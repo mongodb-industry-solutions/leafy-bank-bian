@@ -1,0 +1,284 @@
+.container {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 64px);
+    padding: 20px;
+}
+
+.topSection {
+    height: 40vh;
+    display: flex;
+    align-items: stretch;
+    margin: 16px 0px;
+}
+
+.rowThree {
+    display: flex;
+    gap: 16px;
+    width: 100%;
+}
+
+.topCard {
+    flex: 1 1 0;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    position: relative;
+    border: 1px solid #E8EDEB;
+    box-shadow: 0 4px 7px rgba(16, 24, 40, 0.08);
+    border-radius: 24px;
+
+}
+
+
+.scrollWrapper {
+    height: 100%;
+    overflow-y: auto;
+    /* makes the content scrollable if it overflows */
+    width: 100%;
+}
+
+.iframeWrap {
+    width: 100%;
+}
+
+.iframeWrap iframe {
+    width: 100%;
+    height: 240px;
+    border-radius: 8px;
+    display: block;
+}
+
+/* Column for the split third card (70/30) */
+.stackColumn {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+}
+
+.stackTopCard {
+    flex: 7 7 70%;
+    padding: 16px;
+    padding: 12px 16px;
+    position: relative;
+    border: 1px solid #E8EDEB;
+    box-shadow: 0 4px 7px rgba(16, 24, 40, 0.08);
+    border-radius: 24px;
+}
+
+.kpiCard {
+    border: 1px solid #E8EDEB;
+    box-shadow: 0 4px 7px rgba(16, 24, 40, 0.08);
+    border-radius: 24px;
+    padding: 30px;
+    margin: 10px;
+}
+
+.kpiNumber {
+    display: block;
+    font-size: 1.6rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.kpiLabel {
+    font-size: 0.8rem;
+    color: #666;
+}
+
+.stackBottomCard {
+    flex: 3 3 30%;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    position: relative;
+    border: 1px solid #E8EDEB;
+    box-shadow: 0 4px 7px rgba(16, 24, 40, 0.08);
+    border-radius: 24px;
+    animation: pulseGlow 2s infinite;
+}
+
+@keyframes pulseGlow {
+    0% {
+        box-shadow: 0 0 0 0 rgba(166, 255, 236, 0.8);
+    }
+
+    70% {
+        box-shadow: 0 0 0 6px rgba(166, 255, 236, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(166, 255, 236, 0);
+    }
+}
+
+.stackTopInner {
+    width: 100%;
+    text-align: center;
+    display: flex;
+}
+
+/* small card content replicated from main styles */
+.cardContent {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+}
+
+.thumbWrap {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cardText {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 auto;
+    text-align: left;
+
+}
+
+.cardBodyGray {
+    color: #6b7280;
+    /* gray-500 */
+}
+
+.iconRight {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6b7280;
+}
+
+.bottomSection {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.tableWrap {
+    overflow: auto;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th,
+.table td {
+    padding: 12px 8px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    text-align: left;
+}
+
+.table thead th {
+    font-weight: 600;
+}
+
+/* Table header style: uppercase and grey (reused class) */
+.table thead .th,
+.table thead th,
+.th {
+    text-transform: uppercase;
+    color: #6b7280;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+}
+
+
+
+.progressCard {
+    padding: 10px;
+    margin-top: 10px;
+    width: 100%;
+    border-radius: 20px;
+    position: relative;
+    border: 1px solid #f2f2f2;
+    box-shadow: 0 4px 7px rgba(16, 24, 40, 0.08);
+    border-radius: 24px;
+}
+
+
+
+.progressBarBackground {
+    background-color: #ebf6f4;
+    /* gray bar */
+    border-radius: 8px;
+    height: 10px;
+    width: 100%;
+    margin: 8px 0;
+    overflow: hidden;
+}
+
+.progressBarFill {
+    background-color: #00684A;
+    /* green fill */
+    height: 100%;
+    transition: width 0.5s ease;
+}
+
+.progressPercent {
+    position: absolute;
+    right: 20px;
+    /* keeps percentage visible even if bar is small */
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 10px;
+    color: #929292;
+}
+
+.productName {
+    color: #00684A;
+    font-weight: 600;
+}
+
+/* Mobile: stack the top section cards vertically, one under the other.
+   Keep the transactions (bottom) section unchanged. */
+@media (max-width: 768px) {
+  .topSection {
+    height: auto;
+  }
+
+  .rowThree {
+    flex-direction: column;
+  }
+
+  .topCard,
+  .stackColumn,
+  .stackTopCard,
+  .stackBottomCard {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .stackColumn {
+    height: auto;
+  }
+
+  /* Cards holding charts/overlap content need an explicit height once they're
+     no longer stretched by the row. */
+  .topCard,
+  .stackTopCard {
+    min-height: 260px;
+  }
+}
+
+/* Mobile: leave room so content isn't hidden behind the fixed bottom nav. */
+@media (max-width: 768px) {
+  .container {
+    padding-bottom: 80px;
+  }
+}

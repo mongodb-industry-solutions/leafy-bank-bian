@@ -1,0 +1,258 @@
+[{
+  "_id": {
+    "$oid": "671ff0081ec726b417352702"
+  },
+  "UserName": "adalove",
+  "UserEmail": "adalove@example.com",
+  "UserIdentification": "IDPERSONA03",
+  "Name": {
+    "FirstName": "Ada",
+    "LastName": "Lovelace",
+    "NamePrefix": "Miss"
+  },
+  "ResidentialStatus": "NonResident",
+  "CivilStatus": "Single",
+  "BirthDate": {
+    "$date": {
+      "$numberLong": "-4861728000000"
+    }
+  },
+  "Nationality": "British",
+  "JobTitle": "Mathematician",
+  "UserAddress": {
+    "StreetAndNumber": "3 St James's Square",
+    "PostalCode": "SW1Y 4JU",
+    "Country": "UK",
+    "State": "England",
+    "City": "London"
+  },
+  "LinkedAccounts": [],
+  "RecentTransactions": []
+},
+{
+  "_id": {
+    "$oid": "65a546ae4a8f64e8f88fb89e"
+  },
+  "UserName": "fridaklo",
+  "UserEmail": "fridaklo@example.com",
+  "UserIdentification": "IDPERSONA01",
+  "Name": {
+    "FirstName": "Frida",
+    "LastName": "Kahlo",
+    "NamePrefix": "Miss"
+  },
+  "ResidentialStatus": "Resident",
+  "CivilStatus": "Widow",
+  "BirthDate": {
+    "$date": {
+      "$numberLong": "-1972080000000"
+    }
+  },
+  "Nationality": "Mexican",
+  "JobTitle": "Painter",
+  "UserAddress": {
+    "StreetAndNumber": "Calle de Londres 247",
+    "PostalCode": "62240",
+    "City": "Mexico City",
+    "Country": "Mexico",
+    "State": "Mexico City"
+  },
+  "LinkedAccounts": [
+    {
+      "$oid": "6754667a74a6710be0583b39"
+    },
+    {
+      "$oid": "675466b874a6710be0583b3a"
+    },
+    {
+      "$oid": "675488b874a6710be0583b3e"
+    }
+  ],
+  "RecentTransactions": [
+    {
+      "TransactionId": {
+        "$oid": "67546836ff9fa006e33f602d"
+      },
+      "Date": {
+        "$date": "2024-12-07T15:22:30.426Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "6754694fff9fa006e33f602f"
+      },
+      "Date": {
+        "$date": "2024-12-07T15:27:11.736Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "67546a32ff9fa006e33f6032"
+      },
+      "Date": {
+        "$date": "2024-12-07T15:30:58.533Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "67617cccba043be02652e936"
+      },
+      "Date": {
+        "$date": "2024-12-17T13:29:48.732Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "67617d46ba043be02652e939"
+      },
+      "Date": {
+        "$date": "2024-12-17T13:31:50.834Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "676180ecba043be02652e93c"
+      },
+      "Date": {
+        "$date": "2024-12-17T13:47:24.986Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "676194b9ba043be02652e93f"
+      },
+      "Date": {
+        "$date": "2024-12-17T15:11:53.790Z"
+      }
+    }
+  ]
+},
+{
+  "_id": {
+    "$oid": "66fe219d625d93a100528224"
+  },
+  "UserName": "gracehop",
+  "UserEmail": "gracehop@example.com",
+  "UserIdentification": "IDPERSONA02",
+  "Name": {
+    "FirstName": "Grace",
+    "LastName": "Hopper",
+    "NamePrefix": "Madam"
+  },
+  "ResidentialStatus": "PermanentResident",
+  "CivilStatus": "LegallyDivorced",
+  "BirthDate": {
+    "$date": {
+      "$numberLong": "-1990137600000"
+    }
+  },
+  "Nationality": "American",
+  "JobTitle": "Computer Scientist",
+  "UserAddress": {
+    "StreetAndNumber": "226 W 108th St",
+    "PostalCode": "NY 10025",
+    "Country": "USA",
+    "State": "New York",
+    "City": "New York City"
+  },
+  "LinkedAccounts": [
+    {
+      "$oid": "6754670574a6710be0583b3b"
+    },
+    {
+      "$oid": "67548bdd74a6710be0583b3f"
+    }
+  ],
+  "RecentTransactions": [
+    {
+      "TransactionId": {
+        "$oid": "67617cccba043be02652e936"
+      },
+      "Date": {
+        "$date": "2024-12-17T13:29:49.132Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "67617d46ba043be02652e939"
+      },
+      "Date": {
+        "$date": "2024-12-17T13:31:50.952Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "676180ecba043be02652e93c"
+      },
+      "Date": {
+        "$date": "2024-12-17T13:47:24.867Z"
+      }
+    }
+  ]
+},
+{
+  "_id": {
+    "$oid": "671ff2451ec726b417352703"
+  },
+  "UserName": "claumon",
+  "UserEmail": "claumon@example.com",
+  "UserIdentification": "IDPERSONA04",
+  "Name": {
+    "FirstName": "Claude",
+    "LastName": "Monet",
+    "NamePrefix": "Mister"
+  },
+  "ResidentialStatus": "Resident",
+  "CivilStatus": "Married",
+  "BirthDate": {
+    "$date": {
+      "$numberLong": "-4074969600000"
+    }
+  },
+  "Nationality": "French",
+  "JobTitle": "Painter",
+  "UserAddress": {
+    "StreetAndNumber": "45 Rue Laffitte",
+    "PostalCode": "75009",
+    "Country": "France",
+    "State": "Île-de-France",
+    "City": "Paris"
+  },
+  "LinkedAccounts": [
+    {
+      "$oid": "6754673574a6710be0583b3c"
+    },
+    {
+      "$oid": "6754677374a6710be0583b3d"
+    },
+    {
+      "$oid": "6761837df40fb8e08c8097a4"
+    }
+  ],
+  "RecentTransactions": [
+    {
+      "TransactionId": {
+        "$oid": "6754694fff9fa006e33f602f"
+      },
+      "Date": {
+        "$date": "2024-12-07T15:27:11.876Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "67546a32ff9fa006e33f6032"
+      },
+      "Date": {
+        "$date": "2024-12-07T15:30:58.747Z"
+      }
+    },
+    {
+      "TransactionId": {
+        "$oid": "676194b9ba043be02652e93f"
+      },
+      "Date": {
+        "$date": "2024-12-17T15:11:53.911Z"
+      }
+    }
+  ]
+}]

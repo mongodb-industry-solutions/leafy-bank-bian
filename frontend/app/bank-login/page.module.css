@@ -1,0 +1,237 @@
+.container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #001e2b;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.card {
+  max-width: 90vh;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  width: 100%;
+  padding: 32px;
+  background: white;
+  border-radius: 12px;
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.header {
+  margin-bottom: 24px;
+}
+
+.subtitle {
+  color: #6b7280;
+  font-size: 13px;
+  margin-top: 4px;
+  font-family: monospace;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.tokenBox {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  width: 100%;
+  text-align: center;
+}
+
+.tokenValue {
+  display: block;
+  margin: 8px 0;
+  font-size: 14px;
+  color: #007856;
+  background: #f0fdf4;
+  padding: 8px 12px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.tokenHint {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 12px 16px;
+  width: 100%;
+  color: #991b1b;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #d1d5db;
+  border-top-color: #007856;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* PLACEHOLDER — data team added consent approval box.
+   Colleague to restyle to match design system. */
+.consentBox {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 20px;
+  width: 100%;
+}
+
+.consentMessage {
+  margin: 8px 0 16px;
+  color: #78350f;
+  line-height: 1.5;
+}
+
+.consentDetail {
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #92400e;
+}
+
+.consentSection {
+  margin-bottom: 16px;
+}
+
+.consentSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.consentSectionIcon {
+  font-size: 16px;
+}
+
+.consentSectionValue {
+  padding-left: 24px;
+  color: #78350f;
+}
+
+.permissionList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 24px;
+}
+
+.permissionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #fef9c3;
+  border-radius: 6px;
+}
+
+.permissionIcon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.permissionLabel {
+  flex: 1;
+  font-size: 14px;
+  color: #78350f;
+}
+
+.permissionBadge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #15803d;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+/* PLACEHOLDER — data team added encryption proof section.
+   Colleague to restyle to match design system. */
+.encryptionProof {
+  margin-top: 16px;
+  width: 100%;
+}
+
+.encryptionProof strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.encryptionProof small {
+  display: block;
+  margin-top: 8px;
+}
+
+.encryptionTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+.encryptionTable th,
+.encryptionTable td {
+  text-align: left;
+  padding: 6px;
+}
+
+.encryptedBadge {
+  background: #eaedee;
+  color: #4a5053;
+  padding: 4px 8px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.encryptionLoading {
+}
+
+/* PLACEHOLDER — data team added action buttons layout.
+   Colleague to restyle to match design system. */
+.actions {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.actionBtn {
+  width: 100%;
+}
+
+/* PLACEHOLDER — data team added completion state box.
+   Colleague to restyle to match design system. */
+.doneBox {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 20px;
+  width: 100%;
+  text-align: center;
+}

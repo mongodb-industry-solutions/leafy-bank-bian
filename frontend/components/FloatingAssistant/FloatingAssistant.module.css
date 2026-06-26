@@ -1,0 +1,121 @@
+.chatbotButton {
+  position: fixed;
+  bottom: 30px;
+  right: 25px;
+  background-color: white;
+  border-radius: 50px;
+  width: fit-content;
+  height: fit-content;
+  padding: 15px 20px 15px 8px;
+  display: flex;
+  align-items: center;
+  color: black;
+  cursor: pointer;
+  z-index: 100;
+  animation: pulseShadow 2s infinite;
+  box-shadow: 0px 4px 30px rgba(0, 0, 0, 0.2);
+}
+
+/* Optional hover effect */
+.chatbotButton:hover {
+  background-color: #eefbee;
+}
+
+.chatIcon {
+  width: 50px;
+  margin-right: 10px;
+  margin-left: 10px;
+}
+
+.chatbotText {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* Speech bubble styling */
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeOutDown {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.speechBubble {
+  position: absolute;
+  bottom: 90px;
+  right: 10px;
+  background-color: #00A35C;
+  color: white;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.fadeIn {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+.fadeOut {
+  animation: fadeOutDown 0.5s ease-in forwards;
+}
+
+.textWrapper {
+  display: flex;
+  flex-direction: column;
+  /* Stack text and status vertically */
+}
+
+.statusWrapper {
+  display: flex;
+  align-items: center;
+  /* Align status text and indicator in line */
+}
+
+.indicator {
+  width: 10px;
+  height: 10px;
+  background-color: #00ED64;
+  border-radius: 50%;
+  margin-right: 8px;
+  /* Space between 'Available' text and indicator */
+}
+
+/* Pulsing shadow animation */
+@keyframes pulseShadow {
+  0% {
+    box-shadow: 0px 4px 30px rgba(0, 0, 0, 0.2);
+  }
+
+  50% {
+    box-shadow: 0px 4px 30px #00A35C;
+  }
+
+  100% {
+    box-shadow: 0px 4px 30px rgba(0, 0, 0, 0.2);
+  }
+}
+
+@media (max-width: 768px) {
+  .chatbotButton {
+    display: none;
+  }
+}

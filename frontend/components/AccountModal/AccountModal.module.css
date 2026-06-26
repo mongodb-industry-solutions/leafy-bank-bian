@@ -1,0 +1,80 @@
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1000;
+}
+
+.modalDialog {
+  width: min(560px, 100%);
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(16, 24, 40, 0.18);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.modalCloseButton {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 8px;
+  color: #111827;
+}
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.formLabel {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.formInput {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 1rem;
+  color: #111827;
+}
+
+.formInput:focus {
+  border-color: #00684a;
+  outline: 2px solid rgba(0, 120, 88, 0.12);
+  outline-offset: 2px;
+}
+
+.formInput:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+.modalActions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}

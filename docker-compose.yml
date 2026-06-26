@@ -1,0 +1,71 @@
+####################################################################
+# Local dev: builds all four images from the monorepo root and runs
+# them as four containers. Containers all listen on 8080 internally;
+# host ports are mapped distinctly to avoid collisions.
+#
+# Secrets come from each service's local .env (git-ignored, not baked
+# into images — see .dockerignore). In Kanopy these resolve via ksec.
+####################################################################
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: leafy-core-frontend:latest
+    container_name: leafy-core-frontend
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./frontend/.env.local
+    environment:
+      # BIAN services are separate containers; route by service domain.
+      # CORE_BACKEND_URL (openfinance/etc.) stays in .env.local.
+      ACCOUNTS_BACKEND_URL: http://accounts:8080
+      TRANSACTIONS_BACKEND_URL: http://transactions:8080
+    restart: always
+
+  bian-model:
+    build:
+      context: .
+      dockerfile: Dockerfile.bian-model
+    image: leafy-core-bian-model:latest
+    container_name: leafy-core-bian-model
+    ports:
+      - "8004:8080"
+    restart: always
+
+  accounts:
+    build:
+      context: .
+      dockerfile: Dockerfile.accounts
+    image: leafy-core-accounts:latest
+    container_name: leafy-core-accounts
+    ports:
+      - "8001:8080"
+    env_file:
+      - ./backend/accounts/.env
+    restart: always
+
+  transactions:
+    build:
+      context: .
+      dockerfile: Dockerfile.transactions
+    image: leafy-core-transactions:latest
+    container_name: leafy-core-transactions
+    ports:
+      - "8002:8080"
+    env_file:
+      - ./backend/transactions/.env
+    restart: always
+
+  ledger:
+    build:
+      context: .
+      dockerfile: Dockerfile.ledger
+    image: leafy-core-ledger:latest
+    container_name: leafy-core-ledger
+    ports:
+      - "8003:8080"
+    env_file:
+      - ./backend/ledger/.env
+    restart: always

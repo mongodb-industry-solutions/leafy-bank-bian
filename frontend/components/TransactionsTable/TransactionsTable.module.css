@@ -1,0 +1,66 @@
+.tableWrap {
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.th {
+  text-align: left;
+  padding: 8px 12px;
+  color: #6b7280;
+  font-weight: 600;
+  font-size: 13px;
+}
+.categoryCircleCell {
+  width: 40px;
+  padding: 6px 12px;
+}
+.categoryCircle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+.table td {
+  padding: 10px 12px;
+  border-top: 1px solid #e5e7eb;
+  vertical-align: middle;
+}
+.expandedRow td {
+  background: #fafafa;
+}
+.expandedContent {
+  padding: 12px 0;
+}
+.iconButton {
+  padding: 4px;
+}
+
+.dayHeader {
+  background: transparent;
+}
+.dayHeaderCell {
+  padding: 8px 12px;
+  border-top: none;
+}
+.dayHeaderLabel {
+  font-weight: 600;
+  color: #374151;
+  font-size: 14px;
+}
+
+.transactionDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.establishment {
+  font-weight: 500;
+  color: #111827;
+}
+
+.category {
+  font-size: 12px;
+  color: #9ca3af;
+}

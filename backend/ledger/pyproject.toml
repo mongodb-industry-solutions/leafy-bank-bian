@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "leafy-bank-backend-ledger"
+version = "0.1.0"
+description = "General Ledger / accounting backend for Leafy Bank — BIAN FinancialAccounting / FinancialBookingLog domain (glAccounts, subLedgerEntries, journalEntries)."
+authors = ["Kiran Tulsulkar <kiran.tulsulkar@mongodb.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.11"
+pymongo = "^4.10.1"
+python-dotenv = "^1.0.1"
+fastapi = "^0.115.4"
+uvicorn = "^0.32.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+
+[tool.pytest.ini_options]
+# Put backend/ (the rootdir) on sys.path so tests can import shared/, data/, etc.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

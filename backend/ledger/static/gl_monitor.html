@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leafy Bank — GL Pipeline Monitor</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f1f5f9;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --border-light: #f1f5f9;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --text-xs: #94a3b8;
+    --accent: #2563eb;
+    --accent-light: #eff6ff;
+    --header-bg: #0f172a;
+    --header-text: #f8fafc;
+    --col1: #f0fdf4;
+    --col2: #fefce8;
+    --col3: #fdf4ff;
+    --col4: #eff6ff;
+    --green: #16a34a; --green-bg: #dcfce7; --green-text: #14532d;
+    --yellow: #d97706; --yellow-bg: #fef9c3; --yellow-text: #713f12;
+    --red: #dc2626; --red-bg: #fee2e2; --red-text: #7f1d1d;
+    --blue-bg: #dbeafe; --blue-text: #1e3a8a;
+    --pink-bg: #fce7f3; --pink-text: #831843;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-md: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.05);
+  }
+
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5; }
+
+  /* ── HEADER ── */
+  .topbar { background: var(--header-bg); color: var(--header-text); padding: 0 20px;
+    display: flex; align-items: center; gap: 16px; height: 48px; }
+  .topbar-logo { font-size: 15px; font-weight: 700; letter-spacing: -.3px; }
+  .topbar-logo span { color: #4ade80; }
+  .topbar-sep { color: #475569; }
+  .topbar-title { color: #94a3b8; font-size: 12px; }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 11px; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80;
+    box-shadow: 0 0 0 2px #166534; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .db-badge { background: #1e293b; border: 1px solid #334155;
+    padding: 2px 8px; border-radius: 10px; font-family: monospace; }
+  #base-url-input { background: #1e293b; border: 1px solid #334155; color: #94a3b8;
+    padding: 2px 8px; border-radius: 6px; font-family: monospace; font-size: 11px; width: 200px; }
+  #base-url-input:focus { outline: none; border-color: #3b82f6; }
+
+  /* ── HEALTH BAR ── */
+  .healthbar { background: var(--card); border-bottom: 1px solid var(--border);
+    padding: 10px 20px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .health-group { display: flex; align-items: center; gap: 8px; }
+  .health-label { font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .5px; color: var(--text-muted); }
+  .health-stats { display: flex; gap: 6px; }
+  .hstat { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .hstat-pending  { background: var(--yellow-bg); color: var(--yellow-text); }
+  .hstat-posted   { background: var(--green-bg);  color: var(--green-text); }
+  .hstat-failed   { background: var(--red-bg);    color: var(--red-text); }
+  .hstat-neutral  { background: #f1f5f9; color: var(--text-muted); }
+  .health-div { width: 1px; height: 20px; background: var(--border); }
+  .health-batch { font-size: 11px; color: var(--text-muted); }
+  #health-status { font-size: 11px; color: var(--text-xs); margin-left: auto; }
+
+  /* ── TOOLBAR ── */
+  .toolbar { padding: 10px 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .toolbar label { font-size: 11px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .5px; }
+  .toolbar select, .toolbar input[type=text] {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 10px; font-size: 12px; background: var(--card); color: var(--text);
+    outline: none; }
+  .toolbar select:focus, .toolbar input[type=text]:focus { border-color: var(--accent); }
+  .btn { border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px;
+    font-size: 12px; cursor: pointer; background: var(--card); color: var(--text);
+    font-weight: 500; transition: background .15s; }
+  .btn:hover { background: #f8fafc; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-sm { padding: 2px 8px; font-size: 11px; }
+
+  /* ── PIPELINE COLUMNS ── */
+  .pipeline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    padding: 0 20px 12px; min-height: 0; }
+  .col { background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
+  .col-header { padding: 10px 14px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; }
+  .col-stage { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px;
+    text-transform: uppercase; letter-spacing: .5px; }
+  .stage-tx  { background: #d1fae5; color: #065f46; }
+  .stage-le  { background: #fef9c3; color: #713f12; }
+  .stage-sl  { background: #f3e8ff; color: #581c87; }
+  .stage-jn  { background: #dbeafe; color: #1e3a8a; }
+  .col-title { font-size: 12px; font-weight: 700; }
+  .col-sub   { font-size: 10px; color: var(--text-xs); margin-top: 1px; }
+  .col-count { margin-left: auto; font-size: 11px; color: var(--text-muted); font-weight: 600; }
+  .col-body  { max-height: 380px; overflow-y: auto; }
+
+  .feed-row { padding: 9px 14px; border-bottom: 1px solid var(--border-light);
+    cursor: pointer; transition: background .1s; }
+  .feed-row:last-child { border-bottom: none; }
+  .feed-row:hover { background: #f8fafc; }
+  .feed-row.selected { background: var(--accent-light); border-left: 3px solid var(--accent); padding-left: 11px; }
+
+  .row-top { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .row-id { font-family: monospace; font-size: 11px; font-weight: 600; color: var(--accent); }
+  .row-meta { font-size: 11px; color: var(--text-muted); }
+  .row-detail { font-size: 11px; color: var(--text-muted); }
+  .row-sub { font-size: 10px; color: var(--text-xs); }
+
+  .chip { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 8px;
+    text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
+  .chip-pending  { background: var(--yellow-bg); color: var(--yellow-text); }
+  .chip-posted   { background: var(--green-bg);  color: var(--green-text); }
+  .chip-failed   { background: var(--red-bg);    color: var(--red-text); }
+  .chip-settled  { background: var(--green-bg);  color: var(--green-text); }
+  .chip-dr       { background: var(--blue-bg);   color: var(--blue-text); }
+  .chip-cr       { background: var(--pink-bg);   color: var(--pink-text); }
+  .chip-neutral  { background: #f1f5f9; color: var(--text-muted); }
+  .chip-ok       { background: var(--green-bg);  color: var(--green-text); }
+  .chip-mismatch { background: var(--red-bg);    color: var(--red-text); }
+  .chip-current  { background: #dbeafe; color: #1e3a8a; border: 1px solid #93c5fd; }
+  .chip-last     { background: #e2e8f0; color: #334155; border: 1px solid #cbd5e1; }
+  .batch-sep     { padding: 3px 14px; font-size: 10px; font-weight: 700; letter-spacing: .5px;
+                   color: var(--text-xs); text-transform: uppercase; background: var(--border-light);
+                   border-bottom: 1px solid var(--border); }
+
+  .empty-state { padding: 24px; text-align: center; color: var(--text-xs); font-size: 12px; }
+  .error-state { padding: 12px 14px; color: var(--red-text); background: var(--red-bg);
+    font-size: 11px; border-radius: 6px; margin: 8px; }
+
+  /* ── DETAIL PANEL ── */
+  .detail-wrap { padding: 0 20px 12px; }
+  .detail-panel { background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+  .detail-header { padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; background: #f8fafc; }
+  .detail-title { font-size: 12px; font-weight: 700; }
+  .detail-close { margin-left: auto; cursor: pointer; color: var(--text-muted);
+    font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+  .detail-close:hover { background: var(--border); }
+  .detail-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .detail-section { padding: 14px 16px; border-right: 1px solid var(--border); }
+  .detail-section:last-child { border-right: none; }
+  .detail-section-title { font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .5px; color: var(--text-muted); margin-bottom: 8px; }
+  .kv-table { width: 100%; border-collapse: collapse; }
+  .kv-table td { padding: 3px 0; vertical-align: top; }
+  .kv-table td:first-child { font-weight: 600; color: var(--text-muted); font-size: 11px;
+    width: 45%; padding-right: 10px; white-space: nowrap; }
+  .kv-table td:last-child { font-family: monospace; font-size: 11px; word-break: break-all; }
+  .detail-json { font-family: monospace; font-size: 11px; white-space: pre-wrap;
+    word-break: break-all; max-height: 300px; overflow-y: auto;
+    background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid var(--border); }
+
+  /* ── BOTTOM PANELS ── */
+  .bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 20px 16px; }
+  .panel { background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+  .panel-header { padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; background: #f8fafc; }
+  .panel-title { font-size: 12px; font-weight: 700; }
+  .panel-body { padding: 14px 16px; }
+
+  /* Reconciliation table */
+  .recon-table { width: 100%; border-collapse: collapse; }
+  .recon-table th { text-align: left; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted);
+    padding: 4px 8px; border-bottom: 1px solid var(--border); }
+  .recon-table td { padding: 6px 8px; font-size: 11px; border-bottom: 1px solid var(--border-light); }
+  .recon-table tr:last-child td { border-bottom: none; }
+  .recon-table td:nth-child(3), .recon-table td:nth-child(4) { font-family: monospace; }
+
+  /* Trace */
+  .trace-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .trace-input { flex: 1; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; font-size: 12px; font-family: monospace; color: var(--text); }
+  .trace-input:focus { outline: none; border-color: var(--accent); }
+  .trace-stage { display: grid; grid-template-columns: 120px 1fr auto; gap: 8px;
+    align-items: start; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
+  .trace-stage:last-child { border-bottom: none; }
+  .trace-stage-name { font-size: 11px; font-weight: 700; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .4px; padding-top: 2px; }
+  .trace-stage-body { font-size: 11px; }
+  .trace-stage-body .row-id { display: inline; }
+  .trace-status { font-size: 10px; }
+  .trace-not-reached { color: var(--text-xs); font-style: italic; font-size: 11px; }
+
+  /* MongoDB features */
+  .features-table { width: 100%; border-collapse: collapse; }
+  .features-table td { padding: 5px 8px; font-size: 11px; vertical-align: top;
+    border-bottom: 1px solid var(--border-light); }
+  .features-table tr:last-child td { border-bottom: none; }
+  .features-table td:first-child { font-weight: 700; white-space: nowrap; color: var(--text-muted);
+    font-size: 10px; text-transform: uppercase; padding-right: 12px; }
+  .feature-tag { display: inline-block; background: #f1f5f9; border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; font-size: 10px; margin: 1px; font-family: monospace; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+  /* ── INITIATE PANEL ── */
+  .form-input { border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 10px; font-size: 12px; background: var(--card);
+    color: var(--text); outline: none; width: 100%; }
+  .form-input:focus { border-color: var(--accent); }
+  .field-label { font-size: 10px; font-weight: 700; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .4px; margin-bottom: 3px; }
+  .preset-btn { border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px;
+    font-size: 11px; cursor: pointer; background: var(--card); color: var(--text);
+    font-weight: 500; transition: background .15s; white-space: nowrap; }
+  .preset-btn:hover { background: #f0fdf4; border-color: #86efac; }
+  .preset-btn:disabled { opacity: .5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<div class="topbar">
+  <div class="topbar-logo">LEAFY <span>BANK</span></div>
+  <div class="topbar-sep">·</div>
+  <div class="topbar-title">GL Pipeline Monitor</div>
+  <div class="topbar-right">
+    <span style="color:#475569;font-size:10px">Ledger</span>
+    <input id="base-url-input" type="text" value="" placeholder="http://localhost:8002" title="Ledger backend URL">
+    <div class="db-badge" id="db-name-badge">—</div>
+    <div class="live-dot" id="live-dot" title="Live"></div>
+  </div>
+</div>
+
+<!-- ── HEALTH BAR ── -->
+<div class="healthbar">
+  <div class="health-group">
+    <div class="health-label">Ledger Events</div>
+    <div class="health-stats">
+      <span class="hstat hstat-pending" id="h-le-pending">— pending</span>
+      <span class="hstat hstat-posted"  id="h-le-posted">— posted</span>
+      <span class="hstat hstat-failed"  id="h-le-failed">— failed</span>
+    </div>
+  </div>
+  <div class="health-div"></div>
+  <div class="health-group">
+    <div class="health-label">SubLedger</div>
+    <div class="health-stats">
+      <span class="hstat hstat-pending" id="h-sl-unj">— unjournaled</span>
+      <span class="hstat hstat-posted"  id="h-sl-j">— journaled</span>
+    </div>
+  </div>
+  <div class="health-div"></div>
+  <div class="health-group">
+    <div class="health-label">Journals</div>
+    <div class="health-stats">
+      <span class="hstat hstat-posted"  id="h-jnl-total">— total</span>
+      <span class="hstat hstat-neutral" id="h-jnl-period">— this period</span>
+    </div>
+  </div>
+  <div class="health-div"></div>
+  <div class="health-batch" id="h-batch-info">Batch: —</div>
+  <div id="health-status">checking…</div>
+</div>
+
+<!-- ── TOOLBAR ── -->
+<div class="toolbar">
+  <label>Period</label>
+  <input type="text" id="filter-period" placeholder="2026-06" style="width:90px">
+  <label>Status (events)</label>
+  <select id="filter-status">
+    <option value="">ALL</option>
+    <option value="PENDING">PENDING</option>
+    <option value="POSTED">POSTED</option>
+    <option value="FAILED">FAILED</option>
+  </select>
+  <button class="btn" onclick="refreshAll()">↻ Refresh All</button>
+  <button class="btn btn-primary btn-sm" onclick="refreshAll()">Load Data</button>
+</div>
+
+<!-- ── INITIATE TRANSACTION ── -->
+<div style="padding:0 20px 12px">
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Initiate Transaction</span>
+      <span style="font-size:11px;color:var(--text-muted);margin-left:8px">POST to transactions service · watch the pipeline below react live</span>
+      <button class="btn btn-sm" style="margin-left:auto" onclick="toggleInitiate()">Collapse</button>
+    </div>
+    <div class="panel-body" id="initiate-body">
+
+      <!-- Presets -->
+      <div style="margin-bottom:4px">
+        <div class="field-label" style="margin-bottom:8px">Quick presets</div>
+        <div id="preset-btns" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);margin:14px 0;padding-top:14px">
+        <div class="field-label" style="margin-bottom:10px">Custom transaction</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+          <div style="min-width:155px;flex:1.2">
+            <div class="field-label">Customer ID</div>
+            <input id="custom-customer" list="customer-list" class="form-input" placeholder="CUST-…" value="CUST-00528224">
+            <datalist id="customer-list">
+              <option value="CUST-00528224">Grace</option>
+              <option value="CUST-17352703">Monet</option>
+            </datalist>
+          </div>
+          <div style="min-width:155px;flex:1.5">
+            <div class="field-label">Debtor Account (from)</div>
+            <input id="custom-debtor" list="account-list" class="form-input" placeholder="ACC-…" value="ACC-e0583b3b">
+          </div>
+          <div style="min-width:155px;flex:1.5">
+            <div class="field-label">Creditor Account (to)</div>
+            <input id="custom-creditor" list="account-list" class="form-input" placeholder="ACC-…" value="ACC-e0583b3c">
+            <datalist id="account-list">
+              <option value="ACC-e0583b3b">Grace primary</option>
+              <option value="ACC-e0583b3f">Grace secondary</option>
+              <option value="ACC-e0583b3c">Monet primary</option>
+              <option value="ACC-8c8097a4">Monet secondary</option>
+            </datalist>
+          </div>
+          <div style="min-width:90px;flex:.7">
+            <div class="field-label">Amount (USD)</div>
+            <input id="custom-amount" type="number" class="form-input" min="0.01" step="0.01" value="50.00">
+          </div>
+          <div style="min-width:165px;flex:1.2">
+            <div class="field-label">Type</div>
+            <select id="custom-type" class="form-input">
+              <option value="CREDIT_TRANSFER">CREDIT_TRANSFER</option>
+              <option value="INTRABANK_TRANSFER">INTRABANK_TRANSFER</option>
+            </select>
+          </div>
+          <div style="min-width:100px;flex:.8">
+            <div class="field-label">Rail</div>
+            <select id="custom-rail" class="form-input">
+              <option value="INTERNAL">INTERNAL</option>
+              <option value="ACH">ACH</option>
+              <option value="WIRE">WIRE</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:10px;align-items:flex-end">
+          <div style="flex:1">
+            <div class="field-label">Remittance (optional)</div>
+            <input id="custom-remittance" class="form-input" placeholder="Payment description">
+          </div>
+          <button id="fire-custom-btn" class="btn btn-primary" onclick="fireCustom()">Fire Transaction</button>
+        </div>
+      </div>
+
+      <div id="txn-result" style="display:none;margin-top:12px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PIPELINE COLUMNS ── -->
+<div class="pipeline">
+
+  <!-- Col 1: Transactions -->
+  <div class="col" id="col-tx">
+    <div class="col-header" style="background:var(--col1)">
+      <div>
+        <div class="row-top">
+          <span class="col-stage stage-tx">upstream</span>
+          <span class="col-title">Transactions</span>
+        </div>
+        <div class="col-sub">settled payments · read-only</div>
+      </div>
+      <span class="col-count" id="tx-count">—</span>
+    </div>
+    <div class="col-body" id="tx-body"><div class="empty-state">Click "Load Data" to fetch</div></div>
+  </div>
+
+  <!-- Col 2: Ledger Events -->
+  <div class="col" id="col-le">
+    <div class="col-header" style="background:var(--col2)">
+      <div>
+        <div class="row-top">
+          <span class="col-stage stage-le">Stage ①</span>
+          <span class="col-title">Ledger Events</span>
+        </div>
+        <div class="col-sub">ingest_worker · change stream</div>
+      </div>
+      <span class="col-count" id="le-count">—</span>
+    </div>
+    <div class="col-body" id="le-body"><div class="empty-state">—</div></div>
+  </div>
+
+  <!-- Col 3: SubLedger -->
+  <div class="col" id="col-sl">
+    <div class="col-header" style="background:var(--col3)">
+      <div>
+        <div class="row-top">
+          <span class="col-stage stage-sl">Stage ②</span>
+          <span class="col-title">SubLedger Entries</span>
+        </div>
+        <div class="col-sub">projection_worker · ACID txn</div>
+      </div>
+      <span class="col-count" id="sl-count">—</span>
+    </div>
+    <div class="col-body" id="sl-body"><div class="empty-state">—</div></div>
+  </div>
+
+  <!-- Col 4: Journals -->
+  <div class="col" id="col-jn">
+    <div class="col-header" style="background:var(--col4)">
+      <div>
+        <div class="row-top">
+          <span class="col-stage stage-jn">Stage ③</span>
+          <span class="col-title">Journal Entries</span>
+        </div>
+        <div class="col-sub">gl_batch · scheduled</div>
+      </div>
+      <span class="col-count" id="jn-count">—</span>
+    </div>
+    <div class="col-body" id="jn-body"><div class="empty-state">—</div></div>
+  </div>
+
+</div>
+
+<!-- ── DETAIL PANEL ── -->
+<div class="detail-wrap" id="detail-wrap" style="display:none">
+  <div class="detail-panel">
+    <div class="detail-header">
+      <span class="detail-title" id="detail-title">—</span>
+      <span class="detail-close" onclick="closeDetail()">✕</span>
+    </div>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+<!-- ── BOTTOM PANELS ── -->
+<div class="bottom-grid">
+
+  <!-- Reconciliation -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Reconciliation</span>
+      <span style="font-size:11px;color:var(--text-muted);margin-left:6px" id="recon-period-label"></span>
+      <button class="btn btn-sm" style="margin-left:auto" onclick="fetchRecon()">Run Now</button>
+      <span style="font-size:10px;color:var(--text-xs);margin-left:8px" id="recon-checked"></span>
+    </div>
+    <div class="panel-body">
+      <div id="recon-body">
+        <table class="recon-table">
+          <thead><tr>
+            <th>Account</th><th>Period</th><th>SL Σ</th><th>JNL Σ</th><th>Status</th>
+          </tr></thead>
+          <tbody id="recon-rows"><tr><td colspan="5" style="text-align:center;color:var(--text-xs);padding:16px">Click "Run Now" to reconcile</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transaction Trace -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Transaction Trace</span>
+    </div>
+    <div class="panel-body">
+      <div class="trace-input-row">
+        <input type="text" id="trace-input" class="trace-input" placeholder="PAY-abc12345">
+        <button class="btn btn-primary" onclick="fetchTrace()">Search</button>
+      </div>
+      <div id="trace-body">
+        <div class="empty-state">Enter a paymentId to trace across all 4 stages</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- MongoDB features (full-width) -->
+<div style="padding:0 20px 20px">
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">MongoDB Features In Use</span>
+      <button class="btn btn-sm" style="margin-left:auto" onclick="toggleFeatures()">Toggle</button>
+    </div>
+    <div class="panel-body" id="features-body">
+      <table class="features-table">
+        <tr>
+          <td>Stage ①</td>
+          <td>
+            <span class="feature-tag">Change Streams</span>
+            <span class="feature-tag">Resume Tokens</span>
+            <span class="feature-tag">DuplicateKeyError idempotency</span>
+            <span class="feature-tag">$jsonSchema validator</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Stage ②</td>
+          <td>
+            <span class="feature-tag">Change Streams</span>
+            <span class="feature-tag">ACID multi-doc transaction</span>
+            <span class="feature-tag">$jsonSchema validator</span>
+            <span class="feature-tag">Partial index (journalEntryId ≠ "")</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Stage ③</td>
+          <td>
+            <span class="feature-tag">Aggregation ($group $sum $addToSet)</span>
+            <span class="feature-tag">ACID transaction</span>
+            <span class="feature-tag">$expr Pacioli validator</span>
+            <span class="feature-tag">Multikey index (entries.accountCode)</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Reconciliation</td>
+          <td>
+            <span class="feature-tag">$unwind $cond $multiply</span>
+            <span class="feature-tag">distinct() control accounts</span>
+            <span class="feature-tag">Signed DEBIT+/CREDIT− sums</span>
+          </td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── CONFIG ──────────────────────────────────────────────────────────────
+  function baseUrl() { return document.getElementById('base-url-input').value.replace(/\/$/, ''); }
+
+  // Transactions go through the ledger's proxy endpoint so the browser never
+  // needs to reach the internal cluster DNS (leafy-bank-backend-transactions-web-app).
+  function txnBaseUrl() { return baseUrl(); }
+
+  // ── UTIL ─────────────────────────────────────────────────────────────────
+  function fmt(amount, minor=false) {
+    if (amount == null) return '—';
+    const v = minor ? (amount / 100).toFixed(2) : amount.toFixed ? amount.toFixed(2) : amount;
+    return Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  }
+  function fmtMinor(v) { return v != null ? v.toLocaleString() + ' minor' : '—'; }
+  function fmtDate(s) {
+    if (!s) return '—';
+    try { return parseTs(s).toLocaleString('en-US', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+    catch { return s; }
+  }
+  function chip(status) {
+    const s = (status||'').toUpperCase();
+    const map = { PENDING:'pending', POSTED:'posted', FAILED:'failed',
+                  SETTLED:'settled', COMPLETED:'settled', DEBIT:'dr', CREDIT:'cr' };
+    const cls = map[s] || 'neutral';
+    return `<span class="chip chip-${cls}">${status||'—'}</span>`;
+  }
+  async function apiFetch(path) {
+    const r = await fetch(baseUrl() + path);
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  }
+  function setLive(ok) {
+    const d = document.getElementById('live-dot');
+    d.style.background = ok ? '#4ade80' : '#f87171';
+    d.style.boxShadow = ok ? '0 0 0 2px #166534' : '0 0 0 2px #7f1d1d';
+  }
+
+  // ── HEALTH ───────────────────────────────────────────────────────────────
+  async function fetchHealth() {
+    try {
+      const d = await apiFetch('/pipeline/health');
+      setLive(true);
+      document.getElementById('db-name-badge').textContent = d.dbName || '—';
+      document.getElementById('h-le-pending').textContent = `${d.ledgerEvents?.pending ?? 0} pending`;
+      document.getElementById('h-le-posted').textContent  = `${d.ledgerEvents?.posted  ?? 0} posted`;
+      document.getElementById('h-le-failed').textContent  = `${d.ledgerEvents?.failed  ?? 0} failed`;
+      document.getElementById('h-sl-unj').textContent = `${d.subLedger?.unjournaled ?? 0} unjournaled`;
+      document.getElementById('h-sl-j').textContent   = `${d.subLedger?.journaled   ?? 0} journaled`;
+      document.getElementById('h-jnl-total').textContent  = `${d.journals?.total     ?? 0} total`;
+      document.getElementById('h-jnl-period').textContent = `${d.journals?.thisPeriod ?? 0} this period`;
+      const batch = d.batchIntervalSeconds ? `every ${d.batchIntervalSeconds}s` : '—';
+      const last  = d.lastBatchAt ? ` · last ${fmtDate(d.lastBatchAt)}` : '';
+      document.getElementById('h-batch-info').textContent = `Batch: ${batch}${last}`;
+      document.getElementById('health-status').textContent = `updated ${new Date().toLocaleTimeString()}`;
+      window._batchInfo = { lastBatchAt: d.lastBatchAt || null, intervalMs: (d.batchIntervalSeconds || 600) * 1000 };
+    } catch (e) {
+      setLive(false);
+      document.getElementById('health-status').textContent = `error: ${e.message}`;
+    }
+  }
+
+  // ── BATCH WINDOW HELPERS ─────────────────────────────────────────────────
+  window._batchInfo = null;
+
+  // Some feeds (transactions, ledgerEvents) come straight from BSON dates and
+  // serialize without a timezone offset; the browser would parse those as local
+  // time and skew them out of the batch windows. Treat offset-less timestamps as UTC.
+  function parseTs(v) {
+    if (!v) return new Date(NaN);
+    if (typeof v === 'string' && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(v)) return new Date(v + 'Z');
+    return new Date(v);
+  }
+
+  function filterByBatch(items, tsField) {
+    const info = window._batchInfo;
+    if (!info || !info.lastBatchAt) return items.map(x => ({...x, _batchTag: null}));
+    const lastEnd   = parseTs(info.lastBatchAt);
+    const lastStart = new Date(lastEnd.getTime() - info.intervalMs);
+    return items
+      .map(x => {
+        const t = parseTs(x[tsField]);
+        let tag = null;
+        if (!isNaN(t)) {
+          if (t >= lastEnd)        tag = 'CURRENT';
+          else if (t >= lastStart) tag = 'LAST';
+        }
+        return {...x, _batchTag: tag};
+      })
+      .filter(x => x._batchTag !== null);
+  }
+
+  function batchChip(tag) {
+    if (tag === 'CURRENT') return '<span class="chip chip-current">current</span>';
+    if (tag === 'LAST')    return '<span class="chip chip-last">last batch</span>';
+    return '';
+  }
+
+  function renderWithSep(items, renderFn) {
+    const html = [];
+    let prevTag = null;
+    items.forEach((item, i) => {
+      if (item._batchTag === 'LAST' && prevTag === 'CURRENT')
+        html.push('<div class="batch-sep">current ↑  ·  ↓ last batch</div>');
+      html.push(renderFn(item, i));
+      prevTag = item._batchTag;
+    });
+    return html.join('');
+  }
+
+  // ── TRANSACTIONS ─────────────────────────────────────────────────────────
+  async function fetchTransactions() {
+    const body = document.getElementById('tx-body');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    const params = buildParams({limit: 100});
+    try {
+      const d = await apiFetch(`/pipeline/transactions${params}`);
+      const items = filterByBatch(d.items || [], 'createdAt');
+      const batchMode = window._batchInfo?.lastBatchAt != null;
+      document.getElementById('tx-count').textContent = batchMode ? `${items.length} / ${d.total ?? d.items?.length ?? 0}` : `${d.total ?? d.items?.length ?? 0}`;
+      if (!items.length) { body.innerHTML = '<div class="empty-state">No transactions in last 2 batch windows</div>'; return; }
+      body.innerHTML = renderWithSep(items, (t, i) => `
+        <div class="feed-row" data-idx="${i}" data-col="tx" onclick="showTxDetail(this,${i})">
+          <div class="row-top">
+            <span class="row-id">${t.paymentId || '—'}</span>
+            ${chip(t.transactionStatus)}
+            ${batchChip(t._batchTag)}
+          </div>
+          <div class="row-detail">$${fmt(t.amount)} · ${t.rail||'—'} · ${t.paymentType||'—'}</div>
+          <div class="row-sub">${fmtDate(t.createdAt)} · ${t.payer?.accountId||'—'} → ${t.payee?.accountId||'—'}</div>
+        </div>`);
+      window._txData = items;
+    } catch (e) {
+      body.innerHTML = `<div class="error-state">Error: ${e.message}</div>`;
+    }
+  }
+
+  // ── LEDGER EVENTS ─────────────────────────────────────────────────────────
+  async function fetchLedgerEvents() {
+    const body = document.getElementById('le-body');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    const status = document.getElementById('filter-status').value;
+    const params = buildParams(status ? {status, limit: 100} : {limit: 100});
+    try {
+      const d = await apiFetch(`/pipeline/ledger-events${params}`);
+      const items = filterByBatch(d.items || [], 'occurredAt');
+      const batchMode = window._batchInfo?.lastBatchAt != null;
+      document.getElementById('le-count').textContent = batchMode ? `${items.length} / ${d.total ?? d.items?.length ?? 0}` : `${d.total ?? d.items?.length ?? 0}`;
+      if (!items.length) { body.innerHTML = '<div class="empty-state">No ledger events in last 2 batch windows</div>'; return; }
+      body.innerHTML = renderWithSep(items, (e, i) => `
+        <div class="feed-row" data-idx="${i}" data-col="le" onclick="showLeDetail(this,${i})">
+          <div class="row-top">
+            <span class="row-id">${e.eventId||'—'}</span>
+            ${chip(e.postingStatus)}
+            ${batchChip(e._batchTag)}
+          </div>
+          <div class="row-detail">${e.eventType||'—'} · ${e.postingMode?.type||'—'}</div>
+          <div class="row-sub">${fmtDate(e.occurredAt)} · v${e.mappingVersion||'?'}</div>
+        </div>`);
+      window._leData = items;
+    } catch (e) {
+      body.innerHTML = `<div class="error-state">Error: ${e.message}</div>`;
+    }
+  }
+
+  // ── SUBLEDGER ────────────────────────────────────────────────────────────
+  async function fetchSubledger() {
+    const body = document.getElementById('sl-body');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    const params = buildParams({limit: 100});
+    try {
+      const d = await apiFetch(`/pipeline/subledger-entries${params}`);
+      const items = filterByBatch(d.items || [], 'postingDate');
+      const batchMode = window._batchInfo?.lastBatchAt != null;
+      document.getElementById('sl-count').textContent = batchMode ? `${items.length} / ${d.total ?? d.items?.length ?? 0}` : `${d.total ?? d.items?.length ?? 0}`;
+      if (!items.length) { body.innerHTML = '<div class="empty-state">No subledger entries in last 2 batch windows</div>'; return; }
+      body.innerHTML = renderWithSep(items, (s, i) => `
+        <div class="feed-row" data-idx="${i}" data-col="sl" onclick="showSlDetail(this,${i})">
+          <div class="row-top">
+            ${chip(s.side)}
+            <span class="row-id">${s.subLedgerId||'—'}</span>
+            ${batchChip(s._batchTag)}
+          </div>
+          <div class="row-detail">acct ${s.controlAccountCode||'—'} · ${fmtMinor(s.amount)} · bal ${fmtMinor(s.runningBalance)}</div>
+          <div class="row-sub">${s.journalEntryId ? `<span style="color:var(--green)">✓ ${s.journalEntryId}</span>` : '<span style="color:var(--yellow)">⏳ unjournaled</span>'}</div>
+        </div>`);
+      window._slData = items;
+    } catch (e) {
+      body.innerHTML = `<div class="error-state">Error: ${e.message}</div>`;
+    }
+  }
+
+  // ── JOURNALS ─────────────────────────────────────────────────────────────
+  async function fetchJournals() {
+    const body = document.getElementById('jn-body');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    const params = buildParams({limit: 100});
+    try {
+      const d = await apiFetch(`/pipeline/journals${params}`);
+      const items = filterByBatch(d.items || [], 'createdAt');
+      const batchMode = window._batchInfo?.lastBatchAt != null;
+      document.getElementById('jn-count').textContent = batchMode ? `${items.length} / ${d.total ?? d.items?.length ?? 0}` : `${d.total ?? d.items?.length ?? 0}`;
+      if (!items.length) { body.innerHTML = '<div class="empty-state">No journal entries in last 2 batch windows</div>'; return; }
+      body.innerHTML = renderWithSep(items, (j, i) => {
+        const entries = j.entries || [];
+        const debit  = entries.filter(e=>e.side==='DEBIT').reduce((a,e)=>a+(e.amount||0),0);
+        const credit = entries.filter(e=>e.side==='CREDIT').reduce((a,e)=>a+(e.amount||0),0);
+        const balanced = debit === credit;
+        return `
+        <div class="feed-row" data-idx="${i}" data-col="jn" onclick="showJnDetail(this,${i})">
+          <div class="row-top">
+            <span class="row-id">${j.journalId||'—'}</span>
+            ${chip(j.status)}
+            ${balanced ? '<span style="font-size:12px" title="Balanced">⚖️</span>' : '<span style="color:var(--red)">⚠ unbalanced</span>'}
+            ${batchChip(j._batchTag)}
+          </div>
+          <div class="row-detail">${j.batchId||j.sourceReference?.sourceId||'—'} · ${j.periodCode||'—'}</div>
+          <div class="row-sub">${entries.length} lines · DR ${fmtMinor(debit)} / CR ${fmtMinor(credit)}</div>
+        </div>`;
+      });
+      window._jnData = items;
+    } catch (e) {
+      body.innerHTML = `<div class="error-state">Error: ${e.message}</div>`;
+    }
+  }
+
+  // ── PARAMS BUILDER ────────────────────────────────────────────────────────
+  function buildParams(extra={}) {
+    const p = new URLSearchParams();
+    const period = document.getElementById('filter-period').value.trim();
+    if (period) p.set('periodCode', period);
+    for (const [k,v] of Object.entries(extra)) if (v) p.set(k, v);
+    return p.toString() ? '?' + p.toString() : '';
+  }
+
+  // ── DETAIL PANELS ─────────────────────────────────────────────────────────
+  function clearSelected() {
+    document.querySelectorAll('.feed-row.selected').forEach(r => r.classList.remove('selected'));
+  }
+  function closeDetail() {
+    document.getElementById('detail-wrap').style.display = 'none';
+    clearSelected();
+  }
+  function openDetail(title, html) {
+    document.getElementById('detail-title').textContent = title;
+    document.getElementById('detail-content').innerHTML = html;
+    document.getElementById('detail-wrap').style.display = 'block';
+    document.getElementById('detail-wrap').scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+
+  function kv(pairs) {
+    return '<table class="kv-table">' + pairs.map(([k,v]) =>
+      `<tr><td>${k}</td><td>${v ?? '—'}</td></tr>`).join('') + '</table>';
+  }
+
+  function showTxDetail(el, idx) {
+    clearSelected(); el.classList.add('selected');
+    const t = window._txData[idx];
+    openDetail(`Transaction: ${t.paymentId}`, `
+      <div class="detail-body">
+        <div class="detail-section">
+          <div class="detail-section-title">Payment</div>
+          ${kv([
+            ['paymentId', t.paymentId],
+            ['amount', `$${fmt(t.amount)} ${t.currency||'USD'}`],
+            ['rail', t.rail],
+            ['paymentType', t.paymentType],
+            ['transactionStatus', chip(t.transactionStatus)],
+            ['createdAt', fmtDate(t.createdAt)],
+          ])}
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-title">Parties</div>
+          ${kv([
+            ['payer.accountId', t.payer?.accountId],
+            ['payee.accountId', t.payee?.accountId],
+          ])}
+          <div class="detail-section-title" style="margin-top:12px">Raw</div>
+          <div class="detail-json">${JSON.stringify(t, null, 2)}</div>
+        </div>
+      </div>`);
+  }
+
+  function showLeDetail(el, idx) {
+    clearSelected(); el.classList.add('selected');
+    const e = window._leData[idx];
+    const dr = e.debitLeg  || {};
+    const cr = e.creditLeg || {};
+    const pr = e.postingResult || {};
+    openDetail(`Ledger Event: ${e.eventId}`, `
+      <div class="detail-body">
+        <div class="detail-section">
+          <div class="detail-section-title">Event</div>
+          ${kv([
+            ['eventId', e.eventId],
+            ['idempotencyKey', e.idempotencyKey],
+            ['groupId', e.groupId],
+            ['occurredAt', e.occurredAt],
+            ['periodCode', e.meta?.periodCode],
+            ['eventType', e.eventType],
+            ['postingMode', e.postingMode?.type],
+            ['mappingVersion', e.mappingVersion],
+            ['postingStatus', chip(e.postingStatus)],
+          ])}
+          <div class="detail-section-title" style="margin-top:12px">Posting Result</div>
+          ${kv([
+            ['subLedgerIdDebit',  pr.subLedgerIdDebit],
+            ['subLedgerIdCredit', pr.subLedgerIdCredit],
+            ['journalEntryId',    pr.journalEntryId],
+            ['postedAt',          pr.postedAt],
+          ])}
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-title">Debit Leg</div>
+          ${kv([
+            ['glAccountCode',     dr.glAccountCode],
+            ['controlAccountCode',dr.controlAccountCode],
+            ['amount',            fmtMinor(dr.amount)],
+            ['currency',          dr.currency],
+            ['entityType',        dr.entityReference?.entityType],
+            ['entityId',          dr.entityReference?.entityId],
+          ])}
+          <div class="detail-section-title" style="margin-top:12px">Credit Leg</div>
+          ${kv([
+            ['glAccountCode',     cr.glAccountCode],
+            ['controlAccountCode',cr.controlAccountCode],
+            ['amount',            fmtMinor(cr.amount)],
+            ['currency',          cr.currency],
+            ['entityType',        cr.entityReference?.entityType],
+            ['entityId',          cr.entityReference?.entityId],
+          ])}
+          ${dr.amount != null && cr.amount != null ? `
+          <div style="margin-top:8px;font-size:11px">
+            ${dr.amount === cr.amount
+              ? `<span style="color:var(--green)">✓ ΣDEBIT == ΣCREDIT (${dr.amount})</span>`
+              : `<span style="color:var(--red)">⚠ UNBALANCED: DR ${dr.amount} ≠ CR ${cr.amount}</span>`}
+          </div>` : ''}
+        </div>
+      </div>`);
+  }
+
+  function showSlDetail(el, idx) {
+    clearSelected(); el.classList.add('selected');
+    const s = window._slData[idx];
+    openDetail(`SubLedger Entry: ${s.subLedgerId}`, `
+      <div class="detail-body">
+        <div class="detail-section">
+          <div class="detail-section-title">Entry</div>
+          ${kv([
+            ['subLedgerId',        s.subLedgerId],
+            ['idempotencyKey',     s.idempotencyKey],
+            ['controlAccountCode', s.controlAccountCode],
+            ['subLedgerType',      s.subLedgerType],
+            ['side',               chip(s.side)],
+            ['amount',             fmtMinor(s.amount)],
+            ['currency',           s.currency],
+            ['periodCode',         s.periodCode],
+            ['status',             chip(s.status)],
+            ['runningBalance',     fmtMinor(s.runningBalance)],
+          ])}
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-title">Dates & References</div>
+          ${kv([
+            ['valueDate',    s.valueDate],
+            ['postingDate',  s.postingDate],
+            ['journalEntryId', s.journalEntryId || '⏳ unjournaled'],
+            ['entityType',   s.entityReference?.entityType],
+            ['entityId',     s.entityReference?.entityId],
+            ['sourceId',     s.sourceReference?.sourceId],
+          ])}
+        </div>
+      </div>`);
+  }
+
+  function showJnDetail(el, idx) {
+    clearSelected(); el.classList.add('selected');
+    const j = window._jnData[idx];
+    const entries = j.entries || [];
+    const debit  = entries.filter(e=>e.side==='DEBIT').reduce((a,e)=>a+(e.amount||0),0);
+    const credit = entries.filter(e=>e.side==='CREDIT').reduce((a,e)=>a+(e.amount||0),0);
+    const linesHtml = entries.map(l => `
+      <tr>
+        <td>${l.lineNumber}</td>
+        <td><span style="font-family:monospace">${l.accountCode}</span></td>
+        <td>${l.accountName||'—'}</td>
+        <td>${chip(l.side)}</td>
+        <td style="font-family:monospace;text-align:right">${fmtMinor(l.amount)}</td>
+      </tr>`).join('');
+    openDetail(`Journal Entry: ${j.journalId}`, `
+      <div class="detail-body">
+        <div class="detail-section">
+          <div class="detail-section-title">Journal</div>
+          ${kv([
+            ['journalId',      j.journalId],
+            ['idempotencyKey', j.idempotencyKey],
+            ['periodCode',     j.periodCode],
+            ['batchId',        j.batchId || j.sourceReference?.sourceId],
+            ['journalType',    j.journalType],
+            ['status',         chip(j.status)],
+            ['currency',       j.currency],
+            ['totalAmount',    fmtMinor(j.totalAmount)],
+            ['txnCount',       j.txnCount ?? j.sourceReference?.txnCount],
+            ['createdBy',      j.createdBy],
+            ['postingDate',    j.postingDate],
+            ['createdAt',      j.createdAt],
+          ])}
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-title">Journal Lines</div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead><tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:3px 6px;color:var(--text-muted)">#</th>
+              <th style="text-align:left;padding:3px 6px;color:var(--text-muted)">Acct</th>
+              <th style="text-align:left;padding:3px 6px;color:var(--text-muted)">Name</th>
+              <th style="text-align:left;padding:3px 6px;color:var(--text-muted)">Side</th>
+              <th style="text-align:right;padding:3px 6px;color:var(--text-muted)">Amount</th>
+            </tr></thead>
+            <tbody>${linesHtml}</tbody>
+            <tfoot><tr style="border-top:2px solid var(--border);font-weight:700">
+              <td colspan="4" style="padding:4px 6px;font-size:11px">
+                ${debit === credit
+                  ? `<span style="color:var(--green)">⚖️ ΣDEBIT == ΣCREDIT (${fmtMinor(debit)})</span>`
+                  : `<span style="color:var(--red)">⚠ UNBALANCED: DR ${fmtMinor(debit)} ≠ CR ${fmtMinor(credit)}</span>`}
+              </td>
+            </tr></tfoot>
+          </table>
+        </div>
+      </div>`);
+  }
+
+  // ── RECONCILIATION ────────────────────────────────────────────────────────
+  async function fetchRecon() {
+    const period = document.getElementById('filter-period').value.trim();
+    const params = period ? `?periodCode=${period}` : '';
+    document.getElementById('recon-period-label').textContent = period ? `Period: ${period}` : '(all)';
+    const tbody = document.getElementById('recon-rows');
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-xs)">Running…</td></tr>';
+    try {
+      const rows = await apiFetch(`/pipeline/reconciliation${params}`);
+      document.getElementById('recon-checked').textContent = `checked ${new Date().toLocaleTimeString()}`;
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-xs)">No data</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(r => `
+        <tr>
+          <td><span style="font-family:monospace">${r.accountCode}</span></td>
+          <td>${r.periodCode||'—'}</td>
+          <td style="font-family:monospace">${r.subledgerSum}</td>
+          <td style="font-family:monospace">${r.journalSum}</td>
+          <td>${r.isReconciled
+            ? '<span class="chip chip-ok">✓ MATCH</span>'
+            : '<span class="chip chip-mismatch">⚠ MISMATCH</span>'}</td>
+        </tr>`).join('');
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="error-state">Error: ${e.message}</div></td></tr>`;
+    }
+  }
+
+  // ── TRACE ─────────────────────────────────────────────────────────────────
+  async function fetchTrace() {
+    const pid = document.getElementById('trace-input').value.trim();
+    if (!pid) return;
+    const body = document.getElementById('trace-body');
+    body.innerHTML = '<div class="empty-state">Tracing…</div>';
+    try {
+      const d = await apiFetch(`/pipeline/trace/${encodeURIComponent(pid)}`);
+      const tx  = d.transaction;
+      const le  = d.ledgerEvent;
+      const sls = d.subLedgerEntries || [];
+      const jn  = d.journalEntry;
+
+      const stageRow = (name, content, statusChip) => `
+        <div class="trace-stage">
+          <div class="trace-stage-name">${name}</div>
+          <div class="trace-stage-body">${content}</div>
+          <div class="trace-status">${statusChip}</div>
+        </div>`;
+
+      body.innerHTML = [
+        stageRow('① Transaction',
+          tx ? `<span class="row-id">${tx.paymentId}</span><br>$${fmt(tx.amount)} · ${tx.rail||'—'} · ${fmtDate(tx.settledAt)}`
+             : '<span class="trace-not-reached">not found</span>',
+          tx ? chip(tx.status) : ''),
+        stageRow('② Ledger Event',
+          le ? `<span class="row-id">${le.eventId}</span><br>${le.eventType||'—'} · ${le.postingMode?.type||'—'}<br>DR ${le.debitLeg?.glAccountCode||'—'} / CR ${le.creditLeg?.glAccountCode||'—'} · ${fmtMinor(le.debitLeg?.amount)}`
+             : '<span class="trace-not-reached">not yet ingested</span>',
+          le ? chip(le.postingStatus) : ''),
+        stageRow('③ SubLedger',
+          sls.length ? sls.map(s=>`${chip(s.side)} <span class="row-id">${s.subLedgerId}</span> acct ${s.controlAccountCode} · ${fmtMinor(s.amount)} · bal ${fmtMinor(s.runningBalance)}`).join('<br>')
+                     : '<span class="trace-not-reached">not yet projected</span>',
+          sls.length ? (sls.every(s=>s.journalEntryId) ? chip('POSTED') : chip('PENDING')) : ''),
+        stageRow('④ Journal',
+          jn ? `<span class="row-id">${jn.journalId}</span><br>${jn.batchId||jn.sourceReference?.sourceId||'—'} · ${(jn.entries||[]).length} lines`
+             : '<span class="trace-not-reached">not yet journaled</span>',
+          jn ? chip(jn.status) : ''),
+      ].join('');
+    } catch (e) {
+      body.innerHTML = e.message.includes('404')
+        ? `<div class="empty-state">Payment not found: ${document.getElementById('trace-input').value}</div>`
+        : `<div class="error-state">Error: ${e.message}</div>`;
+    }
+  }
+
+  document.getElementById('trace-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') fetchTrace();
+  });
+
+  // ── FEATURES TOGGLE ───────────────────────────────────────────────────────
+  function toggleFeatures() {
+    const b = document.getElementById('features-body');
+    b.style.display = b.style.display === 'none' ? '' : 'none';
+  }
+
+  // ── INITIATE TRANSACTION ──────────────────────────────────────────────────
+  const PRESETS = [
+    { label: 'Grace → Monet $50',    customerId: 'CUST-00528224', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-e0583b3c', amount: 50,  remittance: 'Ledger smoke test 1' },
+    { label: 'Grace → Monet $125',   customerId: 'CUST-00528224', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-8c8097a4', amount: 125, remittance: 'Ledger smoke test 2' },
+    { label: 'Grace own-acct $200',  customerId: 'CUST-00528224', type: 'INTRABANK_TRANSFER', rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-e0583b3f', amount: 200, remittance: '' },
+    { label: 'Monet → Grace $75',    customerId: 'CUST-17352703', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3c', creditor: 'ACC-e0583b3b', amount: 75,  remittance: 'Ledger smoke test 4' },
+    { label: 'Monet → Grace $30',    customerId: 'CUST-17352703', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3c', creditor: 'ACC-e0583b3f', amount: 30,  remittance: 'Ledger smoke test 5' },
+  ];
+
+  function buildPresetButtons() {
+    document.getElementById('preset-btns').innerHTML = PRESETS.map((p, i) =>
+      `<button class="preset-btn" id="preset-${i}" onclick="firePreset(${i})">${p.label}</button>`
+    ).join('');
+  }
+
+  async function firePreset(idx) {
+    const p = PRESETS[idx];
+    const btn = document.getElementById(`preset-${idx}`);
+    btn.disabled = true; btn.textContent = p.label + ' …';
+    const payload = {
+      customerId: p.customerId, type: p.type, rail: p.rail,
+      debtor: { accountId: p.debtor }, creditor: { accountId: p.creditor },
+      instructedAmount: p.amount, instructedCurrency: 'USD',
+    };
+    if (p.remittance) payload.remittance = { unstructured: p.remittance };
+    await fireTransaction(payload);
+    btn.disabled = false; btn.textContent = p.label;
+  }
+
+  async function fireCustom() {
+    const get = id => document.getElementById(id).value.trim();
+    const amount = parseFloat(get('custom-amount'));
+    if (!get('custom-debtor') || !get('custom-creditor') || isNaN(amount) || amount <= 0) {
+      alert('Debtor Account, Creditor Account, and a positive Amount are required.');
+      return;
+    }
+    const payload = {
+      customerId: get('custom-customer') || 'CUST-00528224',
+      type: get('custom-type'), rail: get('custom-rail'),
+      debtor: { accountId: get('custom-debtor') },
+      creditor: { accountId: get('custom-creditor') },
+      instructedAmount: amount, instructedCurrency: 'USD',
+    };
+    const rem = get('custom-remittance');
+    if (rem) payload.remittance = { unstructured: rem };
+    const btn = document.getElementById('fire-custom-btn');
+    btn.disabled = true; btn.textContent = 'Firing…';
+    try { await fireTransaction(payload); }
+    finally { btn.disabled = false; btn.textContent = 'Fire Transaction'; }
+  }
+
+  async function fireTransaction(payload) {
+    const resultEl = document.getElementById('txn-result');
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div class="empty-state">Sending…</div>';
+    try {
+      // Calls the ledger's proxy endpoint — the server forwards to the
+      // internal transactions service (unreachable from the browser in staging).
+      const resp = await fetch(`${txnBaseUrl()}/PaymentOrderProcedure/Initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = `<div class="error-state">Error ${resp.status}: ${JSON.stringify(data.detail ?? data)}</div>`;
+        return;
+      }
+      const pid = data.paymentId || data.payment_id || data.id || '—';
+      resultEl.innerHTML = `
+        <div style="background:var(--green-bg);color:var(--green-text);border-radius:6px;padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span style="font-weight:700">Initiated:</span>
+          <span style="font-family:monospace;font-size:12px">${pid}</span>
+          <span style="font-size:11px;color:var(--green-text)">Tracing in 2s — refresh in 4s</span>
+          <button class="btn btn-sm" style="margin-left:auto" onclick="tracePayment('${pid}')">→ Trace Now</button>
+        </div>`;
+      setTimeout(() => tracePayment(pid), 2000);
+      setTimeout(refreshAll, 4000);
+    } catch(e) {
+      resultEl.innerHTML = `<div class="error-state">Error: ${e.message}</div>`;
+    }
+  }
+
+  function tracePayment(pid) {
+    document.getElementById('trace-input').value = pid;
+    fetchTrace();
+    document.querySelector('.bottom-grid').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function toggleInitiate() {
+    const b = document.getElementById('initiate-body');
+    const btn = b.previousElementSibling.querySelector('button');
+    if (b.style.display === 'none') { b.style.display = ''; btn.textContent = 'Collapse'; }
+    else { b.style.display = 'none'; btn.textContent = 'Expand'; }
+  }
+
+  // ── REFRESH ALL ───────────────────────────────────────────────────────────
+  async function refreshAll() {
+    await fetchHealth();
+    fetchTransactions();
+    fetchLedgerEvents();
+    fetchSubledger();
+    fetchJournals();
+    fetchRecon();
+  }
+
+  // ── INIT ──────────────────────────────────────────────────────────────────
+  // Default URL input to the current page origin so relative API calls work
+  // at any hostname (local dev, staging, prod) without manual edits.
+  document.getElementById('base-url-input').value = window.location.origin;
+
+  buildPresetButtons();
+  refreshAll();
+  setInterval(fetchHealth, 10_000);
+</script>
+</body>
+</html>

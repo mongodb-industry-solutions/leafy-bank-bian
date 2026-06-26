@@ -1,0 +1,31 @@
+## Production environment configuration for open-finance-nextgen-ui
+## These values are passed to the Helm chart via drone-helm
+
+security:
+  dataClassification: "Internal"
+  dataDesignation: ["MI"]
+
+ownership:
+  driEmail: "kiran.tulsulkar@mongodb.com"
+
+env:
+  NODE_ENV: production
+  ## Backend service URLs (in-cluster DNS names from Kanopy)
+  ## CORE_BACKEND_URL is the fallback (openfinance, encryption-demo).
+  ## Accounts/transactions BIAN service domains route to their own services.
+  CORE_BACKEND_URL: http://open-finance-next-gen-web-app:80
+  ACCOUNTS_BACKEND_URL: http://leafy-bank-backend-accounts-web-app:80
+  TRANSACTIONS_BACKEND_URL: http://leafy-bank-backend-transactions-web-app:80
+  CHATBOT_BACKEND_URL: http://openfinance-chatbot-web-app:80
+
+## Uncomment and configure if you need Kubernetes secrets injected as env vars
+# envSecrets:
+#   MONGODB_URI: open-finance-nextgen-ui-secrets
+#   DATABASE_NAME: open-finance-nextgen-ui-secrets
+
+## AWS IRSA (IAM Roles for Service Accounts) — uncomment if needed
+# serviceAccount:
+#   enabled: true
+#   irsa:
+#     accountId: "275662791714"
+#     roleName: "kanopy-prod-cicd-irsa"

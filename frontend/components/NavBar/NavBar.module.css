@@ -1,0 +1,249 @@
+.navBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  gap: 16px;
+  z-index: 1000;
+}
+
+.left {
+  display: flex;
+  align-items: center;
+}
+
+.logoLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+
+.center {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  justify-content: center;
+}
+
+.navLink {
+  color: black;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.navLink:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.navLinkActive {
+  text-decoration: underline;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+}
+
+/* PLACEHOLDER — data team added profile selector dropdown.
+   Colleague to restyle to match design system. */
+.profileContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profileLabel {
+  font-size: 10px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.profileSelect {
+  padding: 4px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  background: white;
+  font-size: 13px;
+  color: #3d4f58;
+  cursor: pointer;
+  outline: none;
+}
+
+.profileSelect:focus {
+  border-color: #00684a;
+}
+
+/* PLACEHOLDER — data team added consent connection badge.
+   Colleague to restyle to match design system. */
+.consentBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #e3fcef;
+  color: #00684a;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.userInfoContainer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+}
+
+.mobileMenuButton {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #101828;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.mobileMenuIcon {
+  line-height: 1;
+}
+
+.userDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+}
+
+.switchUserBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 4px;
+  border-radius: 4px;
+  margin-left: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.switchUserBtn:hover {
+  color: #374151;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.logoutBtn {
+  display: none;
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.userInfoContainer:hover .logoutBtn {
+  display: block;
+}
+
+.userRole {
+  font-size: 10px;
+  color: #888;
+  line-height: 1.2;
+}
+
+.userModalContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+@media (max-width: 768px) {
+  .center {
+    display: none;
+  }
+
+  .right {
+    gap: 12px;
+  }
+
+  .profileContainer,
+  .consentBadge,
+  .userInfoContainer {
+    display: none;
+  }
+
+  .mobileMenuButton {
+    display: inline-flex;
+  }
+}
+
+.userImageModal {
+  border-radius: 50%;
+}
+
+.switchUserModalBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+  padding: 8px 16px;
+  margin-top: 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.switchUserModalBtn:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.userTags {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.tag {
+  background: #f3f4f6;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: center;
+}

@@ -1,0 +1,15 @@
+env:
+  NODE_ENV: staging
+  ENABLE_EMBEDDED_WORKERS: "true"
+  ENABLE_CHANGE_STREAMS: "false"
+  TRANSACTIONS_BASE_URL: http://leafy-bank-backend-transactions-web-app:80
+
+envSecrets:
+  MONGODB_URI: leafy-bank-backend-ledger
+  LEAFYBANK_DB_NAME: leafy-bank-backend-ledger
+
+serviceAccount:
+  enabled: true
+  irsa:
+    accountId: "275662791714"
+    roleName: "kanopy-staging-cicd-irsa"

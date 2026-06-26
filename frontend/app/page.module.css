@@ -1,0 +1,553 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  /* Space between sections; each section sizes to its own content. */
+  gap: 16px;
+  min-height: calc(100vh - 64px);
+}
+
+/* Sections size to the content they contain. */
+.topSection {
+  padding: 16px 24px;
+}
+
+.midSection {
+  padding: 12px 24px;
+}
+
+.bottomSection {
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.activitySection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 24px;
+}
+
+.tableWrap {
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 12px 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  text-align: left;
+}
+
+.table thead th {
+  font-weight: 600;
+}
+
+.table thead .th,
+.table thead th,
+.th {
+  text-transform: uppercase;
+  color: #6b7280;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.categoryCircleCell {
+  width: 50px;
+  text-align: center;
+}
+
+.categoryCircle {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Row with three cards where middle is larger */
+.rowThree {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  align-items: stretch;
+}
+
+.card {
+  display: flex;
+  height: 100%;
+}
+
+.cardSmall {
+  flex: 1 1 25%;
+}
+
+.cardLarge {
+  flex: 2 1 50%;
+}
+
+/* Row with two equal cards */
+.rowTwo {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  align-items: stretch;
+}
+
+.cardEqual {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+.rowTwo .cardEqual .leafyCard {
+  animation: pulseGlow 2s infinite;
+}
+
+.rowThreeEqual .leafyCard {
+  animation: none;
+}
+
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(166, 255, 236, 0.8);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(166, 255, 236, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(166, 255, 236, 0);
+  }
+}
+
+/* Products area: header + three equal cards */
+.productsHeader {
+  margin-bottom: 12px;
+}
+
+.sectionDots {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sectionDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(16, 24, 40, 0.15);
+}
+
+.rowThreeEqual {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+/* Global Position row: two equal cards spanning the full width. */
+.gpRow {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  width: 100%;
+}
+
+.cardProduct {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+
+}
+
+.leafyCard {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  position: relative;
+  border: 1px solid #E8EDEB;
+  box-shadow: 0 4px 7px rgba(16, 24, 40, 0.08);
+  border-radius: 24px;
+}
+
+.globalPosition {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
+  width: 100%;
+  height: 100%;
+}
+
+.gpSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.divider {
+  height: 1px;
+  background: rgba(16, 24, 40, 0.06);
+  border-radius: 1px;
+  width: 100%;
+}
+
+.productInner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  text-align: left;
+  /* add top padding to avoid overlap with absolute header */
+  padding: 64px 8px 8px 8px;
+}
+
+.productImage {
+  width: 48px;
+  height: 48px;
+}
+
+.productHeader {
+  position: absolute;
+  top: 12px;
+  left: 25px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+}
+
+.productBody {
+  padding: 4px 0;
+  text-align: center;
+}
+
+.accountList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  flex: 1;
+}
+
+.accountRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 0;
+  border-bottom: 1px solid #e5e5e6;
+}
+
+.accountInfo {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.accountBankBadge {
+  align-self: flex-start;
+  margin-top: 6px;
+}
+
+.accountAmount {
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cardContent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.thumbWrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cardText {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  margin-left: 10px
+}
+
+.cardBodyGray {
+  color: #6b7280;
+  /* gray-500 */
+}
+
+.iconRight {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+
+  /* On small screens, make rows horizontally scrollable instead of stacking vertically.
+     Use snap scrolling for a better UX on touch devices. */
+  .rowThree,
+  .rowThreeEqual,
+  .rowTwo {
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+    height: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 8px;
+  }
+
+  .rowThree .card,
+  .rowTwo .cardEqual,
+  .rowThreeEqual .cardProduct,
+  .card {
+    flex: 0 0 auto;
+    min-width: 260px;
+    scroll-snap-align: start;
+  }
+
+  .rowTwo .cardEqual,
+  .rowThreeEqual .cardProduct {
+    min-width: 360px;
+    scroll-snap-align: start;
+  }
+
+  .rowTwo .cardEqual .leafyCard {
+    max-width: 360px;
+    height: 120px;
+  }
+
+  /* Global Position: stack the two cards full-width on mobile (no scroll). */
+  .gpRow {
+    grid-template-columns: 1fr;
+  }
+
+  .gpRow .card {
+    min-width: 0;
+  }
+
+  /* gpRow stacks rather than scrolls, so its paging dots don't apply. */
+  .topSection .sectionDots {
+    display: none;
+  }
+
+  .sectionDots {
+    display: flex;
+  }
+
+  .topSection,
+  .midSection,
+  .bottomSection {
+    height: auto;
+  }
+
+  .container {
+    min-height: auto;
+  }
+
+  /* On mobile the bottom navigation replaces the floating action buttons. */
+  .stickyButtonContainer {
+    display: none;
+  }
+
+  /* Leave room so page content isn't hidden behind the fixed bottom nav. */
+  .container {
+    padding-bottom: 72px;
+  }
+}
+
+/* Global Position (top section) cards are static — no hover lift. */
+.topSection .leafyCard:hover,
+.topSection .leafyCard:focus-within,
+.topSection .leafyCard:focus {
+  transform: none;
+  box-shadow: 0 4px 7px rgba(16, 24, 40, 0.08);
+  border-color: #E8EDEB;
+  cursor: default;
+}
+
+/* Same hover/focus styles for the middle-section card (Add other financial entities) */
+.midSection .leafyCard {
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.midSection .leafyCard:hover,
+.midSection .leafyCard:focus-within,
+.midSection .leafyCard:focus {
+  transform: translateY(-6px);
+  box-shadow: 0 10px 20px rgba(16, 24, 40, 0.12);
+  border-color: rgba(16, 24, 40, 0.08);
+  cursor: pointer;
+}
+
+.midSection .leafyCard:active {
+  transform: translateY(-2px);
+}
+
+.midSection .leafyCard:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 0.18);
+  outline-offset: 4px;
+}
+
+.cardLink {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+
+.entitiesButton {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: opacity 150ms ease;
+}
+
+.entitiesButton:hover {
+  opacity: 0.8;
+}
+
+.entitiesButton:focus {
+  outline: 2px solid rgba(0, 120, 88, 0.12);
+  outline-offset: 4px;
+}
+
+.pieChartWrap {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.pieChartWrap iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 8px;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1000;
+}
+
+.modalDialog {
+  width: min(560px, 100%);
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(16, 24, 40, 0.18);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.modalCloseButton {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 8px;
+  color: #111827;
+}
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.formLabel {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.formInput {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 1rem;
+  color: #111827;
+  background: #ffffff;
+}
+
+.formInput:disabled {
+  background: #f9fafb;
+  color: #6b7280;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.stickyButtonContainer {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  z-index: 999;
+}
+
+/* Utility to hide parts of text on small screens (used for button labels) */
+.hideOnMobile {
+  display: inline;
+}
+
+@media (max-width: 480px) {
+  .hideOnMobile {
+    display: none;
+  }
+}

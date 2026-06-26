@@ -1,0 +1,15 @@
+## Staging environment configuration for fsi-bian-model
+## These values are passed to the Helm chart via drone-helm
+##
+## Standalone BIAN Data Model Explorer — no backend. All data is bundled
+## at build time, so no backend service URLs or secrets are required.
+
+security:
+  dataClassification: "Internal"
+  dataDesignation: ["MI"]
+
+ownership:
+  driEmail: "kiran.tulsulkar@mongodb.com"
+
+env:
+  NODE_ENV: staging
