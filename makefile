@@ -39,6 +39,23 @@ dev-ledger:
 dev-frontend:
 	cd frontend && npm run dev
 
+kill-ports:
+	@for port in 3000 8001 8002 8003; do \
+		pids=$$(lsof -ti :$$port 2>/dev/null); \
+		if [ -n "$$pids" ]; then \
+			echo "Killing process on port $$port (PID $$pids)"; \
+			kill -9 $$pids 2>/dev/null || true; \
+		fi; \
+	done
+
+dev: kill-ports
+	trap 'kill 0' INT; \
+	(cd backend/accounts && poetry run uvicorn main:app --reload --host 0.0.0.0 --port 8001) & \
+	(cd backend/transactions && poetry run uvicorn main:app --reload --host 0.0.0.0 --port 8002) & \
+	(cd backend/ledger && poetry run uvicorn main:app --reload --host 0.0.0.0 --port 8003) & \
+	(cd frontend && npm run dev) & \
+	wait
+
 # ---------- Per-service poetry setup ----------
 install-accounts:
 	cd backend/accounts && poetry config virtualenvs.in-project true && poetry install --no-interaction --no-root
@@ -50,7 +67,7 @@ install-ledger:
 	cd backend/ledger && poetry config virtualenvs.in-project true && poetry install --no-interaction --no-root
 
 install-frontend:
-	cd frontend && npm install
+	cd frontend && npm install --no-audit
 
 setup: install-accounts install-transactions install-ledger install-frontend
 
@@ -61,5 +78,5 @@ check:
 	cd backend/ledger && poetry run python -c "from main import app; print('OK ledger')"
 
 .PHONY: build up start stop down logs clean \
-	dev-accounts dev-transactions dev-ledger dev-frontend \
+	kill-ports dev dev-accounts dev-transactions dev-ledger dev-frontend \
 	install-accounts install-transactions install-ledger install-frontend setup check
