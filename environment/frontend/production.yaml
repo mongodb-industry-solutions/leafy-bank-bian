@@ -17,6 +17,9 @@ env:
   ACCOUNTS_BACKEND_URL: http://leafy-bank-backend-accounts-web-app:80
   TRANSACTIONS_BACKEND_URL: http://leafy-bank-backend-transactions-web-app:80
   CHATBOT_BACKEND_URL: http://openfinance-chatbot-web-app:80
+  ## NOTE: BIAN_MODEL_URL (NavBar "Data Model" button) is baked at image-build
+  ## time via the kaniko build_args in .drone-pending.yml, not here — the
+  ## frontend prerenders statically so a runtime env var would not apply.
 
 ## Uncomment and configure if you need Kubernetes secrets injected as env vars
 # envSecrets:

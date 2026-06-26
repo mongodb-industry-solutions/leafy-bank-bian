@@ -3,6 +3,12 @@ WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm install
 COPY frontend/ .
+# Browser-facing URL of the standalone BIAN Data Model Explorer. Baked at
+# build time because pages are statically prerendered — a runtime env var
+# would not reach the prerendered HTML. Per-environment value comes from the
+# kaniko build_args in .drone-pending.yml; defaults to local docker-compose.
+ARG BIAN_MODEL_URL=http://localhost:8004
+ENV BIAN_MODEL_URL=$BIAN_MODEL_URL
 RUN npm run build
 # Kanopy requires port 8080
 ENV PORT=8080

@@ -110,6 +110,25 @@
   border-radius: 8px;
 }
 
+.bianModelLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  color: #3d4f58;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.bianModelLink:hover {
+  background: #f9fafb;
+  border-color: #00684a;
+  color: #00684a;
+}
+
 .mobileMenuButton {
   display: none;
   align-items: center;
@@ -197,6 +216,7 @@
 
   .profileContainer,
   .consentBadge,
+  .bianModelLink,
   .userInfoContainer {
     display: none;
   }

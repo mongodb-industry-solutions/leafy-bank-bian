@@ -128,6 +128,8 @@ steps:
         - git-${DRONE_COMMIT_SHA:0:7}
         - latest
       dockerfile: Dockerfile.frontend
+      build_args:
+        - BIAN_MODEL_URL=https://fsi-bian-model.industrysolutions.staging.corp.mongodb.com
       access_key:
         from_secret: ecr_access_key
       secret_key:
@@ -370,6 +372,8 @@ steps:
         - git-${DRONE_COMMIT_SHA:0:7}-prod
         - prod-latest
       dockerfile: Dockerfile.frontend
+      build_args:
+        - BIAN_MODEL_URL=https://fsi-bian-model.industrysolutions.prod.corp.mongodb.com
       access_key:
         from_secret: ecr_access_key
       secret_key:
