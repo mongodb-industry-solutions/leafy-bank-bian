@@ -198,3 +198,4 @@ cython_debug/
 #.idea/
 security_check.sh
 setup-hooks.sh
+setup-drone-secrets.sh
