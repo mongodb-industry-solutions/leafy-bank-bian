@@ -4,7 +4,7 @@ security:
 
 ownership:
   driEmail: "kiran.tulsulkar@mongodb.com"
-#environment secrets
+#environment secrets for staging
 env:
   NODE_ENV: staging
   ENABLE_EMBEDDED_WORKERS: "true"
