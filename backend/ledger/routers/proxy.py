@@ -2,7 +2,7 @@
 
 The GL Monitor page is served from the ledger backend. Browsers can reach the
 ledger externally, but the transactions service runs on internal Kanopy DNS
-(leafy-bank-backend-transactions-web-app) which is unreachable from outside the
+(leafy-bank-bian-transactions-web-app) which is unreachable from outside the
 cluster. These routes let the browser call the ledger; the server forwards.
 """
 
@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 router = APIRouter(tags=["proxy"])
 
 _TRANSACTIONS_BASE = os.getenv(
-    "TRANSACTIONS_BASE_URL", "http://leafy-bank-backend-transactions-web-app:80"
+    "TRANSACTIONS_BASE_URL", "http://leafy-bank-bian-transactions-web-app:80"
 )
 
 
