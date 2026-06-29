@@ -1,0 +1,608 @@
+[{
+  "_id": {
+    "$oid": "6754670574a6710be0583b3b"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-e0583b3b",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "212100310",
+  "balance": {
+    "current": 315,
+    "available": 315,
+    "ledger": 315,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-06-26T23:31:13.261Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-07T15:17:25.417Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-00528224"
+  },
+  "description": "Savings account for gracehop",
+  "gl": {
+    "accountCode": "2121",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.02,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-e0583b3b"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-07",
+  "productId": "PROD-STD-SA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-00528224",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-legacy-migration",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "SAVINGS",
+  "updatedAt": {
+    "$date": "2026-06-26T23:31:13.261Z"
+  },
+  "version": 4
+},
+{
+  "_id": {
+    "$oid": "675488b874a6710be0583b3e"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-e0583b3e",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "514624177",
+  "balance": {
+    "current": 584,
+    "available": 584,
+    "ledger": 584,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-06-25T15:18:33.093Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-07T17:41:12.710Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-f88fb89e"
+  },
+  "description": "Savings account for fridaklo",
+  "gl": {
+    "accountCode": "2121",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.02,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-e0583b3e"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-07",
+  "productId": "PROD-STD-SA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-f88fb89e",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-legacy-migration",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "SAVINGS",
+  "updatedAt": {
+    "$date": "2026-06-25T15:18:33.093Z"
+  },
+  "version": 2
+},
+{
+  "_id": {
+    "$oid": "67548bdd74a6710be0583b3f"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-e0583b3f",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "716974731",
+  "balance": {
+    "current": 1756,
+    "available": 1756,
+    "ledger": 1756,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-06-26T23:31:13.261Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-07T17:54:37.776Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-00528224"
+  },
+  "description": "Checking account for gracehop",
+  "gl": {
+    "accountCode": "2111",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.005,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-e0583b3f"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-07",
+  "productId": "PROD-STD-CA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-00528224",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-legacy-migration",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "CURRENT",
+  "updatedAt": {
+    "$date": "2026-06-26T23:31:13.261Z"
+  },
+  "version": 1
+},
+{
+  "_id": {
+    "$oid": "6754667a74a6710be0583b39"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-e0583b39",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "111199300",
+  "balance": {
+    "current": 1085,
+    "available": 1085,
+    "ledger": 1085,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-06-25T15:17:37.094Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-07T15:15:06.501Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-f88fb89e"
+  },
+  "description": "Savings account for fridaklo",
+  "gl": {
+    "accountCode": "2121",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.02,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-e0583b39"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-07",
+  "productId": "PROD-STD-SA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-f88fb89e",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-legacy-migration",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "SAVINGS",
+  "updatedAt": {
+    "$date": "2026-06-25T15:17:37.094Z"
+  },
+  "version": 5
+},
+{
+  "_id": {
+    "$oid": "675466b874a6710be0583b3a"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-e0583b3a",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "828299311",
+  "balance": {
+    "current": 3232,
+    "available": 3232,
+    "ledger": 3232,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-06-26T12:22:56.122Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-07T15:16:08.979Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-f88fb89e"
+  },
+  "description": "Checking account for fridaklo",
+  "gl": {
+    "accountCode": "2111",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.005,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-e0583b3a"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-07",
+  "productId": "PROD-STD-CA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-f88fb89e",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-legacy-migration",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "CURRENT",
+  "updatedAt": {
+    "$date": "2026-06-26T12:22:56.122Z"
+  },
+  "version": 4
+},
+{
+  "_id": {
+    "$oid": "6754673574a6710be0583b3c"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-e0583b3c",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "989800989",
+  "balance": {
+    "current": 5778,
+    "available": 5778,
+    "ledger": 5778,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-06-26T23:24:15.707Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-07T15:18:13.426Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-17352703"
+  },
+  "description": "Checking account for claumon",
+  "gl": {
+    "accountCode": "2111",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.005,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-e0583b3c"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-07",
+  "productId": "PROD-STD-CA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-17352703",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-legacy-migration",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "CURRENT",
+  "updatedAt": {
+    "$date": "2026-06-26T23:24:15.707Z"
+  },
+  "version": 2
+},
+{
+  "_id": {
+    "$oid": "6761837df40fb8e08c8097a4"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-8c8097a4",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "492081594",
+  "balance": {
+    "current": 3650,
+    "available": 3650,
+    "ledger": 3650,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-06-26T12:09:04.899Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-17T13:58:21.692Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-17352703"
+  },
+  "description": "Savings account for claumon",
+  "gl": {
+    "accountCode": "2121",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.02,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-17",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-8c8097a4"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-17",
+  "productId": "PROD-STD-SA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-17352703",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-17"
+    }
+  ],
+  "sourceSystem": "leafy-bank-legacy-migration",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "SAVINGS",
+  "updatedAt": {
+    "$date": "2026-06-26T12:09:04.899Z"
+  },
+  "version": 1
+},
+{
+  "_id": {
+    "$oid": "6754677374a6710be0583b3d"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-e0583b3d",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "323211966",
+  "balance": {
+    "current": 800,
+    "available": 800,
+    "ledger": 800,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": "2024-12-07T15:30:58.338Z"
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-07T15:19:15.412Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-17352703"
+  },
+  "description": "Savings account for claumon",
+  "gl": {
+    "accountCode": "2121",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.02,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-e0583b3d"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-07",
+  "productId": "PROD-STD-SA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-17352703",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-legacy-migration",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "SAVINGS",
+  "updatedAt": "2024-12-07T15:30:58.338Z",
+  "version": 3
+},
+{
+  "_id": {
+    "$oid": "69fc913509927fa6205afd64"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-205afd64",
+  "accountNumber": "858117929",
+  "balance": {
+    "current": 9550,
+    "available": 9550,
+    "ledger": 9550,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-05-08T07:11:06.450Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": {
+    "$date": "2026-05-07T13:18:45.408Z"
+  },
+  "createdBy": "SERVICE-ACCOUNTS",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-f88fb89e"
+  },
+  "gl": {
+    "accountCode": "2121",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.02,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": null,
+    "nextPaymentAt": null,
+    "paymentAccountId": null
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2026-05-07",
+  "productId": "PROD-STD-SAV-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-f88fb89e",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2026-05-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-accounts-service",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": null,
+    "nextScheduledAt": null
+  },
+  "status": "ACTIVE",
+  "type": "SAVINGS",
+  "updatedAt": {
+    "$date": "2026-05-08T07:11:06.450Z"
+  },
+  "version": 1
+}]

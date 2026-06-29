@@ -1,0 +1,1368 @@
+[{
+  "_id": {
+    "$oid": "b2bc3aaa9b08da29d6cf8930"
+  },
+  "accountCode": "1000",
+  "accountName": "Assets",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Top-level asset category",
+  "isPostingAccount": false,
+  "level": 1,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": null,
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "860b30f3cbda7e4b3423c195"
+  },
+  "accountCode": "1100",
+  "accountName": "Cash and Cash Equivalents",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Liquid assets group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "fbf8993fbfee1c8e5de14603"
+  },
+  "accountCode": "1110",
+  "accountName": "Cash — Control",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Cash control account",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1100",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "1887987f8b8072909b630760"
+  },
+  "accountCode": "1111",
+  "accountName": "Nostro Accounts",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Correspondent bank nostro balances",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1110",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "f9da7510db95a76627edc2a9"
+  },
+  "accountCode": "1112",
+  "accountName": "Operational Cash",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Branch and ATM operational cash",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1110",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "93ab80e01f532041294e3324"
+  },
+  "accountCode": "1120",
+  "accountName": "Central Bank Reserves — Control",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Central bank reserve control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1100",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "5b9a8bd269c769989bfc45ed"
+  },
+  "accountCode": "1121",
+  "accountName": "Minimum Reserve Requirements",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Mandatory reserves held at central bank",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1120",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "c96d9eb5df05e8b172a22c97"
+  },
+  "accountCode": "1200",
+  "accountName": "Loans and Advances",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Loan portfolio group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "7912fa66abe8848fd0e3d784"
+  },
+  "accountCode": "1210",
+  "accountName": "Retail Loans — Control",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Retail loan control account",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1200",
+  "status": "ACTIVE",
+  "subLedgerType": "LOAN_PORTFOLIO",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "43b511e400cb774b9f84ef63"
+  },
+  "accountCode": "1211",
+  "accountName": "Personal Loans",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Unsecured personal loans",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1210",
+  "status": "ACTIVE",
+  "subLedgerType": "LOAN_PORTFOLIO",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "5f905f932b993b4fb9ccb517"
+  },
+  "accountCode": "1212",
+  "accountName": "Mortgage Loans",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Residential mortgage portfolio",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1210",
+  "status": "ACTIVE",
+  "subLedgerType": "LOAN_PORTFOLIO",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "004e106f29b35e161209f309"
+  },
+  "accountCode": "1213",
+  "accountName": "Auto Loans",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Vehicle financing",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1210",
+  "status": "ACTIVE",
+  "subLedgerType": "LOAN_PORTFOLIO",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "449bb78e0215350ff9066c22"
+  },
+  "accountCode": "1220",
+  "accountName": "Corporate Loans — Control",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Corporate loan control account",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1200",
+  "status": "ACTIVE",
+  "subLedgerType": "LOAN_PORTFOLIO",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "6f87917b3ecd6681be6af3be"
+  },
+  "accountCode": "1221",
+  "accountName": "Term Loans",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Corporate term lending",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1220",
+  "status": "ACTIVE",
+  "subLedgerType": "LOAN_PORTFOLIO",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "f30f5b546b2649bd643edd82"
+  },
+  "accountCode": "1222",
+  "accountName": "Revolving Credit Facilities",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Committed revolving credit lines",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1220",
+  "status": "ACTIVE",
+  "subLedgerType": "LOAN_PORTFOLIO",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "0580c29067635e891f080723"
+  },
+  "accountCode": "1300",
+  "accountName": "Investment Securities",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Securities portfolio group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "9491f5f6056e38a6751b57b3"
+  },
+  "accountCode": "1310",
+  "accountName": "Govt Securities — Control",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Sovereign debt control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1300",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "c274b932ae81bb67d82f7982"
+  },
+  "accountCode": "1311",
+  "accountName": "Treasury Bills",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Short-term government paper (HQLA L1)",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1310",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "834742879ac7ba6d26d2850c"
+  },
+  "accountCode": "1312",
+  "accountName": "Government Bonds",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Long-term sovereign bonds (HQLA L1)",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1310",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "2cb1cae6c2f0694b57cf2c9a"
+  },
+  "accountCode": "1400",
+  "accountName": "Fixed Assets",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fixed asset group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "cedb91f8f7d3d63f4fd6af84"
+  },
+  "accountCode": "1410",
+  "accountName": "Property and Equipment — Control",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fixed asset control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1400",
+  "status": "ACTIVE",
+  "subLedgerType": "FIXED_ASSETS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "8be57cc22fdd53dee7e5e1b1"
+  },
+  "accountCode": "1411",
+  "accountName": "Owned Property",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Bank-owned premises",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1410",
+  "status": "ACTIVE",
+  "subLedgerType": "FIXED_ASSETS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "7adb6a52c0faeb4f419bc0d7"
+  },
+  "accountCode": "1412",
+  "accountName": "IT Equipment",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Servers, hardware, and devices",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1410",
+  "status": "ACTIVE",
+  "subLedgerType": "FIXED_ASSETS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "7d436fcb03a2648a9df83a8a"
+  },
+  "accountCode": "1500",
+  "accountName": "Accounts Receivable",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Receivables group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "fff8d40611c1091ef7fea7e4"
+  },
+  "accountCode": "1510",
+  "accountName": "Fees Receivable — Control",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fee income receivable control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1500",
+  "status": "ACTIVE",
+  "subLedgerType": "ACCOUNTS_RECEIVABLE",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "70463ee3eeb9add35545e570"
+  },
+  "accountCode": "1511",
+  "accountName": "Transaction Fees Receivable",
+  "accountType": "ASSET",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Payment and transaction fee receivables",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "1510",
+  "status": "ACTIVE",
+  "subLedgerType": "ACCOUNTS_RECEIVABLE",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "bbaff325570cc3ab3f1cdc13"
+  },
+  "accountCode": "2000",
+  "accountName": "Liabilities",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Top-level liability category",
+  "isPostingAccount": false,
+  "level": 1,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": null,
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "3124e884d78e62fe71c924f0"
+  },
+  "accountCode": "2100",
+  "accountName": "Customer Deposits",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Deposit products group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "b522674b9d37694dc1c317b7"
+  },
+  "accountCode": "2110",
+  "accountName": "Current Accounts — Control",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Current/checking account control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2100",
+  "status": "ACTIVE",
+  "subLedgerType": "CUSTOMER_DEPOSITS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "fb80950dd5a2fe7c0340c436"
+  },
+  "accountCode": "2111",
+  "accountName": "Personal Current Accounts",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Retail checking/current accounts",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2110",
+  "status": "ACTIVE",
+  "subLedgerType": "CUSTOMER_DEPOSITS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "291b8330b14f6f13ea690b00"
+  },
+  "accountCode": "2112",
+  "accountName": "Business Current Accounts",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "SME and corporate current accounts",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2110",
+  "status": "ACTIVE",
+  "subLedgerType": "CUSTOMER_DEPOSITS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "b8849843c8c5a15700eacacb"
+  },
+  "accountCode": "2120",
+  "accountName": "Savings Accounts — Control",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Savings product control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2100",
+  "status": "ACTIVE",
+  "subLedgerType": "CUSTOMER_DEPOSITS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "e3356692cf2aa2e992f716ff"
+  },
+  "accountCode": "2121",
+  "accountName": "Retail Savings Accounts",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Individual savings accounts",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2120",
+  "status": "ACTIVE",
+  "subLedgerType": "CUSTOMER_DEPOSITS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "4532f9c5632fd629672d397c"
+  },
+  "accountCode": "2130",
+  "accountName": "Term Deposits — Control",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fixed-term deposit control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2100",
+  "status": "ACTIVE",
+  "subLedgerType": "CUSTOMER_DEPOSITS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "97de521a9dd08a2840791146"
+  },
+  "accountCode": "2131",
+  "accountName": "Retail Term Deposits",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fixed-term deposits, retail",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2130",
+  "status": "ACTIVE",
+  "subLedgerType": "CUSTOMER_DEPOSITS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "25d5fbabbe4c8312338cfed7"
+  },
+  "accountCode": "2132",
+  "accountName": "Corporate Term Deposits",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fixed-term deposits, corporate",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2130",
+  "status": "ACTIVE",
+  "subLedgerType": "CUSTOMER_DEPOSITS",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "2582345868d534bd34f56640"
+  },
+  "accountCode": "2200",
+  "accountName": "Borrowings",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Wholesale funding group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "a3a36fc8fcd2b1a43444cdb3"
+  },
+  "accountCode": "2210",
+  "accountName": "Interbank Borrowings — Control",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interbank funding control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2200",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "731702a68a606239f74f767d"
+  },
+  "accountCode": "2211",
+  "accountName": "Overnight Interbank",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Overnight money market borrowings",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "d085fc28555151b9768cbe4f"
+  },
+  "accountCode": "2300",
+  "accountName": "Accounts Payable",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Payables group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "a458eb7d15add6e67ae9ae31"
+  },
+  "accountCode": "2310",
+  "accountName": "Fees Payable — Control",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fee payables control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2300",
+  "status": "ACTIVE",
+  "subLedgerType": "ACCOUNTS_PAYABLE",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "1e4d491abb3f64dadec93125"
+  },
+  "accountCode": "2311",
+  "accountName": "Correspondent Bank Fees Payable",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fees owed to correspondent banks",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2310",
+  "status": "ACTIVE",
+  "subLedgerType": "ACCOUNTS_PAYABLE",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "1b5dc86087bbc26ca7f7fd7c"
+  },
+  "accountCode": "2312",
+  "accountName": "Supplier Payables",
+  "accountType": "LIABILITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Amounts owed to operational suppliers",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "2310",
+  "status": "ACTIVE",
+  "subLedgerType": "ACCOUNTS_PAYABLE",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "45aad9a7d39b1e66d88ee447"
+  },
+  "accountCode": "3000",
+  "accountName": "Equity",
+  "accountType": "EQUITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Top-level equity category",
+  "isPostingAccount": false,
+  "level": 1,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": null,
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "42158f41ed0437a795941596"
+  },
+  "accountCode": "3100",
+  "accountName": "Share Capital",
+  "accountType": "EQUITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Issued share capital group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "3000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "bfb985e561dd8fe28ce4d81c"
+  },
+  "accountCode": "3110",
+  "accountName": "Share Capital — Control",
+  "accountType": "EQUITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Share capital control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "3100",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "dc83ec4ea1217dbe5232e447"
+  },
+  "accountCode": "3111",
+  "accountName": "Ordinary Share Capital",
+  "accountType": "EQUITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Common/ordinary shares issued",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "3110",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "242ead36da9f42b523d6068f"
+  },
+  "accountCode": "3200",
+  "accountName": "Retained Earnings",
+  "accountType": "EQUITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Retained earnings group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "3000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "37ff688fc5f47e06cc9b04e6"
+  },
+  "accountCode": "3210",
+  "accountName": "Retained Earnings — Control",
+  "accountType": "EQUITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Retained earnings control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "3200",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "abcb15d8bd75c8b28e7bcedd"
+  },
+  "accountCode": "3211",
+  "accountName": "Prior Period Retained Earnings",
+  "accountType": "EQUITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Cumulative retained earnings",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "3210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "7ac7500e24dfd6794803397f"
+  },
+  "accountCode": "3212",
+  "accountName": "Current Year Profit/Loss",
+  "accountType": "EQUITY",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "YTD net income before close",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "3210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "f0caf46699c203d62df85d7d"
+  },
+  "accountCode": "4000",
+  "accountName": "Income",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Top-level income category (REVENUE in schema validator)",
+  "isPostingAccount": false,
+  "level": 1,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": null,
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "1175d89ff0d02375bcda9b66"
+  },
+  "accountCode": "4100",
+  "accountName": "Interest Income",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interest income group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "d6d042687ea142aa79b22332"
+  },
+  "accountCode": "4110",
+  "accountName": "Interest Income — Control",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interest income control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4100",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "300e96b4850f25c6a710bc61"
+  },
+  "accountCode": "4111",
+  "accountName": "Loan Interest Income",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interest earned on loan portfolio",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4110",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "ed79862e14b38486fed387b6"
+  },
+  "accountCode": "4112",
+  "accountName": "Securities Interest Income",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Coupon income from bond holdings",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4110",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "68f2354463966c4a7b3cde7d"
+  },
+  "accountCode": "4113",
+  "accountName": "Interbank Placement Income",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interest on interbank placements",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4110",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "845a66fb80cb0899f0b8400a"
+  },
+  "accountCode": "4200",
+  "accountName": "Fee Income",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fee and commission income group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "66436dfa1bf30fca0de6ca67"
+  },
+  "accountCode": "4210",
+  "accountName": "Fee Income — Control",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Fee income control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4200",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "dbffbe0d6de3d7bde94f5ebd"
+  },
+  "accountCode": "4211",
+  "accountName": "Transaction Fee Income",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Payment and transaction processing fees",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "398e3591fb84afa916ca97bb"
+  },
+  "accountCode": "4212",
+  "accountName": "Account Maintenance Fees",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Monthly/annual account fees",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "4dd229249510db3f19cd47bc"
+  },
+  "accountCode": "4213",
+  "accountName": "FX and Trade Finance Fees",
+  "accountType": "REVENUE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Foreign exchange and trade fees",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "CREDIT",
+  "parentAccountCode": "4210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "c7a00db8afd6f8a31fd26ec9"
+  },
+  "accountCode": "5000",
+  "accountName": "Expenses",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Top-level expense category",
+  "isPostingAccount": false,
+  "level": 1,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": null,
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "ad10994b8e81ac0555c05d96"
+  },
+  "accountCode": "5100",
+  "accountName": "Interest Expense",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interest expense group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "9206085b4fc0b1ad4a8cef28"
+  },
+  "accountCode": "5110",
+  "accountName": "Interest Expense — Control",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interest expense control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5100",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "0c715a631afc83dbc9057b4e"
+  },
+  "accountCode": "5111",
+  "accountName": "Deposit Interest Expense",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interest paid on customer deposits",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5110",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "84ab92d0caefd46382cfb246"
+  },
+  "accountCode": "5112",
+  "accountName": "Interbank Interest Expense",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Interest paid on interbank borrowings",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5110",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "912c04a8a5095fe13808e093"
+  },
+  "accountCode": "5200",
+  "accountName": "Operating Expense",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Operating cost group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "24e0377c01ff08c711781a59"
+  },
+  "accountCode": "5210",
+  "accountName": "Operating Expense — Control",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Operating expense control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5200",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "dc3575c400f230d79d9ae1e0"
+  },
+  "accountCode": "5211",
+  "accountName": "Technology and Infrastructure",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "IT systems, cloud, and infrastructure",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "64a7876f6ce6085686a38cd2"
+  },
+  "accountCode": "5212",
+  "accountName": "Staff Costs",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Salaries, benefits, and related costs",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "86593c7d93deef3edf250320"
+  },
+  "accountCode": "5213",
+  "accountName": "Premises and Facilities",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Rent, utilities, and facilities costs",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5210",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "9b08a224a7627a3821438c73"
+  },
+  "accountCode": "5300",
+  "accountName": "Provision Expense",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Credit loss provision group",
+  "isPostingAccount": false,
+  "level": 2,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5000",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "ceaab67f3c4c87bd1c0c2040"
+  },
+  "accountCode": "5310",
+  "accountName": "Provision Expense — Control",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Provision expense control",
+  "isPostingAccount": false,
+  "level": 3,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5300",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "78d49302f307bb98913cef5f"
+  },
+  "accountCode": "5311",
+  "accountName": "Loan Loss Provision (IFRS 9)",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "Expected credit loss charges",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5310",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+},
+{
+  "_id": {
+    "$oid": "3265976dea3c148cf863f9a2"
+  },
+  "accountCode": "5312",
+  "accountName": "Off-Balance-Sheet Provisions",
+  "accountType": "EXPENSE",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "currency": "USD",
+  "description": "ECL on commitments and guarantees",
+  "isPostingAccount": true,
+  "level": 4,
+  "normalBalance": "DEBIT",
+  "parentAccountCode": "5310",
+  "status": "ACTIVE",
+  "subLedgerType": null,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}]
