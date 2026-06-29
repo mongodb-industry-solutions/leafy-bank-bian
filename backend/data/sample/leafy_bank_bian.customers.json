@@ -1,0 +1,517 @@
+[{
+  "_id": {
+    "$oid": "671ff0081ec726b417352702"
+  },
+  "customerId": "CUST-17352702",
+  "status": "ACTIVE",
+  "type": "INDIVIDUAL",
+  "segment": "RETAIL",
+  "since": "2024-12-07",
+  "rmId": null,
+  "identification": {
+    "userName": "adalove",
+    "legalName": "Ada Lovelace",
+    "firstName": "Ada",
+    "lastName": "Lovelace",
+    "namePrefix": "Miss",
+    "tradingName": null,
+    "dateOfBirth": "1815-12-10",
+    "countryOfBirth": "GB",
+    "nationality": "GB",
+    "nationalId": "vault:enc:IDPERSONA03",
+    "nationalIdType": "NATIONAL_ID",
+    "taxId": "vault:enc:TAX-adalove-001",
+    "civilStatus": "Single",
+    "jobTitle": "Mathematician"
+  },
+  "employment": {
+    "employer": {
+      "name": "King's College London",
+      "payrollId": "EMP-2024-00101",
+      "startDate": "2022-09-01"
+    },
+    "jobTitle": "Research Fellow",
+    "employmentType": "fullTime",
+    "income": {
+      "amount": 5500,
+      "currency": "GBP",
+      "frequency": "Monthly"
+    }
+  },
+  "contact": {
+    "email": "adalove@example.com",
+    "phone": "+445512345678",
+    "preferredLanguage": "en",
+    "preferredChannel": "MOBILE",
+    "addresses": [
+      {
+        "type": "HOME",
+        "isPrimary": true,
+        "residentialStatus": "NonResident",
+        "line1": "3 St James's Square",
+        "line2": null,
+        "city": "London",
+        "state": "England",
+        "postcode": "SW1Y 4JU",
+        "country": "GB",
+        "validFrom": "2024-12-07",
+        "validTo": null
+      }
+    ]
+  },
+  "kyc": {
+    "status": "VERIFIED",
+    "level": "STANDARD",
+    "riskRating": "LOW",
+    "verifiedAt": "2024-12-07",
+    "nextReviewAt": "2026-12-07",
+    "documents": [
+      {
+        "docType": "PASSPORT",
+        "docRef": "vault:doc:ADALOVE-PASS-SYNTH-001",
+        "issuedBy": "HM Passport Office",
+        "issuedAt": "2020-06-10",
+        "expiresAt": "2030-06-10",
+        "verifiedAt": "2024-12-07",
+        "verifiedBy": "SYSTEM-MIGRATION-2026-04"
+      }
+    ]
+  },
+  "gender": "female",
+  "residency": "GB",
+  "identifiers": [
+    {
+      "passportNumber": null,
+      "lei": null,
+      "incorporationNumber": null,
+      "incorporationDate": null,
+      "incorporationCountry": null,
+      "type": "nationalId",
+      "value": "vault:enc:IDPERSONA03",
+      "country": "GB",
+      "issueDate": {
+        "$date": "2020-06-10T00:00:00.000Z"
+      },
+      "expiryDate": null,
+      "verified": true,
+      "verificationMethod": "document_scan",
+      "verificationDate": {
+        "$date": "2024-12-07T15:15:06.000Z"
+      }
+    }
+  ],
+  "bankRelations": {
+    "customerInfo": {
+      "customerSince": "2024-12-07",
+      "segments": [
+        "retail_banking"
+      ],
+      "products": [],
+      "notes": null
+    }
+  },
+  "consents": [
+    {
+      "consentType": "DATA_SHARING",
+      "granted": true,
+      "grantedAt": "2024-12-07T15:15:06Z",
+      "expiresAt": null,
+      "channel": "WEB"
+    }
+  ],
+  "createdAt": "2024-12-07T15:15:06Z",
+  "updatedAt": "2026-05-07T00:00:00Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "version": 2,
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "65a546ae4a8f64e8f88fb89e"
+  },
+  "customerId": "CUST-f88fb89e",
+  "status": "ACTIVE",
+  "type": "INDIVIDUAL",
+  "segment": "RETAIL",
+  "since": "2024-12-07",
+  "rmId": null,
+  "identification": {
+    "userName": "fridaklo",
+    "legalName": "Frida Kahlo",
+    "firstName": "Frida",
+    "lastName": "Kahlo",
+    "namePrefix": "Miss",
+    "tradingName": null,
+    "dateOfBirth": "1907-07-06",
+    "countryOfBirth": "MX",
+    "nationality": "MX",
+    "nationalId": "vault:enc:IDPERSONA01",
+    "nationalIdType": "NATIONAL_ID",
+    "taxId": "vault:enc:TAX-fridaklo-001",
+    "civilStatus": "Widowed",
+    "jobTitle": "Painter"
+  },
+  "employment": {
+    "employer": {
+      "name": "Taller de Arte Moderno",
+      "payrollId": "EMP-2024-00201",
+      "startDate": "2020-01-10"
+    },
+    "jobTitle": "Senior Artist",
+    "employmentType": "selfEmployed",
+    "income": {
+      "amount": 6800,
+      "currency": "USD",
+      "frequency": "Monthly"
+    }
+  },
+  "contact": {
+    "email": "fridaklo@example.com",
+    "phone": "+525512345678",
+    "preferredLanguage": "es",
+    "preferredChannel": "MOBILE",
+    "addresses": [
+      {
+        "type": "HOME",
+        "isPrimary": true,
+        "residentialStatus": "Resident",
+        "line1": "Calle de Londres 247",
+        "line2": null,
+        "city": "Mexico City",
+        "state": "Mexico City",
+        "postcode": "62240",
+        "country": "MX",
+        "validFrom": "2024-12-07",
+        "validTo": null
+      }
+    ]
+  },
+  "kyc": {
+    "status": "VERIFIED",
+    "level": "STANDARD",
+    "riskRating": "LOW",
+    "verifiedAt": "2024-12-07",
+    "nextReviewAt": "2026-12-07",
+    "documents": [
+      {
+        "docType": "PASSPORT",
+        "docRef": "vault:doc:FRIDAKLO-PASS-SYNTH-001",
+        "issuedBy": "SRE Mexico",
+        "issuedAt": "2020-06-10",
+        "expiresAt": "2030-06-10",
+        "verifiedAt": "2024-12-07",
+        "verifiedBy": "SYSTEM-MIGRATION-2026-04"
+      }
+    ]
+  },
+  "gender": "female",
+  "residency": "MX",
+  "identifiers": [
+    {
+      "passportNumber": null,
+      "lei": null,
+      "incorporationNumber": null,
+      "incorporationDate": null,
+      "incorporationCountry": null,
+      "type": "nationalId",
+      "value": "vault:enc:IDPERSONA01",
+      "country": "MX",
+      "issueDate": {
+        "$date": "2020-06-10T00:00:00.000Z"
+      },
+      "expiryDate": null,
+      "verified": true,
+      "verificationMethod": "document_scan",
+      "verificationDate": {
+        "$date": "2024-12-07T15:15:06.000Z"
+      }
+    }
+  ],
+  "bankRelations": {
+    "customerInfo": {
+      "customerSince": "2024-12-07",
+      "segments": [
+        "retail_banking"
+      ],
+      "products": [
+        "savings_plus_high_yield",
+        "standard_current_account"
+      ],
+      "notes": null
+    }
+  },
+  "consents": [
+    {
+      "consentType": "DATA_SHARING",
+      "granted": true,
+      "grantedAt": "2024-12-07T15:15:06Z",
+      "expiresAt": null,
+      "channel": "WEB"
+    }
+  ],
+  "createdAt": "2024-12-07T15:15:06Z",
+  "updatedAt": "2026-05-07T00:00:00Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "version": 2,
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "66fe219d625d93a100528224"
+  },
+  "customerId": "CUST-00528224",
+  "status": "ACTIVE",
+  "type": "INDIVIDUAL",
+  "segment": "RETAIL",
+  "since": "2024-12-07",
+  "rmId": null,
+  "identification": {
+    "userName": "gracehop",
+    "legalName": "Grace Hopper",
+    "firstName": "Grace",
+    "lastName": "Hopper",
+    "namePrefix": "Mrs",
+    "tradingName": null,
+    "dateOfBirth": "1906-12-09",
+    "countryOfBirth": "US",
+    "nationality": "US",
+    "nationalId": "vault:enc:IDPERSONA02",
+    "nationalIdType": "NATIONAL_ID",
+    "taxId": "vault:enc:TAX-gracehop-001",
+    "civilStatus": "Divorced",
+    "jobTitle": "Computer Scientist"
+  },
+  "employment": {
+    "employer": {
+      "name": "U.S. Naval Reserve",
+      "payrollId": "EMP-2024-00302",
+      "startDate": "2019-06-01"
+    },
+    "jobTitle": "Senior Software Engineer",
+    "employmentType": "fullTime",
+    "income": {
+      "amount": 9200,
+      "currency": "USD",
+      "frequency": "Monthly"
+    }
+  },
+  "contact": {
+    "email": "gracehop@example.com",
+    "phone": "+15512345678",
+    "preferredLanguage": "en",
+    "preferredChannel": "MOBILE",
+    "addresses": [
+      {
+        "type": "HOME",
+        "isPrimary": true,
+        "residentialStatus": "PermanentResident",
+        "line1": "226 W 108th St",
+        "line2": null,
+        "city": "New York City",
+        "state": "New York",
+        "postcode": "NY 10025",
+        "country": "US",
+        "validFrom": "2024-12-07",
+        "validTo": null
+      }
+    ]
+  },
+  "kyc": {
+    "status": "VERIFIED",
+    "level": "STANDARD",
+    "riskRating": "LOW",
+    "verifiedAt": "2024-12-07",
+    "nextReviewAt": "2026-12-07",
+    "documents": [
+      {
+        "docType": "PASSPORT",
+        "docRef": "vault:doc:GRACEHOP-PASS-SYNTH-001",
+        "issuedBy": "U.S. Department of State",
+        "issuedAt": "2020-06-10",
+        "expiresAt": "2030-06-10",
+        "verifiedAt": "2024-12-07",
+        "verifiedBy": "SYSTEM-MIGRATION-2026-04"
+      }
+    ]
+  },
+  "gender": "female",
+  "residency": "US",
+  "identifiers": [
+    {
+      "passportNumber": null,
+      "lei": null,
+      "incorporationNumber": null,
+      "incorporationDate": null,
+      "incorporationCountry": null,
+      "type": "nationalId",
+      "value": "vault:enc:IDPERSONA02",
+      "country": "US",
+      "issueDate": {
+        "$date": "2020-06-10T00:00:00.000Z"
+      },
+      "expiryDate": null,
+      "verified": true,
+      "verificationMethod": "document_scan",
+      "verificationDate": {
+        "$date": "2024-12-07T15:15:06.000Z"
+      }
+    }
+  ],
+  "bankRelations": {
+    "customerInfo": {
+      "customerSince": "2024-12-07",
+      "segments": [
+        "retail_banking"
+      ],
+      "products": [
+        "savings_plus_high_yield",
+        "standard_current_account"
+      ],
+      "notes": null
+    }
+  },
+  "consents": [
+    {
+      "consentType": "DATA_SHARING",
+      "granted": true,
+      "grantedAt": "2024-12-07T15:15:06Z",
+      "expiresAt": null,
+      "channel": "WEB"
+    }
+  ],
+  "createdAt": "2024-12-07T15:15:06Z",
+  "updatedAt": "2026-05-07T00:00:00Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "version": 2,
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "671ff2451ec726b417352703"
+  },
+  "customerId": "CUST-17352703",
+  "status": "ACTIVE",
+  "type": "INDIVIDUAL",
+  "segment": "RETAIL",
+  "since": "2024-12-07",
+  "rmId": null,
+  "identification": {
+    "userName": "claumon",
+    "legalName": "Claude Monet",
+    "firstName": "Claude",
+    "lastName": "Monet",
+    "namePrefix": "Mr",
+    "tradingName": null,
+    "dateOfBirth": "1840-11-14",
+    "countryOfBirth": "FR",
+    "nationality": "FR",
+    "nationalId": "vault:enc:IDPERSONA04",
+    "nationalIdType": "NATIONAL_ID",
+    "taxId": "vault:enc:TAX-claumon-001",
+    "civilStatus": "Married",
+    "jobTitle": "Painter"
+  },
+  "employment": {
+    "employer": {
+      "name": "École des Beaux-Arts",
+      "payrollId": "EMP-2024-00401",
+      "startDate": "2018-03-01"
+    },
+    "jobTitle": "Professor of Fine Arts",
+    "employmentType": "fullTime",
+    "income": {
+      "amount": 7200,
+      "currency": "USD",
+      "frequency": "Monthly"
+    }
+  },
+  "contact": {
+    "email": "claumon@example.com",
+    "phone": "+335512345678",
+    "preferredLanguage": "fr",
+    "preferredChannel": "MOBILE",
+    "addresses": [
+      {
+        "type": "HOME",
+        "isPrimary": true,
+        "residentialStatus": "Resident",
+        "line1": "45 Rue Laffitte",
+        "line2": null,
+        "city": "Paris",
+        "state": "Île-de-France",
+        "postcode": "75009",
+        "country": "FR",
+        "validFrom": "2024-12-07",
+        "validTo": null
+      }
+    ]
+  },
+  "kyc": {
+    "status": "VERIFIED",
+    "level": "STANDARD",
+    "riskRating": "LOW",
+    "verifiedAt": "2024-12-07",
+    "nextReviewAt": "2026-12-07",
+    "documents": [
+      {
+        "docType": "PASSPORT",
+        "docRef": "vault:doc:CLAUMON-PASS-SYNTH-001",
+        "issuedBy": "Préfecture de Police",
+        "issuedAt": "2020-06-10",
+        "expiresAt": "2030-06-10",
+        "verifiedAt": "2024-12-07",
+        "verifiedBy": "SYSTEM-MIGRATION-2026-04"
+      }
+    ]
+  },
+  "gender": "male",
+  "residency": "FR",
+  "identifiers": [
+    {
+      "passportNumber": null,
+      "lei": null,
+      "incorporationNumber": null,
+      "incorporationDate": null,
+      "incorporationCountry": null,
+      "type": "nationalId",
+      "value": "vault:enc:IDPERSONA04",
+      "country": "FR",
+      "issueDate": {
+        "$date": "2020-06-10T00:00:00.000Z"
+      },
+      "expiryDate": null,
+      "verified": true,
+      "verificationMethod": "document_scan",
+      "verificationDate": {
+        "$date": "2024-12-07T15:15:06.000Z"
+      }
+    }
+  ],
+  "bankRelations": {
+    "customerInfo": {
+      "customerSince": "2024-12-07",
+      "segments": [
+        "retail_banking"
+      ],
+      "products": [
+        "standard_current_account",
+        "savings_plus_high_yield"
+      ],
+      "notes": null
+    }
+  },
+  "consents": [
+    {
+      "consentType": "DATA_SHARING",
+      "granted": true,
+      "grantedAt": "2024-12-07T15:15:06Z",
+      "expiresAt": null,
+      "channel": "WEB"
+    }
+  ],
+  "createdAt": "2024-12-07T15:15:06Z",
+  "updatedAt": "2026-05-07T00:00:00Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "version": 2,
+  "sourceSystem": "leafy-bank-legacy-migration"
+}]

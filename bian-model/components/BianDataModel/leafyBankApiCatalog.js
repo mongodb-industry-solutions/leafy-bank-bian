@@ -692,13 +692,13 @@ export const LEAFY_BANK_API_CATALOG = {
       "name": "Payment Order",
       "serviceDomains": [
         {
-          "key": "PaymentOrderProcedure",
-          "name": "PaymentOrderProcedure — Payment Initiation & Settlement",
+          "key": "PaymentOrderInitiation",
+          "name": "PaymentOrderInitiation — Payment Initiation & Settlement",
           "operations": [
             {
               "id": "payment_initiate",
               "method": "POST",
-              "path": "/PaymentOrderProcedure/Initiate",
+              "path": "/PaymentOrderInitiation/Initiate",
               "summary": "Initiate a payment order. Routed to the relevant rail (SWIFT, RTGS, RTP, ACH, CARD). Idempotent.",
               "bianAction": "initiate",
               "bianBehaviorQualifier": "PaymentOrderInitiation",
@@ -815,8 +815,8 @@ export const LEAFY_BANK_API_CATALOG = {
             },
             {
               "id": "payment_retrieve",
-              "method": "POST",
-              "path": "/PaymentOrderProcedure/Retrieve",
+              "method": "GET",
+              "path": "/PaymentOrderInitiation/{paymentorderinitiationid}/Retrieve",
               "summary": "Retrieve a payment order by PaymentOrderReference — full ISO 20022 envelope, clearing/settlement timeline, and fraud evaluation.",
               "bianAction": "retrieve",
               "bianBehaviorQualifier": "PaymentOrderInitiation",
@@ -825,18 +825,14 @@ export const LEAFY_BANK_API_CATALOG = {
                   "name": "Authorization",
                   "required": true,
                   "notes": "Bearer token with Payment-Read scope."
-                },
-                {
-                  "name": "Content-Type",
-                  "required": true,
-                  "notes": "application/json"
                 }
               ],
               "request": {
+                "notes": "paymentorderinitiationid is the PaymentOrderReference (e.g. PAY-20260507-0042) passed as a URL path parameter. No request body.",
                 "examples": [
                   {
                     "value": {
-                      "paymentId": "PAY-20260507-0042"
+                      "paymentorderinitiationid": "PAY-20260507-0042"
                     }
                   }
                 ]

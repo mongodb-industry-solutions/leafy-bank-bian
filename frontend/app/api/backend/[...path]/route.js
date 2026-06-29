@@ -9,7 +9,7 @@
  * segment (the BIAN service-domain name):
  *   - CurrentAccountFulfillmentArrangement/*, PartyReferenceDataDirectoryEntry/*
  *       → ACCOUNTS_BACKEND_URL     (accounts service)
- *   - PaymentOrderProcedure/*       → TRANSACTIONS_BACKEND_URL (transactions service)
+ *   - PaymentOrderInitiation/*       → TRANSACTIONS_BACKEND_URL (transactions service)
  *   - everything else (openfinance/*, encryption-demo/*, …)
  *       → CORE_BACKEND_URL          (open-finance monolith — fallback)
  */
@@ -20,13 +20,17 @@ const ACCOUNTS_BACKEND =
   process.env.ACCOUNTS_BACKEND_URL || "http://localhost:8001";
 const TRANSACTIONS_BACKEND =
   process.env.TRANSACTIONS_BACKEND_URL || "http://localhost:8002";
+const LEDGER_BACKEND =
+  process.env.LEDGER_BACKEND_URL || "http://localhost:8080";
 
 // First path segment (BIAN service domain) → backend base URL.
 // Unmapped prefixes fall through to CORE_BACKEND.
 const BACKEND_BY_PREFIX = {
   PartyReferenceDataDirectoryEntry: ACCOUNTS_BACKEND,
   CurrentAccountFulfillmentArrangement: ACCOUNTS_BACKEND,
-  PaymentOrderProcedure: TRANSACTIONS_BACKEND,
+  PaymentOrderInitiation: TRANSACTIONS_BACKEND,
+  // GL pipeline monitor routes (read-only) live on the ledger service.
+  pipeline: LEDGER_BACKEND,
 };
 
 async function proxy(request, { params }) {

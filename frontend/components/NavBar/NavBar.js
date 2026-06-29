@@ -10,7 +10,7 @@ import { useUser } from "@/lib/context/UserContext";
 import Modal from "@leafygreen-ui/modal";
 import Icon from "@leafygreen-ui/icon";
 
-const NavBar = () => {
+const NavBar = ({ bianModelUrl }) => {
     const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
@@ -43,10 +43,10 @@ const NavBar = () => {
         );
     }
 
-    return <NavBarContent />;
+    return <NavBarContent bianModelUrl={bianModelUrl} />;
 };
 
-const NavBarContent = () => {
+const NavBarContent = ({ bianModelUrl }) => {
     const { selectedUser, profile, setProfile, authorizedConsents, clearUser } = useUser();
     const pathname = usePathname();
     const router = useRouter();
@@ -125,6 +125,19 @@ const NavBarContent = () => {
                             <option value="saver">Saver</option>
                         </select>
                     </div>*/}
+
+                    {bianModelUrl && (
+                        <a
+                            href={`${bianModelUrl}/bian-data-model?demo=leafy-bank`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={styles.bianModelLink}
+                            title="Explore the BIAN-aligned data model"
+                        >
+                            <Icon glyph="Diagram3" size="small" />
+                            <Body weight="medium">Data Model</Body>
+                        </a>
+                    )}
 
                     <div className={styles.userInfoContainer} onClick={() => setShowUserModal(true)}>
                         {selectedUser?.id && (

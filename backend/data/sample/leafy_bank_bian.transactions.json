@@ -1,0 +1,1042 @@
+[{
+  "_id": {
+    "$oid": "67546836ff9fa006e33f6001"
+  },
+  "txnId": "TXN-e33f602d-DEBIT",
+  "accountId": "ACC-e0583b3a",
+  "paymentId": "PAY-e33f602d",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-e33f602d",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 250,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 250,
+  "valueDate": "2024-12-07",
+  "bookingDate": "2024-12-07",
+  "description": "Transfer to 111199300",
+  "narrative": null,
+  "balanceAfter": 2975,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "AccountTransfer",
+  "paymentMethod": null,
+  "isInternal": true,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "accountNo": "111199300",
+    "bic": "LEAFUS33",
+    "country": "MX",
+    "userName": "fridaklo",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-07T15:22:29.759Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-07T15:22:30.224Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-07T15:22:30.708Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-07T15:22:30.224Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "67546836ff9fa006e33f6002"
+  },
+  "txnId": "TXN-e33f602d-CREDIT",
+  "accountId": "ACC-e0583b39",
+  "paymentId": "PAY-e33f602d",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-e33f602d",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 250,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 250,
+  "valueDate": "2024-12-07",
+  "bookingDate": "2024-12-07",
+  "description": "Transfer from 828299311",
+  "narrative": null,
+  "balanceAfter": 1100,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "AccountTransfer",
+  "paymentMethod": null,
+  "isInternal": true,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "accountNo": "828299311",
+    "bic": "LEAFUS33",
+    "country": "MX",
+    "userName": "fridaklo",
+    "accountType": "Checking"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-07T15:22:29.759Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-07T15:22:30.224Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-07T15:22:30.708Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-07T15:22:30.224Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "6754694fff9fa006e33f6001"
+  },
+  "txnId": "TXN-e33f602f-DEBIT",
+  "accountId": "ACC-e0583b39",
+  "paymentId": "PAY-e33f602f",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-e33f602f",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-ESCT",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-07",
+  "bookingDate": "2024-12-07",
+  "description": "Transfer to 323211966",
+  "narrative": null,
+  "balanceAfter": 1100,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "DigitalPayment",
+  "paymentMethod": "Paypal",
+  "isInternal": false,
+  "counterparty": {
+    "name": "Claude Monet",
+    "accountNo": "323211966",
+    "bic": "LEAFUS33",
+    "country": "FR",
+    "userName": "claumon",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-07T15:27:11.089Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-07T15:27:11.595Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-07T15:27:12.303Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-07T15:27:11.595Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "6754694fff9fa006e33f6002"
+  },
+  "txnId": "TXN-e33f602f-CREDIT",
+  "accountId": "ACC-e0583b3d",
+  "paymentId": "PAY-e33f602f",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-e33f602f",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-ESCT",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-07",
+  "bookingDate": "2024-12-07",
+  "description": "Transfer from 111199300",
+  "narrative": null,
+  "balanceAfter": 800,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "DigitalPayment",
+  "paymentMethod": "Paypal",
+  "isInternal": false,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "accountNo": "111199300",
+    "bic": "LEAFUS33",
+    "country": "MX",
+    "userName": "fridaklo",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-07T15:27:11.089Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-07T15:27:11.595Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-07T15:27:12.303Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-07T15:27:11.595Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "67546a32ff9fa006e33f6001"
+  },
+  "txnId": "TXN-e33f6032-DEBIT",
+  "accountId": "ACC-e0583b3a",
+  "paymentId": "PAY-e33f6032",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-e33f6032",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-07",
+  "bookingDate": "2024-12-07",
+  "description": "Transfer to 323211966",
+  "narrative": null,
+  "balanceAfter": 2975,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "AccountTransfer",
+  "paymentMethod": null,
+  "isInternal": false,
+  "counterparty": {
+    "name": "Claude Monet",
+    "accountNo": "323211966",
+    "bic": "LEAFUS33",
+    "country": "FR",
+    "userName": "claumon",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-07T15:30:57.519Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-07T15:30:58.338Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-07T15:30:59.162Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-07T15:30:58.338Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "67546a32ff9fa006e33f6002"
+  },
+  "txnId": "TXN-e33f6032-CREDIT",
+  "accountId": "ACC-e0583b3d",
+  "paymentId": "PAY-e33f6032",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-e33f6032",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-07",
+  "bookingDate": "2024-12-07",
+  "description": "Transfer from 828299311",
+  "narrative": null,
+  "balanceAfter": 800,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "AccountTransfer",
+  "paymentMethod": null,
+  "isInternal": false,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "accountNo": "828299311",
+    "bic": "LEAFUS33",
+    "country": "MX",
+    "userName": "fridaklo",
+    "accountType": "Checking"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-07T15:30:57.519Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-07T15:30:58.338Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-07T15:30:59.162Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-07T15:30:58.338Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "67617cccba043be02652e901"
+  },
+  "txnId": "TXN-2652e936-DEBIT",
+  "accountId": "ACC-e0583b39",
+  "paymentId": "PAY-2652e936",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-2652e936",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-ESCT",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-17",
+  "bookingDate": "2024-12-17",
+  "description": "Transfer to 212100310",
+  "narrative": null,
+  "balanceAfter": 1100,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "DigitalPayment",
+  "paymentMethod": "Zelle",
+  "isInternal": false,
+  "counterparty": {
+    "name": "Grace Hopper",
+    "accountNo": "212100310",
+    "bic": "LEAFUS33",
+    "country": "US",
+    "userName": "gracehop",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-17T13:29:48.009Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-17T13:29:48.610Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-17T13:29:49.924Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-17T13:29:48.610Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "67617cccba043be02652e902"
+  },
+  "txnId": "TXN-2652e936-CREDIT",
+  "accountId": "ACC-e0583b3b",
+  "paymentId": "PAY-2652e936",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-2652e936",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-ESCT",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-17",
+  "bookingDate": "2024-12-17",
+  "description": "Transfer from 111199300",
+  "narrative": null,
+  "balanceAfter": 2050,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "DigitalPayment",
+  "paymentMethod": "Zelle",
+  "isInternal": false,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "accountNo": "111199300",
+    "bic": "LEAFUS33",
+    "country": "MX",
+    "userName": "fridaklo",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-17T13:29:48.009Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-17T13:29:48.610Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-17T13:29:49.924Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-17T13:29:48.610Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "67617d46ba043be02652e901"
+  },
+  "txnId": "TXN-2652e939-DEBIT",
+  "accountId": "ACC-e0583b39",
+  "paymentId": "PAY-2652e939",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-2652e939",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-17",
+  "bookingDate": "2024-12-17",
+  "description": "Transfer to 212100310",
+  "narrative": null,
+  "balanceAfter": 1100,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "AccountTransfer",
+  "paymentMethod": null,
+  "isInternal": false,
+  "counterparty": {
+    "name": "Grace Hopper",
+    "accountNo": "212100310",
+    "bic": "LEAFUS33",
+    "country": "US",
+    "userName": "gracehop",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-17T13:31:50.357Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-17T13:31:50.715Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-17T13:31:51.324Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-17T13:31:50.715Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "67617d46ba043be02652e902"
+  },
+  "txnId": "TXN-2652e939-CREDIT",
+  "accountId": "ACC-e0583b3b",
+  "paymentId": "PAY-2652e939",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-2652e939",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-17",
+  "bookingDate": "2024-12-17",
+  "description": "Transfer from 111199300",
+  "narrative": null,
+  "balanceAfter": 2050,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "AccountTransfer",
+  "paymentMethod": null,
+  "isInternal": false,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "accountNo": "111199300",
+    "bic": "LEAFUS33",
+    "country": "MX",
+    "userName": "fridaklo",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-17T13:31:50.357Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-17T13:31:50.715Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-17T13:31:51.324Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-17T13:31:50.715Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "676180ecba043be02652e901"
+  },
+  "txnId": "TXN-2652e93c-DEBIT",
+  "accountId": "ACC-e0583b3b",
+  "paymentId": "PAY-2652e93c",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-2652e93c",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-ESCT",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-17",
+  "bookingDate": "2024-12-17",
+  "description": "Transfer to 514624177",
+  "narrative": null,
+  "balanceAfter": 2050,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "DigitalPayment",
+  "paymentMethod": "Venmo",
+  "isInternal": false,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "accountNo": "514624177",
+    "bic": "LEAFUS33",
+    "country": "MX",
+    "userName": "fridaklo",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-17T13:47:24.355Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-17T13:47:24.748Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-17T13:47:25.361Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-17T13:47:24.748Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "676180ecba043be02652e902"
+  },
+  "txnId": "TXN-2652e93c-CREDIT",
+  "accountId": "ACC-e0583b3e",
+  "paymentId": "PAY-2652e93c",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-2652e93c",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-ESCT",
+  "amount": 50,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 50,
+  "valueDate": "2024-12-17",
+  "bookingDate": "2024-12-17",
+  "description": "Transfer from 212100310",
+  "narrative": null,
+  "balanceAfter": 550,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "DigitalPayment",
+  "paymentMethod": "Venmo",
+  "isInternal": false,
+  "counterparty": {
+    "name": "Grace Hopper",
+    "accountNo": "212100310",
+    "bic": "LEAFUS33",
+    "country": "US",
+    "userName": "gracehop",
+    "accountType": "Savings"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-17T13:47:24.355Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-17T13:47:24.748Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-17T13:47:25.361Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-17T13:47:24.748Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "676194b9ba043be02652e901"
+  },
+  "txnId": "TXN-2652e93f-DEBIT",
+  "accountId": "ACC-e0583b3a",
+  "paymentId": "PAY-2652e93f",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-2652e93f",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-ESCT",
+  "amount": 25,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 25,
+  "valueDate": "2024-12-17",
+  "bookingDate": "2024-12-17",
+  "description": "Transfer to 989800989",
+  "narrative": null,
+  "balanceAfter": 2975,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "DigitalPayment",
+  "paymentMethod": "Paypal",
+  "isInternal": false,
+  "counterparty": {
+    "name": "Claude Monet",
+    "accountNo": "989800989",
+    "bic": "LEAFUS33",
+    "country": "FR",
+    "userName": "claumon",
+    "accountType": "Checking"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-17T15:11:53.305Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-17T15:11:53.664Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-17T15:11:54.152Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-17T15:11:53.664Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "676194b9ba043be02652e902"
+  },
+  "txnId": "TXN-2652e93f-CREDIT",
+  "accountId": "ACC-e0583b3c",
+  "paymentId": "PAY-2652e93f",
+  "externalRef": null,
+  "bankRef": "LEAFY-BOOK-2652e93f",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-ESCT",
+  "amount": 25,
+  "currency": "USD",
+  "fxRate": null,
+  "baseAmount": 25,
+  "valueDate": "2024-12-17",
+  "bookingDate": "2024-12-17",
+  "description": "Transfer from 828299311",
+  "narrative": null,
+  "balanceAfter": 4825,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "transactionCategory": "DigitalPayment",
+  "paymentMethod": "Paypal",
+  "isInternal": false,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "accountNo": "828299311",
+    "bic": "LEAFUS33",
+    "country": "MX",
+    "userName": "fridaklo",
+    "accountType": "Checking"
+  },
+  "transactionDates": [
+    {
+      "date": "2024-12-17T15:11:53.305Z",
+      "type": "TransactionInitiatedDate"
+    },
+    {
+      "date": "2024-12-17T15:11:53.664Z",
+      "type": "TransactionCompletedDate"
+    },
+    {
+      "date": "2024-12-17T15:11:54.152Z",
+      "type": "TransactionNotifiedDate"
+    }
+  ],
+  "transactionStatus": "Notified",
+  "isCompleted": true,
+  "isNotified": true,
+  "createdAt": "2024-12-17T15:11:53.664Z",
+  "createdBy": "SYSTEM-MIGRATION-2026-04",
+  "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "69fc03c7ec166bcc0aa1f4ed"
+  },
+  "txnId": "TXN-0aa1f4ec-DEBIT",
+  "accountId": "ACC-e0583b3a",
+  "paymentId": "PAY-0aa1f4ec",
+  "bankRef": "LEAFY-BOOK-0aa1f4ec",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 45,
+  "currency": "USD",
+  "baseAmount": 45,
+  "valueDate": "2026-05-07",
+  "bookingDate": "2026-05-07",
+  "description": "Transfer to 111199300",
+  "balanceAfter": 2930,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "userName": "fridaklo",
+    "accountNo": "111199300",
+    "accountType": "Savings",
+    "bic": "LEAFUS33",
+    "country": "US"
+  },
+  "createdAt": {
+    "$date": "2026-05-07T03:15:19.392Z"
+  },
+  "createdBy": "SERVICE-PAYMENTS",
+  "sourceSystem": "leafy-bank-payments-service"
+},
+{
+  "_id": {
+    "$oid": "69fc03c7ec166bcc0aa1f4ee"
+  },
+  "txnId": "TXN-0aa1f4ec-CREDIT",
+  "accountId": "ACC-e0583b39",
+  "paymentId": "PAY-0aa1f4ec",
+  "bankRef": "LEAFY-BOOK-0aa1f4ec",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 45,
+  "currency": "USD",
+  "baseAmount": 45,
+  "valueDate": "2026-05-07",
+  "bookingDate": "2026-05-07",
+  "description": "Transfer from 828299311",
+  "balanceAfter": 1145,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "userName": "fridaklo",
+    "accountNo": "828299311",
+    "accountType": "Current",
+    "bic": "LEAFUS33",
+    "country": "US"
+  },
+  "createdAt": {
+    "$date": "2026-05-07T03:15:19.392Z"
+  },
+  "createdBy": "SERVICE-PAYMENTS",
+  "sourceSystem": "leafy-bank-payments-service"
+},
+{
+  "_id": {
+    "$oid": "69fd8c8ad89b245fe424297f"
+  },
+  "txnId": "TXN-e424297e-DEBIT",
+  "accountId": "ACC-205afd64",
+  "paymentId": "PAY-e424297e",
+  "bankRef": "LEAFY-BOOK-e424297e",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 450,
+  "currency": "USD",
+  "baseAmount": 450,
+  "valueDate": "2026-05-08",
+  "bookingDate": "2026-05-08",
+  "description": "Transfer to 828299311",
+  "balanceAfter": 9550,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "userName": "fridaklo",
+    "accountNo": "828299311",
+    "accountType": "Current",
+    "bic": "LEAFUS33",
+    "country": "US"
+  },
+  "createdAt": {
+    "$date": "2026-05-08T07:11:06.450Z"
+  },
+  "createdBy": "SERVICE-PAYMENTS",
+  "sourceSystem": "leafy-bank-payments-service"
+},
+{
+  "_id": {
+    "$oid": "69fd8c8ad89b245fe4242980"
+  },
+  "txnId": "TXN-e424297e-CREDIT",
+  "accountId": "ACC-e0583b3a",
+  "paymentId": "PAY-e424297e",
+  "bankRef": "LEAFY-BOOK-e424297e",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 450,
+  "currency": "USD",
+  "baseAmount": 450,
+  "valueDate": "2026-05-08",
+  "bookingDate": "2026-05-08",
+  "description": "Transfer from 858117929",
+  "balanceAfter": 3425,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "userName": "fridaklo",
+    "accountNo": "858117929",
+    "accountType": "Savings",
+    "bic": "LEAFUS33",
+    "country": "US"
+  },
+  "createdAt": {
+    "$date": "2026-05-08T07:11:06.450Z"
+  },
+  "createdBy": "SERVICE-PAYMENTS",
+  "sourceSystem": "leafy-bank-payments-service"
+},
+{
+  "_id": {
+    "$oid": "69fddbf3d89b245fe4242983"
+  },
+  "txnId": "TXN-e4242982-DEBIT",
+  "accountId": "ACC-e0583b3a",
+  "paymentId": "PAY-e4242982",
+  "bankRef": "LEAFY-BOOK-e4242982",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 100,
+  "currency": "USD",
+  "baseAmount": 100,
+  "valueDate": "2026-05-08",
+  "bookingDate": "2026-05-08",
+  "description": "Transfer to 989800989",
+  "balanceAfter": 3325,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "counterparty": {
+    "name": "Claude Monet",
+    "userName": "claumon",
+    "accountNo": "989800989",
+    "accountType": "Current",
+    "bic": "LEAFUS33",
+    "country": "US"
+  },
+  "createdAt": {
+    "$date": "2026-05-08T12:49:55.694Z"
+  },
+  "createdBy": "SERVICE-PAYMENTS",
+  "sourceSystem": "leafy-bank-payments-service"
+},
+{
+  "_id": {
+    "$oid": "69fddbf3d89b245fe4242984"
+  },
+  "txnId": "TXN-e4242982-CREDIT",
+  "accountId": "ACC-e0583b3c",
+  "paymentId": "PAY-e4242982",
+  "bankRef": "LEAFY-BOOK-e4242982",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 100,
+  "currency": "USD",
+  "baseAmount": 100,
+  "valueDate": "2026-05-08",
+  "bookingDate": "2026-05-08",
+  "description": "Transfer from 828299311",
+  "balanceAfter": 4925,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "userName": "fridaklo",
+    "accountNo": "828299311",
+    "accountType": "Current",
+    "bic": "LEAFUS33",
+    "country": "US"
+  },
+  "createdAt": {
+    "$date": "2026-05-08T12:49:55.694Z"
+  },
+  "createdBy": "SERVICE-PAYMENTS",
+  "sourceSystem": "leafy-bank-payments-service"
+},
+{
+  "_id": {
+    "$oid": "6a2f8a77acf328b53502ffb9"
+  },
+  "txnId": "TXN-3502ffb8-DEBIT",
+  "accountId": "ACC-e0583b39",
+  "paymentId": "PAY-3502ffb8",
+  "bankRef": "LEAFY-BOOK-3502ffb8",
+  "type": "DEBIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 25,
+  "currency": "USD",
+  "baseAmount": 25,
+  "valueDate": "2026-06-15",
+  "bookingDate": "2026-06-15",
+  "description": "Transfer to 828299311",
+  "balanceAfter": 1075,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "userName": "fridaklo",
+    "accountNo": "828299311",
+    "accountType": "Current",
+    "bic": "LEAFUS33",
+    "country": "US"
+  },
+  "createdAt": {
+    "$date": "2026-06-15T05:15:35.386Z"
+  },
+  "createdBy": "SERVICE-PAYMENTS",
+  "sourceSystem": "leafy-bank-payments-service"
+},
+{
+  "_id": {
+    "$oid": "6a2f8a77acf328b53502ffba"
+  },
+  "txnId": "TXN-3502ffb8-CREDIT",
+  "accountId": "ACC-e0583b3a",
+  "paymentId": "PAY-3502ffb8",
+  "bankRef": "LEAFY-BOOK-3502ffb8",
+  "type": "CREDIT",
+  "txnCode": "PMNT-ICDT-BOOK",
+  "amount": 25,
+  "currency": "USD",
+  "baseAmount": 25,
+  "valueDate": "2026-06-15",
+  "bookingDate": "2026-06-15",
+  "description": "Transfer from 111199300",
+  "balanceAfter": 3350,
+  "channel": "API",
+  "isReversed": false,
+  "reversalTxnId": null,
+  "counterparty": {
+    "name": "Frida Kahlo",
+    "userName": "fridaklo",
+    "accountNo": "111199300",
+    "accountType": "Savings",
+    "bic": "LEAFUS33",
+    "country": "US"
+  },
+  "createdAt": {
+    "$date": "2026-06-15T05:15:35.386Z"
+  },
+  "createdBy": "SERVICE-PAYMENTS",
+  "sourceSystem": "leafy-bank-payments-service"
+}]

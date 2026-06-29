@@ -59,7 +59,6 @@ export default function FloatingAssistant() {
       <LeafyBankAssistant
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        initialPrompt="What can you tell me about my Leafy Bank data?"
       />
     </>
   );

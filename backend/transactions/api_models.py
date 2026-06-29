@@ -1,4 +1,4 @@
-"""Pydantic request models for the BIAN PaymentOrderProcedure service domain.
+"""Pydantic request models for the BIAN PaymentOrderInitiation service domain.
 
 Field names use camelCase alias names (matching Mongo storage). The registry
 handles BIAN documentation mapping; no wire translation is done at request time.
@@ -41,6 +41,3 @@ class PaymentOrderInitiateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class PaymentOrderRetrieveRequest(BaseModel):
-    paymentId: str = Field(min_length=1)
-    model_config = ConfigDict(extra="forbid")

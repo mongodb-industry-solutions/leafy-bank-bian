@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
+from pymongo.errors import OperationFailure
 
 from database.connection import MongoDBConnection
 from services.subledger_service import build_subledger_entries, write_subledger_entries
@@ -40,6 +41,10 @@ def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict)
         {"$set": {"resumeToken": token, "updatedAt": _now_utc()}},
         upsert=True,
     )
+
+
+def _clear_resume_token(connection: MongoDBConnection, db_name: str) -> None:
+    connection.get_collection(db_name, "ledgerStreamTokens").delete_one({"workerId": WORKER_ID})
 
 
 def _mark_failed(event_id: str, reason: str, connection: MongoDBConnection, db_name: str) -> None:
@@ -100,7 +105,20 @@ def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> No
     pipeline = [{"$match": {"operationType": "insert"}}]
     kwargs: dict = {"resume_after": resume_token} if resume_token else {}
 
-    with ledger_events.watch(pipeline, **kwargs) as stream:
+    try:
+        stream_cm = ledger_events.watch(pipeline, **kwargs)
+    except OperationFailure as exc:
+        if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
+            logger.warning(
+                "resume token no longer in oplog (%s); clearing and starting a fresh stream",
+                exc.details.get("codeName") if exc.details else exc,
+            )
+            _clear_resume_token(connection, db_name)
+            stream_cm = ledger_events.watch(pipeline)
+        else:
+            raise
+
+    with stream_cm as stream:
         for change in stream:
             event = change.get("fullDocument", {})
             try:

@@ -1,5 +1,6 @@
 # Secrets — never commit
 .vscode/
+.docs/
 **/.env
 **/.env.*
 !**/.env.example

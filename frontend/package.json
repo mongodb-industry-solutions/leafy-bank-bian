@@ -21,6 +21,7 @@
     "@leafygreen-ui/modal": "^17.1.7",
     "@leafygreen-ui/palette": "^5.0.1",
     "@leafygreen-ui/segmented-control": "^11.1.0",
+    "@leafygreen-ui/stepper": "^5.0.13",
     "@leafygreen-ui/tabs": "^14.2.5",
     "@leafygreen-ui/typography": "^20.1.9",
     "bootstrap": "^5.3.8",

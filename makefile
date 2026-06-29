@@ -39,8 +39,13 @@ dev-ledger:
 dev-frontend:
 	cd frontend && npm run dev
 
+# Standalone BIAN Data Model Explorer (separate Next.js app). Port 8004 matches
+# docker-compose and the frontend NavBar "Data Model" link default.
+dev-bian-model:
+	cd bian-model && npm run dev -- -p 8004
+
 kill-ports:
-	@for port in 3000 8001 8002 8003; do \
+	@for port in 3000 8001 8002 8003 8004; do \
 		pids=$$(lsof -ti :$$port 2>/dev/null); \
 		if [ -n "$$pids" ]; then \
 			echo "Killing process on port $$port (PID $$pids)"; \
@@ -54,6 +59,7 @@ dev: kill-ports
 	(cd backend/transactions && poetry run uvicorn main:app --reload --host 0.0.0.0 --port 8002) & \
 	(cd backend/ledger && poetry run uvicorn main:app --reload --host 0.0.0.0 --port 8003) & \
 	(cd frontend && npm run dev) & \
+	(cd bian-model && npm run dev -- -p 8004) & \
 	wait
 
 # ---------- Per-service poetry setup ----------
@@ -69,7 +75,10 @@ install-ledger:
 install-frontend:
 	cd frontend && npm install --no-audit
 
-setup: install-accounts install-transactions install-ledger install-frontend
+install-bian-model:
+	cd bian-model && npm install --no-audit --legacy-peer-deps
+
+setup: install-accounts install-transactions install-ledger install-frontend install-bian-model
 
 # ---------- Sanity: do the backend apps import? ----------
 check:
@@ -78,5 +87,5 @@ check:
 	cd backend/ledger && poetry run python -c "from main import app; print('OK ledger')"
 
 .PHONY: build up start stop down logs clean \
-	kill-ports dev dev-accounts dev-transactions dev-ledger dev-frontend \
-	install-accounts install-transactions install-ledger install-frontend setup check
+	kill-ports dev dev-accounts dev-transactions dev-ledger dev-frontend dev-bian-model \
+	install-accounts install-transactions install-ledger install-frontend install-bian-model setup check

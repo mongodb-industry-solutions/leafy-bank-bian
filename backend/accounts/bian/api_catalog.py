@@ -7,10 +7,10 @@ explorer modal. The catalog spans two backend services:
       * PartyReferenceDataDirectoryEntry
       * CurrentAccountFulfillmentArrangement
   - leafy-bank-backend-transactions (:8001)
-      * PaymentOrderProcedure
+      * PaymentOrderInitiation
 
 Conventions captured at the top level apply to every operation:
-  - HTTP method is always POST (the verb lives in the URL).
+  - Initiate uses POST; Retrieve uses GET with the resource ID in the path.
   - Request bodies use BIAN PascalCase field names; unknown fields are
     rejected (extra="forbid" -> 422).
   - Money values are JSON numbers; currency is ISO-4217 (3 chars).
@@ -534,8 +534,8 @@ API_CATALOG = {
             "port": 8001,
             "serviceDomains": [
                 {
-                    "key": "PaymentOrderProcedure",
-                    "label": "Payment Order Procedure",
+                    "key": "PaymentOrderInitiation",
+                    "label": "Payment Order Initiation",
                     "description": "Submit and retrieve payment orders. Multi-document ACID transactions.",
                     "operations": [
                         {
@@ -543,7 +543,7 @@ API_CATALOG = {
                             "bianBehaviorQualifier": None,
                             "bianAction": "Initiate",
                             "method": "POST",
-                            "path": "/PaymentOrderProcedure/Initiate",
+                            "path": "/PaymentOrderInitiation/Initiate",
                             "summary": (
                                 "Submit a new payment order. Multi-document ACID: atomically writes "
                                 "the payment, two ledger legs, balance updates, and one notification."
@@ -650,18 +650,18 @@ API_CATALOG = {
                             "id": "retrievePaymentOrder",
                             "bianBehaviorQualifier": None,
                             "bianAction": "Retrieve",
-                            "method": "POST",
-                            "path": "/PaymentOrderProcedure/Retrieve",
+                            "method": "GET",
+                            "path": "/PaymentOrderInitiation/{paymentorderinitiationid}/Retrieve",
                             "summary": "Look up a single payment order plus its ledger legs.",
                             "headers": [],
                             "enums": {},
                             "request": {
-                                "required": ["PaymentOrderReference"],
-                                "notes": None,
+                                "required": ["paymentorderinitiationid"],
+                                "notes": "paymentorderinitiationid is the PaymentOrderReference (e.g. PAY-abc) passed as a URL path parameter.",
                                 "examples": [
                                     {
                                         "label": "by payment reference",
-                                        "value": {"PaymentOrderReference": "PAY-abc"},
+                                        "value": {"paymentorderinitiationid": "PAY-abc"},
                                     }
                                 ],
                             },

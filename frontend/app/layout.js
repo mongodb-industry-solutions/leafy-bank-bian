@@ -11,11 +11,15 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }) {
+  // Read at runtime (server) — the BIAN explorer is a separate deployment.
+  // Helm injects BIAN_MODEL_URL as container env; default to local docker-compose port.
+  const bianModelUrl = process.env.BIAN_MODEL_URL || "http://localhost:8004";
+
   return (
     <html lang="en">
       <body>
         <Providers>
-          <NavBar />
+          <NavBar bianModelUrl={bianModelUrl} />
           <div className="appContent">{children}</div>
           <FloatingAssistant />
         </Providers>

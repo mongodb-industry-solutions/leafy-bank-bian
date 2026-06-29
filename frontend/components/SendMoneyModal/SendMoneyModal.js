@@ -9,7 +9,7 @@ import { useUser } from "@/lib/context/UserContext";
 import { useAccounts } from "@/lib/api/hooks";
 import { coreApi } from "@/lib/api/client";
 
-// Cosmetic only — the BIAN PaymentOrderProcedure has no payment-method field.
+// Cosmetic only — the BIAN PaymentOrderInitiation has no payment-method field.
 const PAYMENT_METHODS = [
   { id: "cc", label: "Credit Card" },
   { id: "debit", label: "Debit Card" },
@@ -83,7 +83,7 @@ export default function SendMoneyModal({
 
     setSubmitting(true);
     setError(null);
-    const { error: err } = await coreApi("PaymentOrderProcedure/Initiate", {
+    const { error: err } = await coreApi("PaymentOrderInitiation/Initiate", {
       method: "POST",
       body: {
         customerId,
