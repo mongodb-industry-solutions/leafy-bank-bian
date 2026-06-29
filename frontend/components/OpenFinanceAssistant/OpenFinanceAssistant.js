@@ -1,7 +1,7 @@
 "use client";
 
 import { useOpenFinanceChatbot } from "@/lib/api/useOpenFinanceChatbot";
-import { TALK_TRACK } from "@/lib/const/talkTrack";
+import { OPEN_FINANCE_TALK_TRACK } from "@/lib/const/openFinanceTalkTrack";
 import Button from "@leafygreen-ui/button";
 import { Tab, Tabs } from "@leafygreen-ui/tabs";
 import { Body, H2, H3 } from "@leafygreen-ui/typography";
@@ -139,7 +139,7 @@ export default function OpenFinanceAssistant({ isOpen, onClose }) {
                 </div>
               </Tab>
 
-              {TALK_TRACK.map((tab, idx) => (
+              {OPEN_FINANCE_TALK_TRACK.map((tab, idx) => (
                 <Tab key={idx} name={tab.heading}>
                   <div className={styles.scrollableTabContent}>
                     {tab.content.map((item, i) => (
