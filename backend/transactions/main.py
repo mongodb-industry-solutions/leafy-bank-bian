@@ -8,10 +8,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from api_models import (
-    PaymentOrderInitiateRequest,
-    PaymentOrderRetrieveRequest,
-)
+from api_models import PaymentOrderInitiateRequest
 from database.connection import MongoDBConnection
 from encoder.json_encoder import MyJSONEncoder
 from services.payments_service import PaymentsService
@@ -27,7 +24,7 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 DB_NAME = os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")
 PAYMENT_LIMIT_USD = float(os.getenv("PAYMENT_LIMIT_USD", "500"))
 
-app = FastAPI(title="Leafy Bank — Payments (BIAN PaymentOrderProcedure)")
+app = FastAPI(title="Leafy Bank — Payments (BIAN PaymentOrderInitiation)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,7 +55,7 @@ def _strip(doc: dict) -> dict:
 async def read_root():
     return {
         "service": "leafy-bank-payments",
-        "bian": "PaymentOrderProcedure",
+        "bian": "PaymentOrderInitiation",
         "bianVersion": registry.bian_version,
     }
 
@@ -68,7 +65,7 @@ def health_check():
     return {"status": "healthy"}
 
 
-@app.post("/PaymentOrderProcedure/Initiate")
+@app.post("/PaymentOrderInitiation/Initiate")
 async def payment_order_procedure_initiate(
     body: PaymentOrderInitiateRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
@@ -95,14 +92,14 @@ async def payment_order_procedure_initiate(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logging.error("PaymentOrderProcedure/Initiate failed: %s", e)
+        logging.error("PaymentOrderInitiation/Initiate failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal payment processing error.")
 
 
-@app.post("/PaymentOrderProcedure/Retrieve")
-async def payment_order_procedure_retrieve(body: PaymentOrderRetrieveRequest):
+@app.get("/PaymentOrderInitiation/{paymentorderinitiationid}/Retrieve")
+async def payment_order_initiation_retrieve(paymentorderinitiationid: str):
     try:
-        payment = payments_service.retrieve_payment(body.paymentId)
+        payment = payments_service.retrieve_payment(paymentorderinitiationid)
         if not payment:
             raise HTTPException(status_code=404, detail="paymentId not found.")
 
@@ -115,5 +112,5 @@ async def payment_order_procedure_retrieve(body: PaymentOrderRetrieveRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("PaymentOrderProcedure/Retrieve failed: %s", e)
+        logging.error("PaymentOrderInitiation/Retrieve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal retrieve error.")

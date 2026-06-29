@@ -11,7 +11,7 @@ Leafy Bank is a **BIAN v14-aligned** core-banking reference built as three FastA
 | Service                 | BIAN Service Domain                                                        | Responsibility                                               |
 | ----------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | **accounts** (8001)     | `PartyReferenceDataDirectoryEntry`, `CurrentAccountFulfillmentArrangement` | Customers + KYC, account lifecycle, source-of-truth balances |
-| **transactions** (8002) | `PaymentOrderProcedure`                                                    | Payments/transfers as one multi-doc ACID settlement          |
+| **transactions** (8002) | `PaymentOrderInitiation`                                                    | Payments/transfers as one multi-doc ACID settlement          |
 | **ledger** (8003)       | `FinancialAccounting` / `FinancialBookingLog`                              | Async double-entry general-ledger pipeline                   |
 
 ### The two-phase money flow
@@ -25,7 +25,7 @@ Leafy Bank is a **BIAN v14-aligned** core-banking reference built as three FastA
 | ------------------ | ------------------------------------ | ------------------------------------------------------------ |
 | `customers`        | PartyReferenceDataDirectoryEntry     | Customer master + nested KYC                                 |
 | `accounts`         | CurrentAccountFulfillmentArrangement | Source-of-truth balances                                     |
-| `payments`         | PaymentOrderProcedure                | Payment orders, status PENDING → SETTLED                     |
+| `payments`         | PaymentOrderInitiation                | Payment orders, status PENDING → SETTLED                     |
 | `transactions`     | —                                    | Settled payment legs (business fact, no GL legs)             |
 | `notifications`    | —                                    | Sender-side notifications                                    |
 | `ledgerEvents`     | FinancialBookingLog                  | Stage ①: debit + credit legs, postingStatus PENDING → POSTED |
@@ -133,7 +133,7 @@ CORE_BACKEND_URL="http://localhost:8000"
 | Service      | Port | Notes                                                                            |
 | ------------ | ---- | -------------------------------------------------------------------------------- |
 | accounts     | 8001 | BIAN `PartyReferenceDataDirectoryEntry` + `CurrentAccountFulfillmentArrangement` |
-| transactions | 8002 | BIAN `PaymentOrderProcedure` (synchronous ACID settlement)                       |
+| transactions | 8002 | BIAN `PaymentOrderInitiation` (synchronous ACID settlement)                       |
 | ledger       | 8003 | BIAN `FinancialAccounting` + `/pipeline` monitor routes                          |
 | bian-model   | 8004 | BIAN data-model explorer (Next.js), linked from the NavBar                       |
 | frontend     | 3000 | Next.js UI                                                                       |

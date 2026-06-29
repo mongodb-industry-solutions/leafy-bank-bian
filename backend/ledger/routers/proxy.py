@@ -23,10 +23,10 @@ _TRANSACTIONS_BASE = os.getenv(
 )
 
 
-@router.post("/PaymentOrderProcedure/Initiate")
+@router.post("/PaymentOrderInitiation/Initiate")
 async def proxy_initiate_payment(request: Request) -> JSONResponse:
     body = await request.body()
-    url = f"{_TRANSACTIONS_BASE}/PaymentOrderProcedure/Initiate"
+    url = f"{_TRANSACTIONS_BASE}/PaymentOrderInitiation/Initiate"
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )
