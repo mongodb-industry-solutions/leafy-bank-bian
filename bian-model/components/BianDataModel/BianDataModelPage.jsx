@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useMemo, useState } from "react";
 import { Body, H1, H2, H3, Subtitle, Overline } from "@leafygreen-ui/typography";
 import TextInput from "@leafygreen-ui/text-input";
 import Badge from "@leafygreen-ui/badge";
@@ -378,7 +377,6 @@ export default function BianDataModelPage() {
   const [activeKey, setActiveKey] = useState(DOMAIN_MAP[0].key);
   const [filter, setFilter] = useState("");
   const [demo, setDemo] = useState(DEFAULT_DEMO);
-  const router = useRouter();
 
   // Read the demo lens from ?demo=<key> once on mount (client-only; the linking
   // service sets it). Unknown/absent values keep the default.
@@ -392,13 +390,6 @@ export default function BianDataModelPage() {
     () => new Set(DB_MAP[activeDemo.dbKey] || []),
     [activeDemo.dbKey]
   );
-  const handleBack = useCallback(() => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back();
-    } else {
-      router.push("/");
-    }
-  }, [router]);
 
   const filteredDomains = useMemo(() => {
     if (!filter.trim()) return DOMAIN_MAP;
@@ -416,15 +407,6 @@ export default function BianDataModelPage() {
       {/* HERO */}
       <div className={styles.hero}>
         <div className={styles.heroLeft}>
-          <button
-            type="button"
-            className={styles.backButton}
-            onClick={handleBack}
-            aria-label="Go back"
-          >
-            <Icon glyph="ArrowLeft" size="small" />
-            <span>Back</span>
-          </button>
           <Overline className={styles.heroEyebrow}>
             <span className={styles.heroDot} />
             Agentic Payments Platform · MongoDB · BIAN v14

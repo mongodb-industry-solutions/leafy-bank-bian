@@ -11,6 +11,7 @@ import Icon from "@leafygreen-ui/icon";
 import Link from "next/link";
 import ProductCard from "@/components/ProductCard/ProductCard";
 import LeafyBankAssistant from "../components/LeafyBankAssistant/LeafyBankAssistant";
+import OpenFinanceAssistant from "@/components/OpenFinanceAssistant/OpenFinanceAssistant";
 import Login from "@/components/Login/Login";
 import AccountModal from "@/components/AccountModal/AccountModal";
 import SendMoneyModal from "@/components/SendMoneyModal/SendMoneyModal";
@@ -38,6 +39,7 @@ const HomeContent = () => {
   const [accountBalance, setAccountBalance] = useState("");
   const [accountType, setAccountType] = useState("");
   const [sendMoneyOpen, setSendMoneyOpen] = useState(false);
+  const [openFinanceOpen, setOpenFinanceOpen] = useState(false);
 
   return (
     <main className={styles.container}>
@@ -209,10 +211,7 @@ const HomeContent = () => {
           <div className={`${styles.card} ${styles.cardEqual}`}>
             <Card className={styles.leafyCard}>
               <button
-                onClick={() => {
-                  setPendingPrompt("I want financial advice");
-                  setModalOpen(true);
-                }}
+                onClick={() => setOpenFinanceOpen(true)}
                 className={styles.entitiesButton}
                 aria-label="Get a complete view of your finances"
               >
@@ -280,6 +279,11 @@ const HomeContent = () => {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         initialPrompt={pendingPrompt}
+      />
+
+      <OpenFinanceAssistant
+        isOpen={openFinanceOpen}
+        onClose={() => setOpenFinanceOpen(false)}
       />
     </main>
   );

@@ -16,7 +16,8 @@ env:
   ACCOUNTS_BACKEND_URL: http://leafy-bank-bian-accounts-web-app:80
   TRANSACTIONS_BACKEND_URL: http://leafy-bank-bian-transactions-web-app:80
   LEDGER_BACKEND_URL: http://leafy-bank-bian-ledger-web-app:80
-  CHATBOT_BACKEND_URL: http://openfinance-chatbot-web-app:80
+  CHATBOT_BACKEND_URL: http://cross-be-pdf-rag-web-app:80
+  OPENFINANCE_CHATBOT_BACKEND_URL: http://openfinance-chatbot-web-app:80
 
 envSecrets:
   MONGODB_URI: leafy-bank-bian
