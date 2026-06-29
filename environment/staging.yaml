@@ -11,11 +11,11 @@ env:
   ENABLE_CHANGE_STREAMS: "true"
   GL_BATCH_INTERVAL_SECONDS: "600"
   PAYMENT_LIMIT_USD: "500"
-  TRANSACTIONS_BASE_URL: http://leafy-bank-backend-transactions-web-app:80
+  TRANSACTIONS_BASE_URL: http://leafy-bank-bian-transactions-web-app:80
   CORE_BACKEND_URL: http://open-finance-next-gen-web-app:80
-  ACCOUNTS_BACKEND_URL: http://leafy-bank-backend-accounts-web-app:80
-  TRANSACTIONS_BACKEND_URL: http://leafy-bank-backend-transactions-web-app:80
-  LEDGER_BACKEND_URL: http://leafy-bank-backend-ledger-web-app:80
+  ACCOUNTS_BACKEND_URL: http://leafy-bank-bian-accounts-web-app:80
+  TRANSACTIONS_BACKEND_URL: http://leafy-bank-bian-transactions-web-app:80
+  LEDGER_BACKEND_URL: http://leafy-bank-bian-ledger-web-app:80
   CHATBOT_BACKEND_URL: http://openfinance-chatbot-web-app:80
 
 envSecrets:
