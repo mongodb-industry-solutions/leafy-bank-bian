@@ -7,7 +7,6 @@ ownership:
 
 env:
   NODE_ENV: production
-  ENABLE_EMBEDDED_WORKERS: "true"
   ENABLE_CHANGE_STREAMS: "true"
   GL_BATCH_INTERVAL_SECONDS: "600"
   PAYMENT_LIMIT_USD: "500"

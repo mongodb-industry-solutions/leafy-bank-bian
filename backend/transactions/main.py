@@ -4,6 +4,9 @@ import os
 from typing import Optional
 
 from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -14,8 +17,6 @@ from encoder.json_encoder import MyJSONEncoder
 from services.payments_service import PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
-
-load_dotenv()
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")

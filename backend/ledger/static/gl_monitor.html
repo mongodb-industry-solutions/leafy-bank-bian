@@ -83,6 +83,9 @@
   .btn:hover { background: #f8fafc; }
   .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   .btn-primary:hover { background: #1d4ed8; }
+  .btn-batch { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+  .btn-batch:hover { background: #6d28d9; }
+  .btn-batch:disabled { opacity: .6; cursor: not-allowed; }
   .btn-sm { padding: 2px 8px; font-size: 11px; }
 
   /* ── PIPELINE COLUMNS ── */
@@ -231,7 +234,7 @@
   <div class="topbar-title">GL Pipeline Monitor</div>
   <div class="topbar-right">
     <span style="color:#475569;font-size:10px">Ledger</span>
-    <input id="base-url-input" type="text" value="" placeholder="http://localhost:8002" title="Ledger backend URL">
+    <input id="base-url-input" type="text" value="" placeholder="http://localhost:8003" title="Ledger backend URL">
     <div class="db-badge" id="db-name-badge">—</div>
     <div class="live-dot" id="live-dot" title="Live"></div>
   </div>
@@ -281,6 +284,8 @@
   </select>
   <button class="btn" onclick="refreshAll()">↻ Refresh All</button>
   <button class="btn btn-primary btn-sm" onclick="refreshAll()">Load Data</button>
+  <button class="btn btn-batch" id="batch-trigger-btn" onclick="triggerBatch()">⚡ Run Batch Now</button>
+  <span id="batch-trigger-result" style="font-size:11px"></span>
 </div>
 
 <!-- ── INITIATE TRANSACTION ── -->
@@ -1097,7 +1102,7 @@
     try {
       // Calls the ledger's proxy endpoint — the server forwards to the
       // internal transactions service (unreachable from the browser in staging).
-      const resp = await fetch(`${txnBaseUrl()}/PaymentOrderProcedure/Initiate`, {
+      const resp = await fetch(`${txnBaseUrl()}/PaymentOrderInitiation/Initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1133,6 +1138,31 @@
     const btn = b.previousElementSibling.querySelector('button');
     if (b.style.display === 'none') { b.style.display = ''; btn.textContent = 'Collapse'; }
     else { b.style.display = 'none'; btn.textContent = 'Expand'; }
+  }
+
+  // ── BATCH TRIGGER ─────────────────────────────────────────────────────────
+  async function triggerBatch() {
+    const btn = document.getElementById('batch-trigger-btn');
+    const resultEl = document.getElementById('batch-trigger-result');
+    btn.disabled = true; btn.textContent = '⏳ Running…';
+    resultEl.textContent = '';
+    try {
+      const r = await fetch(baseUrl() + '/pipeline/batch/trigger', { method: 'POST' });
+      const d = await r.json();
+      if (d.skipped) {
+        resultEl.style.color = 'var(--yellow)';
+        resultEl.textContent = `⚠ Skipped — ${d.reason}`;
+      } else {
+        resultEl.style.color = 'var(--green)';
+        resultEl.textContent = `✓ Posted ${d.written} journal(s)`;
+        refreshAll();
+      }
+    } catch (e) {
+      resultEl.style.color = 'var(--red)';
+      resultEl.textContent = `Error: ${e.message}`;
+    } finally {
+      btn.disabled = false; btn.textContent = '⚡ Run Batch Now';
+    }
   }
 
   // ── REFRESH ALL ───────────────────────────────────────────────────────────
