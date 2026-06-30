@@ -4,7 +4,7 @@ Change stream on `transactions` inserts. For each settled payment, decomposes it
 into a one-doc ledgerEvent with debitLeg + creditLeg and writes it to `ledgerEvents`.
 Idempotent via unique idempotencyKey (= paymentId).
 
-Resume token persisted in `ledgerStreamTokens` so a restart replays nothing and
+Resume token persisted in `changeStreamTokens` so a restart replays nothing and
 misses nothing.
 """
 
@@ -126,12 +126,12 @@ def build_ledger_event(
 
 
 def _load_resume_token(connection: MongoDBConnection, db_name: str) -> dict | None:
-    doc = connection.get_collection(db_name, "ledgerStreamTokens").find_one({"workerId": WORKER_ID})
+    doc = connection.get_collection(db_name, "changeStreamTokens").find_one({"workerId": WORKER_ID})
     return doc.get("resumeToken") if doc else None
 
 
 def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict) -> None:
-    connection.get_collection(db_name, "ledgerStreamTokens").update_one(
+    connection.get_collection(db_name, "changeStreamTokens").update_one(
         {"workerId": WORKER_ID},
         {"$set": {"resumeToken": token, "updatedAt": _now_utc()}},
         upsert=True,
@@ -139,7 +139,7 @@ def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict)
 
 
 def _clear_resume_token(connection: MongoDBConnection, db_name: str) -> None:
-    connection.get_collection(db_name, "ledgerStreamTokens").delete_one({"workerId": WORKER_ID})
+    connection.get_collection(db_name, "changeStreamTokens").delete_one({"workerId": WORKER_ID})
 
 
 def process_transaction(
