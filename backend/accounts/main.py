@@ -1,8 +1,14 @@
 import json
 import logging
 import os
+import threading
+import time
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -25,17 +31,45 @@ from services.accounts_service import AccountsService
 from services.bian_service import BianService
 from services.customers_service import CustomersService
 from shared import registry
-
-load_dotenv()
+from workers import eod_topup_worker
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
+logger = logging.getLogger(__name__)
+
 MONGODB_URI = os.getenv("MONGODB_URI")
 DB_NAME = os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")
+connection = MongoDBConnection(MONGODB_URI)
+
+
+def _restart_loop(name: str, fn, *args, restart_delay: int = 5) -> None:
+    while True:
+        try:
+            fn(*args)
+        except Exception:
+            logger.exception("%s crashed; restarting in %ds", name, restart_delay)
+            time.sleep(restart_delay)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threshold = float(os.getenv("EOD_TOPUP_THRESHOLD", "500"))
+    amount = float(os.getenv("EOD_TOPUP_AMOUNT", "500"))
+    interval = int(os.getenv("EOD_TOPUP_INTERVAL_SECONDS", "0"))
+    threading.Thread(
+        target=_restart_loop,
+        args=("eod_topup_worker", eod_topup_worker.run, connection, DB_NAME, threshold, amount, interval),
+        daemon=True,
+        name="eod-topup-worker",
+    ).start()
+    logger.info("started background worker: eod_topup_worker")
+    yield
+
 
 app = FastAPI(
-    title="Leafy Bank — Accounts (BIAN PartyReferenceDataDirectoryEntry + CurrentAccountFulfillmentArrangement)"
+    title="Leafy Bank — Accounts (BIAN PartyReferenceDataDirectoryEntry + CurrentAccountFulfillmentArrangement)",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -46,7 +80,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-connection = MongoDBConnection(MONGODB_URI)
 accounts_service = AccountsService(connection, DB_NAME)
 customers_service = CustomersService(connection, DB_NAME)
 bian_service = BianService(connection, DB_NAME, "bian-mapping")
@@ -81,6 +114,15 @@ async def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+
+@app.post("/accounts/topup/run")
+async def topup_run():
+    threshold = float(os.getenv("EOD_TOPUP_THRESHOLD", "500"))
+    amount = float(os.getenv("EOD_TOPUP_AMOUNT", "500"))
+    accounts = connection.get_collection(DB_NAME, "accounts")
+    credited = eod_topup_worker.run_once(accounts, threshold, amount)
+    return {"credited": credited, "threshold": threshold, "amount": amount}
 
 
 # ---------- PartyReferenceDataDirectoryEntry ----------

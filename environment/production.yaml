@@ -7,9 +7,11 @@ ownership:
 
 env:
   NODE_ENV: production
-  ENABLE_EMBEDDED_WORKERS: "true"
   ENABLE_CHANGE_STREAMS: "true"
   GL_BATCH_INTERVAL_SECONDS: "600"
+  EOD_TOPUP_INTERVAL_SECONDS: "0"
+  EOD_TOPUP_THRESHOLD: "500"
+  EOD_TOPUP_AMOUNT: "500"
   PAYMENT_LIMIT_USD: "500"
   TRANSACTIONS_BASE_URL: http://leafy-bank-bian-transactions-web-app:80
   CORE_BACKEND_URL: http://open-finance-next-gen-web-app:80

@@ -50,17 +50,24 @@ def _reconcile(connection: MongoDBConnection, db_name: str) -> bool:
         return True
 
 
+def run_one_cycle(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> dict:
+    """Execute one batch cycle and return a result dict.
+
+    Returns: {"skipped": bool, "written": int, "reason": str | None}
+    """
+    if not _reconcile(connection, db_name):
+        return {"skipped": True, "written": 0, "reason": "pre-batch reconciliation break"}
+    written = run_batch(connection, db_name, coa=coa)
+    logger.info("gl_batch manual trigger: posted %d journal(s)", written)
+    return {"skipped": False, "written": written, "reason": None}
+
+
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts,
         interval: int = DEFAULT_INTERVAL) -> None:
     logger.info("gl_batch starting — interval=%ds on %s", interval, db_name)
     while True:
         try:
-            if not _reconcile(connection, db_name):
-                logger.warning("gl_batch skipped this cycle due to pre-batch reconciliation break")
-            else:
-                written = run_batch(connection, db_name, coa=coa)
-                if written:
-                    logger.info("gl_batch: posted %d journal(s)", written)
+            run_one_cycle(connection, db_name, coa)
         except Exception:
             logger.exception("gl_batch error")
         time.sleep(interval)

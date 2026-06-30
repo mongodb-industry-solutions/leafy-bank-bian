@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from routers._util import to_json_response
 from services import pipeline_read_service, reconciliation_service
+from workers import gl_batch
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -100,6 +101,15 @@ def trace_payment(payment_id: str, request: Request) -> JSONResponse:
     result = pipeline_read_service.trace_payment(payment_id, connection, db_name)
     if result is None:
         raise HTTPException(status_code=404, detail=f"payment {payment_id} not found")
+    return to_json_response(result)
+
+
+@router.post("/batch/trigger")
+def trigger_batch(request: Request) -> JSONResponse:
+    connection = request.app.state.connection
+    db_name = request.app.state.db_name
+    coa = request.app.state.coa
+    result = gl_batch.run_one_cycle(connection, db_name, coa)
     return to_json_response(result)
 
 

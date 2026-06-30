@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from pymongo.errors import OperationFailure
+from pymongo.errors import BulkWriteError, OperationFailure
 
 from database.connection import MongoDBConnection
 from services.subledger_service import build_subledger_entries, write_subledger_entries
@@ -93,7 +93,7 @@ def process_ledger_event(
 
         entries = build_subledger_entries(event)
         write_subledger_entries(entries, event_id, connection, db_name)
-    except ValueError as e:
+    except (ValueError, BulkWriteError) as e:
         _mark_failed(event_id, str(e), connection, db_name)
 
 

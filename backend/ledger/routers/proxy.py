@@ -18,15 +18,14 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["proxy"])
 
-_TRANSACTIONS_BASE = os.getenv(
-    "TRANSACTIONS_BASE_URL", "http://leafy-bank-bian-transactions-web-app:80"
-)
+_TRANSACTIONS_BASE_DEFAULT = "http://leafy-bank-bian-transactions-web-app:80"
 
 
 @router.post("/PaymentOrderInitiation/Initiate")
 async def proxy_initiate_payment(request: Request) -> JSONResponse:
+    txn_base = os.getenv("TRANSACTIONS_BASE_URL", _TRANSACTIONS_BASE_DEFAULT).rstrip("/")
     body = await request.body()
-    url = f"{_TRANSACTIONS_BASE}/PaymentOrderInitiation/Initiate"
+    url = f"{txn_base}/PaymentOrderInitiation/Initiate"
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )

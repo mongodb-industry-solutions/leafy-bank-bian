@@ -115,7 +115,6 @@ PAYMENT_LIMIT_USD=500              # optional, per-payment ceiling (default 500)
 # ledger only:
 GL_BATCH_INTERVAL_SECONDS=600      # optional, GL batch cadence (default 600)
 ENABLE_CHANGE_STREAMS=true         # optional (default true)
-ENABLE_EMBEDDED_WORKERS=false      # optional, run pipeline workers in-process (default false)
 ```
 
 **Frontend** — create `frontend/.env.local`. The UI proxies BIAN requests to each service by path segment, so it needs the backend URLs:

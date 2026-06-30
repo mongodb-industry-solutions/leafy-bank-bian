@@ -189,7 +189,10 @@ class PaymentsService:
 
         def callback(session: ClientSession) -> dict:
             debtor_after = self.accounts.find_one_and_update(
-                {"accountId": debtor_account_ref},
+                {
+                    "accountId": debtor_account_ref,
+                    "balance.available": {"$gte": instructed_amount},
+                },
                 {
                     "$inc": {
                         "balance.current": -instructed_amount,
@@ -201,6 +204,8 @@ class PaymentsService:
                 session=session,
                 return_document=True,
             )
+            if debtor_after is None:
+                raise ValueError("Insufficient funds at settlement time.")
             self.accounts.find_one_and_update(
                 {"accountId": creditor_account_ref},
                 {
