@@ -4,7 +4,7 @@ Change stream on `ledgerEvents` inserts. For each event, fans out into two
 subLedgerEntries (DEBIT + CREDIT) and stamps ledgerEvents.postingResult.
 Idempotent via unique idempotencyKey per sub-ledger entry.
 
-Resume token persisted in `ledgerStreamTokens`.
+Resume token persisted in `changeStreamTokens`.
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ def _now_utc() -> datetime:
 
 
 def _load_resume_token(connection: MongoDBConnection, db_name: str) -> dict | None:
-    doc = connection.get_collection(db_name, "ledgerStreamTokens").find_one({"workerId": WORKER_ID})
+    doc = connection.get_collection(db_name, "changeStreamTokens").find_one({"workerId": WORKER_ID})
     return doc.get("resumeToken") if doc else None
 
 
 def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict) -> None:
-    connection.get_collection(db_name, "ledgerStreamTokens").update_one(
+    connection.get_collection(db_name, "changeStreamTokens").update_one(
         {"workerId": WORKER_ID},
         {"$set": {"resumeToken": token, "updatedAt": _now_utc()}},
         upsert=True,
@@ -44,7 +44,7 @@ def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict)
 
 
 def _clear_resume_token(connection: MongoDBConnection, db_name: str) -> None:
-    connection.get_collection(db_name, "ledgerStreamTokens").delete_one({"workerId": WORKER_ID})
+    connection.get_collection(db_name, "changeStreamTokens").delete_one({"workerId": WORKER_ID})
 
 
 def _mark_failed(event_id: str, reason: str, connection: MongoDBConnection, db_name: str) -> None:

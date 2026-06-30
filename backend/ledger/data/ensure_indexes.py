@@ -236,7 +236,7 @@ def ensure_ledger_indexes(connection: MongoDBConnection, db_name: str) -> dict[s
         "ledgerEvents": _ensure(connection, db_name, "ledgerEvents", LEDGER_EVENTS_INDEXES),
         "subLedgerEntries": _ensure(connection, db_name, "subLedgerEntries", SUBLEDGER_ENTRIES_INDEXES),
         "journalEntries": _ensure(connection, db_name, "journalEntries", JOURNAL_ENTRIES_INDEXES),
-        "ledgerStreamTokens": _ensure(connection, db_name, "ledgerStreamTokens", STREAM_TOKENS_INDEXES),
+        "changeStreamTokens": _ensure(connection, db_name, "changeStreamTokens", STREAM_TOKENS_INDEXES),
         "validators": ensure_validators(connection, db_name),
     }
 
