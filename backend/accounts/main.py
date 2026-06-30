@@ -116,6 +116,15 @@ def health_check():
     return {"status": "healthy"}
 
 
+@app.post("/accounts/topup/run")
+async def topup_run():
+    threshold = float(os.getenv("EOD_TOPUP_THRESHOLD", "500"))
+    amount = float(os.getenv("EOD_TOPUP_AMOUNT", "500"))
+    accounts = connection.get_collection(DB_NAME, "accounts")
+    credited = eod_topup_worker.run_once(accounts, threshold, amount)
+    return {"credited": credited, "threshold": threshold, "amount": amount}
+
+
 # ---------- PartyReferenceDataDirectoryEntry ----------
 
 @app.post("/PartyReferenceDataDirectoryEntry/Retrieve")

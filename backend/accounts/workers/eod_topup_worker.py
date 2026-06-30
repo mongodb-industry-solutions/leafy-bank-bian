@@ -8,7 +8,7 @@ atomic at the MongoDB level.
 Env vars (read by the caller in main.py and passed as arguments):
   EOD_TOPUP_THRESHOLD      — minimum balance that triggers a top-up (default 500)
   EOD_TOPUP_AMOUNT         — amount credited per top-up (default 500)
-  EOD_TOPUP_INTERVAL_SECONDS — override sleep interval in seconds; 0 = sleep until midnight UTC
+  EOD_TOPUP_INTERVAL_SECONDS — -1 = disabled (manual trigger only); 0 = sleep until midnight UTC; >0 = fixed interval in seconds
 """
 
 import logging
@@ -62,6 +62,10 @@ def run(
 
     `interval` > 0 overrides the midnight-UTC sleep (useful for testing).
     """
+    if interval == -1:
+        logger.info("eod_topup_worker: disabled — use POST /accounts/topup/run to trigger manually")
+        return
+
     accounts = connection.get_collection(db_name, "accounts")
     logger.info(
         "eod_topup_worker starting — threshold=$%.0f top_up=$%.0f",
