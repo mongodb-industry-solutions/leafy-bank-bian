@@ -40,11 +40,9 @@ def _now_utc() -> datetime:
 def _derive_posting_mode(rail: str | None, payment_type: str | None) -> str:
     rail = (rail or "").upper()
     ptype = (payment_type or "").upper()
-    if rail == "WIRE" or "WIRE" in ptype:
+    if rail in ("WIRE", "INTERNAL") or "WIRE" in ptype:
         return "REALTIME"
-    if rail == "ACH" or ptype == "ACH":
-        return "NEAR_REALTIME"
-    return "BATCH"
+    return "BATCH"  # ACH, VENMO, PAYPAL, and any other rail settle batch by default
 
 
 def build_ledger_event(

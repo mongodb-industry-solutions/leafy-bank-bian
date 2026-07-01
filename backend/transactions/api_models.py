@@ -32,7 +32,7 @@ class PaymentOrderInitiateRequest(BaseModel):
     type: Literal[
         "CREDIT_TRANSFER", "DIRECT_DEBIT", "CARD_PAYMENT", "CHEQUE", "INTRABANK_TRANSFER"
     ]
-    rail: Literal["INTERNAL"]  # Phase 1 supports INTERNAL only
+    rail: Literal["INTERNAL", "ACH", "WIRE", "VENMO", "PAYPAL"]  # drives ledger postingMode routing (BATCH/NEAR_REALTIME/REALTIME)
     debtor: PaymentDebtorBody
     creditor: PaymentCreditorBody
     instructedAmount: float = Field(gt=0)

@@ -30,6 +30,7 @@ _UNJOURNALED = ""
 # BIAN SourceSystemReference / SourceTransactionType constants for journalEntries.
 _SOURCE_SYSTEM = "GL_BATCH_PIPELINE"
 _SOURCE_TYPE_BATCH = "BATCH_POSTING"
+_SOURCE_TYPE_REALTIME = "REALTIME_POSTING"
 
 
 def _now_utc() -> datetime:
@@ -53,12 +54,22 @@ def build_journal_entry(
     period_code: str,
     agg_rows: list[dict],
     coa: Optional["ChartOfAccounts"] = None,
+    *,
+    idempotency_key: Optional[str] = None,
+    source_type: str = _SOURCE_TYPE_BATCH,
+    source_id: Optional[str] = None,
 ) -> tuple[dict, list[str], list[str]]:
-    """Assemble ONE balanced summary journal for a (batch window, period).
+    """Assemble ONE balanced journal for a (window, period).
+
+    Batch path: one line per (controlAccountCode, side) summarizing many txns.
+    Realtime path: same shape with count=1 rows — one journal per transaction.
 
     agg_rows: list of {_id:{controlAccountCode,side}, amount, currency, count, subLedgerIds, eventIds}.
+    idempotency_key / source_type / source_id default to the batch values.
     Returns (journal_doc, all_subLedgerIds, all_eventIds).
     """
+    idempotency_key = idempotency_key or f"JOURNAL-{batch_id}-{period_code}"
+    source_id = source_id or batch_id
     # One line per (controlAccountCode, side). DEBIT-first, then accountCode asc.
     lines_in = sorted(
         agg_rows,
@@ -96,7 +107,7 @@ def build_journal_entry(
     journal = {
         "_id": oid,
         "journalId": derive_ref(PREFIX_JOURNAL_ENTRY, oid),
-        "idempotencyKey": f"JOURNAL-{batch_id}-{period_code}",
+        "idempotencyKey": idempotency_key,
         "periodCode": period_code,
         "valueDate": now.date().isoformat(),                     # string per v30
         "postingDate": now.date().isoformat(),                   # string per v30
@@ -108,8 +119,8 @@ def build_journal_entry(
         "createdBy": "GL_BATCH_PIPELINE",                        # required; SoD $ne approvedBy (leave approvedBy absent)
         "sourceReference": {
             "sourceSystem": _SOURCE_SYSTEM,
-            "sourceId": batch_id,
-            "sourceType": _SOURCE_TYPE_BATCH,
+            "sourceId": source_id,
+            "sourceType": source_type,
             "sourceCollection": "subLedgerEntries",
             "periodCode": period_code,
             "txnCount": len(set(event_ids)),
@@ -170,6 +181,72 @@ def write_journal(
     return True
 
 
+def post_realtime_event(
+    event_id: str,
+    connection: MongoDBConnection,
+    db_name: str,
+    coa: Optional["ChartOfAccounts"] = None,
+) -> bool:
+    """Stage ③ (realtime): write ONE per-transaction journal for a single event.
+
+    Reads the event's two POSTED, un-journaled subLedgerEntries and summarizes
+    them into one balanced journal (one line per control account + side).
+    Unlike run_batch, this produces a journal per transaction, not per window.
+    Idempotent via journalEntries.idempotencyKey. Returns True if written.
+    """
+    sl_coll = connection.get_collection(db_name, "subLedgerEntries")
+    rows = list(sl_coll.find({
+        "sourceReference.sourceId": event_id,
+        "status": "POSTED",
+        "journalEntryId": _UNJOURNALED,
+    }))
+    if not rows:
+        logger.info("no un-journaled subLedgerEntries for eventId=%s; realtime post skipped", event_id)
+        return False
+
+    # Must be a complete DEBIT+CREDIT pair in a single period, mirroring the
+    # batch completeness gate (GAP-2). A partial pair must never be journaled.
+    sides = {r["side"] for r in rows}
+    periods = {r["periodCode"] for r in rows}
+    if len(rows) != 2 or sides != {"DEBIT", "CREDIT"}:
+        logger.warning(
+            "incomplete leg pair for eventId=%s (count=%d sides=%s) — realtime post skipped",
+            event_id, len(rows), sorted(sides),
+        )
+        return False
+    if len(periods) > 1:
+        logger.warning(
+            "period mismatch for eventId=%s (periods=%s) — realtime post skipped",
+            event_id, sorted(periods),
+        )
+        return False
+    period_code = periods.pop()
+
+    # Reshape the two legs into the aggregation shape build_journal_entry expects.
+    agg_rows = [
+        {
+            "_id": {"controlAccountCode": r["controlAccountCode"], "side": r["side"]},
+            "amount": r["amount"],
+            "currency": r.get("currency"),
+            "count": 1,
+            "subLedgerIds": [r["subLedgerId"]],
+            "eventIds": [event_id],
+        }
+        for r in rows
+    ]
+
+    journal, sub_ids, event_ids = build_journal_entry(
+        f"RT-{event_id}",
+        period_code,
+        agg_rows,
+        coa=coa,
+        idempotency_key=f"JOURNAL-RT-{event_id}",
+        source_type=_SOURCE_TYPE_REALTIME,
+        source_id=event_id,
+    )
+    return write_journal(journal, sub_ids, event_ids, connection, db_name)
+
+
 def run_batch(
     connection: MongoDBConnection,
     db_name: str,
@@ -211,6 +288,20 @@ def run_batch(
         else:
             complete_event_ids.append(r["_id"])
 
+    if not complete_event_ids:
+        return 0
+
+    # postingMode routing: REALTIME / NEAR_REALTIME events are journaled
+    # per-transaction by realtime_posting_worker. The batch posts ONLY
+    # postingMode=BATCH events, so the two paths never journal the same event.
+    le_coll = connection.get_collection(db_name, "ledgerEvents")
+    complete_event_ids = [
+        d["eventId"]
+        for d in le_coll.find(
+            {"eventId": {"$in": complete_event_ids}, "postingMode.type": "BATCH"},
+            {"eventId": 1},
+        )
+    ]
     if not complete_event_ids:
         return 0
 

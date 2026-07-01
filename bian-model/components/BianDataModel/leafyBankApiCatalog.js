@@ -887,6 +887,153 @@ export const LEAFY_BANK_API_CATALOG = {
           ]
         }
       ]
+    },
+    {
+      "key": "ledger",
+      "name": "Financial Accounting",
+      "serviceDomains": [
+        {
+          "key": "FinancialAccounting",
+          "name": "FinancialAccounting — GL Account & Ledger Posting Log",
+          "operations": [
+            {
+              "id": "financial_accounting_retrieve",
+              "method": "GET",
+              "path": "/FinancialAccounting/{financialaccountingid}/Retrieve",
+              "summary": "Retrieve a GL account and its recent journal-entry log. financialaccountingid is the GL account code (e.g. a control account), passed as a URL path parameter.",
+              "bianAction": "retrieve",
+              "bianBehaviorQualifier": "FinancialAccounting",
+              "headers": [
+                {
+                  "name": "Authorization",
+                  "required": true,
+                  "notes": "Bearer token with Ledger-Read scope."
+                }
+              ],
+              "request": {
+                "notes": "No request body. Optional `periodCode` query parameter (e.g. \"2026-05\") filters recentJournals to a single accounting period.",
+                "examples": [
+                  {
+                    "value": {
+                      "financialaccountingid": "2010-CTRL",
+                      "periodCode": "2026-05"
+                    }
+                  }
+                ]
+              },
+              "response": {
+                "successCodes": [
+                  200
+                ],
+                "envelopeKeys": [
+                  "financialAccountingId",
+                  "glAccount",
+                  "recentJournals"
+                ],
+                "example": {
+                  "financialAccountingId": "2010-CTRL",
+                  "glAccount": {
+                    "accountCode": "2010-CTRL",
+                    "accountName": "Customer Deposits — Control",
+                    "isPostingAccount": false,
+                    "status": "ACTIVE"
+                  },
+                  "recentJournals": [
+                    {
+                      "journalId": "JNL-20260507-000318",
+                      "periodCode": "2026-05",
+                      "postingDate": "2026-05-07",
+                      "totalAmount": 100000,
+                      "entries": [
+                        {
+                          "accountCode": "2010-CTRL",
+                          "side": "CREDIT",
+                          "amount": 100000,
+                          "currency": "USD",
+                          "lineDescription": "Sum of 3 credit postings to control account 2010-CTRL — Customer Deposits"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "errors": [
+                {
+                  "code": 404,
+                  "meaning": "Not Found",
+                  "when": "financialaccountingid does not match any glAccounts.accountCode."
+                }
+              ]
+            },
+            {
+              "id": "financial_accounting_ledger_posting_retrieve",
+              "method": "GET",
+              "path": "/FinancialAccounting/{financialaccountingid}/LedgerPosting/{ledgerpostingid}/Retrieve",
+              "summary": "Retrieve a single ledger posting (ledgerEvent) by its event reference — the debit/credit leg pair derived from a settled payment, before sub-ledger and journal summarization.",
+              "bianAction": "retrieve",
+              "bianBehaviorQualifier": "LedgerPosting",
+              "headers": [
+                {
+                  "name": "Authorization",
+                  "required": true,
+                  "notes": "Bearer token with Ledger-Read scope."
+                }
+              ],
+              "request": {
+                "notes": "No request body. financialaccountingid and ledgerpostingid (the ledgerEvents.eventId) are URL path parameters.",
+                "examples": [
+                  {
+                    "value": {
+                      "financialaccountingid": "2010-CTRL",
+                      "ledgerpostingid": "LEDGEVT-20260507-000512"
+                    }
+                  }
+                ]
+              },
+              "response": {
+                "successCodes": [
+                  200
+                ],
+                "envelopeKeys": [
+                  "eventId",
+                  "idempotencyKey",
+                  "occurredAt",
+                  "periodName",
+                  "eventType",
+                  "debitLeg",
+                  "creditLeg"
+                ],
+                "example": {
+                  "eventId": "LEDGEVT-20260507-000512",
+                  "idempotencyKey": "PAY-20260507-0042",
+                  "occurredAt": "2026-05-07T11:48:34.918Z",
+                  "periodName": "May 2026",
+                  "eventType": "PAYMENT_SETTLEMENT",
+                  "debitLeg": {
+                    "glAccountCode": "1010-CASH",
+                    "controlAccountCode": "1010-CTRL",
+                    "amount": 100000,
+                    "currency": "USD"
+                  },
+                  "creditLeg": {
+                    "glAccountCode": "2010-CTRL",
+                    "controlAccountCode": "2010-CTRL",
+                    "amount": 100000,
+                    "currency": "USD"
+                  }
+                }
+              },
+              "errors": [
+                {
+                  "code": 404,
+                  "meaning": "Not Found",
+                  "when": "ledgerpostingid does not match any ledgerEvents.eventId."
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 };

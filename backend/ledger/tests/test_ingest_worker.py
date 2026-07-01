@@ -195,8 +195,11 @@ def test_event_id_and_group_id_have_correct_prefixes():
     ("WIRE", None, "REALTIME"),
     ("wire", None, "REALTIME"),
     (None, "WIRE_TRANSFER", "REALTIME"),
-    ("ACH", None, "NEAR_REALTIME"),
-    (None, "ACH", "NEAR_REALTIME"),
+    ("INTERNAL", None, "REALTIME"),
+    ("ACH", None, "BATCH"),
+    (None, "ACH", "BATCH"),
+    ("VENMO", None, "BATCH"),
+    ("PAYPAL", None, "BATCH"),
     ("RTP", "OTHER", "BATCH"),
     (None, None, "BATCH"),
 ])

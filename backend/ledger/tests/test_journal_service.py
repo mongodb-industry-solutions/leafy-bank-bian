@@ -5,10 +5,18 @@ Hermetic: inline aggregation-row + CoA fixtures, no DB.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 from bson import Int64
 
-from services.journal_service import assert_balanced_journal, build_journal_entry
+import services.journal_service as journal_service
+from services.journal_service import (
+    assert_balanced_journal,
+    build_journal_entry,
+    post_realtime_event,
+    run_batch,
+)
 from shared.coa_cache import ChartOfAccounts
 
 
@@ -286,3 +294,122 @@ def test_same_control_account_both_sides_produces_two_lines():
     assert len(journal["entries"]) == 2
     sides = [e["side"] for e in journal["entries"]]
     assert sides == ["DEBIT", "CREDIT"]
+
+
+# --- build_journal_entry: realtime overrides ----------------------------------
+
+def test_realtime_overrides_flow_into_journal():
+    journal, _, _ = build_journal_entry(
+        "RT-LE-abc", _PERIOD, _balanced_agg_rows(),
+        idempotency_key="JOURNAL-RT-LE-abc",
+        source_type="REALTIME_POSTING",
+        source_id="LE-abc",
+    )
+    assert journal["idempotencyKey"] == "JOURNAL-RT-LE-abc"
+    assert journal["sourceReference"]["sourceType"] == "REALTIME_POSTING"
+    assert journal["sourceReference"]["sourceId"] == "LE-abc"
+    assert journal["journalType"] == "SYSTEM"  # validator only allows SYSTEM/MANUAL/REVERSAL
+
+
+def test_overrides_default_to_batch_values():
+    journal, _, _ = build_journal_entry(_BATCH_ID, _PERIOD, _balanced_agg_rows())
+    assert journal["idempotencyKey"] == f"JOURNAL-{_BATCH_ID}-{_PERIOD}"
+    assert journal["sourceReference"]["sourceType"] == "BATCH_POSTING"
+    assert journal["sourceReference"]["sourceId"] == _BATCH_ID
+
+
+# --- post_realtime_event (mocked DB) ------------------------------------------
+
+def _sl(code: str, side: str, amount: int, event_id: str, sub_id: str, period: str = _PERIOD) -> dict:
+    """One subLedgerEntry doc as post_realtime_event reads it."""
+    return {
+        "controlAccountCode": code,
+        "side": side,
+        "amount": amount,
+        "currency": "USD",
+        "subLedgerId": sub_id,
+        "periodCode": period,
+        "status": "POSTED",
+        "journalEntryId": "",
+        "sourceReference": {"sourceId": event_id},
+    }
+
+
+def _conn_returning(sl_rows: list[dict]):
+    coll = MagicMock()
+    coll.find.return_value = iter(sl_rows)
+    conn = MagicMock()
+    conn.get_collection.return_value = coll
+    return conn
+
+
+def test_post_realtime_event_writes_one_journal(monkeypatch):
+    captured = {}
+
+    def _fake_write(journal, sub_ids, event_ids, connection, db_name):
+        captured["journal"] = journal
+        captured["sub_ids"] = sub_ids
+        return True
+
+    monkeypatch.setattr(journal_service, "write_journal", _fake_write)
+    rows = [
+        _sl("2110", "DEBIT", 25000, "LE-x", "SL-1"),
+        _sl("2120", "CREDIT", 25000, "LE-x", "SL-2"),
+    ]
+    result = post_realtime_event("LE-x", _conn_returning(rows), "test_db", coa=_coa())
+
+    assert result is True
+    assert captured["journal"]["idempotencyKey"] == "JOURNAL-RT-LE-x"
+    assert captured["journal"]["sourceReference"]["sourceType"] == "REALTIME_POSTING"
+    assert len(captured["journal"]["entries"]) == 2
+    assert set(captured["sub_ids"]) == {"SL-1", "SL-2"}
+
+
+def test_post_realtime_event_skips_when_no_rows(monkeypatch):
+    called = MagicMock()
+    monkeypatch.setattr(journal_service, "write_journal", called)
+    result = post_realtime_event("LE-none", _conn_returning([]), "test_db")
+    assert result is False
+    called.assert_not_called()
+
+
+def test_post_realtime_event_skips_incomplete_pair(monkeypatch):
+    called = MagicMock()
+    monkeypatch.setattr(journal_service, "write_journal", called)
+    rows = [_sl("2110", "DEBIT", 25000, "LE-x", "SL-1")]  # only one leg
+    result = post_realtime_event("LE-x", _conn_returning(rows), "test_db")
+    assert result is False
+    called.assert_not_called()
+
+
+# --- run_batch: postingMode routing exclusion ---------------------------------
+
+def _dispatch_conn(subledger_coll, ledger_events_coll):
+    conn = MagicMock()
+
+    def _get(_db, name):
+        return ledger_events_coll if name == "ledgerEvents" else subledger_coll
+
+    conn.get_collection.side_effect = _get
+    return conn
+
+
+def test_run_batch_excludes_realtime_events(monkeypatch):
+    # Completeness aggregation yields one complete pair for a realtime event...
+    sl_coll = MagicMock()
+    sl_coll.aggregate.return_value = [
+        {"_id": "LE-rt", "count": 2, "sides": ["DEBIT", "CREDIT"], "periodCodes": [_PERIOD]},
+    ]
+    # ...but ledgerEvents.find (postingMode=BATCH) returns nothing → batch posts 0.
+    le_coll = MagicMock()
+    le_coll.find.return_value = iter([])
+
+    write_called = MagicMock()
+    monkeypatch.setattr(journal_service, "write_journal", write_called)
+
+    written = run_batch(_dispatch_conn(sl_coll, le_coll), "test_db")
+
+    assert written == 0
+    write_called.assert_not_called()
+    # The BATCH-only filter must be applied against ledgerEvents.
+    assert le_coll.find.call_args[0][0]["postingMode.type"] == "BATCH"

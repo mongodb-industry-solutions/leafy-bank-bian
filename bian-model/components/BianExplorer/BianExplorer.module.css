@@ -593,7 +593,7 @@
   padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 28px;
 }
 
 .apiDomain {
@@ -806,6 +806,7 @@
 .serviceFilter {
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 0 4px;
 }
 
@@ -880,8 +881,8 @@
 .actionLegend {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 4px 2px;
+  gap: 15px;
+  padding: 0 px;
 }
 
 .actionLegendItem {
