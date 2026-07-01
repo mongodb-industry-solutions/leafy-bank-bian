@@ -79,36 +79,39 @@ def process_event(
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:
     logger.info("realtime_posting_worker starting — watching ledgerEvents on %s", db_name)
-    resume_token = _load_resume_token(connection, db_name)
-
     ledger_events = connection.get_collection(db_name, "ledgerEvents")
-    pipeline = [_MATCH]
-    kwargs: dict = {"full_document": "updateLookup"}
-    if resume_token:
-        kwargs["resume_after"] = resume_token
 
-    try:
-        stream_cm = ledger_events.watch(pipeline, **kwargs)
-    except OperationFailure as exc:
-        if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
-            logger.warning(
-                "resume token no longer in oplog (%s); clearing and starting a fresh stream",
-                exc.details.get("codeName") if exc.details else exc,
-            )
-            _clear_resume_token(connection, db_name)
-            stream_cm = ledger_events.watch([_MATCH], full_document="updateLookup")
-        else:
+    # Loops (rather than watching once) because NonResumableChangeStreamError can be
+    # raised by a getMore on an already-open cursor, not just by the initial watch()
+    # call — a stream that falls behind the oplog window mid-iteration hits the same
+    # error later. Both cases need the same clear-token-and-reopen recovery.
+    while True:
+        resume_token = _load_resume_token(connection, db_name)
+        kwargs: dict = {"full_document": "updateLookup"}
+        if resume_token:
+            kwargs["resume_after"] = resume_token
+        try:
+            with ledger_events.watch([_MATCH], **kwargs) as stream:
+                for change in stream:
+                    event = change.get("fullDocument", {})
+                    try:
+                        process_event(event, connection, db_name, coa)
+                        _save_resume_token(connection, db_name, change["_id"])
+                    except Exception:
+                        logger.exception("error realtime-posting eventId=%s", event.get("eventId"))
+                        raise
+        except OperationFailure as exc:
+            if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
+                logger.critical(
+                    "resume token no longer in oplog (%s); clearing and starting a fresh stream — "
+                    "any realtime-eligible ledgerEvents updated since the last saved token were NOT "
+                    "posted to journalEntries and will not be retried (they remain PENDING; gl_batch "
+                    "will not pick them up either since it only handles BATCH postingMode).",
+                    exc.details.get("codeName") if exc.details else exc,
+                )
+                _clear_resume_token(connection, db_name)
+                continue
             raise
-
-    with stream_cm as stream:
-        for change in stream:
-            event = change.get("fullDocument", {})
-            try:
-                process_event(event, connection, db_name, coa)
-                _save_resume_token(connection, db_name, change["_id"])
-            except Exception:
-                logger.exception("error realtime-posting eventId=%s", event.get("eventId"))
-                raise
 
 
 def main() -> None:

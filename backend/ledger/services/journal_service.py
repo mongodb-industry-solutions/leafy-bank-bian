@@ -164,6 +164,7 @@ def write_journal(
                     {"$set": {
                         "postingStatus": "POSTED",
                         "postingResult.journalEntryId": journal_id,
+                        "postingResult.postedAt": _now_utc(),
                     }},
                     session=session,
                 )

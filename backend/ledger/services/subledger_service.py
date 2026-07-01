@@ -183,7 +183,6 @@ def write_subledger_entries(
                         "postingResult": {
                             "subLedgerIdDebit": debit_entry["subLedgerId"],
                             "subLedgerIdCredit": credit_entry["subLedgerId"],
-                            "postedAt": _now_utc(),
                         },
                     }},
                     session=session,
