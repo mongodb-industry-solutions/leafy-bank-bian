@@ -68,6 +68,42 @@ export function useAccounts() {
 }
 
 /**
+ * Fetch every CURRENT/SAVINGS account bank-wide (any customer), each tagged
+ * with its owner's legal name, so a beneficiary picker can be a plain
+ * dropdown instead of a type-and-lookup field. GL/NOSTRO/VOSTRO accounts are
+ * excluded — those are internal ledger accounts, not payment counterparties.
+ * Calls BIAN CurrentAccountFulfillmentArrangement/Request + PartyReferenceDataDirectoryEntry/Request.
+ */
+export function useBeneficiaryAccounts() {
+  const [beneficiaryAccounts, setBeneficiaryAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      coreApi("CurrentAccountFulfillmentArrangement/Request", { method: "POST", body: {} }),
+      coreApi("PartyReferenceDataDirectoryEntry/Request", { method: "POST", body: {} }),
+    ]).then(([accountsRes, customersRes]) => {
+      const legalNameByCustomerId = new Map(
+        (customersRes.data?.customers ?? []).map((c) => [c.customerId, c.identification?.legalName]),
+      );
+      const options = (accountsRes.data?.accounts ?? [])
+        .filter((a) => a.type === "CURRENT" || a.type === "SAVINGS")
+        .map((a) => ({
+          id: a.accountId,
+          label: `${a.type} - ${a.accountNumber}`,
+          ownerName: legalNameByCustomerId.get(a.customerSnapshot?.customerId) ?? null,
+          currency: a.currency,
+        }));
+      setBeneficiaryAccounts(options);
+      setLoading(false);
+    });
+  }, []);
+
+  return { beneficiaryAccounts, loading };
+}
+
+/**
  * Fetch all transactions for the logged-in user.
  * Calls BIAN CurrentAccountFulfillmentArrangement/CurrentAccountTransaction/Request.
  */

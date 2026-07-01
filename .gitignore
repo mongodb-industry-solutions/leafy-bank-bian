@@ -1,6 +1,7 @@
 # Secrets — never commit
 .vscode/
 .docs/
+.playwright-mcp
 **/.env
 **/.env.*
 !**/.env.example

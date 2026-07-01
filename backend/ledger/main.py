@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 
 from database.connection import MongoDBConnection
 from shared.coa_cache import ChartOfAccounts
-from workers import gl_batch, ingest_worker, projection_worker
+from workers import gl_batch, ingest_worker, projection_worker, realtime_posting_worker
 
 from routers.financial_accounting import router as fa_router
 from routers.pipeline import router as pipeline_router
@@ -55,8 +55,9 @@ async def lifespan(app: FastAPI):
     interval = int(os.getenv("GL_BATCH_INTERVAL_SECONDS", "600"))
 
     change_stream_workers = [
-        ("ingest_worker",     ingest_worker.run,     (connection, DB_NAME, coa)),
-        ("projection_worker", projection_worker.run, (connection, DB_NAME, coa)),
+        ("ingest_worker",            ingest_worker.run,            (connection, DB_NAME, coa)),
+        ("projection_worker",        projection_worker.run,        (connection, DB_NAME, coa)),
+        ("realtime_posting_worker",  realtime_posting_worker.run,  (connection, DB_NAME, coa)),
     ]
     batch_workers = [
         ("gl_batch",          gl_batch.run,          (connection, DB_NAME, coa, interval)),
