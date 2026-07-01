@@ -67,7 +67,10 @@ def process_ledger_event(
 ) -> None:
     event_id = event.get("eventId")
     if not event_id:
-        logger.warning("ledgerEvent missing eventId; skipping")
+        # No stable id to dead-letter against — this indicates a malformed
+        # ledgerEvents doc (a bug upstream in ingest_worker), not a normal
+        # runtime condition, so it's logged loud rather than swallowed quietly.
+        logger.error("ledgerEvent missing eventId; skipping: %r", event)
         return
 
     if "debitLeg" not in event or "creditLeg" not in event:
@@ -99,34 +102,37 @@ def process_ledger_event(
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:
     logger.info("projection_worker starting — watching ledgerEvents on %s", db_name)
-    resume_token = _load_resume_token(connection, db_name)
-
     ledger_events = connection.get_collection(db_name, "ledgerEvents")
     pipeline = [{"$match": {"operationType": "insert"}}]
-    kwargs: dict = {"resume_after": resume_token} if resume_token else {}
 
-    try:
-        stream_cm = ledger_events.watch(pipeline, **kwargs)
-    except OperationFailure as exc:
-        if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
-            logger.warning(
-                "resume token no longer in oplog (%s); clearing and starting a fresh stream",
-                exc.details.get("codeName") if exc.details else exc,
-            )
-            _clear_resume_token(connection, db_name)
-            stream_cm = ledger_events.watch(pipeline)
-        else:
+    # Loops (rather than watching once) because NonResumableChangeStreamError can be
+    # raised by a getMore on an already-open cursor, not just by the initial watch()
+    # call — a stream that falls behind the oplog window mid-iteration hits the same
+    # error later. Both cases need the same clear-token-and-reopen recovery.
+    while True:
+        resume_token = _load_resume_token(connection, db_name)
+        kwargs: dict = {"resume_after": resume_token} if resume_token else {}
+        try:
+            with ledger_events.watch(pipeline, **kwargs) as stream:
+                for change in stream:
+                    event = change.get("fullDocument", {})
+                    try:
+                        process_ledger_event(event, connection, db_name, coa)
+                        _save_resume_token(connection, db_name, change["_id"])
+                    except Exception:
+                        logger.exception("error projecting eventId=%s", event.get("eventId"))
+                        raise
+        except OperationFailure as exc:
+            if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
+                logger.critical(
+                    "resume token no longer in oplog (%s); clearing and starting a fresh stream — "
+                    "any ledgerEvents inserted since the last saved token were NOT projected into "
+                    "subLedgerEntries and will not be retried.",
+                    exc.details.get("codeName") if exc.details else exc,
+                )
+                _clear_resume_token(connection, db_name)
+                continue
             raise
-
-    with stream_cm as stream:
-        for change in stream:
-            event = change.get("fullDocument", {})
-            try:
-                process_ledger_event(event, connection, db_name, coa)
-                _save_resume_token(connection, db_name, change["_id"])
-            except Exception:
-                logger.exception("error projecting eventId=%s", event.get("eventId"))
-                raise
 
 
 def main() -> None:
