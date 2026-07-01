@@ -293,8 +293,9 @@ def run_batch(
         return 0
 
     # postingMode routing: REALTIME / NEAR_REALTIME events are journaled
-    # per-transaction by realtime_posting_worker. The batch posts ONLY
-    # postingMode=BATCH events, so the two paths never journal the same event.
+    # per-transaction inline by projection_worker (right after it writes the
+    # subledger legs). The batch posts ONLY postingMode=BATCH events, so the
+    # two paths never journal the same event.
     le_coll = connection.get_collection(db_name, "ledgerEvents")
     complete_event_ids = [
         d["eventId"]

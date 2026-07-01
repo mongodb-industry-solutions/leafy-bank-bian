@@ -300,62 +300,10 @@
 
       <!-- Presets -->
       <div style="margin-bottom:4px">
-        <div class="field-label" style="margin-bottom:8px">Quick presets</div>
-        <div id="preset-btns" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-      </div>
-
-      <div style="border-top:1px solid var(--border);margin:14px 0;padding-top:14px">
-        <div class="field-label" style="margin-bottom:10px">Custom transaction</div>
-        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
-          <div style="min-width:155px;flex:1.2">
-            <div class="field-label">Customer ID</div>
-            <input id="custom-customer" list="customer-list" class="form-input" placeholder="CUST-…" value="CUST-00528224">
-            <datalist id="customer-list">
-              <option value="CUST-00528224">Grace</option>
-              <option value="CUST-17352703">Monet</option>
-            </datalist>
-          </div>
-          <div style="min-width:155px;flex:1.5">
-            <div class="field-label">Debtor Account (from)</div>
-            <input id="custom-debtor" list="account-list" class="form-input" placeholder="ACC-…" value="ACC-e0583b3b">
-          </div>
-          <div style="min-width:155px;flex:1.5">
-            <div class="field-label">Creditor Account (to)</div>
-            <input id="custom-creditor" list="account-list" class="form-input" placeholder="ACC-…" value="ACC-e0583b3c">
-            <datalist id="account-list">
-              <option value="ACC-e0583b3b">Grace primary</option>
-              <option value="ACC-e0583b3f">Grace secondary</option>
-              <option value="ACC-e0583b3c">Monet primary</option>
-              <option value="ACC-8c8097a4">Monet secondary</option>
-            </datalist>
-          </div>
-          <div style="min-width:90px;flex:.7">
-            <div class="field-label">Amount (USD)</div>
-            <input id="custom-amount" type="number" class="form-input" min="0.01" step="0.01" value="50.00">
-          </div>
-          <div style="min-width:165px;flex:1.2">
-            <div class="field-label">Type</div>
-            <select id="custom-type" class="form-input">
-              <option value="CREDIT_TRANSFER">CREDIT_TRANSFER</option>
-              <option value="INTRABANK_TRANSFER">INTRABANK_TRANSFER</option>
-            </select>
-          </div>
-          <div style="min-width:100px;flex:.8">
-            <div class="field-label">Rail</div>
-            <select id="custom-rail" class="form-input">
-              <option value="INTERNAL">INTERNAL</option>
-              <option value="ACH">ACH</option>
-              <option value="WIRE">WIRE</option>
-            </select>
-          </div>
-        </div>
-        <div style="display:flex;gap:10px;margin-top:10px;align-items:flex-end">
-          <div style="flex:1">
-            <div class="field-label">Remittance (optional)</div>
-            <input id="custom-remittance" class="form-input" placeholder="Payment description">
-          </div>
-          <button id="fire-custom-btn" class="btn btn-primary" onclick="fireCustom()">Fire Transaction</button>
-        </div>
+        <div class="field-label" style="margin-bottom:8px">Real-time presets <span style="text-transform:none;font-weight:400;color:var(--text-xs)">— rail WIRE/INTERNAL</span></div>
+        <div id="preset-btns-realtime" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
+        <div class="field-label" style="margin-bottom:8px">Batch presets <span style="text-transform:none;font-weight:400;color:var(--text-xs)">— rail ACH/VENMO/PAYPAL</span></div>
+        <div id="preset-btns-batch" style="display:flex;flex-wrap:wrap;gap:6px"></div>
       </div>
 
       <div id="txn-result" style="display:none;margin-top:12px"></div>
@@ -1045,18 +993,28 @@
   }
 
   // ── INITIATE TRANSACTION ──────────────────────────────────────────────────
+  // rail drives ledger postingMode routing (ingest_worker._derive_posting_mode):
+  // WIRE/INTERNAL -> REALTIME, everything else (ACH/VENMO/PAYPAL) -> BATCH.
   const PRESETS = [
-    { label: 'Grace → Monet $50',    customerId: 'CUST-00528224', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-e0583b3c', amount: 50,  remittance: 'Ledger smoke test 1' },
-    { label: 'Grace → Monet $125',   customerId: 'CUST-00528224', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-8c8097a4', amount: 125, remittance: 'Ledger smoke test 2' },
-    { label: 'Grace own-acct $200',  customerId: 'CUST-00528224', type: 'INTRABANK_TRANSFER', rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-e0583b3f', amount: 200, remittance: '' },
-    { label: 'Monet → Grace $75',    customerId: 'CUST-17352703', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3c', creditor: 'ACC-e0583b3b', amount: 75,  remittance: 'Ledger smoke test 4' },
-    { label: 'Monet → Grace $30',    customerId: 'CUST-17352703', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3c', creditor: 'ACC-e0583b3f', amount: 30,  remittance: 'Ledger smoke test 5' },
+    { mode: 'REALTIME', label: 'Grace → Monet $50',    customerId: 'CUST-00528224', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-e0583b3c', amount: 50,  remittance: 'Ledger smoke test 1' },
+    { mode: 'REALTIME', label: 'Grace → Monet $125',   customerId: 'CUST-00528224', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-8c8097a4', amount: 125, remittance: 'Ledger smoke test 2' },
+    { mode: 'REALTIME', label: 'Grace own-acct $200',  customerId: 'CUST-00528224', type: 'INTRABANK_TRANSFER', rail: 'INTERNAL', debtor: 'ACC-e0583b3b', creditor: 'ACC-e0583b3f', amount: 200, remittance: '' },
+    { mode: 'REALTIME', label: 'Monet → Grace $75',    customerId: 'CUST-17352703', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3c', creditor: 'ACC-e0583b3b', amount: 75,  remittance: 'Ledger smoke test 4' },
+    { mode: 'REALTIME', label: 'Monet → Grace $30',    customerId: 'CUST-17352703', type: 'CREDIT_TRANSFER',   rail: 'INTERNAL', debtor: 'ACC-e0583b3c', creditor: 'ACC-e0583b3f', amount: 30,  remittance: 'Ledger smoke test 5' },
+    { mode: 'BATCH',    label: 'Grace → Monet $60',    customerId: 'CUST-00528224', type: 'CREDIT_TRANSFER',   rail: 'ACH',      debtor: 'ACC-e0583b3b', creditor: 'ACC-e0583b3c', amount: 60,  remittance: 'Batch smoke test 1' },
+    { mode: 'BATCH',    label: 'Grace → Monet $150',   customerId: 'CUST-00528224', type: 'CREDIT_TRANSFER',   rail: 'ACH',      debtor: 'ACC-e0583b3b', creditor: 'ACC-8c8097a4', amount: 150, remittance: 'Batch smoke test 2' },
+    { mode: 'BATCH',    label: 'Monet → Grace $45',    customerId: 'CUST-17352703', type: 'CREDIT_TRANSFER',   rail: 'ACH',      debtor: 'ACC-e0583b3c', creditor: 'ACC-e0583b3b', amount: 45,  remittance: 'Batch smoke test 3' },
+    { mode: 'BATCH',    label: 'Monet → Grace $90',    customerId: 'CUST-17352703', type: 'CREDIT_TRANSFER',   rail: 'ACH',      debtor: 'ACC-e0583b3c', creditor: 'ACC-e0583b3f', amount: 90,  remittance: 'Batch smoke test 4' },
   ];
 
   function buildPresetButtons() {
-    document.getElementById('preset-btns').innerHTML = PRESETS.map((p, i) =>
-      `<button class="preset-btn" id="preset-${i}" onclick="firePreset(${i})">${p.label}</button>`
-    ).join('');
+    const buttonsFor = mode => PRESETS
+      .map((p, i) => [p, i])
+      .filter(([p]) => p.mode === mode)
+      .map(([p, i]) => `<button class="preset-btn" id="preset-${i}" onclick="firePreset(${i})">${p.label}</button>`)
+      .join('');
+    document.getElementById('preset-btns-realtime').innerHTML = buttonsFor('REALTIME');
+    document.getElementById('preset-btns-batch').innerHTML = buttonsFor('BATCH');
   }
 
   async function firePreset(idx) {
@@ -1071,28 +1029,6 @@
     if (p.remittance) payload.remittance = { unstructured: p.remittance };
     await fireTransaction(payload);
     btn.disabled = false; btn.textContent = p.label;
-  }
-
-  async function fireCustom() {
-    const get = id => document.getElementById(id).value.trim();
-    const amount = parseFloat(get('custom-amount'));
-    if (!get('custom-debtor') || !get('custom-creditor') || isNaN(amount) || amount <= 0) {
-      alert('Debtor Account, Creditor Account, and a positive Amount are required.');
-      return;
-    }
-    const payload = {
-      customerId: get('custom-customer') || 'CUST-00528224',
-      type: get('custom-type'), rail: get('custom-rail'),
-      debtor: { accountId: get('custom-debtor') },
-      creditor: { accountId: get('custom-creditor') },
-      instructedAmount: amount, instructedCurrency: 'USD',
-    };
-    const rem = get('custom-remittance');
-    if (rem) payload.remittance = { unstructured: rem };
-    const btn = document.getElementById('fire-custom-btn');
-    btn.disabled = true; btn.textContent = 'Firing…';
-    try { await fireTransaction(payload); }
-    finally { btn.disabled = false; btn.textContent = 'Fire Transaction'; }
   }
 
   async function fireTransaction(payload) {
