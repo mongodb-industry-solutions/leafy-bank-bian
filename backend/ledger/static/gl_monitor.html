@@ -633,7 +633,7 @@
             ${chip(e.postingStatus)}
             ${batchChip(e._batchTag)}
           </div>
-          <div class="row-detail">${e.eventType||'—'} · ${e.postingMode?.type||'—'}</div>
+          <div class="row-detail">${e.eventType||'—'} · ${e.postingMode?.type||'—'} · ${fmtMinor(e.debitLeg?.amount)}</div>
           <div class="row-sub">${fmtDate(e.occurredAt)} · v${e.mappingVersion||'?'}</div>
         </div>`);
       window._leData = items;
