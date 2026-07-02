@@ -1,7 +1,6 @@
 import "./globals.css";
 import { Providers } from "./providers";
-import NavBar from "@/components/NavBar/NavBar";
-import FloatingAssistant from "@/components/FloatingAssistant/FloatingAssistant";
+import AppShell from "@/components/AppShell/AppShell";
 
 
 // TODO: Update metadata with actual demo details
@@ -19,9 +18,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body>
         <Providers>
-          <NavBar bianModelUrl={bianModelUrl} />
-          <div className="appContent">{children}</div>
-          <FloatingAssistant />
+          <AppShell bianModelUrl={bianModelUrl}>{children}</AppShell>
         </Providers>
       </body>
     </html>
