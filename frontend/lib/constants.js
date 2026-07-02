@@ -34,6 +34,8 @@ export const USER_MAP = {
         IncomeAmount: null,
         Currency: "USD",
         IncomeFrequency: null,
+        Url: "/gl-pipeline-monitor",
+        Features: ["GL Pipeline Monitor"],
     },
     "67a1000000000000000000002": {
         UserName: "anaruiz",
