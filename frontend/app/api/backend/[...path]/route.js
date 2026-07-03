@@ -11,11 +11,11 @@
  *       → ACCOUNTS_BACKEND_URL     (accounts service)
  *   - PaymentOrderInitiation/*       → TRANSACTIONS_BACKEND_URL (transactions service)
  *   - everything else (openfinance/*, encryption-demo/*, …)
- *       → CORE_BACKEND_URL          (open-finance monolith — fallback)
+ *       → CONSENT_BACKEND_URL        (open-finance monolith — fallback)
  */
 
-const CORE_BACKEND =
-  process.env.CORE_BACKEND_URL || "http://localhost:8001";
+const CONSENT_BACKEND =
+  process.env.CONSENT_BACKEND_URL || "http://localhost:8001";
 const ACCOUNTS_BACKEND =
   process.env.ACCOUNTS_BACKEND_URL || "http://localhost:8001";
 const TRANSACTIONS_BACKEND =
@@ -24,7 +24,7 @@ const LEDGER_BACKEND =
   process.env.LEDGER_BACKEND_URL || "http://localhost:8080";
 
 // First path segment (BIAN service domain) → backend base URL.
-// Unmapped prefixes fall through to CORE_BACKEND.
+// Unmapped prefixes fall through to CONSENT_BACKEND.
 const BACKEND_BY_PREFIX = {
   PartyReferenceDataDirectoryEntry: ACCOUNTS_BACKEND,
   CurrentAccountFulfillmentArrangement: ACCOUNTS_BACKEND,
@@ -42,7 +42,7 @@ async function proxy(request, { params }) {
     backendPath += "/";
   }
 
-  const backend = BACKEND_BY_PREFIX[path[0]] || CORE_BACKEND;
+  const backend = BACKEND_BY_PREFIX[path[0]] || CONSENT_BACKEND;
   const backendUrl = `${backend}${backendPath}${request.nextUrl.search}`;
 
   const headers = new Headers();

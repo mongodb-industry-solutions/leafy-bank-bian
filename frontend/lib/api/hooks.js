@@ -32,7 +32,12 @@ function normalizeTransaction(t) {
     CdtDbtInd: t.direction === "OUTGOING" ? "DBIT" : "CRDT",
     Cdtr: { Nm: t.payee?.name },
     AddtlNtryInf: t.description,
-    BkTxCd: { Fmly: t.txnCode?.split("-")[0] ?? "PMNT" },
+    // BIAN txnCode is "PMNT-MCRD-POSD": family is the SECOND segment (MCRD=card),
+    // subfamily the third (POSD=point-of-sale). The card view filters on Fmly === "MCRD".
+    BkTxCd: {
+      Fmly: t.txnCode?.split("-")[1] ?? "PMNT",
+      SubFmly: t.txnCode?.split("-")[2],
+    },
   };
 }
 
@@ -164,160 +169,27 @@ export function useCreditScore() {
 }
 
 /**
- * Fetch external accounts from ALL consented institutions (multi-bank).
- * Fires parallel fetches per authorized consent, merges results.
- * Each account is tagged with _sourceInstitution and _consentId.
+ * Fetch ALL cached external data (accounts, products, transactions) for the
+ * user in one round trip via the backend caching layer.
+ *
+ * The dashboard uses fetch-once-then-read-cache: on consent approval the
+ * consent listener calls fetch-and-cache; this hook then reads the durable
+ * cache, so the dashboard survives one-time-consent consumption and the
+ * sweeper-driven expiry model. Called ONCE per user, not per-consent.
+ *
+ * The cache returns raw BIAN source docs grouped by institution:
+ *   institutions[] -> { institution, consent_id, accounts[], products[], transactions[] }
+ * Accounts/products are already PascalCase (AccountBalance, ProductName, ...).
+ * Transactions are BIAN-shaped, so they run through normalizeTransaction here.
+ * Every row is tagged with _sourceInstitution and _consentId for per-bank badges.
+ *
+ * A partial payload (e.g. accounts + transactions but no products, when a
+ * consent lacks LOANS_READ) is normal — it never clears the consent.
  */
-export function useExternalAccounts() {
-  const { selectedUser, authorizedConsents, consentRefreshKey, removeConsent } =
-    useUser();
+export function useCachedExternalData() {
+  const { selectedUser, authorizedConsents, consentRefreshKey } = useUser();
   const [externalAccounts, setExternalAccounts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (
-      !selectedUser?.name ||
-      !selectedUser?.bearerToken ||
-      authorizedConsents.length === 0
-    ) {
-      setExternalAccounts([]);
-      return;
-    }
-    setLoading(true);
-
-    const fetchAll = async () => {
-      try {
-        const results = await Promise.all(
-          authorizedConsents.map(async ({ consentId, institution }) => {
-            const { data, error: err } = await coreApi(
-              "openfinance/secure/fetch-external-accounts-for-user/",
-              {
-                bearerToken: selectedUser.bearerToken,
-                params: {
-                  user_identifier: selectedUser.name,
-                  consent_id: consentId,
-                },
-              },
-            );
-            if (err) {
-              // 403 means consent is stale/revoked — remove it from context
-              if (err.startsWith("403")) {
-                removeConsent(consentId);
-              }
-              return [];
-            }
-            return (data?.accounts || []).map((a) => ({
-              ...a,
-              _sourceInstitution: institution,
-              _consentId: consentId,
-            }));
-          }),
-        );
-        setExternalAccounts(results.flat());
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedUser?.name,
-    selectedUser?.bearerToken,
-    authorizedConsents,
-    consentRefreshKey,
-  ]);
-
-  return { externalAccounts, loading, error };
-}
-
-/**
- * Fetch external products/loans from ALL consented institutions (multi-bank).
- * Fires parallel fetches per authorized consent, merges results.
- * Each product is tagged with _sourceInstitution and _consentId.
- */
-export function useExternalProducts() {
-  const { selectedUser, authorizedConsents, consentRefreshKey, removeConsent } =
-    useUser();
   const [externalProducts, setExternalProducts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (
-      !selectedUser?.name ||
-      !selectedUser?.bearerToken ||
-      authorizedConsents.length === 0
-    ) {
-      setExternalProducts([]);
-      return;
-    }
-    setLoading(true);
-
-    const fetchAll = async () => {
-      try {
-        const results = await Promise.all(
-          authorizedConsents.map(async ({ consentId, institution }) => {
-            const { data, error: err } = await coreApi(
-              "openfinance/secure/fetch-external-products-for-user/",
-              {
-                bearerToken: selectedUser.bearerToken,
-                params: {
-                  user_identifier: selectedUser.name,
-                  consent_id: consentId,
-                },
-              },
-            );
-            if (err) {
-              // 403 means consent is stale/revoked — remove it from context
-              if (err.startsWith("403")) {
-                removeConsent(consentId);
-              }
-              return [];
-            }
-            return (data?.products || []).map((p) => ({
-              ...p,
-              _sourceInstitution: institution,
-              _consentId: consentId,
-            }));
-          }),
-        );
-        setExternalProducts(results.flat());
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedUser?.name,
-    selectedUser?.bearerToken,
-    authorizedConsents,
-    consentRefreshKey,
-  ]);
-
-  return { externalProducts, loading, error };
-}
-
-/**
- * Fetch external transactions from ALL consented institutions (multi-bank).
- * Fires parallel fetches per authorized consent, merges results.
- * Each transaction is tagged with _sourceInstitution and _consentId.
- */
-export function useExternalTransactions() {
-  const {
-    selectedUser,
-    authorizedConsents,
-    consentRefreshKey,
-    removeConsent,
-    profile,
-  } = useUser();
   const [externalTransactions, setExternalTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -328,60 +200,107 @@ export function useExternalTransactions() {
       !selectedUser?.bearerToken ||
       authorizedConsents.length === 0
     ) {
+      setExternalAccounts([]);
+      setExternalProducts([]);
       setExternalTransactions([]);
       return;
     }
     setLoading(true);
+    let cancelled = false;
 
-    const fetchAll = async () => {
-      try {
-        const results = await Promise.all(
-          authorizedConsents.map(async ({ consentId, institution }) => {
-            const params = {
-              consent_id: consentId,
-            };
-            if (profile) params.profile = profile;
-
-            const { data, error: err } = await coreApi(
-              `openfinance/secure/customers/${selectedUser.name}/external-transactions`,
-              {
-                bearerToken: selectedUser.bearerToken,
-                params,
-              },
-            );
-            if (err) {
-              if (err.startsWith("403")) {
-                removeConsent(consentId);
-              }
-              return [];
-            }
-            return (data?.transactions || []).map((t) => ({
-              ...t,
-              _sourceInstitution:
-                institution || data?.source_institution || "External",
-              _consentId: consentId,
-            }));
-          }),
-        );
-        setExternalTransactions(results.flat());
-      } catch (e) {
-        setError(e.message);
-      } finally {
+    coreApi(
+      `openfinance/secure/customers/${selectedUser.name}/cached-data`,
+      { bearerToken: selectedUser.bearerToken },
+    ).then(({ data, error: err }) => {
+      if (cancelled) return;
+      if (err || !data?.institutions) {
+        if (err) setError(err);
+        setExternalAccounts([]);
+        setExternalProducts([]);
+        setExternalTransactions([]);
         setLoading(false);
+        return;
       }
-    };
 
-    fetchAll();
+      const accounts = [];
+      const products = [];
+      const transactions = [];
+      for (const inst of data.institutions) {
+        const tag = {
+          _sourceInstitution: inst.institution || "External",
+          _consentId: inst.consent_id,
+        };
+        for (const a of inst.accounts || []) accounts.push({ ...a, ...tag });
+        for (const p of inst.products || []) products.push({ ...p, ...tag });
+        for (const t of inst.transactions || [])
+          transactions.push({ ...normalizeTransaction(t), ...tag });
+      }
+
+      setExternalAccounts(accounts);
+      setExternalProducts(products);
+      setExternalTransactions(transactions);
+      setError(null);
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedUser?.name,
     selectedUser?.bearerToken,
     authorizedConsents,
     consentRefreshKey,
-    profile,
   ]);
 
-  return { externalTransactions, loading, error };
+  return { externalAccounts, externalProducts, externalTransactions, loading, error };
+}
+
+/**
+ * Server-computed global position: folds internal Leafy Bank balances with the
+ * cached external data into { total_balance, total_debt, net_worth, by_institution }.
+ * Requires an authorized consent and that fetch-and-cache has run (Phase 1).
+ * Returns null when there is no consent — callers fall back to internal-only math.
+ */
+export function useGlobalPosition() {
+  const { selectedUser, authorizedConsents, consentRefreshKey } = useUser();
+  const [position, setPosition] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (
+      !selectedUser?.name ||
+      !selectedUser?.bearerToken ||
+      authorizedConsents.length === 0
+    ) {
+      setPosition(null);
+      return;
+    }
+    setLoading(true);
+    let cancelled = false;
+
+    coreApi(
+      `openfinance/secure/customers/${selectedUser.name}/global-position`,
+      { bearerToken: selectedUser.bearerToken },
+    ).then(({ data, error }) => {
+      if (cancelled) return;
+      setPosition(error ? null : data);
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedUser?.name,
+    selectedUser?.bearerToken,
+    authorizedConsents,
+    consentRefreshKey,
+  ]);
+
+  return { position, loading };
 }
 
 // ────────────────────────────────────────────────────────────
@@ -399,9 +318,12 @@ import { formatDate, txCategory } from "./format";
 export function useHomeData() {
   const { accounts, loading: accountsLoading } = useAccounts();
   const { creditScore } = useCreditScore();
-  const { externalProducts } = useExternalProducts();
+  const { externalProducts } = useCachedExternalData();
+  const { position } = useGlobalPosition();
 
-  const totalBalance = accounts
+  // Internal-only totals — used as the no-consent fallback and before the
+  // server-side global position has loaded.
+  const internalBalance = accounts
     .filter((a) => a.AccountBalance > 0)
     .reduce((sum, a) => sum + a.AccountBalance, 0);
 
@@ -413,6 +335,11 @@ export function useHomeData() {
     (sum, p) => sum + (p.ProductBalance || 0),
     0,
   );
+
+  // Prefer the server-computed global position (folds internal + cached external);
+  // fall back to client-side internal + external math when it is unavailable.
+  const totalBalance = position?.total_balance ?? internalBalance;
+  const totalDebt = position?.total_debt ?? internalDebt + externalDebt;
 
   const bankAccounts = accounts.filter(
     (a) => a.AccountType === "Checking" || a.AccountType === "Savings",
@@ -428,7 +355,7 @@ export function useHomeData() {
 
   return {
     totalBalance,
-    totalDebt: internalDebt + externalDebt,
+    totalDebt,
     bankAccounts,
     creditCards,
     creditScore,
@@ -445,9 +372,11 @@ export function useHomeData() {
 export function useAccountsPageData() {
   const { accounts, loading: accountsLoading } = useAccounts();
   const { transactions, loading: txLoading } = useTransactions();
-  const { externalAccounts } = useExternalAccounts();
-  const { externalTransactions, loading: extTxLoading } =
-    useExternalTransactions();
+  const {
+    externalAccounts,
+    externalTransactions,
+    loading: extTxLoading,
+  } = useCachedExternalData();
 
   const bankAccounts = accounts
     .filter((a) => a.AccountType === "Checking" || a.AccountType === "Savings")
@@ -511,9 +440,11 @@ export function useAccountsPageData() {
 export function useCreditCardsPageData() {
   const { accounts, loading: accountsLoading } = useAccounts();
   const { transactions, loading: txLoading } = useTransactions();
-  const { externalAccounts } = useExternalAccounts();
-  const { externalTransactions, loading: extTxLoading } =
-    useExternalTransactions();
+  const {
+    externalAccounts,
+    externalTransactions,
+    loading: extTxLoading,
+  } = useCachedExternalData();
 
   const internalCards = accounts
     .filter((a) => a.AccountType === "CreditCard")
@@ -583,7 +514,7 @@ export function useCreditCardsPageData() {
  */
 export function useLoansPageData() {
   const { hasActiveConsent } = useUser();
-  const { externalProducts, loading } = useExternalProducts();
+  const { externalProducts, loading } = useCachedExternalData();
 
   const loanCards = externalProducts.map((p) => ({
     title: p.ProductName || p.ProductType || "Loan",
