@@ -35,7 +35,9 @@ const BACKEND_BY_PREFIX = {
 
 async function proxy(request, { params }) {
   const { path } = await params;
-  let backendPath = `/${path.join("/")}`;
+  // coreApi paths are documented as "after /api/v1/" (see client.js); all
+  // backend services mount under /api/v1, so prepend it here.
+  let backendPath = `/api/v1/${path.join("/")}`;
 
   // Preserve trailing slash for FastAPI (avoids 307 redirects)
   if (request.nextUrl.pathname.endsWith("/")) {
