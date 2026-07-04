@@ -318,7 +318,7 @@ import { formatDate, txCategory } from "./format";
 export function useHomeData() {
   const { accounts, loading: accountsLoading } = useAccounts();
   const { creditScore } = useCreditScore();
-  const { externalProducts } = useCachedExternalData();
+  const { externalAccounts, externalProducts } = useCachedExternalData();
   const { position } = useGlobalPosition();
 
   // Internal-only totals — used as the no-consent fallback and before the
@@ -341,11 +341,37 @@ export function useHomeData() {
   const totalBalance = position?.total_balance ?? internalBalance;
   const totalDebt = position?.total_debt ?? internalDebt + externalDebt;
 
-  const bankAccounts = accounts.filter(
-    (a) => a.AccountType === "Checking" || a.AccountType === "Savings",
-  );
+  // Internal Leafy Bank accounts + external accounts pulled via consent.
+  // External docs are already PascalCase (AccountType/Number/Bank/Balance) and
+  // carry _sourceInstitution as their bank tag, so they need no remapping —
+  // just fall back to the tag for the badge when AccountBank is absent.
+  const isCheckingOrSavings = (a) =>
+    a.AccountType === "Checking" || a.AccountType === "Savings";
 
-  const creditCards = accounts.filter((a) => a.AccountType === "CreditCard");
+  const externalBankAccounts = externalAccounts
+    .filter(isCheckingOrSavings)
+    .map((a) => ({ ...a, AccountBank: a.AccountBank || a._sourceInstitution }));
+
+  const bankAccounts = [
+    ...accounts.filter(isCheckingOrSavings),
+    ...externalBankAccounts,
+  ];
+
+  // Internal credit cards + external cards pulled via consent. External card
+  // docs use AccountType "CreditCard" (or Acct.Tp "CARD"); they're PascalCase
+  // like the accounts above, so tag the bank from _sourceInstitution when absent.
+  const isCreditCard = (a) =>
+    (a.AccountType || "").toUpperCase() === "CREDITCARD" ||
+    (a.Acct?.Tp || "") === "CARD";
+
+  const externalCreditCards = externalAccounts
+    .filter(isCreditCard)
+    .map((a) => ({ ...a, AccountBank: a.AccountBank || a._sourceInstitution }));
+
+  const creditCards = [
+    ...accounts.filter((a) => a.AccountType === "CreditCard"),
+    ...externalCreditCards,
+  ];
 
   const loans = externalProducts.map((p) => ({
     name: p.ProductName || p.ProductType || "Loan",
