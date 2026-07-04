@@ -8,10 +8,10 @@ Leafy Bank is a **BIAN v14-aligned** core-banking reference built as three FastA
 
 ### BIAN Service Domains implemented
 
-| Service                 | BIAN Service Domain                                                        | Responsibility                                               |
-| ----------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Service                       | BIAN Service Domain                                                            | Responsibility                                               |
+| ----------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------ |
 | **accounts** (8001)     | `PartyReferenceDataDirectoryEntry`, `CurrentAccountFulfillmentArrangement` | Customers + KYC, account lifecycle, source-of-truth balances |
-| **transactions** (8002) | `PaymentOrderInitiation`                                                    | Payments/transfers as one multi-doc ACID settlement          |
+| **transactions** (8002) | `PaymentOrderInitiation`                                                     | Payments/transfers as one multi-doc ACID settlement          |
 | **ledger** (8003)       | `FinancialAccounting` / `FinancialBookingLog`                              | Async double-entry general-ledger pipeline                   |
 
 ### The two-phase money flow
@@ -21,17 +21,17 @@ Leafy Bank is a **BIAN v14-aligned** core-banking reference built as three FastA
 
 ### MongoDB collections (`leafy_bank_bian`)
 
-| Collection         | Backs BIAN object                    | Notes                                                        |
-| ------------------ | ------------------------------------ | ------------------------------------------------------------ |
-| `customers`        | PartyReferenceDataDirectoryEntry     | Customer master + nested KYC                                 |
-| `accounts`         | CurrentAccountFulfillmentArrangement | Source-of-truth balances                                     |
-| `payments`         | PaymentOrderInitiation                | Payment orders, status PENDING → SETTLED                     |
-| `transactions`     | —                                    | Settled payment legs (business fact, no GL legs)             |
-| `notifications`    | —                                    | Sender-side notifications                                    |
+| Collection           | Backs BIAN object                    | Notes                                                          |
+| -------------------- | ------------------------------------ | -------------------------------------------------------------- |
+| `customers`        | PartyReferenceDataDirectoryEntry     | Customer master + nested KYC                                   |
+| `accounts`         | CurrentAccountFulfillmentArrangement | Source-of-truth balances                                       |
+| `payments`         | PaymentOrderInitiation               | Payment orders, status PENDING → SETTLED                      |
+| `transactions`     | —                                   | Settled payment legs (business fact, no GL legs)               |
+| `notifications`    | —                                   | Sender-side notifications                                      |
 | `ledgerEvents`     | FinancialBookingLog                  | Stage ①: debit + credit legs, postingStatus PENDING → POSTED |
-| `subLedgerEntries` | FinancialAccounting                  | Stage ②: two entries per event (DR + CR)                     |
-| `journalEntries`   | FinancialAccounting                  | Stage ③: batched, balanced (Pacioli enforced)                |
-| `glAccounts`       | FinancialAccounting                  | Chart of accounts                                            |
+| `subLedgerEntries` | FinancialAccounting                  | Stage ②: two entries per event (DR + CR)                      |
+| `journalEntries`   | FinancialAccounting                  | Stage ③: batched, balanced (Pacioli enforced)                 |
+| `glAccounts`       | FinancialAccounting                  | Chart of accounts                                              |
 
 ## Where Does MongoDB Shine?
 
@@ -41,7 +41,7 @@ This modern **microservices architecture** splits functionalities across differe
 
 ### 1. **Accounts Service**
 
-**[Accounts Service Repository](backend/accounts/)**
+**[Accounts Service](backend/accounts/)**
 This service handles account operations. MongoDB excels here by offering a **flexible schema**, allowing the system to adapt to evolving account data structures without requiring disruptive migrations. Its scalability and adaptability ensure real-time updates and a seamless account management experience.
 
 ![accounts diagram](diagrams/accounts_diagram.png)
@@ -50,7 +50,7 @@ This service handles account operations. MongoDB excels here by offering a **fle
 
 ### 2. **Transactions Service**
 
-**[Transactions Service Repository](backend/transactions/)**
+**[Transactions Service](backend/transactions/)**
 Responsible for handling digital payments and account-to-account transfers, this service uses MongoDB’s **multi-document ACID transactions** to ensure reliable and consistent financial operations. This guarantees the integrity and correctness of data across multiple collections, making MongoDB a trusted choice for critical workflows within banking systems.
 
 ![transactions diagram](diagrams/transactions_diagram.png)
@@ -59,7 +59,7 @@ Responsible for handling digital payments and account-to-account transfers, this
 
 ### 3. **Ledger Service**
 
-**[Ledger Service Repository](backend/ledger/)**
+**[Ledger Service](backend/ledger/)**
 Powers the asynchronous general-ledger pipeline behind every payment. MongoDB **change streams** let this service react to settled transactions in real time — without polling — feeding an event-driven flow that projects double-entry sub-ledger entries and rolls them up into journal entries. Combined with **multi-document ACID transactions** to keep debits and credits balanced and **aggregation pipelines** for periodic batch posting, MongoDB delivers the consistency and event-driven processing that core accounting systems demand.
 
 ---
@@ -90,8 +90,8 @@ Before you begin, ensure you have the following:
 
 Sample data ships in `backend/data/sample/`. Import each file into the `leafy_bank_bian` database with [MongoDB Compass](https://www.mongodb.com/products/tools/compass) or `mongoimport`:
 
-| File                                | Collection     |
-| ----------------------------------- | -------------- |
+| File                                  | Collection       |
+| ------------------------------------- | ---------------- |
 | `leafy_bank_bian.customers.json`    | `customers`    |
 | `leafy_bank_bian.accounts.json`     | `accounts`     |
 | `leafy_bank_bian.transactions.json` | `transactions` |
@@ -129,13 +129,13 @@ CORE_BACKEND_URL="http://localhost:8000"
 
 ### Services and ports
 
-| Service      | Port | Notes                                                                            |
-| ------------ | ---- | -------------------------------------------------------------------------------- |
-| accounts     | 8001 | BIAN `PartyReferenceDataDirectoryEntry` + `CurrentAccountFulfillmentArrangement` |
-| transactions | 8002 | BIAN `PaymentOrderInitiation` (synchronous ACID settlement)                       |
-| ledger       | 8003 | BIAN `FinancialAccounting` + `/pipeline` monitor routes                          |
-| bian-model   | 8004 | BIAN data-model explorer (Next.js), linked from the NavBar                       |
-| frontend     | 3000 | Next.js UI                                                                       |
+| Service      | Port | Notes                                                                               |
+| ------------ | ---- | ----------------------------------------------------------------------------------- |
+| accounts     | 8001 | BIAN`PartyReferenceDataDirectoryEntry` + `CurrentAccountFulfillmentArrangement` |
+| transactions | 8002 | BIAN`PaymentOrderInitiation` (synchronous ACID settlement)                        |
+| ledger       | 8003 | BIAN`FinancialAccounting` + `/pipeline` monitor routes                          |
+| bian-model   | 8004 | BIAN data-model explorer (Next.js), linked from the NavBar                          |
+| frontend     | 3000 | Next.js UI                                                                          |
 
 > The optional [Open Finance Service](https://github.com/mongodb-industry-solutions/leafy-bank-backend-openfinance) (external-bank aggregation) is out of scope for the BIAN flow; the proxy falls back to `CORE_BACKEND_URL` for its routes.
 
@@ -157,7 +157,7 @@ make setup
 make dev
 ```
 
-This frees the dev ports, then starts the accounts, transactions, and ledger backends plus the frontend together. Open <http://localhost:3000>.
+This frees the dev ports, then starts the accounts, transactions, and ledger backends plus the frontend together. Open [http://localhost:3000](http://localhost:3000).
 
 You can also run pieces individually:
 
