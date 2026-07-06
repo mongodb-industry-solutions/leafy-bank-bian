@@ -16,6 +16,7 @@ from services.journal_service import (
     build_journal_entry,
     post_realtime_event,
     run_batch,
+    sweep_stale_realtime_postings,
 )
 from shared.coa_cache import ChartOfAccounts
 
@@ -413,3 +414,70 @@ def test_run_batch_excludes_realtime_events(monkeypatch):
     write_called.assert_not_called()
     # The BATCH-only filter must be applied against ledgerEvents.
     assert le_coll.find.call_args[0][0]["postingMode.type"] == "BATCH"
+
+
+# --- sweep_stale_realtime_postings ---------------------------------------------
+
+def test_sweep_posts_stale_realtime_event(monkeypatch):
+    sl_coll = MagicMock()
+    sl_coll.distinct.return_value = ["LE-stale-rt"]
+    le_coll = MagicMock()
+    le_coll.find.return_value = iter([{"eventId": "LE-stale-rt"}])
+
+    posted = MagicMock(return_value=True)
+    monkeypatch.setattr(journal_service, "post_realtime_event", posted)
+
+    count = sweep_stale_realtime_postings(_dispatch_conn(sl_coll, le_coll), "test_db")
+
+    assert count == 1
+    posted.assert_called_once()
+    # The REALTIME/NEAR_REALTIME filter must be applied against ledgerEvents.
+    assert le_coll.find.call_args[0][0]["postingMode.type"]["$in"] == ["REALTIME", "NEAR_REALTIME"]
+
+
+def test_sweep_excludes_stale_batch_event(monkeypatch):
+    sl_coll = MagicMock()
+    sl_coll.distinct.return_value = ["LE-stale-batch"]
+    le_coll = MagicMock()
+    le_coll.find.return_value = iter([])  # BATCH event filtered out by ledgerEvents.find
+
+    posted = MagicMock()
+    monkeypatch.setattr(journal_service, "post_realtime_event", posted)
+
+    count = sweep_stale_realtime_postings(_dispatch_conn(sl_coll, le_coll), "test_db")
+
+    assert count == 0
+    posted.assert_not_called()
+
+
+def test_sweep_skips_when_nothing_stale(monkeypatch):
+    sl_coll = MagicMock()
+    sl_coll.distinct.return_value = []
+    le_coll = MagicMock()
+
+    posted = MagicMock()
+    monkeypatch.setattr(journal_service, "post_realtime_event", posted)
+
+    count = sweep_stale_realtime_postings(_dispatch_conn(sl_coll, le_coll), "test_db")
+
+    assert count == 0
+    posted.assert_not_called()
+    le_coll.find.assert_not_called()
+
+
+def test_sweep_continues_after_one_event_fails(monkeypatch):
+    sl_coll = MagicMock()
+    sl_coll.distinct.return_value = ["LE-bad", "LE-good"]
+    le_coll = MagicMock()
+    le_coll.find.return_value = iter([{"eventId": "LE-bad"}, {"eventId": "LE-good"}])
+
+    def _fake_post(event_id, *args, **kwargs):
+        if event_id == "LE-bad":
+            raise RuntimeError("boom")
+        return True
+
+    monkeypatch.setattr(journal_service, "post_realtime_event", _fake_post)
+
+    count = sweep_stale_realtime_postings(_dispatch_conn(sl_coll, le_coll), "test_db")
+
+    assert count == 1

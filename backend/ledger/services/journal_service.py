@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 
 from bson import Int64, ObjectId
@@ -31,6 +31,13 @@ _UNJOURNALED = ""
 _SOURCE_SYSTEM = "GL_BATCH_PIPELINE"
 _SOURCE_TYPE_BATCH = "BATCH_POSTING"
 _SOURCE_TYPE_REALTIME = "REALTIME_POSTING"
+
+REALTIME_POSTING_MODE_TYPES = ("REALTIME", "NEAR_REALTIME")
+
+# Safety-net threshold for sweep_stale_realtime_postings: how long a REALTIME
+# subledger leg pair may sit un-journaled before gl_batch treats it as missed
+# by realtime_posting_worker (e.g. a lost resume token) and posts it itself.
+_DEFAULT_STALE_REALTIME_SECONDS = 120
 
 
 def _now_utc() -> datetime:
@@ -348,3 +355,55 @@ def run_batch(
         except Exception:
             logger.exception("unexpected error batch=%s period=%s", batch_id, period_code)
     return written
+
+
+def sweep_stale_realtime_postings(
+    connection: MongoDBConnection,
+    db_name: str,
+    coa: Optional["ChartOfAccounts"] = None,
+    stale_after_seconds: int = _DEFAULT_STALE_REALTIME_SECONDS,
+) -> int:
+    """Safety net for REALTIME events realtime_posting_worker failed to journal.
+
+    gl_batch never aggregates REALTIME events (see the postingMode routing filter
+    in run_batch above), so if realtime_posting_worker's change stream ever loses
+    its resume token, an un-journaled REALTIME leg pair would otherwise sit in
+    subLedgerEntries forever with no worker responsible for it. This sweep finds
+    any such leg pairs older than `stale_after_seconds` and posts them itself via
+    post_realtime_event — the same per-transaction journal the dedicated worker
+    would have written. Returns the count of journals posted.
+    """
+    sl_coll = connection.get_collection(db_name, "subLedgerEntries")
+    le_coll = connection.get_collection(db_name, "ledgerEvents")
+
+    cutoff = (_now_utc() - timedelta(seconds=stale_after_seconds)).isoformat()
+    stale_event_ids = sl_coll.distinct(
+        "sourceReference.sourceId",
+        {"status": "POSTED", "journalEntryId": _UNJOURNALED, "postingDate": {"$lt": cutoff}},
+    )
+    if not stale_event_ids:
+        return 0
+
+    # A stale-looking BATCH event is normal (it's waiting for the next gl_batch
+    # window) — only REALTIME/NEAR_REALTIME events are this sweep's concern.
+    realtime_event_ids = [
+        d["eventId"]
+        for d in le_coll.find(
+            {"eventId": {"$in": stale_event_ids}, "postingMode.type": {"$in": list(REALTIME_POSTING_MODE_TYPES)}},
+            {"eventId": 1},
+        )
+    ]
+
+    posted = 0
+    for event_id in realtime_event_ids:
+        try:
+            if post_realtime_event(event_id, connection, db_name, coa=coa):
+                posted += 1
+                logger.warning(
+                    "gl_batch safety net posted stale REALTIME event %s "
+                    "(realtime_posting_worker did not journal it in time)",
+                    event_id,
+                )
+        except Exception:
+            logger.exception("safety-net realtime post failed for eventId=%s", event_id)
+    return posted

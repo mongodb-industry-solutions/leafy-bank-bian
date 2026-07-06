@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from database.connection import MongoDBConnection
-from services.journal_service import run_batch
+from services.journal_service import run_batch, sweep_stale_realtime_postings
 from services.reconciliation_service import reconcile_all_accounts
 from shared.coa_cache import ChartOfAccounts
 
@@ -55,6 +55,13 @@ def run_one_cycle(connection: MongoDBConnection, db_name: str, coa: ChartOfAccou
 
     Returns: {"skipped": bool, "written": int, "reason": str | None}
     """
+    # Independent of the reconciliation gate below: catches REALTIME events
+    # realtime_posting_worker missed (e.g. a lost resume token), so it must run
+    # even on a cycle where the batch itself is skipped.
+    swept = sweep_stale_realtime_postings(connection, db_name, coa=coa)
+    if swept:
+        logger.warning("gl_batch safety net posted %d stale REALTIME journal(s)", swept)
+
     if not _reconcile(connection, db_name):
         return {"skipped": True, "written": 0, "reason": "pre-batch reconciliation break"}
     written = run_batch(connection, db_name, coa=coa)
