@@ -101,12 +101,63 @@
   padding: 4px 12px;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  cursor: default;
+  cursor: pointer;
 }
+.user-info-container:hover { background: #f9fafb; }
 .user-avatar { width: 40px; height: 40px; object-fit: cover; display: block; }
 .user-details { display: flex; flex-direction: column; gap: 4px; height: 40px; margin-top: 4px; }
 .user-name { font-size: 13px; font-weight: 500; color: #0f172a; line-height: 1.3; }
 .user-role { font-size: 10px; color: #888; line-height: 1.2; }
+.switch-user-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #5c6c75;
+  cursor: pointer;
+  transition: background .15s ease-in-out, color .15s ease-in-out, border-color .15s ease-in-out;
+}
+.switch-user-btn:hover { background: #f0fdf4; color: #00684a; border-color: #86efac; }
+
+/* User details modal (opened by clicking the user block) */
+.user-modal-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+.user-image-modal { border-radius: 50%; object-fit: cover; }
+.user-tags { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.user-tag {
+  background: #f3f4f6;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: center;
+}
+.switch-user-modal-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+  padding: 8px 16px;
+  margin-top: 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  transition: background .15s, border-color .15s;
+}
+.switch-user-modal-btn:hover { background: #f9fafb; border-color: #9ca3af; }
 
 /* ── healthbar.css ── */
 .healthbar {
