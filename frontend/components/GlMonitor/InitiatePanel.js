@@ -90,15 +90,31 @@ export default function InitiatePanel({ onFired, onRefresh }) {
         {!collapsed && (
           <div className={styles["panel-body"]}>
             <div style={{ marginBottom: 4 }}>
-              <div className={styles["field-label"]} style={{ marginBottom: 8 }}>Quick presets</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {PRESETS.map((p, i) => (
+              <div className={styles["field-label"]} style={{ marginBottom: 8 }}>
+                Real-time presets <span style={{ textTransform: "none", fontWeight: 400, color: "var(--text-xs)" }}>— rail WIRE/INTERNAL</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+                {PRESETS.map((p, i) => [p, i]).filter(([p]) => p.mode === "REALTIME").map(([p, i]) => (
                   <button
                     key={i}
                     className={styles["preset-btn"]}
                     disabled={busy === i}
                     onClick={() => firePreset(i)}
                   >💰 {p.label}{busy === i ? " …" : ""}</button>
+                ))}
+              </div>
+
+              <div className={styles["field-label"]} style={{ marginBottom: 8 }}>
+                Batch presets <span style={{ textTransform: "none", fontWeight: 400, color: "var(--text-xs)" }}>— rail ACH/VENMO/PAYPAL</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {PRESETS.map((p, i) => [p, i]).filter(([p]) => p.mode === "BATCH").map(([p, i]) => (
+                  <button
+                    key={i}
+                    className={styles["preset-btn"]}
+                    disabled={busy === i}
+                    onClick={() => firePreset(i)}
+                  >🏦 {p.label}{busy === i ? " …" : ""}</button>
                 ))}
                 <button
                   className={`${styles["preset-btn"]} ${styles["preset-btn-action"]}`}
