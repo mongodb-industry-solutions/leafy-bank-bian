@@ -272,6 +272,8 @@ def trace_payment(
         if journal_id:
             journal_entry = jnl_coll.find_one({"journalId": journal_id}, {"_id": 0})
 
+    posting_mode = (ledger_event or {}).get("postingMode", {}).get("type")
+
     return {
         "paymentId": payment_id,
         "payment": payment,
@@ -279,4 +281,5 @@ def trace_payment(
         "ledgerEvent": ledger_event,
         "subLedgerEntries": subledger_entries,
         "journalEntry": journal_entry,
+        "postingMode": posting_mode,
     }

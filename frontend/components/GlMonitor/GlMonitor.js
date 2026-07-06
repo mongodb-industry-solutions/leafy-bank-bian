@@ -19,7 +19,6 @@ import InitiatePanel from "./InitiatePanel";
 import PaymentTrace from "./PaymentTrace";
 import PipelineColumns from "./PipelineColumns";
 import PipelineStepper from "./PipelineStepper";
-import Toolbar from "./Toolbar";
 
 const EMPTY_COL = { items: [], count: "—", loading: false, error: null };
 const DETAIL_BG = {
@@ -180,13 +179,6 @@ export default function GlMonitor() {
           <PaymentTrace />
         ) : (
           <>
-            <Toolbar
-              period={period}
-              status={status}
-              onPeriodChange={setPeriod}
-              onStatusChange={setStatus}
-              onRefresh={refreshAll}
-            />
             <InitiatePanel onFired={refreshAll} onRefresh={refreshAll} />
             <PipelineStepper />
             <PipelineColumns
