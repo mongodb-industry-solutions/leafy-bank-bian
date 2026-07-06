@@ -5,17 +5,17 @@
 // first (establishes the batch window), then fan out to the four columns.
 // Reads flow through the /api/backend/pipeline proxy (pipelineApi).
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { SegmentedControl, SegmentedControlOption } from "@leafygreen-ui/segmented-control";
 import styles from "./GlMonitor.module.css";
 import { pipelineApi } from "@/lib/api/client";
 import { buildParams } from "@/lib/glMonitor/format";
 import { filterByBatch } from "@/lib/glMonitor/batch";
 import TopBar from "./TopBar";
-import HealthBar from "./HealthBar";
-import Toolbar from "./Toolbar";
 import InitiatePanel from "./InitiatePanel";
 import PipelineStepper from "./PipelineStepper";
 import PipelineColumns from "./PipelineColumns";
 import DetailPanel from "./DetailPanel";
+import PaymentTrace from "./PaymentTrace";
 
 const EMPTY_COL = { items: [], count: "—", loading: false, error: null };
 const DETAIL_BG = { tx: "var(--col1)", le: "var(--col2)", sl: "var(--col3)", jn: "var(--col4)" };
@@ -35,6 +35,7 @@ export default function GlMonitor() {
   const [columns, setColumns] = useState({ tx: EMPTY_COL, le: EMPTY_COL, sl: EMPTY_COL, jn: EMPTY_COL });
   const [selected, setSelected] = useState({ col: null, idx: null });
   const [detail, setDetail] = useState({ open: false });
+  const [tab, setTab] = useState(0);
 
   // Latest filter values, read inside async fetchers to avoid stale closures.
   const filtersRef = useRef({ period, status });
@@ -104,21 +105,42 @@ export default function GlMonitor() {
     setSelected({ col: null, idx: null });
   };
 
+  // Jump from a Transactions card's LE chip to the matching Ledger Event card:
+  // highlight + open its detail + scroll it into view.
+  const onJumpToLe = (eventId) => {
+    const items = columns.le.items || [];
+    const idx = items.findIndex((e) => e.eventId === eventId);
+    if (idx < 0) return;
+    onSelect("le", idx, items[idx]);
+    const el = document.getElementById(`le-row-${eventId}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   return (
     <div className={styles.glMonitorRoot}>
-      <TopBar dbName={health?.dbName} live={live} />
-      <HealthBar health={health} statusText={healthStatus} />
-      <Toolbar
-        period={period}
-        status={status}
-        onPeriodChange={setPeriod}
-        onStatusChange={setStatus}
-        onRefresh={refreshAll}
-      />
-      <InitiatePanel onFired={refreshAll} />
-      <PipelineStepper />
-      <PipelineColumns columns={columns} selected={selected} onSelect={onSelect} />
-      <DetailPanel detail={detail} onClose={closeDetail} />
+      <TopBar live={live} />
+      <div className={styles["gl-tabs"]}>
+        <div className={styles["gl-mode-switch"]}>
+          <SegmentedControl
+            name="gl-mode"
+            value={String(tab)}
+            onChange={(v) => setTab(Number(v))}
+          >
+            <SegmentedControlOption value="0">Payment Trace</SegmentedControlOption>
+            <SegmentedControlOption value="1">Pipeline Monitor</SegmentedControlOption>
+          </SegmentedControl>
+        </div>
+        {tab === 0 ? (
+          <PaymentTrace />
+        ) : (
+          <>
+            <InitiatePanel onFired={refreshAll} onRefresh={refreshAll} />
+            <PipelineStepper />
+            <PipelineColumns columns={columns} selected={selected} onSelect={onSelect} onJumpToLe={onJumpToLe} />
+            <DetailPanel detail={detail} onClose={closeDetail} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import styles from "./GlMonitor.module.css";
 
 // The base-URL field is kept for visual parity with the static reference, but
 // data now flows through the Next.js /api/backend proxy, so it is display-only.
-export default function TopBar({ dbName, live }) {
+export default function TopBar({ live }) {
   return (
     <div className={styles.topbar}>
       <div className={styles["topbar-left"]}>
@@ -13,13 +13,7 @@ export default function TopBar({ dbName, live }) {
         </div>
       </div>
 
-      <div className={styles["topbar-center"]}>
-        <span className={styles["topbar-title"]}>GL Pipeline Monitor</span>
-      </div>
-
       <div className={styles["topbar-right"]}>
-        <input className={styles.baseUrlInput} type="text" defaultValue="/api/backend/pipeline" placeholder="proxy" title="Ledger backend (via proxy)" readOnly />
-        <div className={styles["db-badge"]}>{dbName || "—"}</div>
         <div
           className={styles["live-dot"]}
           title="Live"
