@@ -4,14 +4,12 @@ Change stream on `ledgerEvents` inserts. For each event, fans out into two
 subLedgerEntries (DEBIT + CREDIT) and stamps ledgerEvents.postingResult.
 Idempotent via unique idempotencyKey per sub-ledger entry.
 
-For REALTIME/NEAR_REALTIME events, also performs Stage ③ inline right after
-the subledger write: posts one per-transaction journal immediately instead of
-waiting for gl_batch. This used to be a separate change-stream worker
-(realtime_posting_worker) reacting to the update this function makes — folded
-in here since it only needs data this function already has in hand, and doing
-so removes a second change stream / resume token and the failure window where
-a lost realtime-worker resume token could strand REALTIME events in PENDING
-forever (gl_batch never picks up BATCH-only events).
+Stage ③ (journal posting) is handled elsewhere: realtime_posting_worker reacts
+to the postingResult update this function makes for REALTIME/NEAR_REALTIME
+events, and gl_batch's scheduled sweep aggregates BATCH events. If
+realtime_posting_worker's resume token is ever lost, gl_batch.
+sweep_stale_realtime_postings is the fallback that rescues any REALTIME event
+left un-journaled.
 
 Resume token persisted in `changeStreamTokens`.
 """
@@ -24,10 +22,9 @@ import time
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from pymongo.errors import BulkWriteError, DuplicateKeyError, OperationFailure
+from pymongo.errors import BulkWriteError, OperationFailure
 
 from database.connection import MongoDBConnection
-from services.journal_service import post_realtime_event
 from services.subledger_service import build_subledger_entries, write_subledger_entries
 from shared.coa_cache import ChartOfAccounts
 
@@ -109,19 +106,6 @@ def process_ledger_event(
     except (ValueError, BulkWriteError) as e:
         _mark_failed(event_id, str(e), connection, db_name)
         return
-
-    if event.get("postingMode", {}).get("type") in ("REALTIME", "NEAR_REALTIME"):
-        try:
-            post_realtime_event(event_id, connection, db_name, coa=coa)
-        except DuplicateKeyError:
-            logger.info("realtime journal already exists for eventId=%s; skipping", event_id)
-        except Exception:
-            # A Stage-③ failure here must not be conflated with a Stage-② failure —
-            # the subledger legs already posted successfully. Leave postingStatus
-            # PENDING; gl_batch does not pick up REALTIME events, so this needs a
-            # manual/administrative retry, but it's a visible PENDING event rather
-            # than a silently dropped one.
-            logger.exception("realtime journal post failed for eventId=%s; leaving PENDING", event_id)
 
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:
