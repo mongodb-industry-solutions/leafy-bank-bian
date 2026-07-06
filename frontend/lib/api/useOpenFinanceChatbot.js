@@ -2,7 +2,7 @@
 
 import { useUser } from "@/lib/context/UserContext";
 import { marked } from "marked";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openFinanceChatApi } from "./client";
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -19,6 +19,37 @@ export function useOpenFinanceChatbot() {
   const [sending, setSending] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const threadIdRef = useRef(null);
+  const seenBroadcastsRef = useRef(new Set());
+
+  // The bank-login tab runs the login → consent → resume flow, then broadcasts
+  // the agent's post-consent reply on "leafy-bank-consent". Render it here so
+  // the chat advances past the "action required" interrupt bubble.
+  useEffect(() => {
+    const channel = new BroadcastChannel("leafy-bank-consent");
+
+    channel.onmessage = (event) => {
+      const msg = event.data;
+      if (msg?.type !== "consent_complete" && msg?.type !== "consent_declined") {
+        return;
+      }
+      if (msg._broadcastId && seenBroadcastsRef.current.has(msg._broadcastId)) {
+        return;
+      }
+      if (msg._broadcastId) seenBroadcastsRef.current.add(msg._broadcastId);
+
+      setMessages((prev) => {
+        // Replace the trailing interrupt bubble with the agent's reply.
+        const next = prev.filter((m) => m.type !== "interrupt");
+        if (msg.response) {
+          next.push({ type: "assistant", text: msg.response });
+        }
+        return next;
+      });
+      setSuggestions(msg.suggestions?.length ? msg.suggestions : []);
+    };
+
+    return () => channel.close();
+  }, []);
 
   async function handleSend(overrideText) {
     const text = overrideText || inputValue.trim();
@@ -47,6 +78,14 @@ export function useOpenFinanceChatbot() {
       threadIdRef.current = data.thread_id;
 
       if (data.interrupt) {
+        if (data.interrupt.type === "BANK_LOGIN") {
+          const params = new URLSearchParams({
+            consent_id: data.interrupt.consent_id || "",
+            institution_name: data.interrupt.institution_name || "",
+            thread_id: data.thread_id || "",
+          });
+          window.open(`/bank-login?${params.toString()}`, "_blank");
+        }
         setMessages((prev) => [
           ...prev,
           {

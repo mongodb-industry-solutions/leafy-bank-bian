@@ -10,7 +10,13 @@ import styles from './User.module.css';
 const User = ({ user = null, isSelectedUser = false, setOpen, setLocalSelectedUser = null }) => {
     const handleClick = () => {
         if (user.url) {
-            window.open(user.url, '_blank');
+            // Internal routes (relative paths) navigate in the same tab;
+            // external demo links open in a new tab.
+            if (user.url.startsWith('/')) {
+                window.location.href = user.url;
+            } else {
+                window.open(user.url, '_blank');
+            }
             return;
         }
         if (!setLocalSelectedUser) return;

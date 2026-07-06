@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { coreApi, chatStream } from "./client";
+import { coreApi, openFinanceChatStream } from "./client";
 import { useUser } from "@/lib/context/UserContext";
 
 export function useBankLogin({ consentId, institutionName, threadId }) {
@@ -108,11 +108,10 @@ export function useBankLogin({ consentId, institutionName, threadId }) {
     setStatusText("Authenticating with bank...");
 
     try {
-      const res = await chatStream("chat/stream/resume", {
+      const res = await openFinanceChatStream("chat/stream/resume", {
         thread_id: threadId,
         user_id: selectedUser.name,
         resume_data: { status: "success" },
-        profile: null,
       });
       await processSSEForConsent(res);
     } catch (e) {
@@ -129,11 +128,10 @@ export function useBankLogin({ consentId, institutionName, threadId }) {
     setStatusText(approved ? "Approving consent..." : "Declining consent...");
 
     try {
-      const res = await chatStream("chat/stream/resume", {
+      const res = await openFinanceChatStream("chat/stream/resume", {
         thread_id: threadId,
         user_id: selectedUser.name,
         resume_data: { approved },
-        profile: null,
       });
 
       // Parse SSE stream to extract the final AI response and suggestions
