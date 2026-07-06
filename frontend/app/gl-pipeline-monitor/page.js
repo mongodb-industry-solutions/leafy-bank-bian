@@ -1,3 +1,4 @@
+import styles from "./page.module.css";
 import GlMonitor from "@/components/GlMonitor/GlMonitor";
 
 export const metadata = {
@@ -5,5 +6,9 @@ export const metadata = {
 };
 
 export default function GlMonitorPage() {
-  return <GlMonitor />;
+  return (
+    <main className={styles.container}>
+      <GlMonitor />
+    </main>
+  );
 }

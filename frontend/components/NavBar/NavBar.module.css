@@ -113,20 +113,16 @@
 .bianModelLink {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  color: #3d4f58;
+  gap: 5px;
+  color: #9ca3af;
   text-decoration: none;
   white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s;
+  transition: color 0.15s, text-decoration-color 0.15s;
 }
 
 .bianModelLink:hover {
-  background: #f9fafb;
-  border-color: #00684a;
   color: #00684a;
+  text-decoration: underline;
 }
 
 .mobileMenuButton {

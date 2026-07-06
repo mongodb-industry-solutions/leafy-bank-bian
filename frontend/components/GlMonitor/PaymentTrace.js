@@ -8,6 +8,7 @@
 // are derived from those — see buildStages).
 import React, { useState, useEffect, useCallback } from "react";
 import Icon from "@leafygreen-ui/icon";
+import Code from "@leafygreen-ui/code";
 import styles from "./GlMonitor.module.css";
 import { Chip } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
@@ -142,7 +143,7 @@ function DetailPane({ stage }) {
           <button className={styles["ptrace-json-btn"]} onClick={() => setShowJson((s) => !s)}>
             <Icon glyph="CurlyBraces" size={12} /> {showJson ? "Hide JSON" : "View JSON"}
           </button>
-          {showJson && <div className={styles["detail-json"]}>{JSON.stringify(stage.raw, null, 2)}</div>}
+          {showJson && <div style={{ marginTop: 8 }}><Code language="json">{JSON.stringify(stage.raw, null, 2)}</Code></div>}
         </>
       ) : (
         <div className={styles["ptrace-not-reached"]}>not reached</div>
@@ -230,9 +231,15 @@ export default function PaymentTrace() {
 
       {stages && (
         <div className={styles["ptrace-explorer"]}>
+          <div className={styles["panel-header"]} style={{ gridColumn: "1 / -1", marginBottom: 8 }}>
+            <span className={styles["panel-title"]}>Payment Trace</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>Click on one of the steps to view more details</span>
+          </div>
           {/* Vertical stage rail (left) + detail pane (right) */}
-          <StepList stages={stages} selectedKey={selectedKey} onSelect={setSelectedKey} />
-          <DetailPane stage={selectedStage} />
+          <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "300px 1fr", gap: 20, paddingLeft: 12, paddingRight: 12 }}>
+            <StepList stages={stages} selectedKey={selectedKey} onSelect={setSelectedKey} />
+            <DetailPane stage={selectedStage} />
+          </div>
         </div>
       )}
     </div>
