@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import styles from "./GlMonitor.module.css";
+import Button from "@leafygreen-ui/button";
 import { PRESETS } from "@/lib/glMonitor/presets";
 import { coreApi } from "@/lib/api/client";
 

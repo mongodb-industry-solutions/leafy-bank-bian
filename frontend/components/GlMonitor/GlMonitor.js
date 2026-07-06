@@ -10,7 +10,8 @@ import styles from "./GlMonitor.module.css";
 import { pipelineApi } from "@/lib/api/client";
 import { buildParams } from "@/lib/glMonitor/format";
 import { filterByBatch } from "@/lib/glMonitor/batch";
-import TopBar from "./TopBar";
+import HealthBar from "./HealthBar";
+import Toolbar from "./Toolbar";
 import InitiatePanel from "./InitiatePanel";
 import PipelineStepper from "./PipelineStepper";
 import PipelineColumns from "./PipelineColumns";
@@ -30,7 +31,6 @@ export default function GlMonitor() {
   const [period, setPeriod] = useState("");
   const [status, setStatus] = useState("");
   const [health, setHealth] = useState(null);
-  const [live, setLive] = useState(true);
   const [healthStatus, setHealthStatus] = useState("checking…");
   const [columns, setColumns] = useState({ tx: EMPTY_COL, le: EMPTY_COL, sl: EMPTY_COL, jn: EMPTY_COL });
   const [selected, setSelected] = useState({ col: null, idx: null });
@@ -48,11 +48,9 @@ export default function GlMonitor() {
   const fetchHealth = useCallback(async () => {
     const { data, error } = await pipelineApi("health");
     if (error) {
-      setLive(false);
       setHealthStatus(`error: ${error}`);
       return null;
     }
-    setLive(true);
     setHealth(data);
     setHealthStatus(`updated ${new Date().toLocaleTimeString()}`);
     return {
@@ -118,7 +116,7 @@ export default function GlMonitor() {
 
   return (
     <div className={styles.glMonitorRoot}>
-      <TopBar live={live} />
+      <HealthBar health={health} statusText={healthStatus} />
       <div className={styles["gl-tabs"]}>
         <div className={styles["gl-mode-switch"]}>
           <SegmentedControl
@@ -126,14 +124,21 @@ export default function GlMonitor() {
             value={String(tab)}
             onChange={(v) => setTab(Number(v))}
           >
-            <SegmentedControlOption value="0">Payment Trace</SegmentedControlOption>
-            <SegmentedControlOption value="1">Pipeline Monitor</SegmentedControlOption>
+            <SegmentedControlOption value="0">Payment Trace (for Single Transactions)</SegmentedControlOption>
+            <SegmentedControlOption value="1">Pipeline Monitor (for Multiple Transactions)</SegmentedControlOption>
           </SegmentedControl>
         </div>
         {tab === 0 ? (
           <PaymentTrace />
         ) : (
           <>
+            <Toolbar
+              period={period}
+              status={status}
+              onPeriodChange={setPeriod}
+              onStatusChange={setStatus}
+              onRefresh={refreshAll}
+            />
             <InitiatePanel onFired={refreshAll} onRefresh={refreshAll} />
             <PipelineStepper />
             <PipelineColumns columns={columns} selected={selected} onSelect={onSelect} onJumpToLe={onJumpToLe} />
