@@ -49,12 +49,13 @@ function buildStages(d) {
         ["Internal", pay.isInternal ? "Yes" : "No"],
         ["Initiated", fmtDate(pay.initiatedAt)],
         ["Settled", pay.clearing?.settledAt ? fmtDate(pay.clearing.settledAt) : "—"],
-      ] : null, raw: pay,
+      ] : null, raw: pay, features: null,
     },
     {
       key: "transaction", hue: "green", title: "Transaction", icon: "Beaker",
       id: tx?.paymentId, count: null,
       status: tx ? tx.transactionStatus : null, reached: !!tx,
+      features: ["ACID multi-doc transaction", "$inc atomic balance update", "DuplicateKeyError idempotency"],
       pairs: tx ? [
         ["Bank Ref", tx.bankRef || "—"],
         ["Status", <Chip status={tx.transactionStatus} key="c" />],
@@ -79,6 +80,7 @@ function buildStages(d) {
       key: "ledgerEvents", hue: "blue", title: "Ledger Events", icon: "Diagram3",
       id: le?.eventId, count: le ? 1 : 0,
       status: le?.postingStatus, reached: !!le,
+      features: ["Change Streams", "Resume Tokens", "DuplicateKeyError idempotency", "$jsonSchema validator"],
       pairs: le ? [
         ["Status", <Chip status={le.postingStatus} key="c" />],
         ["Event Type", le.eventType || "—"],
@@ -105,6 +107,7 @@ function buildStages(d) {
       id: sls[0]?.subLedgerId, count: sls.length,
       status: sls.length ? (sls.every((s) => s.journalEntryId) ? "POSTED" : "PENDING") : null,
       reached: sls.length > 0,
+      features: ["Change Streams", "ACID multi-doc transaction", "$jsonSchema validator", "Partial index (journalEntryId ≠ \"\")"],
       pairs: sls.length ? (() => {
         const debit = sls.find((s) => s.side === "DEBIT") || sls[0];
         const credit = sls.find((s) => s.side === "CREDIT") || sls[1];
@@ -134,6 +137,7 @@ function buildStages(d) {
       key: "batch", hue: "purple", title: "Batch Queue", icon: "Clock",
       id: jn?.batchId || le?.postingResult?.journalEntryId, count: null,
       status: batchStatus, reached: !!le,
+      features: ["Aggregation ($group $sum $cond) — pre-batch reconciliation gate"],
       pairs: le ? [
         ["Queue", batchStatus === "POSTED" ? "Cleared" : "Awaiting batch"],
         ["Journal", le.postingResult?.journalEntryId || "—"],
@@ -143,6 +147,7 @@ function buildStages(d) {
       key: "generalLedger", hue: "purple", title: "General Ledger", icon: "Building",
       id: jn?.journalId, count: jn ? (jn.entries || []).length : 0,
       status: jn?.status, reached: !!jn,
+      features: ["Aggregation ($group $sum $addToSet)", "ACID transaction", "$expr Pacioli validator", "Multikey index (entries.accountCode)"],
       pairs: jn ? [
         ["Status", <Chip status={jn.status} key="c" />],
         ["Journal Type", jn.journalType || "—"],
@@ -232,6 +237,16 @@ function DetailPane({ stage }) {
           {showJson && (
             <div className={styles["ptrace-json-wrap"]}>
               <Code language="json" copyButtonAppearance="none">{jsonText}</Code>
+            </div>
+          )}
+          {stage.features && (
+            <div className={styles["col-features-footer"]} style={{ marginTop: 16 }}>
+              <span className={styles["col-features-label"]}>MongoDB Features In Use</span>
+              <div>
+                {stage.features.map((f) => (
+                  <span className={styles["feature-tag"]} key={f}>{f}</span>
+                ))}
+              </div>
             </div>
           )}
         </>
