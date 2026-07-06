@@ -14,39 +14,65 @@ import { Chip } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
 import { pipelineApi } from "@/lib/api/client";
 
-// Maps the 4 trace docs → 6 presentation stages Doina drew. Rough mapping;
-// "Payment" vs "Transaction" both draw from the transaction doc for now, and
-// "Batch Queue" is derived from ledger-event posting status (open question in
-// the carry-forward doc — refine later).
+// Maps the trace docs → presentation stages Doina drew. "Batch Queue" is
+// derived from ledger-event posting status, and only applies to BATCH-mode
+// rails — REALTIME/NEAR_REALTIME rails (e.g. INTERNAL, WIRE) post straight to
+// the general ledger with no queueing step.
 function buildStages(d) {
+  const pay = d.payment;
   const tx = d.transaction;
   const le = d.ledgerEvent;
   const sls = d.subLedgerEntries || [];
   const jn = d.journalEntry;
+  const isRealtime = ["REALTIME", "NEAR_REALTIME"].includes(d.postingMode);
 
   const batchStatus = !le ? null : le.postingStatus === "POSTED" ? "POSTED" : "QUEUED";
 
-  return [
+  const stages = [
     {
       key: "payment", hue: "green", title: "Payment", icon: "CreditCard",
-      id: tx?.paymentId, count: null,
-      status: tx ? "COMPLETED" : null, reached: !!tx,
-      pairs: tx ? [
-        ["Type", tx.paymentType || tx.rail || "—"],
-        ["Amount", `$${fmt(tx.amount)} ${tx.currency || "USD"}`],
-        ["Status", <Chip status={tx.transactionStatus} key="c" />],
-        ["Initiated", fmtDate(tx.createdAt)],
-      ] : null, raw: tx,
+      id: pay?.paymentId || tx?.paymentId, count: null,
+      status: pay?.status, reached: !!pay,
+      pairs: pay ? [
+        ["Txn ID", pay.txnId || "—"],
+        ["End-to-End ID", pay.endToEndId || "—"],
+        ["Status", <Chip status={pay.status} key="c" />],
+        ["Type / Rail", `${pay.type || "—"} · ${pay.rail || "—"}`],
+        ["Priority", pay.priority || "—"],
+        ["Amount", `$${fmt(pay.amount)} ${pay.currency || "USD"}`],
+        ["Debtor", pay.debtor ? `${pay.debtor.name} (${pay.debtor.accountId})` : "—"],
+        ["Creditor", pay.creditor ? `${pay.creditor.name} (${pay.creditor.accountId})` : "—"],
+        ["Remittance", pay.remittance?.unstructured || "—"],
+        ["Sanctions", pay.correspondent?.sanctionsCheck?.status || "—"],
+        ["Fraud", pay.fraud ? `${pay.fraud.decision} (score ${pay.fraud.score})` : "—"],
+        ["Channel", pay.initiation?.channel || "—"],
+        ["Internal", pay.isInternal ? "Yes" : "No"],
+        ["Initiated", fmtDate(pay.initiatedAt)],
+        ["Settled", pay.clearing?.settledAt ? fmtDate(pay.clearing.settledAt) : "—"],
+      ] : null, raw: pay,
     },
     {
       key: "transaction", hue: "green", title: "Transaction", icon: "Beaker",
       id: tx?.paymentId, count: null,
       status: tx ? tx.transactionStatus : null, reached: !!tx,
       pairs: tx ? [
-        ["From", tx.payer?.accountId],
-        ["To", tx.payee?.accountId],
-        ["Rail", tx.rail || "—"],
+        ["Bank Ref", tx.bankRef || "—"],
+        ["Status", <Chip status={tx.transactionStatus} key="c" />],
+        ["Type / Rail", `${tx.paymentType || "—"} · ${tx.rail || "—"}`],
+        ["Direction", tx.direction || "—"],
+        ["Txn Code", tx.txnCode || "—"],
         ["Amount", `$${fmt(tx.amount)} ${tx.currency || "USD"}`],
+        ["Base Amount", tx.baseAmount != null ? `$${fmt(tx.baseAmount)}` : "—"],
+        ["Balance After", tx.balanceAfter != null ? `$${fmt(tx.balanceAfter)}` : "—"],
+        ["From", tx.payer ? `${tx.payer.name} (${tx.payer.accountId})` : "—"],
+        ["To", tx.payee ? `${tx.payee.name} (${tx.payee.accountId})` : "—"],
+        ["Description", tx.description || "—"],
+        ["Category", tx.transactionCategory || "—"],
+        ["Channel", tx.channel || "—"],
+        ["Value Date", tx.valueDate || "—"],
+        ["Booking Date", tx.bookingDate || "—"],
+        ["Reversed", tx.isReversed ? `Yes (${tx.reversalTxnId || "—"})` : "No"],
+        ["Created", fmtDate(tx.createdAt)],
       ] : null, raw: tx,
     },
     {
@@ -54,10 +80,24 @@ function buildStages(d) {
       id: le?.eventId, count: le ? 1 : 0,
       status: le?.postingStatus, reached: !!le,
       pairs: le ? [
-        ["Event", le.eventType || "—"],
-        ["DR", le.debitLeg?.glAccountCode || "—"],
-        ["CR", le.creditLeg?.glAccountCode || "—"],
-        ["Amount", fmtMinor(le.debitLeg?.amount)],
+        ["Status", <Chip status={le.postingStatus} key="c" />],
+        ["Event Type", le.eventType || "—"],
+        ["Description", le.description || "—"],
+        ["Posting Mode", le.postingMode?.type || "—"],
+        ["Rail", le.rail || "—"],
+        ["DR Account", `${le.debitLeg?.glAccountCode || "—"} (ctrl ${le.debitLeg?.controlAccountCode || "—"})`],
+        ["DR Entity", le.debitLeg?.entityReference?.entityId || "—"],
+        ["CR Account", `${le.creditLeg?.glAccountCode || "—"} (ctrl ${le.creditLeg?.controlAccountCode || "—"})`],
+        ["CR Entity", le.creditLeg?.entityReference?.entityId || "—"],
+        ["Amount", `${fmtMinor(le.debitLeg?.amount)} ${le.debitLeg?.currency || "—"}`],
+        ["Occurred", fmtDate(le.occurredAt)],
+        ["Value Date", fmtDate(le.valueDate)],
+        ["Period", le.periodName || "—"],
+        ["Sub Ledger Type", le.meta?.subLedgerType || "—"],
+        ["Source", le.sourceReference ? `${le.sourceReference.sourceType} · ${le.sourceReference.sourceCollection}` : "—"],
+        ["Journal Entry", le.postingResult?.journalEntryId || "—"],
+        ["Posted At", le.postingResult?.postedAt ? fmtDate(le.postingResult.postedAt) : "—"],
+        ["Reversal Of", le.reversalOf || "—"],
       ] : null, raw: le,
     },
     {
@@ -65,11 +105,32 @@ function buildStages(d) {
       id: sls[0]?.subLedgerId, count: sls.length,
       status: sls.length ? (sls.every((s) => s.journalEntryId) ? "POSTED" : "PENDING") : null,
       reached: sls.length > 0,
-      pairs: sls.length ? sls.slice(0, 3).map((s) => [
-        s.side, `${s.controlAccountCode} · ${fmtMinor(s.amount)}`,
-      ]) : null, raw: sls,
+      pairs: sls.length ? (() => {
+        const debit = sls.find((s) => s.side === "DEBIT") || sls[0];
+        const credit = sls.find((s) => s.side === "CREDIT") || sls[1];
+        return [
+          ["Journal Entry", debit?.journalEntryId || credit?.journalEntryId || "—"],
+          ["Period", debit?.periodCode || credit?.periodCode || "—"],
+          ["Value Date", fmtDate(debit?.valueDate || credit?.valueDate)],
+          ["Posting Date", fmtDate(debit?.postingDate || credit?.postingDate)],
+          ["DR SubLedger ID", debit?.subLedgerId || "—"],
+          ["DR Control A/C", debit?.controlAccountCode || "—"],
+          ["DR Type", debit?.subLedgerType || "—"],
+          ["DR Entity", debit?.entityReference?.entityId || "—"],
+          ["DR Amount", debit ? `${fmtMinor(debit.amount)} ${debit.currency || "—"}` : "—"],
+          ["DR Running Balance", debit ? fmtMinor(debit.runningBalance) : "—"],
+          ["DR Status", debit ? <Chip status={debit.status} key="dr" /> : "—"],
+          ["CR SubLedger ID", credit?.subLedgerId || "—"],
+          ["CR Control A/C", credit?.controlAccountCode || "—"],
+          ["CR Type", credit?.subLedgerType || "—"],
+          ["CR Entity", credit?.entityReference?.entityId || "—"],
+          ["CR Amount", credit ? `${fmtMinor(credit.amount)} ${credit.currency || "—"}` : "—"],
+          ["CR Running Balance", credit ? fmtMinor(credit.runningBalance) : "—"],
+          ["CR Status", credit ? <Chip status={credit.status} key="cr" /> : "—"],
+        ];
+      })() : null, raw: sls,
     },
-    {
+    ...(isRealtime ? [] : [{
       key: "batch", hue: "purple", title: "Batch Queue", icon: "Clock",
       id: jn?.batchId || le?.postingResult?.journalEntryId, count: null,
       status: batchStatus, reached: !!le,
@@ -77,19 +138,30 @@ function buildStages(d) {
         ["Queue", batchStatus === "POSTED" ? "Cleared" : "Awaiting batch"],
         ["Journal", le.postingResult?.journalEntryId || "—"],
       ] : null, raw: le?.postingResult,
-    },
+    }]),
     {
       key: "generalLedger", hue: "purple", title: "General Ledger", icon: "Building",
       id: jn?.journalId, count: jn ? (jn.entries || []).length : 0,
       status: jn?.status, reached: !!jn,
       pairs: jn ? [
-        ["Batch", jn.batchId || "—"],
-        ["Lines", (jn.entries || []).length],
-        ["Total", fmtMinor(jn.totalAmount)],
-        ["Posted", fmtDate(jn.createdAt)],
+        ["Status", <Chip status={jn.status} key="c" />],
+        ["Journal Type", jn.journalType || "—"],
+        ["Source", jn.sourceReference ? `${jn.sourceReference.sourceType} · ${jn.sourceReference.sourceId}` : "—"],
+        ["Txn Count", jn.sourceReference?.txnCount ?? "—"],
+        ["Period", jn.periodCode || "—"],
+        ["Value / Posting Date", `${jn.valueDate || "—"} / ${jn.postingDate || "—"}`],
+        ["Total", `${fmtMinor(jn.totalAmount)} ${jn.currency || "—"}`],
+        ...(jn.entries || []).map((e) => [
+          `Line ${e.lineNumber} (${e.side})`,
+          `${e.accountCode}${e.accountName ? ` · ${e.accountName}` : ""} — ${fmtMinor(e.amount)} ${e.currency || ""}`,
+        ]),
+        ["Created By", jn.createdBy || "—"],
+        ["Mapping Version", jn.mappingVersion || "—"],
+        ["Created", fmtDate(jn.createdAt)],
       ] : null, raw: jn,
     },
   ];
+  return stages;
 }
 
 // Vertical stepper (left rail). Clicking a reached step selects it.
@@ -125,7 +197,14 @@ function StepList({ stages, selectedKey, onSelect }) {
 // Right-hand detail pane for the selected step.
 function DetailPane({ stage }) {
   const [showJson, setShowJson] = useState(false);
+  const [copied, setCopied] = useState(false);
   if (!stage) return null;
+  const jsonText = stage.raw ? JSON.stringify(stage.raw, null, 2) : "";
+  const copyJson = () => {
+    navigator.clipboard.writeText(jsonText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   return (
     <div className={`${styles["ptrace-detail"]} ${styles[`ptrace-${stage.hue}`]}`}>
       <div className={styles["ptrace-detail-title"]}>
@@ -140,10 +219,21 @@ function DetailPane({ stage }) {
               ))}
             </tbody>
           </table>
-          <button className={styles["ptrace-json-btn"]} onClick={() => setShowJson((s) => !s)}>
-            <Icon glyph="CurlyBraces" size={12} /> {showJson ? "Hide JSON" : "View JSON"}
-          </button>
-          {showJson && <div style={{ marginTop: 8 }}><Code language="json">{JSON.stringify(stage.raw, null, 2)}</Code></div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className={styles["ptrace-json-btn"]} onClick={() => setShowJson((s) => !s)}>
+              <Icon glyph="CurlyBraces" size={12} /> {showJson ? "Hide JSON" : "View JSON"}
+            </button>
+            {showJson && (
+              <button className={styles["ptrace-json-btn"]} onClick={copyJson}>
+                <Icon glyph={copied ? "Checkmark" : "Copy"} size={12} /> {copied ? "Copied" : "Copy"}
+              </button>
+            )}
+          </div>
+          {showJson && (
+            <div className={styles["ptrace-json-wrap"]}>
+              <Code language="json" copyButtonAppearance="none">{jsonText}</Code>
+            </div>
+          )}
         </>
       ) : (
         <div className={styles["ptrace-not-reached"]}>not reached</div>

@@ -240,6 +240,7 @@ def trace_payment(
     Returns None if paymentId is not found in transactions (caller raises 404).
     Partial results (stages not yet reached) are present as None in the dict.
     """
+    payment_coll = connection.get_collection(db_name, "payments")
     txn_coll = connection.get_collection(db_name, "transactions")
     le_coll = connection.get_collection(db_name, "ledgerEvents")
     sl_coll = connection.get_collection(db_name, "subLedgerEntries")
@@ -249,6 +250,10 @@ def trace_payment(
     txn = txn_coll.find_one({"paymentId": payment_id}, {"_id": 0})
     if txn is None:
         return None
+
+    # Payment — payments collection doc (initiation/clearing state, owned by
+    # the transactions service). Not a pipeline stage; the initiation record.
+    payment = payment_coll.find_one({"paymentId": payment_id}, {"_id": 0})
 
     # Stage 2 — ledgerEvent (idempotencyKey == paymentId, set by ingest_worker).
     ledger_event = le_coll.find_one({"idempotencyKey": payment_id}, {"_id": 0})
@@ -267,10 +272,14 @@ def trace_payment(
         if journal_id:
             journal_entry = jnl_coll.find_one({"journalId": journal_id}, {"_id": 0})
 
+    posting_mode = (ledger_event or {}).get("postingMode", {}).get("type")
+
     return {
         "paymentId": payment_id,
+        "payment": payment,
         "transaction": txn,
         "ledgerEvent": ledger_event,
         "subLedgerEntries": subledger_entries,
         "journalEntry": journal_entry,
+        "postingMode": posting_mode,
     }

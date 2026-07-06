@@ -13,7 +13,7 @@ export function filterByBatch(items, tsField, batchInfo) {
       const t = parseTs(x[tsField]);
       let tag = null;
       if (!isNaN(t)) {
-        if (t >= lastEnd) tag = "CURRENT";
+        if (t > lastEnd) tag = "CURRENT";
         else if (t >= lastStart) tag = "LAST";
       }
       return { ...x, _batchTag: tag };
