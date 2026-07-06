@@ -14,11 +14,11 @@ import { Chip } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
 import { pipelineApi } from "@/lib/api/client";
 
-// Maps the 4 trace docs → 6 presentation stages Doina drew. Rough mapping;
-// "Payment" vs "Transaction" both draw from the transaction doc for now, and
-// "Batch Queue" is derived from ledger-event posting status (open question in
-// the carry-forward doc — refine later).
+// Maps the trace docs → 6 presentation stages Doina drew. "Batch Queue" is
+// derived from ledger-event posting status (open question in the
+// carry-forward doc — refine later).
 function buildStages(d) {
+  const pay = d.payment;
   const tx = d.transaction;
   const le = d.ledgerEvent;
   const sls = d.subLedgerEntries || [];
@@ -29,14 +29,25 @@ function buildStages(d) {
   return [
     {
       key: "payment", hue: "green", title: "Payment", icon: "CreditCard",
-      id: tx?.paymentId, count: null,
-      status: tx ? "COMPLETED" : null, reached: !!tx,
-      pairs: tx ? [
-        ["Type", tx.paymentType || tx.rail || "—"],
-        ["Amount", `$${fmt(tx.amount)} ${tx.currency || "USD"}`],
-        ["Status", <Chip status={tx.transactionStatus} key="c" />],
-        ["Initiated", fmtDate(tx.createdAt)],
-      ] : null, raw: tx,
+      id: pay?.paymentId || tx?.paymentId, count: null,
+      status: pay?.status, reached: !!pay,
+      pairs: pay ? [
+        ["Txn ID", pay.txnId || "—"],
+        ["End-to-End ID", pay.endToEndId || "—"],
+        ["Status", <Chip status={pay.status} key="c" />],
+        ["Type / Rail", `${pay.type || "—"} · ${pay.rail || "—"}`],
+        ["Priority", pay.priority || "—"],
+        ["Amount", `$${fmt(pay.amount)} ${pay.currency || "USD"}`],
+        ["Debtor", pay.debtor ? `${pay.debtor.name} (${pay.debtor.accountId})` : "—"],
+        ["Creditor", pay.creditor ? `${pay.creditor.name} (${pay.creditor.accountId})` : "—"],
+        ["Remittance", pay.remittance?.unstructured || "—"],
+        ["Sanctions", pay.correspondent?.sanctionsCheck?.status || "—"],
+        ["Fraud", pay.fraud ? `${pay.fraud.decision} (score ${pay.fraud.score})` : "—"],
+        ["Channel", pay.initiation?.channel || "—"],
+        ["Internal", pay.isInternal ? "Yes" : "No"],
+        ["Initiated", fmtDate(pay.initiatedAt)],
+        ["Settled", pay.clearing?.settledAt ? fmtDate(pay.clearing.settledAt) : "—"],
+      ] : null, raw: pay,
     },
     {
       key: "transaction", hue: "green", title: "Transaction", icon: "Beaker",
