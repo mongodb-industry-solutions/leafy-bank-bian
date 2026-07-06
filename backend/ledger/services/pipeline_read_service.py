@@ -100,6 +100,7 @@ def list_transactions(
 ) -> dict:
     """Return recent settled transactions from the upstream collection."""
     coll = connection.get_collection(db_name, "transactions")
+    le_coll = connection.get_collection(db_name, "ledgerEvents")
 
     match: dict = {}
     if period_code:
@@ -128,6 +129,17 @@ def list_transactions(
         .sort("createdAt", -1)
         .limit(limit)
     )
+
+    # Attach ledgerEventId (idempotencyKey == paymentId, same join trace_payment uses).
+    payment_ids = [item["paymentId"] for item in items]
+    ledger_events = le_coll.find(
+        {"idempotencyKey": {"$in": payment_ids}},
+        {"_id": 0, "idempotencyKey": 1, "eventId": 1},
+    )
+    event_id_by_payment = {le["idempotencyKey"]: le["eventId"] for le in ledger_events}
+    for item in items:
+        item["ledgerEventId"] = event_id_by_payment.get(item["paymentId"])
+
     return {"items": items, "total": total}
 
 

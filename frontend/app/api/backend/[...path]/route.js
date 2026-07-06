@@ -35,16 +35,19 @@ const BACKEND_BY_PREFIX = {
 
 async function proxy(request, { params }) {
   const { path } = await params;
-  // coreApi paths are documented as "after /api/v1/" (see client.js); all
-  // backend services mount under /api/v1, so prepend it here.
-  let backendPath = `/api/v1/${path.join("/")}`;
+  const backend = BACKEND_BY_PREFIX[path[0]] || CONSENT_BACKEND;
+
+  // BIAN services (accounts/transactions/ledger) mount their routes at root.
+  // Only the open-finance monolith fallback serves under /api/v1, so prepend
+  // that prefix solely for unmapped (CONSENT_BACKEND) routes.
+  const apiPrefix = BACKEND_BY_PREFIX[path[0]] ? "" : "/api/v1";
+  let backendPath = `${apiPrefix}/${path.join("/")}`;
 
   // Preserve trailing slash for FastAPI (avoids 307 redirects)
   if (request.nextUrl.pathname.endsWith("/")) {
     backendPath += "/";
   }
 
-  const backend = BACKEND_BY_PREFIX[path[0]] || CONSENT_BACKEND;
   const backendUrl = `${backend}${backendPath}${request.nextUrl.search}`;
 
   const headers = new Headers();
