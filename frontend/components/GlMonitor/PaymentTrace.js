@@ -197,7 +197,14 @@ function StepList({ stages, selectedKey, onSelect }) {
 // Right-hand detail pane for the selected step.
 function DetailPane({ stage }) {
   const [showJson, setShowJson] = useState(false);
+  const [copied, setCopied] = useState(false);
   if (!stage) return null;
+  const jsonText = stage.raw ? JSON.stringify(stage.raw, null, 2) : "";
+  const copyJson = () => {
+    navigator.clipboard.writeText(jsonText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   return (
     <div className={`${styles["ptrace-detail"]} ${styles[`ptrace-${stage.hue}`]}`}>
       <div className={styles["ptrace-detail-title"]}>
@@ -212,10 +219,21 @@ function DetailPane({ stage }) {
               ))}
             </tbody>
           </table>
-          <button className={styles["ptrace-json-btn"]} onClick={() => setShowJson((s) => !s)}>
-            <Icon glyph="CurlyBraces" size={12} /> {showJson ? "Hide JSON" : "View JSON"}
-          </button>
-          {showJson && <div style={{ marginTop: 8 }}><Code language="json">{JSON.stringify(stage.raw, null, 2)}</Code></div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className={styles["ptrace-json-btn"]} onClick={() => setShowJson((s) => !s)}>
+              <Icon glyph="CurlyBraces" size={12} /> {showJson ? "Hide JSON" : "View JSON"}
+            </button>
+            {showJson && (
+              <button className={styles["ptrace-json-btn"]} onClick={copyJson}>
+                <Icon glyph={copied ? "Checkmark" : "Copy"} size={12} /> {copied ? "Copied" : "Copy"}
+              </button>
+            )}
+          </div>
+          {showJson && (
+            <div className={styles["ptrace-json-wrap"]}>
+              <Code language="json" copyButtonAppearance="none">{jsonText}</Code>
+            </div>
+          )}
         </>
       ) : (
         <div className={styles["ptrace-not-reached"]}>not reached</div>

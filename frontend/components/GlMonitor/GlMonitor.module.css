@@ -1193,6 +1193,7 @@
 /* right detail pane */
 .ptrace-detail {
   min-width: 0;
+  min-height: 510px;
   padding: 4px 4px 8px;
 }
 .ptrace-detail-title {
@@ -1217,6 +1218,13 @@
   font-weight: 600;
 }
 .ptrace-json-btn:hover { background: var(--border-light); }
+.ptrace-json-wrap {
+  margin-top: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
 
 @media (max-width: 900px) {
   .ptrace-explorer { grid-template-columns: 1fr; }
