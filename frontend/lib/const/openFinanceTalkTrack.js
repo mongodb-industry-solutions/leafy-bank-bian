@@ -70,24 +70,6 @@ export const OPEN_FINANCE_TALK_TRACK = [
           "",
           "Ask follow-up questions to continue the conversation — the agent maintains context using MongoDB-backed memory."
         ]
-      },
-      {
-        heading: "Spending Profiles",
-        body: [
-          "A dropdown in the top bar lets you switch spending profiles. The spending score directly affects the portability offer — the agent applies a 15–30% reduction on the external bank's current rate, with better scores unlocking larger discounts.",
-          "",
-          "**Balanced (default)**:",
-          "- Mix of groceries, utilities, dining, savings",
-          "- Score ~90 → Moderate rate reduction",
-          "",
-          "**Overspender**:",
-          "- Heavy discretionary spending: luxury dining, designer shopping, premium entertainment",
-          "- Score ~81 → Smallest rate reduction",
-          "",
-          "**Saver**:",
-          "- Budget groceries, thrift stores, multiple savings transfers",
-          "- Score ~100 → Largest rate reduction"
-        ]
       }
     ]
   },

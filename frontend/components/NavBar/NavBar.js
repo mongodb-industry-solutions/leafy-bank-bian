@@ -47,7 +47,7 @@ const NavBar = ({ bianModelUrl }) => {
 };
 
 const NavBarContent = ({ bianModelUrl }) => {
-    const { selectedUser, profile, setProfile, authorizedConsents, clearUser } = useUser();
+    const { selectedUser, authorizedConsents, clearUser } = useUser();
     const pathname = usePathname();
     const router = useRouter();
     const userName = selectedUser?.name || "User";
@@ -111,20 +111,6 @@ const NavBarContent = ({ bianModelUrl }) => {
                             Connected to {institution}
                         </span>
                     ))}
-
-                    {/*}
-                        <div className={styles.profileContainer}>
-                        <label className={styles.profileLabel}>Spending Profile</label>
-                        <select
-                            className={styles.profileSelect}
-                            value={profile}
-                            onChange={(e) => setProfile(e.target.value)}
-                        >
-                            <option value="balanced">Balanced</option>
-                            <option value="overspender">Overspender</option>
-                            <option value="saver">Saver</option>
-                        </select>
-                    </div>*/}
 
                     {bianModelUrl && (
                         <a
