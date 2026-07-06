@@ -5,7 +5,7 @@ import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
 
 // Renders feed rows with the "current ↑ · ↓ last batch" separator when the
 // tag transitions from CURRENT to LAST (ported from batch.js renderWithSep).
-function FeedRows({ col, items, selected, onSelect, renderRow }) {
+function FeedRows({ col, items, selected, onSelect, renderRow, rowId }) {
   const out = [];
   let prevTag = null;
   items.forEach((item, i) => {
@@ -19,6 +19,7 @@ function FeedRows({ col, items, selected, onSelect, renderRow }) {
       <div
         className={`${styles["feed-row"]}${isSel ? " " + styles.selected : ""}`}
         key={i}
+        id={rowId ? rowId(item) : undefined}
         onClick={() => onSelect(col, i, item)}
       >
         {renderRow(item)}
@@ -30,12 +31,12 @@ function FeedRows({ col, items, selected, onSelect, renderRow }) {
 }
 
 // features: array of MongoDB feature-tag labels for the footer (null = no footer).
-function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, features, col, selected, onSelect, renderRow, emptyMsg }) {
+function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, features, col, selected, onSelect, renderRow, emptyMsg, rowId }) {
   let body;
   if (state.loading) body = <div className={styles["empty-state"]}>Loading…</div>;
   else if (state.error) body = <div className={styles["error-state"]}>Error: {state.error}</div>;
   else if (!state.items.length) body = <div className={styles["empty-state"]}>{emptyMsg}</div>;
-  else body = <FeedRows col={col} items={state.items} selected={selected} onSelect={onSelect} renderRow={renderRow} />;
+  else body = <FeedRows col={col} items={state.items} selected={selected} onSelect={onSelect} renderRow={renderRow} rowId={rowId} />;
 
   return (
     <div className={styles.col}>
@@ -66,7 +67,7 @@ function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, feat
   );
 }
 
-export default function PipelineColumns({ columns, selected, onSelect }) {
+export default function PipelineColumns({ columns, selected, onSelect, onJumpToLe }) {
   return (
     <div className={styles.pipeline}>
       <Column
@@ -83,6 +84,15 @@ export default function PipelineColumns({ columns, selected, onSelect }) {
             </div>
             <div className={styles["row-detail"]}>${fmt(t.amount)} · {t.rail || "—"} · {t.paymentType || "—"}</div>
             <div className={styles["row-sub"]}>{fmtDate(t.createdAt)} · {t.payer?.accountId || "—"} → {t.payee?.accountId || "—"}</div>
+            <div className={styles["row-sub"]} style={{ marginTop: 3 }}>
+              {t.ledgerEventId
+                ? <span
+                    className={styles["le-link-chip"]}
+                    title="Jump to this Ledger Event"
+                    onClick={(ev) => { ev.stopPropagation(); onJumpToLe?.(t.ledgerEventId); }}
+                  >→ {t.ledgerEventId}</span>
+                : <span className={styles["le-not-ingested"]}>LE: not yet ingested</span>}
+            </div>
           </>
         )}
       />
@@ -91,7 +101,7 @@ export default function PipelineColumns({ columns, selected, onSelect }) {
         headerBg="var(--col2)" stageCls="stage-le" stageLabel="Stage ①" title="Ledger Events"
         sub="ingest_worker · change stream" count={columns.le.count} state={columns.le}
         features={["Change Streams", "Resume Tokens", "DuplicateKeyError idempotency", "$jsonSchema validator"]}
-        col="le" selected={selected} onSelect={onSelect}
+        col="le" selected={selected} onSelect={onSelect} rowId={(e) => `le-row-${e.eventId}`}
         emptyMsg="No ledger events in last 2 batch windows"
         renderRow={(e) => (
           <>

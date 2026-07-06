@@ -6,7 +6,7 @@ import { coreApi } from "@/lib/api/client";
 // Initiate Transaction panel — ported from initiate.js. The POST now goes
 // through the /api/backend proxy (coreApi) which routes PaymentOrderInitiation
 // to the transactions service. After firing, the parent refreshes the columns.
-export default function InitiatePanel({ onFired }) {
+export default function InitiatePanel({ onFired, onRefresh }) {
   const [collapsed, setCollapsed] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
   const [busy, setBusy] = useState(null); // preset index or "custom" currently firing
@@ -75,9 +75,13 @@ export default function InitiatePanel({ onFired }) {
           <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>
             POST to transactions service · watch the pipeline below react live
           </span>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            <button className={styles.btn} onClick={onRefresh}>↻ Refresh All</button>
+            <button className={`${styles.btn} ${styles["btn-primary"]} ${styles["btn-sm"]}`} onClick={onRefresh}>Load Data</button>
+          </div>
           <button
             className={styles["panel-toggle-btn"]}
-            style={{ marginLeft: "auto", transform: collapsed ? "rotate(-90deg)" : "" }}
+            style={{ marginLeft: 8, transform: collapsed ? "rotate(-90deg)" : "" }}
             onClick={() => setCollapsed((c) => !c)}
             aria-label="Toggle panel"
           >▾</button>
@@ -86,15 +90,31 @@ export default function InitiatePanel({ onFired }) {
         {!collapsed && (
           <div className={styles["panel-body"]}>
             <div style={{ marginBottom: 4 }}>
-              <div className={styles["field-label"]} style={{ marginBottom: 8 }}>Quick presets</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {PRESETS.map((p, i) => (
+              <div className={styles["field-label"]} style={{ marginBottom: 8 }}>
+                Real-time presets <span style={{ textTransform: "none", fontWeight: 400, color: "var(--text-xs)" }}>— rail WIRE/INTERNAL</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+                {PRESETS.map((p, i) => [p, i]).filter(([p]) => p.mode === "REALTIME").map(([p, i]) => (
                   <button
                     key={i}
                     className={styles["preset-btn"]}
                     disabled={busy === i}
                     onClick={() => firePreset(i)}
                   >💰 {p.label}{busy === i ? " …" : ""}</button>
+                ))}
+              </div>
+
+              <div className={styles["field-label"]} style={{ marginBottom: 8 }}>
+                Batch presets <span style={{ textTransform: "none", fontWeight: 400, color: "var(--text-xs)" }}>— rail ACH/VENMO/PAYPAL</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {PRESETS.map((p, i) => [p, i]).filter(([p]) => p.mode === "BATCH").map(([p, i]) => (
+                  <button
+                    key={i}
+                    className={styles["preset-btn"]}
+                    disabled={busy === i}
+                    onClick={() => firePreset(i)}
+                  >🏦 {p.label}{busy === i ? " …" : ""}</button>
                 ))}
                 <button
                   className={`${styles["preset-btn"]} ${styles["preset-btn-action"]}`}
