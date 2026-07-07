@@ -10,39 +10,33 @@
 
 The defining story is the **two-phase money flow**: a payment settles synchronously as one MongoDB ACID transaction, then an asynchronous, change-stream-driven pipeline posts it through the general ledger — no polling, debits always equal credits.
 
-![High level architecture](diagrams/high_level_architecture.png)
-
 Where MongoDB shines: **flexible schema** for evolving account/customer data (accounts), **multi-document ACID transactions** for consistent settlement (transactions), and **change streams + aggregation pipelines** for real-time, event-driven double-entry accounting (ledger) — all in one database, no separate message bus.
+
+## Why MongoDB
+
+Legacy cores lock accounting behind COBOL batch cycles: the general ledger reconciles overnight, so balances and books drift apart intraday. The scale of the debt is well documented — 90% of US banking core software is considered legacy, and 43% of US core systems still run on COBOL. A legacy core also typically splits the problem across three systems: a relational database for balances, a CDC connector (Debezium, Kafka Connect) to move settled transactions downstream, and a separate ledger or event-store product for the accounting entries. MongoDB collapses all three into one platform:
+
+- **Multi-document ACID transactions replace two-phase commit orchestration.** Debit, credit, transaction fact, notification, and status flip are one `session.with_transaction` call — no saga, no compensating-transaction logic.
+- **Change streams replace the CDC connector.** The ledger service tails `transactions` natively, with resume tokens for exactly-once-effective delivery across restarts — no Debezium, no Kafka topic to operate.
+- **The document model replaces the ledger's join tables.** A `ledgerEvent` embeds both its debit and credit legs, and a `journalEntry` embeds its full array of posting lines — one balanced accounting entry is one document, one atomic read or write.
+- **Validators replace application-layer invariant checks.** The Pacioli balance rule (Σdebit == Σcredit) is a `$expr` validator on `journalEntries` itself; required-field and enum rules on `ledgerEvents`/`subLedgerEntries` are JSON Schema validators. The invariant holds even for a write that bypasses the service layer.
 
 ## What This Demo Shows
 
 ### BIAN Service Domains implemented
 
 
-| Service                 | BIAN Service Domain                                                        | Responsibility                                               |
-| ------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Service                 | BIAN Service Domain                                  | Responsibility                                               |
+| ------------------------- | ------------------------------------------------------ | -------------------------------------------------------------- |
 | **accounts** (8001)     | `PartyReferenceDataDirectoryEntry`, `CurrentAccount` | Customers + KYC, account lifecycle, source-of-truth balances |
-| **transactions** (8002) | `PaymentOrderInitiation`                                                   | Payments/transfers as one multi-doc ACID settlement          |
-| **ledger** (8003)       | `FinancialAccounting` / `FinancialBookingLog`                              | Async double-entry general-ledger pipeline                   |
+| **transactions** (8002) | `PaymentOrderInitiation`                             | Payments/transfers as one multi-doc ACID settlement          |
+| **ledger** (8003)       | `FinancialAccounting` / `FinancialBookingLog`        | Async double-entry general-ledger pipeline                   |
 
 ### The two-phase money flow
 
 1. **Synchronous settlement** — a payment is one MongoDB **ACID transaction**: `$inc` debtor down, `$inc` creditor up, insert the transaction, flip the payment to SETTLED, write the sender notification. Idempotent via an `Idempotency-Key` header.
-2. **Asynchronous general ledger** — **change-stream** workers react to settled transactions with no polling: `transactions → ledgerEvents → subLedgerEntries`, then a periodic batch rolls them into balanced `journalEntries` (debits == credits enforced at the DB level). The UI traces a payment through all stages live via `/pipeline/trace/{paymentId}`.
-
-### MongoDB collections (`leafy_bank_bian`)
-
-
-| Collection         | Backs BIAN object                    | Notes                                                                              |
-| -------------------- | -------------------------------------- | ------------------------------------------------------------------------------------ |
-| `customers`        | PartyReferenceDataDirectoryEntry     | Customer master + nested KYC                                                       |
-| `accounts`         | CurrentAccountFacility                | Source-of-truth balances                                                           |
-| `payments`         | PaymentOrderInitiation               | Payment orders, status PENDING → SETTLED                                          |
-| `transactions`     | CurrentAccountFacility                | Settled payment legs; listed via `CurrentAccountTransaction/Request` (accounts svc) |
-| `ledgerEvents`     | FinancialBookingLog                  | Stage ①: debit + credit legs, postingStatu PENDING → POSTED                      |
-| `subLedgerEntries` | FinancialAccounting                  | Stage ②: two entries per event (DR + CR)                                          |
-| `journalEntries`   | FinancialAccounting                  | Stage ③: batched, balanced (Pacioli enforced)                                     |
-| `glAccounts`       | FinancialAccounting                  | Chart of accounts                                                                  |
+2. **Asynchronous general ledger** — **change-stream** wor
+3. kers react to settled transactions with no polling: `transactions → ledgerEvents → subLedgerEntries`, then a periodic batch rolls them into balanced `journalEntries` (debits == credits enforced at the DB level). The UI traces a payment through all stages live via `/pipeline/trace/{paymentId}`.
 
 ## Where Does MongoDB Shine?
 
@@ -71,7 +65,95 @@ Responsible for handling digital payments and account-to-account transfers, this
 ### 3. **Ledger Service**
 
 **[Ledger Service](backend/ledger/)**
-Powers the asynchronous general-ledger pipeline behind every payment. MongoDB **change streams** let this service react to settled transactions in real time — without polling — feeding an event-driven flow that projects double-entry sub-ledger entries and rolls them up into journal entries. Combined with **multi-document ACID transactions** to keep debits and credits balanced and **aggregation pipelines** for periodic batch posting, MongoDB delivers the consistency and event-driven processing that core accounting systems demand.
+Powers the asynchronous general-ledger pipeline behind every payment — this is the demo's centerpiece. MongoDB **change streams** let this service react to settled transactions in real time — without polling — feeding a three-stage, event-driven flow that derives ledger events, projects double-entry sub-ledger entries, and rolls them up into journal entries. Combined with **multi-document ACID transactions** to keep debits and credits balanced and **aggregation pipelines** for periodic batch posting, MongoDB delivers the consistency and event-driven processing that core accounting systems demand.
+
+```mermaid
+flowchart TD
+    T["transactions"]
+    T -->|change stream| IW["Stage 1: ingest_worker"]
+    IW --> LE["ledgerEvents<br/>1 / payment"]
+    LE -->|change stream| PW["Stage 2: projection_worker"]
+    PW --> SLE["subLedgerEntries<br/>2 / event · DR + CR"]
+    SLE -->|sweep · every 600s| GB["Stage 3: gl_batch"]
+    GB --> RC{"ΣDR == ΣCR?"}
+    RC -->|no| SKIP["skip cycle"]
+    RC -->|yes| JE["journalEntries<br/>1 / period + account"]
+
+    JE -.->|stamp journalEntryId| SLE & LE
+
+    classDef coll fill:#e3fcf7,stroke:#00684a,color:#023430;
+    class T,LE,SLE,JE coll;
+```
+
+*Per settled payment: 1 `ledgerEvent`, 2 `subLedgerEntries` (debit + credit). Per batch cycle: 1 `journalEntry` per reconciled `(periodCode, controlAccountCode)` group, aggregating however many sub-ledger entries fell in it. `REALTIME`-mode events skip the batch and post their journal inline from `projection_worker` instead.*
+
+**Stage 1 — Change-stream CDC ingest with resume tokens.** The ledger service watches the `transactions` collection with a change stream. Each inserted transaction fires the ingest worker, which derives the debit and credit legs from posting rules and writes one `ledgerEvent`. The worker persists the change stream's resume token after every processed event, so a restart replays nothing and misses nothing. The insert is idempotent on `paymentId` — a duplicate event hits the unique index and is skipped, never double-posted.
+
+```python
+while True:
+    resume_token = load_resume_token(connection, db_name)
+    kwargs = {"resume_after": resume_token} if resume_token else {}
+    try:
+        with transactions.watch([{"$match": {"operationType": "insert"}}], **kwargs) as stream:
+            for change in stream:
+                process_transaction(change["fullDocument"], connection, db_name, coa)
+                save_resume_token(connection, db_name, change["_id"])
+    except OperationFailure as exc:
+        if exc.has_error_label("NonResumableChangeStreamError") and resume_token:
+            clear_resume_token(connection, db_name)  # token aged out of oplog
+            continue
+        raise
+```
+
+Wrapping the open-and-iterate cycle in a loop matters: a stream that falls behind the oplog window raises `NonResumableChangeStreamError` from a `getMore` on an already-open cursor, not only at open time. The loop gives both cases the same clear-token-and-reopen recovery.
+
+**Stage 2 — Projection to balanced sub-ledger entries.** The projection worker watches `ledgerEvents` and fans each event into two `subLedgerEntries` — one debit, one credit — written together in an ACID transaction. Before writing, it re-verifies that the debit and credit amounts match and that both GL accounts are active posting leaves in the chart of accounts. A JSON Schema validator on the collection rejects any entry that violates the stored shape. Events with a `REALTIME` posting mode post their journal inline here; `BATCH` events wait for the scheduled batch.
+
+**Stage 3 — Batched journal posting with a reconciliation gate.** The GL batch worker runs on a fixed interval. Each cycle first reconciles every account; if any account fails to balance, the worker skips the cycle rather than post a suspect journal. On success, it aggregates pending sub-ledger entries by group into balanced `journalEntries`, stamps the `journalEntryId` back onto the source events, and flips their status to `POSTED`. The reconciliation gate makes an unbalanced batch impossible to publish.
+
+```python
+def run_one_cycle(connection, db_name, coa):
+    if not reconcile_ok(connection, db_name):
+        return {"skipped": True, "reason": "pre-batch reconciliation break"}
+    written = run_batch(connection, db_name, coa=coa)
+    return {"skipped": False, "written": written}
+```
+
+See [Indexing and validators (ledger service)](#indexing-and-validators-ledger-service) below for how idempotency, the partial index, the batch-sweep index, and the three JSON Schema/`$expr` validators back every stage above.
+
+---
+
+Put together, the three services form one high-level flow around a single MongoDB Atlas cluster: the accounts and transactions services settle payments and expose balances synchronously, while the ledger service reacts asynchronously to a change stream on `transactions` and posts the GL collections without the other two ever writing to them directly.
+
+![High level architecture](diagrams/high_level_architecture.png)
+
+*Accounts and transactions settle synchronously against MongoDB Atlas; the ledger service consumes a change stream on `transactions` and posts the GL collections asynchronously.*
+
+### MongoDB collections
+
+
+| Collection         | Backs BIAN object                | Notes                                                                              |
+| -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------ |
+| `customers`        | PartyReferenceDataDirectoryEntry | Customer master + nested KYC                                                       |
+| `accounts`         | CurrentAccountFacility           | Source-of-truth balances                                                           |
+| `payments`         | PaymentOrderInitiation           | Payment orders, status PENDING → SETTLED                                          |
+| `transactions`     | CurrentAccountFacility           | Settled payment legs; listed via`CurrentAccountTransaction/Request` (accounts svc) |
+| `glAccounts`       | FinancialAccounting              | Chart of accounts, consulted by every GL stage below                               |
+| `ledgerEvents`     | FinancialBookingLog              | Stage ①: debit + credit legs, postingStatus PENDING → POSTED                     |
+| `subLedgerEntries` | FinancialAccounting              | Stage ②: two entries per event (DR + CR)                                          |
+| `journalEntries`   | FinancialAccounting              | Stage ③: batched, balanced (Pacioli enforced)                                     |
+
+**How the collections chain together** — no `$lookup`-style foreign keys, just a carried-forward identifier at each stage: `payments.paymentId` → `transactions.paymentId` → `ledgerEvents.sourceReference.sourceId` → `subLedgerEntries.sourceReference.sourceId` → `journalEntries.journalId`, which then gets stamped back onto `subLedgerEntries.journalEntryId` and `ledgerEvents.postingResult.journalEntryId`. Every hop is a single indexed lookup — that's what lets `/pipeline/trace/{paymentId}` assemble the full trace without an aggregation-pipeline join.
+
+### Indexing and validators (ledger service)
+
+`backend/ledger/data/ensure_indexes.py` is the source of truth for the GL collections' indexes and validators:
+
+- **Idempotency** — a unique index on `idempotencyKey` on `ledgerEvents`, `subLedgerEntries`, and `journalEntries`. A duplicate insert raises `DuplicateKeyError` and the worker skips it, instead of racing on check-then-insert.
+- **Partial index** — on `subLedgerEntries.journalEntryId` with `{"$gt": ""}`, so the `""` sentinel written before the batch stamps the real ID stays out of the index.
+- **Compound batch sweep** — `idx_batch_sweep` covers the batch query's `{status, journalEntryId}` match and its `{periodCode, controlAccountCode}` grouping in one index.
+- **Multikey reconciliation** — an index on `journalEntries.entries.accountCode` bounds the reconciliation aggregation to monthly volume.
+- **Three JSON Schema / `$expr` validators** — `ledgerEvents` and `subLedgerEntries` require their business fields and lock `postingStatus`/`side`/`status` to known enums; `journalEntries` enforces the Pacioli invariant (Σdebit == Σcredit) directly with `$expr`, so a write that bypasses the service layer still cannot corrupt the books.
 
 ---
 
@@ -105,7 +187,11 @@ make setup
 
 # 2. Create a .env per backend service and frontend/.env.local — see Environment variables below
 
-# 3. Start everything
+# 3. Create the GL collections' indexes and validators (ledger service only — see
+#    "Indexing and validators" above)
+cd backend/ledger && poetry run python -m data.ensure_indexes && cd ../..
+
+# 4. Start everything
 make dev
 ```
 
@@ -167,13 +253,13 @@ CORE_BACKEND_URL="http://localhost:8000"
 ### Services and ports
 
 
-| Service      | Port | Notes                                                                           |
-| -------------- | ------ | --------------------------------------------------------------------------------- |
-| accounts     | 8001 | BIAN`PartyReferenceDataDirectoryEntry` + `CurrentAccount`                       |
-| transactions | 8002 | BIAN`PaymentOrderInitiation` (synchronous ACID settlement)                      |
-| ledger       | 8003 | BIAN`FinancialAccounting` + `/pipeline` monitor routes                          |
-| bian-model   | 8004 | BIAN data-model explorer (Next.js), linked from the NavBar                      |
-| frontend     | 3000 | Next.js UI                                                                      |
+| Service      | Port | Notes                                                      |
+| -------------- | ------ | ------------------------------------------------------------ |
+| accounts     | 8001 | BIAN`PartyReferenceDataDirectoryEntry` + `CurrentAccount`  |
+| transactions | 8002 | BIAN`PaymentOrderInitiation` (synchronous ACID settlement) |
+| ledger       | 8003 | BIAN`FinancialAccounting` + `/pipeline` monitor routes     |
+| bian-model   | 8004 | BIAN data-model explorer (Next.js), linked from the NavBar |
+| frontend     | 3000 | Next.js UI                                                 |
 
 > The optional [Open Finance Service](https://github.com/mongodb-industry-solutions/leafy-bank-backend-openfinance) (external-bank aggregation) is out of scope for the BIAN flow; the proxy falls back to `CORE_BACKEND_URL` for its routes.
 
