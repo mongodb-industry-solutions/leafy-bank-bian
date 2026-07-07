@@ -187,7 +187,7 @@ export function useCreditScore() {
  * consent lacks LOANS_READ) is normal — it never clears the consent.
  */
 export function useCachedExternalData() {
-  const { selectedUser, authorizedConsents, consentRefreshKey } = useUser();
+  const { selectedUser, authorizedConsents, authorizedConsentIds, consentRefreshKey } = useUser();
   const [externalAccounts, setExternalAccounts] = useState([]);
   const [externalProducts, setExternalProducts] = useState([]);
   const [externalTransactions, setExternalTransactions] = useState([]);
@@ -210,7 +210,12 @@ export function useCachedExternalData() {
 
     coreApi(
       `openfinance/secure/customers/${selectedUser.name}/cached-data`,
-      { bearerToken: selectedUser.bearerToken },
+      {
+        bearerToken: selectedUser.bearerToken,
+        // Scope to THIS browser session's consents so cross-session/duplicate
+        // cached data from other sessions never appears on the dashboard.
+        params: { consent_ids: authorizedConsentIds.join(",") },
+      },
     ).then(({ data, error: err }) => {
       if (cancelled) return;
       if (err || !data?.institutions) {
@@ -264,7 +269,7 @@ export function useCachedExternalData() {
  * Returns null when there is no consent — callers fall back to internal-only math.
  */
 export function useGlobalPosition() {
-  const { selectedUser, authorizedConsents, consentRefreshKey } = useUser();
+  const { selectedUser, authorizedConsents, authorizedConsentIds, consentRefreshKey } = useUser();
   const [position, setPosition] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -282,7 +287,12 @@ export function useGlobalPosition() {
 
     coreApi(
       `openfinance/secure/customers/${selectedUser.name}/global-position`,
-      { bearerToken: selectedUser.bearerToken },
+      {
+        bearerToken: selectedUser.bearerToken,
+        // Match the cached-data view: only this session's banks, so totals
+        // never double-count duplicates from other sessions.
+        params: { consent_ids: authorizedConsentIds.join(",") },
+      },
     ).then(({ data, error }) => {
       if (cancelled) return;
       setPosition(error ? null : data);
