@@ -48,6 +48,7 @@ export default function GlMonitor() {
   const [selected, setSelected] = useState({ col: null, idx: null });
   const [detail, setDetail] = useState({ open: false });
   const [tab, setTab] = useState(0);
+  const [tracePid, setTracePid] = useState("");
 
   // Latest filter values, read inside async fetchers to avoid stale closures.
   const filtersRef = useRef({ period, status });
@@ -146,15 +147,12 @@ export default function GlMonitor() {
     setSelected({ col: null, idx: null });
   };
 
-  // Jump from a Transactions card's LE chip to the matching Ledger Event card:
-  // highlight + open its detail + scroll it into view.
-  const onJumpToLe = (eventId) => {
-    const items = columns.le.items || [];
-    const idx = items.findIndex((e) => e.eventId === eventId);
-    if (idx < 0) return;
-    onSelect("le", idx, items[idx]);
-    const el = document.getElementById(`le-row-${eventId}`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  // From a Transactions card's chip: jump to the Payment Trace tab and trace
+  // that payment end-to-end (replaces the old highlight-the-LE-card behavior).
+  const onTraceTx = (paymentId) => {
+    if (!paymentId) return;
+    setTracePid(paymentId);
+    setTab(1);
   };
 
   return (
@@ -168,16 +166,14 @@ export default function GlMonitor() {
             onChange={(v) => setTab(Number(v))}
           >
             <SegmentedControlOption value="0">
-              Payment Trace (for Single Transactions)
+              Pipeline Monitor (for Multiple Transactions)
             </SegmentedControlOption>
             <SegmentedControlOption value="1">
-              Pipeline Monitor (for Multiple Transactions)
+              Payment Trace (for Single Transactions)
             </SegmentedControlOption>
           </SegmentedControl>
         </div>
         {tab === 0 ? (
-          <PaymentTrace />
-        ) : (
           <>
             <InitiatePanel onFired={refreshAll} onRefresh={refreshAll} />
             <PipelineStepper />
@@ -185,10 +181,12 @@ export default function GlMonitor() {
               columns={columns}
               selected={selected}
               onSelect={onSelect}
-              onJumpToLe={onJumpToLe}
+              onTraceTx={onTraceTx}
             />
             <DetailPanel detail={detail} onClose={closeDetail} />
           </>
+        ) : (
+          <PaymentTrace initialPid={tracePid} />
         )}
       </div>
     </div>

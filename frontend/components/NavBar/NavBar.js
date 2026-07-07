@@ -61,6 +61,7 @@ const NavBarContent = ({ bianModelUrl }) => {
 
     const handleSwitchUser = (e) => {
         e.stopPropagation();
+        setShowUserModal(false);
         clearUser();
         router.push('/');
     };
