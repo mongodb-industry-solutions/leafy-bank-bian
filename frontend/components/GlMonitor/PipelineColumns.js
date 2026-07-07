@@ -1,6 +1,6 @@
 import React from "react";
 import styles from "./GlMonitor.module.css";
-import { Chip, VariantChip, BatchChip } from "./Bits";
+import { Chip, VariantChip, BalanceChip } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
 
 // Renders feed rows with the "current ↑ · ↓ last batch" separator when the
@@ -67,7 +67,7 @@ function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, feat
   );
 }
 
-export default function PipelineColumns({ columns, selected, onSelect, onJumpToLe }) {
+export default function PipelineColumns({ columns, selected, onSelect, onTraceTx }) {
   return (
     <div className={styles.pipeline}>
       <Column
@@ -80,18 +80,15 @@ export default function PipelineColumns({ columns, selected, onSelect, onJumpToL
             <div className={styles["row-top"]}>
               <span className={styles["row-id"]}>{t.paymentId || "—"}</span>
               <Chip status={t.transactionStatus} />
-              <BatchChip tag={t._batchTag} />
             </div>
             <div className={styles["row-detail"]}>${fmt(t.amount)} · {t.rail || "—"} · {t.paymentType || "—"}</div>
             <div className={styles["row-sub"]}>{fmtDate(t.createdAt)} · {t.payer?.accountId || "—"} → {t.payee?.accountId || "—"}</div>
             <div className={styles["row-sub"]} style={{ marginTop: 3 }}>
-              {t.ledgerEventId
-                ? <span
-                    className={styles["le-link-chip"]}
-                    title="Jump to this Ledger Event"
-                    onClick={(ev) => { ev.stopPropagation(); onJumpToLe?.(t.ledgerEventId); }}
-                  >→ {t.ledgerEventId}</span>
-                : <span className={styles["le-not-ingested"]}>LE: not yet ingested</span>}
+              <span
+                className={styles["le-link-chip"]}
+                title="Trace this payment end-to-end"
+                onClick={(ev) => { ev.stopPropagation(); onTraceTx?.(t.paymentId); }}
+              >→ Trace transaction</span>
             </div>
           </>
         )}
@@ -108,7 +105,9 @@ export default function PipelineColumns({ columns, selected, onSelect, onJumpToL
             <div className={styles["row-top"]}>
               <span className={styles["row-id"]}>{e.eventId || "—"}</span>
               <Chip status={e.postingStatus} />
-              <BatchChip tag={e._batchTag} />
+              {e.debitLeg && e.creditLeg && (
+                <BalanceChip balanced={e.debitLeg.amount === e.creditLeg.amount} />
+              )}
             </div>
             <div className={styles["row-detail"]}>{e.eventType || "—"} · {e.postingMode?.type || "—"}</div>
             <div className={styles["row-sub"]}>{fmtDate(e.occurredAt)} · v{e.mappingVersion || "?"}</div>
@@ -127,7 +126,6 @@ export default function PipelineColumns({ columns, selected, onSelect, onJumpToL
             <div className={styles["row-top"]}>
               <Chip status={s.side} />
               <span className={styles["row-id"]}>{s.subLedgerId || "—"}</span>
-              <BatchChip tag={s._batchTag} />
             </div>
             <div className={styles["row-detail"]}>acct {s.controlAccountCode || "—"} · {fmtMinor(s.amount)} · bal {fmtMinor(s.runningBalance)}</div>
             <div className={styles["row-sub"]}>
@@ -155,10 +153,7 @@ export default function PipelineColumns({ columns, selected, onSelect, onJumpToL
               <div className={styles["row-top"]}>
                 <span className={styles["row-id"]}>{j.journalId || "—"}</span>
                 <Chip status={j.status} />
-                {balanced
-                  ? <span style={{ fontSize: 12 }} title="Balanced">⚖️</span>
-                  : <span style={{ color: "var(--red)" }}>⚠ unbalanced</span>}
-                <BatchChip tag={j._batchTag} />
+                <BalanceChip balanced={balanced} />
               </div>
               <div className={styles["row-detail"]}>{j.batchId || j.sourceReference?.sourceId || "—"} · {j.periodCode || "—"}</div>
               <div className={styles["row-sub"]}>{entries.length} lines · DR {fmtMinor(debit)} / CR {fmtMinor(credit)}</div>

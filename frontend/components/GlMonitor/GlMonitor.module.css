@@ -654,7 +654,6 @@
   transition: background .12s;
 }
 .le-link-chip:hover { background: #bfdbfe; }
-.le-not-ingested { font-size: 10px; color: var(--text-xs); font-style: italic; }
 
 .row-sub {
   font-size: 10px;
@@ -1225,6 +1224,62 @@
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+
+/* Double-entry T-account (General Ledger stage) */
+.ta-wrap {
+  border: 1px solid var(--hue-border, var(--border));
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 16px;
+  background: #fff;
+}
+.ta-head, .ta-row, .ta-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.ta-head {
+  background: var(--hue-bg, var(--border-light));
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hue, var(--text-muted));
+}
+.ta-head > span {
+  padding: 6px 12px;
+}
+.ta-head > span:first-child { border-right: 1px solid var(--hue-border, var(--border)); }
+.ta-cell {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 11px;
+  min-height: 30px;
+  align-items: center;
+}
+.ta-row .ta-cell:first-child,
+.ta-foot .ta-cell:first-child { border-right: 1px solid var(--border); }
+.ta-row:not(:last-child) { border-bottom: 1px solid var(--border-light); }
+.ta-acct { color: var(--text-muted); }
+.ta-amt { font-family: monospace; font-weight: 700; color: var(--text); white-space: nowrap; }
+.ta-foot {
+  border-top: 2px solid var(--hue-border, var(--border));
+  background: var(--hue-bg, var(--border-light));
+  font-weight: 700;
+}
+.ta-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ta-ok  { background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; }
+.ta-bad { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
 
 @media (max-width: 900px) {
   .ptrace-explorer { grid-template-columns: 1fr; }

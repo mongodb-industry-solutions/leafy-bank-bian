@@ -15,10 +15,13 @@ export function VariantChip({ variant, children }) {
   return <span className={`${styles.chip} ${styles[`chip-${variant}`]}`}>{children}</span>;
 }
 
-export function BatchChip({ tag }) {
-  if (tag === "CURRENT") return <VariantChip variant="current">current</VariantChip>;
-  if (tag === "LAST") return <VariantChip variant="last">last batch</VariantChip>;
-  return null;
+// Double-entry balance indicator — "DR = CR" when legs match, else a warning.
+export function BalanceChip({ balanced }) {
+  return (
+    <VariantChip variant={balanced ? "ok" : "mismatch"}>
+      {balanced ? "DR = CR" : "DR ≠ CR"}
+    </VariantChip>
+  );
 }
 
 // Key/value table — pairs is an array of [label, value]; value may be a node.

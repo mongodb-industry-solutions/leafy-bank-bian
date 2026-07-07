@@ -81,6 +81,19 @@ function buildStages(d) {
       id: le?.eventId, count: le ? 1 : 0,
       status: le?.postingStatus, reached: !!le,
       features: ["Change Streams", "Resume Tokens", "DuplicateKeyError idempotency", "$jsonSchema validator"],
+      ledger: le ? {
+        currency: le.debitLeg?.currency || le.creditLeg?.currency || "USD",
+        debits: le.debitLeg ? [{
+          accountCode: le.debitLeg.glAccountCode,
+          accountName: le.debitLeg.controlAccountCode ? `ctrl ${le.debitLeg.controlAccountCode}` : "",
+          amount: le.debitLeg.amount,
+        }] : [],
+        credits: le.creditLeg ? [{
+          accountCode: le.creditLeg.glAccountCode,
+          accountName: le.creditLeg.controlAccountCode ? `ctrl ${le.creditLeg.controlAccountCode}` : "",
+          amount: le.creditLeg.amount,
+        }] : [],
+      } : null,
       pairs: le ? [
         ["Status", <Chip status={le.postingStatus} key="c" />],
         ["Event Type", le.eventType || "—"],
@@ -108,6 +121,15 @@ function buildStages(d) {
       status: sls.length ? (sls.every((s) => s.journalEntryId) ? "POSTED" : "PENDING") : null,
       reached: sls.length > 0,
       features: ["Change Streams", "ACID multi-doc transaction", "$jsonSchema validator", "Partial index (journalEntryId ≠ \"\")"],
+      ledger: sls.length ? {
+        currency: sls[0]?.currency || "USD",
+        debits: sls.filter((s) => s.side === "DEBIT").map((s) => ({
+          accountCode: s.controlAccountCode, accountName: s.subLedgerType || "", amount: s.amount,
+        })),
+        credits: sls.filter((s) => s.side === "CREDIT").map((s) => ({
+          accountCode: s.controlAccountCode, accountName: s.subLedgerType || "", amount: s.amount,
+        })),
+      } : null,
       pairs: sls.length ? (() => {
         const debit = sls.find((s) => s.side === "DEBIT") || sls[0];
         const credit = sls.find((s) => s.side === "CREDIT") || sls[1];
@@ -148,6 +170,13 @@ function buildStages(d) {
       id: jn?.journalId, count: jn ? (jn.entries || []).length : 0,
       status: jn?.status, reached: !!jn,
       features: ["Aggregation ($group $sum $addToSet)", "ACID transaction", "$expr Pacioli validator", "Multikey index (entries.accountCode)"],
+      // Double-entry legs rendered as a T-account (see TAccount); kept out of
+      // the flat pairs so the balance story reads spatially, not as a list.
+      ledger: jn ? {
+        currency: jn.currency || "USD",
+        debits: (jn.entries || []).filter((e) => e.side === "DEBIT"),
+        credits: (jn.entries || []).filter((e) => e.side === "CREDIT"),
+      } : null,
       pairs: jn ? [
         ["Status", <Chip status={jn.status} key="c" />],
         ["Journal Type", jn.journalType || "—"],
@@ -155,11 +184,6 @@ function buildStages(d) {
         ["Txn Count", jn.sourceReference?.txnCount ?? "—"],
         ["Period", jn.periodCode || "—"],
         ["Value / Posting Date", `${jn.valueDate || "—"} / ${jn.postingDate || "—"}`],
-        ["Total", `${fmtMinor(jn.totalAmount)} ${jn.currency || "—"}`],
-        ...(jn.entries || []).map((e) => [
-          `Line ${e.lineNumber} (${e.side})`,
-          `${e.accountCode}${e.accountName ? ` · ${e.accountName}` : ""} — ${fmtMinor(e.amount)} ${e.currency || ""}`,
-        ]),
         ["Created By", jn.createdBy || "—"],
         ["Mapping Version", jn.mappingVersion || "—"],
         ["Created", fmtDate(jn.createdAt)],
@@ -199,6 +223,59 @@ function StepList({ stages, selectedKey, onSelect }) {
   );
 }
 
+// Double-entry T-account: debits left, credits right, totals footer, and a
+// balanced badge. Makes DR == CR visible spatially instead of as flat rows.
+function TAccount({ ledger }) {
+  const sum = (rows) => rows.reduce((t, e) => t + (Number(e.amount) || 0), 0);
+  const drTotal = sum(ledger.debits);
+  const crTotal = sum(ledger.credits);
+  const balanced = drTotal === crTotal;
+  const rows = Math.max(ledger.debits.length, ledger.credits.length);
+
+  const cell = (e) =>
+    e ? (
+      <>
+        <span className={styles["ta-acct"]}>
+          {e.accountCode}{e.accountName ? ` · ${e.accountName}` : ""}
+        </span>
+        <span className={styles["ta-amt"]}>${fmt(e.amount, true)}</span>
+      </>
+    ) : null;
+
+  return (
+    <div className={styles["ta-wrap"]}>
+      <div className={styles["ta-head"]}>
+        <span>Debit</span>
+        <span>Credit</span>
+      </div>
+      <div className={styles["ta-body"]}>
+        {Array.from({ length: rows }).map((_, i) => (
+          <div className={styles["ta-row"]} key={i}>
+            <div className={styles["ta-cell"]}>{cell(ledger.debits[i])}</div>
+            <div className={styles["ta-cell"]}>{cell(ledger.credits[i])}</div>
+          </div>
+        ))}
+      </div>
+      <div className={styles["ta-foot"]}>
+        <div className={styles["ta-cell"]}>
+          <span className={styles["ta-acct"]}>Total DR</span>
+          <span className={styles["ta-amt"]}>${fmt(drTotal, true)}</span>
+        </div>
+        <div className={styles["ta-cell"]}>
+          <span className={styles["ta-acct"]}>Total CR</span>
+          <span className={styles["ta-amt"]}>${fmt(crTotal, true)}</span>
+        </div>
+      </div>
+      <div className={`${styles["ta-badge"]} ${balanced ? styles["ta-ok"] : styles["ta-bad"]}`}>
+        <Icon glyph={balanced ? "CheckmarkWithCircle" : "Warning"} size={14} />
+        {balanced
+          ? `Balanced — DR $${fmt(drTotal, true)} = CR $${fmt(crTotal, true)} ${ledger.currency}`
+          : `Out of balance — DR $${fmt(drTotal, true)} ≠ CR $${fmt(crTotal, true)}`}
+      </div>
+    </div>
+  );
+}
+
 // Right-hand detail pane for the selected step.
 function DetailPane({ stage }) {
   const [showJson, setShowJson] = useState(false);
@@ -217,6 +294,7 @@ function DetailPane({ stage }) {
       </div>
       {stage.reached ? (
         <>
+          {stage.ledger && <TAccount ledger={stage.ledger} />}
           <table className={styles["kv-table"]}>
             <tbody>
               {(stage.pairs || []).map(([k, v], i) => (
@@ -257,10 +335,11 @@ function DetailPane({ stage }) {
   );
 }
 
-export default function PaymentTrace() {
+export default function PaymentTrace({ initialPid = "" }) {
   const [pid, setPid] = useState("");
   const [state, setState] = useState({ kind: "empty" }); // empty|loading|notfound|error|data
   const [recent, setRecent] = useState([]); // last 5 payments to pick from
+  const [recentOpen, setRecentOpen] = useState(true); // Recent Transactions panel collapse
   const [selectedKey, setSelectedKey] = useState(null); // selected stage in the vertical stepper
 
   const fetchTrace = useCallback(async (idArg) => {
@@ -276,6 +355,16 @@ export default function PaymentTrace() {
     setState({ kind: "data", d: data });
   }, [pid]);
 
+  // Deep-linked from the Pipeline Monitor's "Trace transaction" chip: trace the
+  // handed-off paymentId as soon as this view mounts.
+  useEffect(() => {
+    if (initialPid) {
+      setRecentOpen(false);
+      fetchTrace(initialPid);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPid]);
+
   // Load the 5 most recent payments so the user can trace one without typing.
   useEffect(() => {
     let alive = true;
@@ -287,11 +376,10 @@ export default function PaymentTrace() {
 
   const stages = state.kind === "data" ? buildStages(state.d) : null;
 
-  // On a new trace, default the selection to the last reached stage.
+  // On a new trace, default the selection to the first stage (Payment).
   useEffect(() => {
     if (!stages) { setSelectedKey(null); return; }
-    const reached = stages.filter((s) => s.reached);
-    setSelectedKey((reached[reached.length - 1] || stages[0]).key);
+    setSelectedKey(stages[0].key);
   }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedStage = stages?.find((s) => s.key === selectedKey) || null;
@@ -300,12 +388,18 @@ export default function PaymentTrace() {
     <div className={styles["ptrace-root"]}>
       {/* Recent transactions — pick one to trace without typing an id */}
       <div className={styles.panel} style={{ marginBottom: 16 }}>
-        <div className={styles["panel-header"]}>
-          <span className={styles["panel-title"]}>Recent Transactions</span>
+        <div
+          className={styles["panel-header"]}
+          style={{ cursor: "pointer" }}
+          onClick={() => setRecentOpen((o) => !o)}
+        >
+          <Icon glyph={recentOpen ? "ChevronDown" : "ChevronRight"} size={16} />
+          <span className={styles["panel-title"]} style={{ marginLeft: 4 }}>Recent Transactions</span>
           <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>
             last 5 payments · click one to trace it end-to-end
           </span>
         </div>
+        {recentOpen && (
         <div className={styles["panel-body"]}>
           {recent.length ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -327,6 +421,7 @@ export default function PaymentTrace() {
             <div className={styles["empty-state"]}>No recent transactions.</div>
           )}
         </div>
+        )}
       </div>
 
       {state.kind === "empty" && <div className={styles["empty-state"]}>Enter a paymentId to trace it end-to-end across all stages.</div>}

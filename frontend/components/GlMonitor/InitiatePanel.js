@@ -8,7 +8,7 @@ import { coreApi } from "@/lib/api/client";
 // through the /api/backend proxy (coreApi) which routes PaymentOrderInitiation
 // to the transactions service. After firing, the parent refreshes the columns.
 export default function InitiatePanel({ onFired, onRefresh }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [showCustom, setShowCustom] = useState(false);
   const [busy, setBusy] = useState(null); // preset index or "custom" currently firing
   const [result, setResult] = useState(null); // { ok, text } | null
