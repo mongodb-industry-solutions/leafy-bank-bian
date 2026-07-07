@@ -498,6 +498,14 @@ export function useCreditCardsPageData() {
 
   const creditCards = [...internalCards, ...externalCards];
 
+  // Account numbers of the actual external credit cards. A transaction only
+  // counts as a card transaction if it belongs to one of these accounts —
+  // the MCRD (merchant-card) family alone also matches card purchases made
+  // on a checking account, which are not credit-card transactions.
+  const externalCardNumbers = new Set(
+    externalCards.map((c) => c.number).filter(Boolean),
+  );
+
   const internalCardTxns = transactions
     .filter((t) => t.Acct?.Tp === "CARD")
     .map((t) => ({
@@ -510,9 +518,10 @@ export function useCreditCardsPageData() {
       _rawDocument: t,
     }));
 
-  // External card transactions: filter by MCRD (merchant card) family code
+  // External card transactions: those posted to an actual credit-card account
+  // (matched by payer account number), not merely any MCRD-family transaction.
   const externalCardTxns = externalTransactions
-    .filter((t) => t.BkTxCd?.Fmly === "MCRD")
+    .filter((t) => externalCardNumbers.has(t.payer?.accountNo))
     .map((t) => ({
       category: txCategory(t),
       establishment: t.Cdtr?.Nm || t.AddtlNtryInf || "\u2014",
