@@ -1,9 +1,9 @@
 "use client";
 
+import { openFinanceChatApi } from "@/lib/api/client";
 import { useUser } from "@/lib/context/UserContext";
 import { marked } from "marked";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { openFinanceChatApi } from "@/lib/api/client";
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -17,8 +17,6 @@ const WELCOME_MESSAGE =
 const WELCOME_SUGGESTIONS = [
   "Connect a bank for personalized financial advice",
   "Connect a bank for general access to your accounts and data",
-  "Check your existing bank connections",
-  "Something else?",
 ];
 
 const OpenFinanceChatContext = createContext(null);
@@ -58,7 +56,10 @@ export function OpenFinanceChatProvider({ children }) {
 
     channel.onmessage = (event) => {
       const msg = event.data;
-      if (msg?.type !== "consent_complete" && msg?.type !== "consent_declined") {
+      if (
+        msg?.type !== "consent_complete" &&
+        msg?.type !== "consent_declined"
+      ) {
         return;
       }
       if (msg._broadcastId && seenBroadcastsRef.current.has(msg._broadcastId)) {
