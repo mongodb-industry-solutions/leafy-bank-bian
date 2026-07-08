@@ -1,5 +1,4 @@
 import React from "react";
-import Code from "@leafygreen-ui/code";
 import styles from "./GlMonitor.module.css";
 import { Chip, KvTable } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
@@ -49,10 +48,6 @@ function TxDetail({ t }) {
           ["payer.accountId", t.payer?.accountId],
           ["payee.accountId", t.payee?.accountId],
         ]} />
-        <div className={styles["detail-section-title"]} style={{ marginTop: 12 }}>Raw</div>
-        <div style={{ marginTop: 8 }}>
-          <Code language="json">{JSON.stringify(t, null, 2)}</Code>
-        </div>
       </div>
     </div>
   );

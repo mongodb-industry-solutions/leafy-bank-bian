@@ -2,12 +2,15 @@ import React from "react";
 import styles from "./GlMonitor.module.css";
 import { Chip, VariantChip, BalanceChip } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
+import { linkKeyOf } from "@/lib/glMonitor/lineage";
 
 // Renders feed rows with the "current ↑ · ↓ last batch" separator when the
 // tag transitions from CURRENT to LAST (ported from batch.js renderWithSep).
-function FeedRows({ col, items, selected, onSelect, renderRow, rowId, keyOf }) {
+function FeedRows({ col, items, selected, lineage, onSelect, renderRow, rowId, keyOf }) {
   const out = [];
   let prevTag = null;
+  const linkedSet = lineage?.[col];
+  const active = !!lineage;
   items.forEach((item, i) => {
     const key = keyOf ? keyOf(item, i) : i;
     if (item._batchTag === "LAST" && prevTag === "CURRENT") {
@@ -16,9 +19,12 @@ function FeedRows({ col, items, selected, onSelect, renderRow, rowId, keyOf }) {
       );
     }
     const isSel = selected.col === col && selected.idx === i;
+    const isLinked = !isSel && linkedSet?.has(linkKeyOf[col]?.(item));
+    const isDimmed = active && !isSel && !isLinked;
+    const cls = `${styles["feed-row"]}${isSel ? " " + styles.selected : ""}${isLinked ? " " + styles.linked : ""}${isDimmed ? " " + styles.dimmed : ""}`;
     out.push(
       <div
-        className={`${styles["feed-row"]}${isSel ? " " + styles.selected : ""}`}
+        className={cls}
         key={key}
         id={rowId ? rowId(item) : undefined}
         onClick={() => onSelect(col, i, item)}
@@ -32,12 +38,12 @@ function FeedRows({ col, items, selected, onSelect, renderRow, rowId, keyOf }) {
 }
 
 // features: array of MongoDB feature-tag labels for the footer (null = no footer).
-function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, features, col, selected, onSelect, renderRow, emptyMsg, rowId, keyOf }) {
+function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, features, col, selected, lineage, onSelect, renderRow, emptyMsg, rowId, keyOf }) {
   let body;
   if (state.loading) body = <div className={styles["empty-state"]}>Loading…</div>;
   else if (state.error) body = <div className={styles["error-state"]}>Error: {state.error}</div>;
   else if (!state.items.length) body = <div className={styles["empty-state"]}>{emptyMsg}</div>;
-  else body = <FeedRows col={col} items={state.items} selected={selected} onSelect={onSelect} renderRow={renderRow} rowId={rowId} keyOf={keyOf} />;
+  else body = <FeedRows col={col} items={state.items} selected={selected} lineage={lineage} onSelect={onSelect} renderRow={renderRow} rowId={rowId} keyOf={keyOf} />;
 
   return (
     <div className={styles.col}>
@@ -68,13 +74,13 @@ function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, feat
   );
 }
 
-export default function PipelineColumns({ columns, selected, onSelect, onTraceTx }) {
+export default function PipelineColumns({ columns, selected, lineage, onSelect, onTraceTx }) {
   return (
     <div className={styles.pipeline}>
       <Column
         headerBg="var(--col1)" stageCls="stage-tx" stageLabel="upstream" title="Transactions"
         sub="settled payments · read-only" count={columns.tx.count} state={columns.tx}
-        features={null} col="tx" selected={selected} onSelect={onSelect}
+        features={null} col="tx" selected={selected} lineage={lineage} onSelect={onSelect}
         keyOf={(t, i) => t.paymentId ?? i}
         emptyMsg="No transactions in last 2 batch windows"
         renderRow={(t) => (
@@ -100,7 +106,7 @@ export default function PipelineColumns({ columns, selected, onSelect, onTraceTx
         headerBg="var(--col2)" stageCls="stage-le" stageLabel="Stage ①" title="Ledger Events"
         sub="ingest_worker · change stream" count={columns.le.count} state={columns.le}
         features={["Change Streams", "Resume Tokens", "DuplicateKeyError idempotency", "$jsonSchema validator"]}
-        col="le" selected={selected} onSelect={onSelect} rowId={(e) => `le-row-${e.eventId}`}
+        col="le" selected={selected} lineage={lineage} onSelect={onSelect} rowId={(e) => `le-row-${e.eventId}`}
         keyOf={(e, i) => e.eventId ?? i}
         emptyMsg="No ledger events in last 2 batch windows"
         renderRow={(e) => (
@@ -122,7 +128,7 @@ export default function PipelineColumns({ columns, selected, onSelect, onTraceTx
         headerBg="var(--col3)" stageCls="stage-sl" stageLabel="Stage ②" title="SubLedger Entries"
         sub="projection_worker · ACID txn" count={columns.sl.count} state={columns.sl}
         features={["Change Streams", "ACID multi-doc transaction", "$jsonSchema validator", "Partial index (journalEntryId ≠ \"\")"]}
-        col="sl" selected={selected} onSelect={onSelect}
+        col="sl" selected={selected} lineage={lineage} onSelect={onSelect}
         keyOf={(s, i) => s.subLedgerId ?? i}
         emptyMsg="No subledger entries in last 2 batch windows"
         renderRow={(s) => (
@@ -145,7 +151,7 @@ export default function PipelineColumns({ columns, selected, onSelect, onTraceTx
         headerBg="var(--col4)" stageCls="stage-jn" stageLabel="Stage ③" title="Journal Entries"
         sub="gl_batch · scheduled" count={columns.jn.count} state={columns.jn}
         features={["Aggregation ($group $sum $addToSet)", "ACID transaction", "$expr Pacioli validator", "Multikey index (entries.accountCode)"]}
-        col="jn" selected={selected} onSelect={onSelect}
+        col="jn" selected={selected} lineage={lineage} onSelect={onSelect}
         keyOf={(j, i) => j.journalId ?? i}
         emptyMsg="No journal entries in last 2 batch windows"
         renderRow={(j) => {

@@ -7,6 +7,7 @@
 import { pipelineApi } from "@/lib/api/client";
 import { filterByBatch } from "@/lib/glMonitor/batch";
 import { buildParams } from "@/lib/glMonitor/format";
+import { computeLineage } from "@/lib/glMonitor/lineage";
 import {
   SegmentedControl,
   SegmentedControlOption,
@@ -46,6 +47,7 @@ export default function GlMonitor({ lastBatchAt, onManualRefresh }) {
     jn: EMPTY_COL,
   });
   const [selected, setSelected] = useState({ col: null, idx: null });
+  const [lineage, setLineage] = useState(null);
   const [detail, setDetail] = useState({ open: false });
   const [tab, setTab] = useState(0);
   const [tracePid, setTracePid] = useState("");
@@ -165,7 +167,13 @@ export default function GlMonitor({ lastBatchAt, onManualRefresh }) {
   }, [refreshAll, onManualRefresh]);
 
   const onSelect = (col, idx, item) => {
+    // Clicking the already-selected card toggles the selection off.
+    if (selected.col === col && selected.idx === idx) {
+      closeDetail();
+      return;
+    }
     setSelected({ col, idx });
+    setLineage(computeLineage(col, item, columns));
     setDetail({
       open: true,
       kind: col,
@@ -178,6 +186,7 @@ export default function GlMonitor({ lastBatchAt, onManualRefresh }) {
   const closeDetail = () => {
     setDetail({ open: false });
     setSelected({ col: null, idx: null });
+    setLineage(null);
   };
 
   // From a Transactions card's chip: jump to the Payment Trace tab and trace
@@ -219,6 +228,7 @@ export default function GlMonitor({ lastBatchAt, onManualRefresh }) {
             <PipelineColumns
               columns={columns}
               selected={selected}
+              lineage={lineage}
               onSelect={onSelect}
               onTraceTx={onTraceTx}
             />
