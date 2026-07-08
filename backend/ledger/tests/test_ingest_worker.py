@@ -5,10 +5,8 @@ Hermetic: inline CoA + account fixtures, no DB.
 
 from __future__ import annotations
 
-import pytest
-
 from shared.coa_cache import ChartOfAccounts
-from workers.ingest_worker import _derive_posting_mode, build_ledger_event
+from workers.ingest_worker import build_ledger_event
 
 
 def _coa() -> ChartOfAccounts:
@@ -188,20 +186,3 @@ def test_event_id_and_group_id_have_correct_prefixes():
     assert event["eventId"].startswith("LE-")
     assert event["groupId"].startswith("GRP-")
 
-
-# --- _derive_posting_mode -----------------------------------------------------
-
-@pytest.mark.parametrize("rail,ptype,expected", [
-    ("WIRE", None, "REALTIME"),
-    ("wire", None, "REALTIME"),
-    (None, "WIRE_TRANSFER", "REALTIME"),
-    ("INTERNAL", None, "REALTIME"),
-    ("ACH", None, "BATCH"),
-    (None, "ACH", "BATCH"),
-    ("VENMO", None, "BATCH"),
-    ("PAYPAL", None, "BATCH"),
-    ("RTP", "OTHER", "BATCH"),
-    (None, None, "BATCH"),
-])
-def test_derive_posting_mode(rail, ptype, expected):
-    assert _derive_posting_mode(rail, ptype) == expected

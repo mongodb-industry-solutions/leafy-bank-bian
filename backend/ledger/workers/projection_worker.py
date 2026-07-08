@@ -4,12 +4,9 @@ Change stream on `ledgerEvents` inserts. For each event, fans out into two
 subLedgerEntries (DEBIT + CREDIT) and stamps ledgerEvents.postingResult.
 Idempotent via unique idempotencyKey per sub-ledger entry.
 
-Stage ③ (journal posting) is handled elsewhere: realtime_posting_worker reacts
-to the postingResult update this function makes for REALTIME/NEAR_REALTIME
-events, and gl_batch's scheduled sweep aggregates BATCH events. If
-realtime_posting_worker's resume token is ever lost, gl_batch.
-sweep_stale_realtime_postings is the fallback that rescues any REALTIME event
-left un-journaled.
+Stage ③ (journal posting) is handled elsewhere: gl_batch's scheduled sweep
+aggregates the POSTED subledger legs into journalEntries. All events post via
+that batch path — there is no realtime posting.
 
 Resume token persisted in `changeStreamTokens`.
 """

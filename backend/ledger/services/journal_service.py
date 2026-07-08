@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 from bson import Int64, ObjectId
@@ -30,14 +30,6 @@ _UNJOURNALED = ""
 # BIAN SourceSystemReference / SourceTransactionType constants for journalEntries.
 _SOURCE_SYSTEM = "GL_BATCH_PIPELINE"
 _SOURCE_TYPE_BATCH = "BATCH_POSTING"
-_SOURCE_TYPE_REALTIME = "REALTIME_POSTING"
-
-REALTIME_POSTING_MODE_TYPES = ("REALTIME", "NEAR_REALTIME")
-
-# Safety-net threshold for sweep_stale_realtime_postings: how long a REALTIME
-# subledger leg pair may sit un-journaled before gl_batch treats it as missed
-# by realtime_posting_worker (e.g. a lost resume token) and posts it itself.
-_DEFAULT_STALE_REALTIME_SECONDS = 120
 
 
 def _now_utc() -> datetime:
@@ -189,72 +181,6 @@ def write_journal(
     return True
 
 
-def post_realtime_event(
-    event_id: str,
-    connection: MongoDBConnection,
-    db_name: str,
-    coa: Optional["ChartOfAccounts"] = None,
-) -> bool:
-    """Stage ③ (realtime): write ONE per-transaction journal for a single event.
-
-    Reads the event's two POSTED, un-journaled subLedgerEntries and summarizes
-    them into one balanced journal (one line per control account + side).
-    Unlike run_batch, this produces a journal per transaction, not per window.
-    Idempotent via journalEntries.idempotencyKey. Returns True if written.
-    """
-    sl_coll = connection.get_collection(db_name, "subLedgerEntries")
-    rows = list(sl_coll.find({
-        "sourceReference.sourceId": event_id,
-        "status": "POSTED",
-        "journalEntryId": _UNJOURNALED,
-    }))
-    if not rows:
-        logger.info("no un-journaled subLedgerEntries for eventId=%s; realtime post skipped", event_id)
-        return False
-
-    # Must be a complete DEBIT+CREDIT pair in a single period, mirroring the
-    # batch completeness gate (GAP-2). A partial pair must never be journaled.
-    sides = {r["side"] for r in rows}
-    periods = {r["periodCode"] for r in rows}
-    if len(rows) != 2 or sides != {"DEBIT", "CREDIT"}:
-        logger.warning(
-            "incomplete leg pair for eventId=%s (count=%d sides=%s) — realtime post skipped",
-            event_id, len(rows), sorted(sides),
-        )
-        return False
-    if len(periods) > 1:
-        logger.warning(
-            "period mismatch for eventId=%s (periods=%s) — realtime post skipped",
-            event_id, sorted(periods),
-        )
-        return False
-    period_code = periods.pop()
-
-    # Reshape the two legs into the aggregation shape build_journal_entry expects.
-    agg_rows = [
-        {
-            "_id": {"controlAccountCode": r["controlAccountCode"], "side": r["side"]},
-            "amount": r["amount"],
-            "currency": r.get("currency"),
-            "count": 1,
-            "subLedgerIds": [r["subLedgerId"]],
-            "eventIds": [event_id],
-        }
-        for r in rows
-    ]
-
-    journal, sub_ids, event_ids = build_journal_entry(
-        f"RT-{event_id}",
-        period_code,
-        agg_rows,
-        coa=coa,
-        idempotency_key=f"JOURNAL-RT-{event_id}",
-        source_type=_SOURCE_TYPE_REALTIME,
-        source_id=event_id,
-    )
-    return write_journal(journal, sub_ids, event_ids, connection, db_name)
-
-
 def run_batch(
     connection: MongoDBConnection,
     db_name: str,
@@ -299,21 +225,6 @@ def run_batch(
     if not complete_event_ids:
         return 0
 
-    # postingMode routing: REALTIME / NEAR_REALTIME events are journaled
-    # per-transaction inline by projection_worker (right after it writes the
-    # subledger legs). The batch posts ONLY postingMode=BATCH events, so the
-    # two paths never journal the same event.
-    le_coll = connection.get_collection(db_name, "ledgerEvents")
-    complete_event_ids = [
-        d["eventId"]
-        for d in le_coll.find(
-            {"eventId": {"$in": complete_event_ids}, "postingMode.type": "BATCH"},
-            {"eventId": 1},
-        )
-    ]
-    if not complete_event_ids:
-        return 0
-
     # Group by (period, control account, side) → one summarized line each.
     # Only legs from complete event pairs are included.
     pipeline = [
@@ -355,55 +266,3 @@ def run_batch(
         except Exception:
             logger.exception("unexpected error batch=%s period=%s", batch_id, period_code)
     return written
-
-
-def sweep_stale_realtime_postings(
-    connection: MongoDBConnection,
-    db_name: str,
-    coa: Optional["ChartOfAccounts"] = None,
-    stale_after_seconds: int = _DEFAULT_STALE_REALTIME_SECONDS,
-) -> int:
-    """Safety net for REALTIME events realtime_posting_worker failed to journal.
-
-    gl_batch never aggregates REALTIME events (see the postingMode routing filter
-    in run_batch above), so if realtime_posting_worker's change stream ever loses
-    its resume token, an un-journaled REALTIME leg pair would otherwise sit in
-    subLedgerEntries forever with no worker responsible for it. This sweep finds
-    any such leg pairs older than `stale_after_seconds` and posts them itself via
-    post_realtime_event — the same per-transaction journal the dedicated worker
-    would have written. Returns the count of journals posted.
-    """
-    sl_coll = connection.get_collection(db_name, "subLedgerEntries")
-    le_coll = connection.get_collection(db_name, "ledgerEvents")
-
-    cutoff = (_now_utc() - timedelta(seconds=stale_after_seconds)).isoformat()
-    stale_event_ids = sl_coll.distinct(
-        "sourceReference.sourceId",
-        {"status": "POSTED", "journalEntryId": _UNJOURNALED, "postingDate": {"$lt": cutoff}},
-    )
-    if not stale_event_ids:
-        return 0
-
-    # A stale-looking BATCH event is normal (it's waiting for the next gl_batch
-    # window) — only REALTIME/NEAR_REALTIME events are this sweep's concern.
-    realtime_event_ids = [
-        d["eventId"]
-        for d in le_coll.find(
-            {"eventId": {"$in": stale_event_ids}, "postingMode.type": {"$in": list(REALTIME_POSTING_MODE_TYPES)}},
-            {"eventId": 1},
-        )
-    ]
-
-    posted = 0
-    for event_id in realtime_event_ids:
-        try:
-            if post_realtime_event(event_id, connection, db_name, coa=coa):
-                posted += 1
-                logger.warning(
-                    "gl_batch safety net posted stale REALTIME event %s "
-                    "(realtime_posting_worker did not journal it in time)",
-                    event_id,
-                )
-        except Exception:
-            logger.exception("safety-net realtime post failed for eventId=%s", event_id)
-    return posted
