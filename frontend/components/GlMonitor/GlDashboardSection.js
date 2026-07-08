@@ -1,6 +1,8 @@
 "use client";
 
 import styles from "./GlDashboardSection.module.css";
+import { useGlDashboard } from "@/lib/api/hooks";
+import { fmt } from "@/lib/glMonitor/format";
 
 function StatCard({ label, value = "—" }) {
   return (
@@ -12,6 +14,13 @@ function StatCard({ label, value = "—" }) {
 }
 
 export default function GlDashboardSection() {
+  // Rolling 3-month window (periodCode null). Amounts are minor units (÷100).
+  const { dashboard, loading } = useGlDashboard(null, true);
+  const summary = dashboard?.summary;
+  const recon = dashboard?.reconciliation;
+  const ph = loading ? "…" : "—"; // placeholder while fetching vs. no data
+  const money = (v) => (v == null ? ph : `$${fmt(v, true)}`);
+
   return (
     <div className={styles.dashSection}>
       {/* Column 1: Atlas chart */}
@@ -33,13 +42,22 @@ export default function GlDashboardSection() {
       {/* Column 3: stat cards */}
       <div className={styles.statsPane}>
         <div className={styles.statsRow}>
-          <StatCard label="Total Journals" />
-          <StatCard label="Total Debit" />
-          <StatCard label="Total Credit" />
+          <StatCard
+            label="Total Journals"
+            value={summary ? summary.totalJournals : ph}
+          />
+          <StatCard label="Total Debit" value={money(summary?.totalDebit)} />
+          <StatCard label="Total Credit" value={money(summary?.totalCredit)} />
         </div>
         <div className={styles.statsRow}>
-          <StatCard label="Out of Balance" />
-          <StatCard label="Reconciliation" />
+          <StatCard
+            label="Out of Balance"
+            value={summary ? summary.outOfBalance : ph}
+          />
+          <StatCard
+            label="Reconciliation"
+            value={recon ? recon.status : ph}
+          />
         </div>
       </div>
     </div>
