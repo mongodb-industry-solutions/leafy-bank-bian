@@ -37,14 +37,6 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _derive_posting_mode(rail: str | None, payment_type: str | None) -> str:
-    rail = (rail or "").upper()
-    ptype = (payment_type or "").upper()
-    if rail in ("WIRE", "INTERNAL") or "WIRE" in ptype:
-        return "REALTIME"
-    return "BATCH"  # ACH, VENMO, PAYPAL, and any other rail settle batch by default
-
-
 def build_ledger_event(
     txn: dict,
     payer_account: dict,
@@ -114,7 +106,8 @@ def build_ledger_event(
         },
         "rail": txn.get("rail"),
         "paymentType": txn.get("paymentType"),
-        "postingMode": {"type": _derive_posting_mode(txn.get("rail"), txn.get("paymentType"))},
+        # All events settle via the scheduled gl_batch sweep; no realtime path.
+        "postingMode": {"type": "BATCH"},
         "reversalOf": None,
         "postingStatus": "PENDING",
         "postingResult": None,
