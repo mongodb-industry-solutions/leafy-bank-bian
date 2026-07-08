@@ -57,6 +57,7 @@ def get_pipeline_health(
     db_name: str,
     *,
     batch_interval_seconds: int,
+    next_batch_at: str | None = None,
 ) -> dict:
     """Return counts and timing for the pipeline health bar."""
     le_coll = connection.get_collection(db_name, "ledgerEvents")
@@ -99,6 +100,7 @@ def get_pipeline_health(
         },
         "batchIntervalSeconds": batch_interval_seconds,
         "lastBatchAt": last_batch_at,
+        "nextBatchAt": next_batch_at,
     }
 
 
@@ -331,13 +333,9 @@ def get_gl_dashboard(
     # --- Reconciliation roll-up: reduce per-account checks to one flag.
     # Reconciliation is per account per period, so check each period in the
     # window and sum. accountsChecked counts account-period pairs.
-    recon_results = [
-        r
-        for p in periods
-        for r in reconciliation_service.reconcile_all_accounts(
-            connection, db_name, period_code=p
-        )
-    ]
+    recon_results = reconciliation_service.reconcile_all_accounts_batched(
+        connection, db_name, period_codes=periods
+    )
     breaks = sum(1 for r in recon_results if not r.is_reconciled)
     reconciliation = {
         "status": "BALANCED" if breaks == 0 else "OUT_OF_BALANCE",

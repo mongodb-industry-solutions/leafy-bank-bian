@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -63,13 +63,29 @@ def run_one_cycle(connection: MongoDBConnection, db_name: str, coa: ChartOfAccou
 
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts,
-        interval: int = DEFAULT_INTERVAL) -> None:
+        interval: int = DEFAULT_INTERVAL, status: dict | None = None) -> None:
+    """Run the batch loop. If `status` is provided, publish the authoritative
+    schedule (lastRunAt / nextRunAt) into it after each cycle so the pipeline
+    monitor can render an exact countdown — this loop owns the real sleep clock,
+    so its next-run time is ground truth (unlike lastBatchAt, which only moves
+    when a journal is actually written and goes stale during idle cycles).
+    """
     logger.info("gl_batch starting — interval=%ds on %s", interval, db_name)
+    if status is not None:
+        # Seed a target so the monitor has something before the first cycle ends.
+        status["intervalSeconds"] = interval
+        status["nextRunAt"] = (
+            datetime.now(timezone.utc) + timedelta(seconds=interval)
+        ).isoformat()
     while True:
         try:
             run_one_cycle(connection, db_name, coa)
         except Exception:
             logger.exception("gl_batch error")
+        if status is not None:
+            finished = datetime.now(timezone.utc)
+            status["lastRunAt"] = finished.isoformat()
+            status["nextRunAt"] = (finished + timedelta(seconds=interval)).isoformat()
         time.sleep(interval)
 
 

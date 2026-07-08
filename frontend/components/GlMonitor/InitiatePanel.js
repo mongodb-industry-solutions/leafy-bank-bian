@@ -2,12 +2,13 @@ import React, { useState } from "react";
 import styles from "./GlMonitor.module.css";
 import Button from "@leafygreen-ui/button";
 import { PRESETS } from "@/lib/glMonitor/presets";
-import { coreApi } from "@/lib/api/client";
+import { coreApi, pipelineApi } from "@/lib/api/client";
+import BatchTimer from "./BatchTimer";
 
 // Initiate Transaction panel — ported from initiate.js. The POST now goes
 // through the /api/backend proxy (coreApi) which routes PaymentOrderInitiation
 // to the transactions service. After firing, the parent refreshes the columns.
-export default function InitiatePanel({ onFired, onRefresh }) {
+export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIntervalSeconds, onBatchTriggered }) {
   const [collapsed, setCollapsed] = useState(true);
   const [showCustom, setShowCustom] = useState(false);
   const [busy, setBusy] = useState(null); // preset index or "custom" currently firing
@@ -24,6 +25,25 @@ export default function InitiatePanel({ onFired, onRefresh }) {
   });
   const setField = (k, v) => setCustom((c) => ({ ...c, [k]: v }));
 
+  // The transaction settles synchronously (ACID write), but the async GL
+  // pipeline reacts a beat later via change streams. Rather than guess a fixed
+  // delay — too slow for the realtime rails, and liable to refresh before batch
+  // data exists — refresh once immediately (the settled transaction is already
+  // queryable), then poll the trace until the first async artifact (ledgerEvent)
+  // lands and refresh again. Bounded so a stalled pipeline can't poll forever.
+  async function pollForPipeline(pid) {
+    onFired?.();
+    if (!pid || pid === "—") return;
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const { data } = await pipelineApi(`trace/${encodeURIComponent(pid)}`);
+      if (data?.ledgerEvent) {
+        onFired?.();
+        return;
+      }
+    }
+  }
+
   async function fireTransaction(payload) {
     setResult({ loading: true });
     const { data, error } = await coreApi("PaymentOrderInitiation/Initiate", { method: "POST", body: payload });
@@ -32,8 +52,9 @@ export default function InitiatePanel({ onFired, onRefresh }) {
       return;
     }
     const pid = data.paymentId || data.payment_id || data.id || "—";
-    setResult({ ok: true, pid });
-    setTimeout(() => onFired?.(), 4000);
+    setResult({ ok: true, pid, syncing: true });
+    await pollForPipeline(pid);
+    setResult({ ok: true, pid, syncing: false });
   }
 
   async function firePreset(idx) {
@@ -71,19 +92,30 @@ export default function InitiatePanel({ onFired, onRefresh }) {
   return (
     <div style={{ padding: "0 20px 12px" }}>
       <div className={styles.panel}>
-        <div className={styles["panel-header"]}>
+        <div
+          className={styles["panel-header"]}
+          onClick={() => setCollapsed((c) => !c)}
+          style={{ cursor: "pointer" }}
+        >
           <span className={styles["panel-title"]}>Initiate Transaction</span>
           <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>
             POST to transactions service · watch the pipeline below react live
           </span>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <BatchTimer
+              nextBatchAt={nextBatchAt}
+              intervalSeconds={batchIntervalSeconds}
+              onTriggered={onBatchTriggered}
+            />
             <button className={styles.btn} onClick={onRefresh}>↻ Refresh All</button>
-            <button className={`${styles.btn} ${styles["btn-primary"]} ${styles["btn-sm"]}`} onClick={onRefresh}>Load Data</button>
           </div>
           <button
             className={styles["panel-toggle-btn"]}
             style={{ marginLeft: 8, transform: collapsed ? "rotate(-90deg)" : "" }}
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={(e) => { e.stopPropagation(); setCollapsed((c) => !c); }}
             aria-label="Toggle panel"
           >▾</button>
         </div>
@@ -191,7 +223,9 @@ export default function InitiatePanel({ onFired, onRefresh }) {
                   <div style={{ background: "var(--green-bg)", color: "var(--green-text)", borderRadius: 6, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <span style={{ fontWeight: 700 }}>Initiated:</span>
                     <span style={{ fontFamily: "monospace", fontSize: 12 }}>{result.pid}</span>
-                    <span style={{ fontSize: 11, color: "var(--green-text)" }}>Refreshing in 4s</span>
+                    <span style={{ fontSize: 11, color: "var(--green-text)" }}>
+                      {result.syncing ? "Waiting for pipeline…" : "Pipeline updated"}
+                    </span>
                   </div>
                 ) : (
                   <div className={styles["error-state"]}>{result.text}</div>

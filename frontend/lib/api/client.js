@@ -44,12 +44,16 @@ export async function coreApi(path, { method = "GET", body = null, bearerToken =
 }
 
 /**
- * GL pipeline monitor client (read-only, ledger service via the proxy).
+ * GL pipeline monitor client (ledger service via the proxy). GET by default;
+ * pass options.method/body for the manual batch trigger (POST /pipeline/batch/trigger).
  * @param {string} path - path after the prefix, e.g. "trace/PAY-123" or "health"
  * @param {object} [params] - query params as key-value pairs (kept separate from path to avoid URL normalization issues)
+ * @param {object} [options]
+ * @param {string} [options.method="GET"]
+ * @param {object} [options.body]
  * @returns {Promise<{data: any, error: string|null}>}
  */
-export async function pipelineApi(path, params = null) {
+export async function pipelineApi(path, params = null, { method = "GET", body = null } = {}) {
   let url = `${CORE_BASE}/pipeline/${path}`;
   if (params) {
     const clean = Object.fromEntries(
@@ -61,8 +65,9 @@ export async function pipelineApi(path, params = null) {
 
   try {
     const res = await fetch(url, {
-      method: "GET",
+      method,
       headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : null,
     });
 
     if (!res.ok) {

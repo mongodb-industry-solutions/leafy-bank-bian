@@ -13,9 +13,12 @@ function StatCard({ label, value = "—" }) {
   );
 }
 
-export default function GlDashboardSection() {
+export default function GlDashboardSection({ refreshKey }) {
   // Rolling 3-month window (periodCode null). Amounts are minor units (÷100).
-  const { dashboard, loading } = useGlDashboard(null, true);
+  // The totals are journal-derived, so they only change when the GL batch posts.
+  // `refreshKey` (owned by GlPipelineView) advances when the batch actually runs
+  // or the user hits Refresh All, forcing a refetch then rather than on a timer.
+  const { dashboard, loading } = useGlDashboard(null, true, 5, 3, refreshKey);
   const summary = dashboard?.summary;
   const recon = dashboard?.reconciliation;
   const accounts = dashboard?.topControlAccounts ?? [];

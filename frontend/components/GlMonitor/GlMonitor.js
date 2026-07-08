@@ -34,7 +34,7 @@ const DETAIL_TITLE = {
   jn: (d) => `Journal Entry: ${d.journalId}`,
 };
 
-export default function GlMonitor() {
+export default function GlMonitor({ lastBatchAt, onManualRefresh }) {
   const [period, setPeriod] = useState("");
   const [status, setStatus] = useState("");
   const [health, setHealth] = useState(null);
@@ -74,9 +74,14 @@ export default function GlMonitor() {
   }, []);
 
   const fetchColumn = useCallback(
-    async (key, buildPath, tsField, batchInfo) => {
+    async (key, buildPath, tsField, batchInfoPromise) => {
       setCol(key, { loading: true, error: null });
-      const { data, error } = await pipelineApi(buildPath());
+      // Fire the column request and the health request concurrently; only the
+      // client-side batch filter needs the health result, so await it here.
+      const [{ data, error }, batchInfo] = await Promise.all([
+        pipelineApi(buildPath()),
+        batchInfoPromise,
+      ]);
       if (error) {
         setCol(key, { loading: false, error, items: [] });
         return;
@@ -95,41 +100,69 @@ export default function GlMonitor() {
   );
 
   const refreshAll = useCallback(async () => {
-    const batchInfo = await fetchHealth();
+    // Fire health and all four columns in parallel; columns await the shared
+    // health promise internally only for the batch-window filter.
+    const batchInfoPromise = fetchHealth();
     const { period: p, status: s } = filtersRef.current;
     fetchColumn(
       "tx",
       () => `transactions${buildParams(p, { limit: 100 })}`,
       "createdAt",
-      batchInfo,
+      batchInfoPromise,
     );
     fetchColumn(
       "le",
       () =>
         `ledger-events${buildParams(p, s ? { status: s, limit: 100 } : { limit: 100 })}`,
       "occurredAt",
-      batchInfo,
+      batchInfoPromise,
     );
     fetchColumn(
       "sl",
       () => `subledger-entries${buildParams(p, { limit: 100 })}`,
       "postingDate",
-      batchInfo,
+      batchInfoPromise,
     );
     fetchColumn(
       "jn",
       () => `journals${buildParams(p, { limit: 100 })}`,
       "createdAt",
-      batchInfo,
+      batchInfoPromise,
     );
   }, [fetchHealth, fetchColumn]);
 
-  // Mount: initial load + 10s health poll (app.js parity).
+  // Mount: initial load. Health is fetched once as part of refreshAll (it
+  // establishes the batch window); no standing poll — nothing renders live
+  // health, and the batch cadence is 10 min, not 10 s.
   useEffect(() => {
     refreshAll();
-    const id = setInterval(fetchHealth, 10_000);
-    return () => clearInterval(id);
-  }, [refreshAll, fetchHealth]);
+  }, [refreshAll]);
+
+  // The journal column only changes when the GL batch posts, which can be
+  // minutes after a payment fires. GlPipelineView polls for the batch actually
+  // completing (lastBatchAt) — re-fetch all columns when it advances, so the
+  // journal stage fills in on its own without a manual refresh. (The dashboard
+  // reacts to the same lastBatchAt via its refreshKey, up in GlPipelineView.)
+  const prevBatchAt = useRef(null);
+  useEffect(() => {
+    if (lastBatchAt == null) return;
+    // Record the first observed value without refreshing (it's already loaded).
+    if (prevBatchAt.current == null) {
+      prevBatchAt.current = lastBatchAt;
+      return;
+    }
+    if (lastBatchAt !== prevBatchAt.current) {
+      prevBatchAt.current = lastBatchAt;
+      refreshAll();
+    }
+  }, [lastBatchAt, refreshAll]);
+
+  // Manual "Refresh All": refresh the columns and also nudge the sibling
+  // dashboard (via GlPipelineView) so the whole page updates together.
+  const handleManualRefresh = useCallback(() => {
+    refreshAll();
+    onManualRefresh?.();
+  }, [refreshAll, onManualRefresh]);
 
   const onSelect = (col, idx, item) => {
     setSelected({ col, idx });
@@ -175,7 +208,13 @@ export default function GlMonitor() {
         </div>
         {tab === 0 ? (
           <>
-            <InitiatePanel onFired={refreshAll} onRefresh={refreshAll} />
+            <InitiatePanel
+              onFired={refreshAll}
+              onRefresh={handleManualRefresh}
+              nextBatchAt={health?.nextBatchAt ?? null}
+              batchIntervalSeconds={health?.batchIntervalSeconds ?? 600}
+              onBatchTriggered={handleManualRefresh}
+            />
             <PipelineStepper />
             <PipelineColumns
               columns={columns}

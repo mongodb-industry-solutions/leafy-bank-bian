@@ -58,8 +58,12 @@ async def lifespan(app: FastAPI):
         ("ingest_worker",     ingest_worker.run,     (connection, DB_NAME, coa)),
         ("projection_worker", projection_worker.run, (connection, DB_NAME, coa)),
     ]
+    # Shared with the /pipeline/health route so the monitor can render an exact
+    # countdown; the gl_batch thread publishes nextRunAt into it each cycle.
+    batch_status: dict = {}
+    app.state.batch_status = batch_status
     batch_workers = [
-        ("gl_batch",          gl_batch.run,          (connection, DB_NAME, coa, interval)),
+        ("gl_batch",          gl_batch.run,          (connection, DB_NAME, coa, interval, batch_status)),
     ]
     if ENABLE_CHANGE_STREAMS:
         for name, fn, args in change_stream_workers:

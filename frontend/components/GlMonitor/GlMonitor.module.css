@@ -1285,3 +1285,34 @@
   .ptrace-explorer { grid-template-columns: 1fr; }
   .ptrace-steplist { border-right: none; border-bottom: 1px solid var(--border); padding-right: 0; padding-bottom: 12px; }
 }
+
+/* GL batch countdown timer + manual trigger — compact, inline in panel header */
+.batchTimer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.batchTimerTime {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.batchTimerLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-xs);
+}
+/* Reveal the countdown text only on hover; the ring stays visible. */
+.batchTimerTime,
+.batchTimerLabel {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition: max-width 0.2s ease, opacity 0.2s ease;
+}
+.batchTimer:hover .batchTimerTime { max-width: 60px; opacity: 1; }
+.batchTimer:hover .batchTimerLabel { max-width: 80px; opacity: 1; }

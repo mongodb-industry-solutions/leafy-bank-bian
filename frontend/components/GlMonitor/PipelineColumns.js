@@ -5,20 +5,21 @@ import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
 
 // Renders feed rows with the "current ↑ · ↓ last batch" separator when the
 // tag transitions from CURRENT to LAST (ported from batch.js renderWithSep).
-function FeedRows({ col, items, selected, onSelect, renderRow, rowId }) {
+function FeedRows({ col, items, selected, onSelect, renderRow, rowId, keyOf }) {
   const out = [];
   let prevTag = null;
   items.forEach((item, i) => {
+    const key = keyOf ? keyOf(item, i) : i;
     if (item._batchTag === "LAST" && prevTag === "CURRENT") {
       out.push(
-        <div className={styles["batch-sep"]} key={`sep-${i}`}>current ↑  ·  ↓ last batch</div>
+        <div className={styles["batch-sep"]} key={`sep-${key}`}>current ↑  ·  ↓ last batch</div>
       );
     }
     const isSel = selected.col === col && selected.idx === i;
     out.push(
       <div
         className={`${styles["feed-row"]}${isSel ? " " + styles.selected : ""}`}
-        key={i}
+        key={key}
         id={rowId ? rowId(item) : undefined}
         onClick={() => onSelect(col, i, item)}
       >
@@ -31,12 +32,12 @@ function FeedRows({ col, items, selected, onSelect, renderRow, rowId }) {
 }
 
 // features: array of MongoDB feature-tag labels for the footer (null = no footer).
-function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, features, col, selected, onSelect, renderRow, emptyMsg, rowId }) {
+function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, features, col, selected, onSelect, renderRow, emptyMsg, rowId, keyOf }) {
   let body;
   if (state.loading) body = <div className={styles["empty-state"]}>Loading…</div>;
   else if (state.error) body = <div className={styles["error-state"]}>Error: {state.error}</div>;
   else if (!state.items.length) body = <div className={styles["empty-state"]}>{emptyMsg}</div>;
-  else body = <FeedRows col={col} items={state.items} selected={selected} onSelect={onSelect} renderRow={renderRow} rowId={rowId} />;
+  else body = <FeedRows col={col} items={state.items} selected={selected} onSelect={onSelect} renderRow={renderRow} rowId={rowId} keyOf={keyOf} />;
 
   return (
     <div className={styles.col}>
@@ -74,6 +75,7 @@ export default function PipelineColumns({ columns, selected, onSelect, onTraceTx
         headerBg="var(--col1)" stageCls="stage-tx" stageLabel="upstream" title="Transactions"
         sub="settled payments · read-only" count={columns.tx.count} state={columns.tx}
         features={null} col="tx" selected={selected} onSelect={onSelect}
+        keyOf={(t, i) => t.paymentId ?? i}
         emptyMsg="No transactions in last 2 batch windows"
         renderRow={(t) => (
           <>
@@ -99,6 +101,7 @@ export default function PipelineColumns({ columns, selected, onSelect, onTraceTx
         sub="ingest_worker · change stream" count={columns.le.count} state={columns.le}
         features={["Change Streams", "Resume Tokens", "DuplicateKeyError idempotency", "$jsonSchema validator"]}
         col="le" selected={selected} onSelect={onSelect} rowId={(e) => `le-row-${e.eventId}`}
+        keyOf={(e, i) => e.eventId ?? i}
         emptyMsg="No ledger events in last 2 batch windows"
         renderRow={(e) => (
           <>
@@ -120,6 +123,7 @@ export default function PipelineColumns({ columns, selected, onSelect, onTraceTx
         sub="projection_worker · ACID txn" count={columns.sl.count} state={columns.sl}
         features={["Change Streams", "ACID multi-doc transaction", "$jsonSchema validator", "Partial index (journalEntryId ≠ \"\")"]}
         col="sl" selected={selected} onSelect={onSelect}
+        keyOf={(s, i) => s.subLedgerId ?? i}
         emptyMsg="No subledger entries in last 2 batch windows"
         renderRow={(s) => (
           <>
@@ -142,6 +146,7 @@ export default function PipelineColumns({ columns, selected, onSelect, onTraceTx
         sub="gl_batch · scheduled" count={columns.jn.count} state={columns.jn}
         features={["Aggregation ($group $sum $addToSet)", "ACID transaction", "$expr Pacioli validator", "Multikey index (entries.accountCode)"]}
         col="jn" selected={selected} onSelect={onSelect}
+        keyOf={(j, i) => j.journalId ?? i}
         emptyMsg="No journal entries in last 2 batch windows"
         renderRow={(j) => {
           const entries = j.entries || [];
