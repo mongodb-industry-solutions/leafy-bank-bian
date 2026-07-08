@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database.connection import MongoDBConnection
+from services import reconciliation_service
 
 
 def _now_utc() -> datetime:
@@ -224,6 +225,147 @@ def list_journal_entries(
         .limit(limit)
     )
     return {"items": items, "total": total}
+
+
+# ---------------------------------------------------------------------------
+# GL dashboard (monthly)
+# ---------------------------------------------------------------------------
+
+def get_gl_dashboard(
+    connection: MongoDBConnection,
+    db_name: str,
+    *,
+    period_code: Optional[str] = None,
+    top_n: int = 5,
+) -> dict:
+    """Aggregate every GL dashboard block for one month in a single response.
+
+    All amounts are minor units (int), consistent with the rest of this service.
+    Scoping is monthly via periodCode ("YYYY-MM"); defaults to the current month.
+    """
+    period = period_code or _current_period()
+
+    jnl_coll = connection.get_collection(db_name, "journalEntries")
+    le_coll = connection.get_collection(db_name, "ledgerEvents")
+    sl_coll = connection.get_collection(db_name, "subLedgerEntries")
+
+    # --- KPI tiles: journal count, debit/credit totals, out-of-balance count ---
+    # Per-journal DR/CR sums, then roll up. outOfBalance is structurally 0
+    # (assert_balanced_journal blocks unbalanced writes) but surfaced for the tile.
+    summary_pipeline = [
+        {"$match": {"periodCode": period}},
+        {"$project": {
+            "currency": 1,
+            "debit": {"$sum": {"$map": {
+                "input": "$entries", "as": "e",
+                "in": {"$cond": [{"$eq": ["$$e.side", "DEBIT"]}, "$$e.amount", 0]},
+            }}},
+            "credit": {"$sum": {"$map": {
+                "input": "$entries", "as": "e",
+                "in": {"$cond": [{"$eq": ["$$e.side", "CREDIT"]}, "$$e.amount", 0]},
+            }}},
+        }},
+        {"$group": {
+            "_id": None,
+            "totalJournals": {"$sum": 1},
+            "totalDebit": {"$sum": "$debit"},
+            "totalCredit": {"$sum": "$credit"},
+            "outOfBalance": {"$sum": {"$cond": [{"$ne": ["$debit", "$credit"]}, 1, 0]}},
+            "currency": {"$first": "$currency"},
+        }},
+    ]
+    summary_rows = list(jnl_coll.aggregate(summary_pipeline))
+    if summary_rows:
+        row = summary_rows[0]
+        summary = {
+            "totalJournals": int(row["totalJournals"]),
+            "totalDebit": int(row["totalDebit"]),
+            "totalCredit": int(row["totalCredit"]),
+            "outOfBalance": int(row["outOfBalance"]),
+            "currency": row.get("currency") or "USD",
+        }
+    else:
+        summary = {
+            "totalJournals": 0, "totalDebit": 0, "totalCredit": 0,
+            "outOfBalance": 0, "currency": "USD",
+        }
+
+    # --- Journal Status donut: driven off ledgerEvents.postingStatus for the period.
+    # PENDING is surfaced as "posting". Total is the event count (may differ from
+    # totalJournals, since one batch journal aggregates many events).
+    status_counts: dict[str, int] = {"PENDING": 0, "POSTED": 0, "FAILED": 0}
+    status_pipeline = [
+        {"$match": {"meta.periodCode": period}},
+        {"$group": {"_id": "$postingStatus", "n": {"$sum": 1}}},
+    ]
+    for r in le_coll.aggregate(status_pipeline):
+        if r["_id"] in status_counts:
+            status_counts[r["_id"]] = int(r["n"])
+    journal_status = {
+        "posted": status_counts["POSTED"],
+        "posting": status_counts["PENDING"],
+        "failed": status_counts["FAILED"],
+        "total": sum(status_counts.values()),
+    }
+
+    # --- Reconciliation roll-up: reduce per-account checks to one flag.
+    recon_results = reconciliation_service.reconcile_all_accounts(
+        connection, db_name, period_code=period
+    )
+    breaks = sum(1 for r in recon_results if not r.is_reconciled)
+    reconciliation = {
+        "status": "BALANCED" if breaks == 0 else "OUT_OF_BALANCE",
+        "accountsChecked": len(recon_results),
+        "breaks": breaks,
+    }
+
+    # --- Top control accounts: DR/CR split + balance per control account, ranked.
+    top_pipeline = [
+        {"$match": {"periodCode": period, "status": "POSTED"}},
+        {"$group": {
+            "_id": "$controlAccountCode",
+            "debit": {"$sum": {"$cond": [{"$eq": ["$side", "DEBIT"]}, "$amount", 0]}},
+            "credit": {"$sum": {"$cond": [{"$eq": ["$side", "CREDIT"]}, "$amount", 0]}},
+        }},
+        {"$addFields": {
+            "balance": {"$subtract": ["$debit", "$credit"]},
+            "activity": {"$add": ["$debit", "$credit"]},
+        }},
+        {"$sort": {"activity": -1, "_id": 1}},
+        {"$limit": top_n},
+        {"$lookup": {
+            "from": "glAccounts",
+            "localField": "_id",
+            "foreignField": "accountCode",
+            "as": "acct",
+        }},
+        {"$project": {
+            "_id": 0,
+            "accountCode": "$_id",
+            "accountName": {"$arrayElemAt": ["$acct.accountName", 0]},
+            "debit": 1,
+            "credit": 1,
+            "balance": 1,
+        }},
+    ]
+    top_accounts = [
+        {
+            "accountCode": r["accountCode"],
+            "accountName": r.get("accountName"),
+            "debit": int(r["debit"]),
+            "credit": int(r["credit"]),
+            "balance": int(r["balance"]),
+        }
+        for r in sl_coll.aggregate(top_pipeline)
+    ]
+
+    return {
+        "periodCode": period,
+        "summary": summary,
+        "journalStatus": journal_status,
+        "reconciliation": reconciliation,
+        "topControlAccounts": top_accounts,
+    }
 
 
 # ---------------------------------------------------------------------------
