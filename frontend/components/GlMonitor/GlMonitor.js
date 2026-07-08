@@ -157,7 +157,7 @@ export default function GlMonitor() {
 
   return (
     <div className={styles.glMonitorRoot}>
-      <HealthBar health={health} statusText={healthStatus} />
+      {/* <HealthBar health={health} statusText={healthStatus} /> */}
       <div className={styles["gl-tabs"]}>
         <div className={styles["gl-mode-switch"]}>
           <SegmentedControl

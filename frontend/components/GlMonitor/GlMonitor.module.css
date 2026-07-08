@@ -6,7 +6,7 @@
 
 /* ── base.css ── */
 .glMonitorRoot {
-  --bg: #f1f5f9;
+  --bg: white;
   --card: #ffffff;
   --border: #e2e8f0;
   --border-light: #f1f5f9;
@@ -1105,7 +1105,7 @@
 
 /* ── tabs + payment trace (Doina back-office design) ── */
 .gl-tabs { padding: 12px 20px 0; }
-.gl-mode-switch { display: flex; justify-content: flex-start; margin-bottom: 16px; }
+.gl-mode-switch { display: flex; justify-content: center; margin-bottom: 16px; }
 
 /* green / blue / purple hues per Doina's palette request */
 .ptrace-green  { --hue: #16a34a; --hue-bg: #f0fdf4; --hue-border: #86efac; }
