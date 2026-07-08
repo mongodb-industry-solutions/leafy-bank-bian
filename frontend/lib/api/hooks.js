@@ -636,6 +636,50 @@ export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
 }
 
 /**
+ * GL dashboard snapshot — one call feeds all dashboard blocks (KPI tiles,
+ * journal-status donut, reconciliation roll-up, top control accounts).
+ * Monthly granularity. Pass a periodCode for a single month, or omit it to
+ * roll up the last `months` months (default 3, including the current month).
+ * Amounts are minor units (int) — divide by 100 for display.
+ *
+ * @param {string|null} periodCode - "YYYY-MM" for a single month, or null for the rolling window
+ * @param {boolean} enabled - gate the fetch (e.g. only when the page is shown)
+ * @param {number} [topN=5] - number of top control accounts to return
+ * @param {number} [months=3] - window size when periodCode is null
+ * @returns {{dashboard: object|null, loading: boolean, error: string|null}}
+ */
+export function useGlDashboard(periodCode, enabled, topN = 5, months = 3) {
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+
+    setLoading(true);
+    setError(null);
+    // Only send months for the rolling-window case; a fixed periodCode ignores it.
+    const params = periodCode ? { periodCode, topN } : { topN, months };
+    pipelineApi("gl-dashboard", params).then(({ data, error: err }) => {
+      if (cancelled) return;
+      if (err) {
+        setError(err);
+      } else {
+        setDashboard(data);
+      }
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [periodCode, enabled, topN, months]);
+
+  return { dashboard, loading, error };
+}
+
+/**
  * Pipeline health snapshot — used for the next-GL-batch countdown.
  * Fetched once when `enabled` flips true.
  */

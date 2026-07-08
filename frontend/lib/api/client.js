@@ -46,11 +46,21 @@ export async function coreApi(path, { method = "GET", body = null, bearerToken =
 /**
  * GL pipeline monitor client (read-only, ledger service via the proxy).
  * @param {string} path - path after the prefix, e.g. "trace/PAY-123" or "health"
+ * @param {object} [params] - query params as key-value pairs (kept separate from path to avoid URL normalization issues)
  * @returns {Promise<{data: any, error: string|null}>}
  */
-export async function pipelineApi(path) {
+export async function pipelineApi(path, params = null) {
+  let url = `${CORE_BASE}/pipeline/${path}`;
+  if (params) {
+    const clean = Object.fromEntries(
+      Object.entries(params).filter(([, v]) => v !== null && v !== undefined)
+    );
+    const qs = new URLSearchParams(clean).toString();
+    if (qs) url += (url.includes("?") ? "&" : "?") + qs;
+  }
+
   try {
-    const res = await fetch(`${CORE_BASE}/pipeline/${path}`, {
+    const res = await fetch(url, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
     });
