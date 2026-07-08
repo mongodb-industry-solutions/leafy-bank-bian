@@ -61,7 +61,7 @@ def test_full_dashboard_happy_path(monkeypatch):
     conn = _conn(aggregate_by_coll)
     monkeypatch.setattr(
         pipeline_read_service.reconciliation_service,
-        "reconcile_all_accounts",
+        "reconcile_all_accounts_batched",
         lambda *a, **k: _recon(True, True, True),
     )
 
@@ -88,7 +88,7 @@ def test_empty_period_returns_zeroed_summary(monkeypatch):
     conn = _conn({})  # no rows from any collection
     monkeypatch.setattr(
         pipeline_read_service.reconciliation_service,
-        "reconcile_all_accounts",
+        "reconcile_all_accounts_batched",
         lambda *a, **k: [],
     )
 
@@ -110,7 +110,7 @@ def test_reconciliation_break_flips_status(monkeypatch):
     conn = _conn({})
     monkeypatch.setattr(
         pipeline_read_service.reconciliation_service,
-        "reconcile_all_accounts",
+        "reconcile_all_accounts_batched",
         lambda *a, **k: _recon(True, False, True),
     )
 
@@ -127,8 +127,8 @@ def test_defaults_to_rolling_window(monkeypatch):
     calls = []
     monkeypatch.setattr(
         pipeline_read_service.reconciliation_service,
-        "reconcile_all_accounts",
-        lambda *a, **k: calls.append(k.get("period_code")) or [],
+        "reconcile_all_accounts_batched",
+        lambda *a, **k: calls.append(k.get("period_codes")) or [],
     )
     monkeypatch.setattr(
         pipeline_read_service, "_last_n_periods",
@@ -139,8 +139,8 @@ def test_defaults_to_rolling_window(monkeypatch):
 
     assert result["periods"] == ["2026-05", "2026-06", "2026-07"]
     assert result["periodCode"] == "2026-07"
-    # reconciliation runs once per period in the window
-    assert calls == ["2026-05", "2026-06", "2026-07"]
+    # reconciliation runs once for the whole window (one batched call)
+    assert calls == [["2026-05", "2026-06", "2026-07"]]
 
 
 def test_single_period_ignores_window(monkeypatch):
@@ -149,12 +149,12 @@ def test_single_period_ignores_window(monkeypatch):
     calls = []
     monkeypatch.setattr(
         pipeline_read_service.reconciliation_service,
-        "reconcile_all_accounts",
-        lambda *a, **k: calls.append(k.get("period_code")) or [],
+        "reconcile_all_accounts_batched",
+        lambda *a, **k: calls.append(k.get("period_codes")) or [],
     )
 
     result = get_gl_dashboard(conn, "test_db", period_code="2025-05", months=3)
 
     assert result["periods"] == ["2025-05"]
     assert result["periodCode"] == "2025-05"
-    assert calls == ["2025-05"]
+    assert calls == [["2025-05"]]

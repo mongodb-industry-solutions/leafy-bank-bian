@@ -611,10 +611,25 @@
   background: #f8fafc;
 }
 
-.feed-row.selected {
-  background: var(--accent-light);
-  border-left: 3px solid var(--accent);
+/* Selection focus mode: the clicked card is the anchor, the rest of its payment
+   flow (.linked) shares one accent, and everything unrelated (.dimmed) fades
+   back so the connected chain reads clearly across all four columns. */
+.feed-row.selected,
+.feed-row.linked {
+  background: #f1f5f9;
+  border-left: 3px solid #94a3b8;
   padding-left: 11px;
+}
+
+.feed-row.selected {
+  box-shadow: inset 0 0 0 1px #94a3b8;
+}
+
+.feed-row.dimmed {
+  opacity: 0.32;
+}
+.feed-row.dimmed:hover {
+  opacity: 1;
 }
 
 .row-top {
@@ -1285,3 +1300,34 @@
   .ptrace-explorer { grid-template-columns: 1fr; }
   .ptrace-steplist { border-right: none; border-bottom: 1px solid var(--border); padding-right: 0; padding-bottom: 12px; }
 }
+
+/* GL batch countdown timer + manual trigger — compact, inline in panel header */
+.batchTimer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.batchTimerTime {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.batchTimerLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-xs);
+}
+/* Reveal the countdown text only on hover; the ring stays visible. */
+.batchTimerTime,
+.batchTimerLabel {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition: max-width 0.2s ease, opacity 0.2s ease;
+}
+.batchTimer:hover .batchTimerTime { max-width: 60px; opacity: 1; }
+.batchTimer:hover .batchTimerLabel { max-width: 80px; opacity: 1; }

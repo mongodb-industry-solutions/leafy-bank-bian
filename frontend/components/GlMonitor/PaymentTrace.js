@@ -6,13 +6,14 @@
 // completion/status + a row of per-stage detail cards with "View JSON".
 // Wired to GET /pipeline/trace/{paymentId} (returns 4 stages; the 6 UI stages
 // are derived from those — see buildStages).
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Icon from "@leafygreen-ui/icon";
 import Code from "@leafygreen-ui/code";
 import styles from "./GlMonitor.module.css";
 import { Chip } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
 import { pipelineApi } from "@/lib/api/client";
+import { usePipelineTrace } from "@/lib/api/hooks";
 
 // Maps the trace docs → presentation stages Doina drew. "Batch Queue" is
 // derived from ledger-event posting status, and only applies to BATCH-mode
@@ -336,33 +337,24 @@ function DetailPane({ stage }) {
 }
 
 export default function PaymentTrace({ initialPid = "" }) {
-  const [pid, setPid] = useState("");
-  const [state, setState] = useState({ kind: "empty" }); // empty|loading|notfound|error|data
+  const [pid, setPid] = useState(initialPid); // paymentId currently being traced
   const [recent, setRecent] = useState([]); // last 5 payments to pick from
-  const [recentOpen, setRecentOpen] = useState(true); // Recent Transactions panel collapse
+  const [recentOpen, setRecentOpen] = useState(!initialPid); // Recent Transactions panel collapse
   const [selectedKey, setSelectedKey] = useState(null); // selected stage in the vertical stepper
 
-  const fetchTrace = useCallback(async (idArg) => {
-    const id = (idArg ?? pid).trim();
-    if (!id) return;
-    setPid(id);
-    setState({ kind: "loading" });
-    const { data, error } = await pipelineApi(`trace/${encodeURIComponent(id)}`);
-    if (error) {
-      setState(error.includes("404") ? { kind: "notfound", id } : { kind: "error", error });
-      return;
-    }
-    setState({ kind: "data", d: data });
-  }, [pid]);
+  // Live trace: polls /pipeline/trace/{pid} every 2s and self-terminates once
+  // the journal entry posts (or on error), so the stages advance PENDING→POSTED
+  // without a manual refresh.
+  const { trace, loading, error } = usePipelineTrace(pid, !!pid);
+  const notFound = !!error && error.includes("404");
 
   // Deep-linked from the Pipeline Monitor's "Trace transaction" chip: trace the
-  // handed-off paymentId as soon as this view mounts.
+  // handed-off paymentId as soon as this view mounts / the prop changes.
   useEffect(() => {
     if (initialPid) {
+      setPid(initialPid);
       setRecentOpen(false);
-      fetchTrace(initialPid);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPid]);
 
   // Load the 5 most recent payments so the user can trace one without typing.
@@ -374,13 +366,16 @@ export default function PaymentTrace({ initialPid = "" }) {
     return () => { alive = false; };
   }, []);
 
-  const stages = state.kind === "data" ? buildStages(state.d) : null;
+  // Rebuild presentation stages only when the trace doc changes (not on every
+  // unrelated render — e.g. toggling the Recent panel or selecting a stage).
+  const stages = useMemo(() => (trace ? buildStages(trace) : null), [trace]);
 
-  // On a new trace, default the selection to the first stage (Payment).
+  // Reset the stepper selection to the first stage (Payment) when a *new*
+  // payment is traced. Keyed on pid — not the trace object — so the 2s re-polls
+  // don't clobber the user's current selection every tick.
   useEffect(() => {
-    if (!stages) { setSelectedKey(null); return; }
-    setSelectedKey(stages[0].key);
-  }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
+    setSelectedKey(pid ? "payment" : null);
+  }, [pid]);
 
   const selectedStage = stages?.find((s) => s.key === selectedKey) || null;
 
@@ -408,7 +403,7 @@ export default function PaymentTrace({ initialPid = "" }) {
                   key={t.paymentId}
                   className={styles["preset-btn"]}
                   style={pid === t.paymentId ? { borderColor: "var(--accent)", background: "var(--accent-light)" } : undefined}
-                  onClick={() => fetchTrace(t.paymentId)}
+                  onClick={() => { setRecentOpen(false); setPid(t.paymentId); }}
                   title={`${t.payer?.accountId || "—"} → ${t.payee?.accountId || "—"} · ${fmtDate(t.createdAt)}`}
                 >
                   <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{t.paymentId}</span>
@@ -424,12 +419,12 @@ export default function PaymentTrace({ initialPid = "" }) {
         )}
       </div>
 
-      {state.kind === "empty" && <div className={styles["empty-state"]}>Enter a paymentId to trace it end-to-end across all stages.</div>}
-      {state.kind === "loading" && <div className={styles["empty-state"]}>Tracing…</div>}
-      {state.kind === "notfound" && <div className={styles["empty-state"]}>Payment not found: {state.id}</div>}
-      {state.kind === "error" && <div className={styles["error-state"]}>Error: {state.error}</div>}
+      {!pid && <div className={styles["empty-state"]}>Enter a paymentId to trace it end-to-end across all stages.</div>}
+      {pid && loading && <div className={styles["empty-state"]}>Tracing…</div>}
+      {pid && !loading && notFound && <div className={styles["empty-state"]}>Payment not found: {pid}</div>}
+      {pid && !loading && error && !notFound && <div className={styles["error-state"]}>Error: {error}</div>}
 
-      {stages && (
+      {stages && !loading && (
         <div className={styles["ptrace-explorer"]}>
           <div className={styles["panel-header"]} style={{ gridColumn: "1 / -1", marginBottom: 8 }}>
             <span className={styles["panel-title"]}>Payment Trace</span>

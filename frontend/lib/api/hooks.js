@@ -636,6 +636,39 @@ export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
 }
 
 /**
+ * Polls /pipeline/health on a light cadence and returns the latest
+ * `lastBatchAt`. Batch-derived views (the journal column, the GL dashboard
+ * totals) use the returned value as a refetch key, so they update when the GL
+ * batch *actually* posts — reacting to real completion instead of a guessed
+ * timer. Returns the ISO string (its change is the "batch ran" signal) or null
+ * before the first batch. Interval defaults to 30s; the batch cadence is 10 min.
+ */
+export function useBatchTick(enabled = true, intervalMs = 30000) {
+  const [lastBatchAt, setLastBatchAt] = useState(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    let timer = null;
+
+    const poll = async () => {
+      const { data } = await pipelineApi("health");
+      if (cancelled) return;
+      if (data?.lastBatchAt) setLastBatchAt(data.lastBatchAt);
+      timer = setTimeout(poll, intervalMs);
+    };
+
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled, intervalMs]);
+
+  return lastBatchAt;
+}
+
+/**
  * GL dashboard snapshot — one call feeds all dashboard blocks (KPI tiles,
  * journal-status donut, reconciliation roll-up, top control accounts).
  * Monthly granularity. Pass a periodCode for a single month, or omit it to
@@ -646,9 +679,10 @@ export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
  * @param {boolean} enabled - gate the fetch (e.g. only when the page is shown)
  * @param {number} [topN=5] - number of top control accounts to return
  * @param {number} [months=3] - window size when periodCode is null
+ * @param {*} [refreshKey] - change this to force a refetch (e.g. useBatchTick())
  * @returns {{dashboard: object|null, loading: boolean, error: string|null}}
  */
-export function useGlDashboard(periodCode, enabled, topN = 5, months = 3) {
+export function useGlDashboard(periodCode, enabled, topN = 5, months = 3, refreshKey) {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -674,28 +708,7 @@ export function useGlDashboard(periodCode, enabled, topN = 5, months = 3) {
     return () => {
       cancelled = true;
     };
-  }, [periodCode, enabled, topN, months]);
+  }, [periodCode, enabled, topN, months, refreshKey]);
 
   return { dashboard, loading, error };
-}
-
-/**
- * Pipeline health snapshot — used for the next-GL-batch countdown.
- * Fetched once when `enabled` flips true.
- */
-export function usePipelineHealth(enabled) {
-  const [health, setHealth] = useState(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    pipelineApi("health").then(({ data }) => {
-      if (!cancelled && data) setHealth(data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
-
-  return health;
 }

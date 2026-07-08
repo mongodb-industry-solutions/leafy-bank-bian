@@ -26,8 +26,9 @@ def pipeline_health(request: Request) -> JSONResponse:
     connection = request.app.state.connection
     db_name = request.app.state.db_name
     interval = int(os.getenv("GL_BATCH_INTERVAL_SECONDS", "600"))
+    next_batch_at = getattr(request.app.state, "batch_status", {}).get("nextRunAt")
     data = pipeline_read_service.get_pipeline_health(
-        connection, db_name, batch_interval_seconds=interval
+        connection, db_name, batch_interval_seconds=interval, next_batch_at=next_batch_at
     )
     return to_json_response(data)
 

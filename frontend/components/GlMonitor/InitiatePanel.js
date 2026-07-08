@@ -1,13 +1,14 @@
 import React, { useState } from "react";
 import styles from "./GlMonitor.module.css";
 import Button from "@leafygreen-ui/button";
-import { PRESETS } from "@/lib/glMonitor/presets";
-import { coreApi } from "@/lib/api/client";
+import { PRESETS, generateBulkItems } from "@/lib/glMonitor/presets";
+import { coreApi, pipelineApi } from "@/lib/api/client";
+import BatchTimer from "./BatchTimer";
 
 // Initiate Transaction panel — ported from initiate.js. The POST now goes
 // through the /api/backend proxy (coreApi) which routes PaymentOrderInitiation
 // to the transactions service. After firing, the parent refreshes the columns.
-export default function InitiatePanel({ onFired, onRefresh }) {
+export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIntervalSeconds, onBatchTriggered }) {
   const [collapsed, setCollapsed] = useState(true);
   const [showCustom, setShowCustom] = useState(false);
   const [busy, setBusy] = useState(null); // preset index or "custom" currently firing
@@ -24,6 +25,25 @@ export default function InitiatePanel({ onFired, onRefresh }) {
   });
   const setField = (k, v) => setCustom((c) => ({ ...c, [k]: v }));
 
+  // The transaction settles synchronously (ACID write), but the async GL
+  // pipeline reacts a beat later via change streams. Rather than guess a fixed
+  // delay — too slow for the realtime rails, and liable to refresh before batch
+  // data exists — refresh once immediately (the settled transaction is already
+  // queryable), then poll the trace until the first async artifact (ledgerEvent)
+  // lands and refresh again. Bounded so a stalled pipeline can't poll forever.
+  async function pollForPipeline(pid) {
+    onFired?.();
+    if (!pid || pid === "—") return;
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const { data } = await pipelineApi(`trace/${encodeURIComponent(pid)}`);
+      if (data?.ledgerEvent) {
+        onFired?.();
+        return;
+      }
+    }
+  }
+
   async function fireTransaction(payload) {
     setResult({ loading: true });
     const { data, error } = await coreApi("PaymentOrderInitiation/Initiate", { method: "POST", body: payload });
@@ -32,8 +52,9 @@ export default function InitiatePanel({ onFired, onRefresh }) {
       return;
     }
     const pid = data.paymentId || data.payment_id || data.id || "—";
-    setResult({ ok: true, pid });
-    setTimeout(() => onFired?.(), 4000);
+    setResult({ ok: true, pid, syncing: true });
+    await pollForPipeline(pid);
+    setResult({ ok: true, pid, syncing: false });
   }
 
   async function firePreset(idx) {
@@ -46,6 +67,26 @@ export default function InitiatePanel({ onFired, onRefresh }) {
     };
     if (p.remittance) payload.remittance = { unstructured: p.remittance };
     await fireTransaction(payload);
+    setBusy(null);
+  }
+
+  // Bulk fire: one POST to BulkInitiate (the service loops the batch sequentially),
+  // then a single refresh + single bounded pipeline poll — NOT one poll per item,
+  // which is what makes firing presets one-by-one drag.
+  async function fireBulk() {
+    setBusy("bulk");
+    setResult({ loading: true });
+    const items = generateBulkItems(5);
+    const { data, error } = await coreApi("PaymentOrderInitiation/BulkInitiate", { method: "POST", body: { items } });
+    if (error) {
+      setResult({ ok: false, text: `Error: ${error}` });
+      setBusy(null);
+      return;
+    }
+    const firstPid = data.results?.find((r) => r.ok)?.paymentId || "—";
+    setResult({ ok: true, bulk: true, requested: data.requested, settled: data.settled, failed: data.failed, syncing: true });
+    await pollForPipeline(firstPid);
+    setResult({ ok: true, bulk: true, requested: data.requested, settled: data.settled, failed: data.failed, syncing: false });
     setBusy(null);
   }
 
@@ -71,19 +112,30 @@ export default function InitiatePanel({ onFired, onRefresh }) {
   return (
     <div style={{ padding: "0 20px 12px" }}>
       <div className={styles.panel}>
-        <div className={styles["panel-header"]}>
+        <div
+          className={styles["panel-header"]}
+          onClick={() => setCollapsed((c) => !c)}
+          style={{ cursor: "pointer" }}
+        >
           <span className={styles["panel-title"]}>Initiate Transaction</span>
           <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>
             POST to transactions service · watch the pipeline below react live
           </span>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <BatchTimer
+              nextBatchAt={nextBatchAt}
+              intervalSeconds={batchIntervalSeconds}
+              onTriggered={onBatchTriggered}
+            />
             <button className={styles.btn} onClick={onRefresh}>↻ Refresh All</button>
-            <button className={`${styles.btn} ${styles["btn-primary"]} ${styles["btn-sm"]}`} onClick={onRefresh}>Load Data</button>
           </div>
           <button
             className={styles["panel-toggle-btn"]}
             style={{ marginLeft: 8, transform: collapsed ? "rotate(-90deg)" : "" }}
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={(e) => { e.stopPropagation(); setCollapsed((c) => !c); }}
             aria-label="Toggle panel"
           >▾</button>
         </div>
@@ -121,7 +173,12 @@ export default function InitiatePanel({ onFired, onRefresh }) {
                   className={`${styles["preset-btn"]} ${styles["preset-btn-action"]}`}
                   onClick={() => setShowCustom((s) => !s)}
                 >{showCustom ? "✕ Custom transaction" : "✏️ Custom transaction"}</button>
-                <button className={`${styles["preset-btn"]} ${styles["preset-btn-muted"]}`} disabled title="Coming soon">⏳ Bulk transactions</button>
+                <button
+                  className={`${styles["preset-btn"]} ${styles["preset-btn-action"]}`}
+                  disabled={busy === "bulk"}
+                  onClick={fireBulk}
+                  title="Fire a randomized batch of 5 transactions in one call"
+                >⚡ Bulk transactions{busy === "bulk" ? " …" : ""}</button>
               </div>
             </div>
 
@@ -135,6 +192,7 @@ export default function InitiatePanel({ onFired, onRefresh }) {
                     <datalist id="glm-customer-list">
                       <option value="CUST-00528224">Grace</option>
                       <option value="CUST-17352703">Monet</option>
+                      <option value="CUST-f88fb89e">Frida</option>
                     </datalist>
                   </div>
                   <div style={{ minWidth: 155, flex: 1.5 }}>
@@ -145,10 +203,12 @@ export default function InitiatePanel({ onFired, onRefresh }) {
                     <div className={styles["field-label"]}>Creditor Account (to)</div>
                     <input className={styles["form-input"]} list="glm-account-list" placeholder="ACC-…" value={custom.creditor} onChange={(e) => setField("creditor", e.target.value)} />
                     <datalist id="glm-account-list">
-                      <option value="ACC-e0583b3b">Grace primary</option>
-                      <option value="ACC-e0583b3f">Grace secondary</option>
-                      <option value="ACC-e0583b3c">Monet primary</option>
-                      <option value="ACC-8c8097a4">Monet secondary</option>
+                      <option value="ACC-e0583b3b">Grace savings</option>
+                      <option value="ACC-e0583b3f">Grace checking</option>
+                      <option value="ACC-e0583b3c">Monet checking</option>
+                      <option value="ACC-8c8097a4">Monet savings</option>
+                      <option value="ACC-e0583b3a">Frida checking</option>
+                      <option value="ACC-e0583b39">Frida savings</option>
                     </datalist>
                   </div>
                   <div style={{ minWidth: 90, flex: 0.7 }}>
@@ -189,9 +249,20 @@ export default function InitiatePanel({ onFired, onRefresh }) {
                   <div className={styles["empty-state"]}>Sending…</div>
                 ) : result.ok ? (
                   <div style={{ background: "var(--green-bg)", color: "var(--green-text)", borderRadius: 6, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 700 }}>Initiated:</span>
-                    <span style={{ fontFamily: "monospace", fontSize: 12 }}>{result.pid}</span>
-                    <span style={{ fontSize: 11, color: "var(--green-text)" }}>Refreshing in 4s</span>
+                    {result.bulk ? (
+                      <>
+                        <span style={{ fontWeight: 700 }}>Bulk initiated:</span>
+                        <span style={{ fontSize: 12 }}>{result.settled}/{result.requested} settled{result.failed ? `, ${result.failed} failed` : ""}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontWeight: 700 }}>Initiated:</span>
+                        <span style={{ fontFamily: "monospace", fontSize: 12 }}>{result.pid}</span>
+                      </>
+                    )}
+                    <span style={{ fontSize: 11, color: "var(--green-text)" }}>
+                      {result.syncing ? "Waiting for pipeline…" : "Pipeline updated"}
+                    </span>
                   </div>
                 ) : (
                   <div className={styles["error-state"]}>{result.text}</div>

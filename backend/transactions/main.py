@@ -11,7 +11,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from api_models import PaymentOrderInitiateRequest
+from api_models import PaymentOrderBulkInitiateRequest, PaymentOrderInitiateRequest
 from database.connection import MongoDBConnection
 from encoder.json_encoder import MyJSONEncoder
 from services.payments_service import PaymentsService
@@ -95,6 +95,46 @@ async def payment_order_procedure_initiate(
     except Exception as e:
         logging.error("PaymentOrderInitiation/Initiate failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/PaymentOrderInitiation/BulkInitiate")
+async def payment_order_procedure_bulk_initiate(body: PaymentOrderBulkInitiateRequest):
+    """Initiate a batch of payment orders sequentially. Each item reuses the single
+    initiate path; per-item validation failures are captured in the response so a
+    bad item can't abort the batch. Returns settled/failed counts plus per-item results."""
+    results = []
+    settled = 0
+    for idx, item in enumerate(body.items):
+        try:
+            payment_doc = payments_service.initiate_payment(
+                customer_ref=item.customerId,
+                debtor_account_ref=item.debtor.accountId,
+                creditor_account_ref=item.creditor.accountId,
+                instructed_amount=item.instructedAmount,
+                instructed_currency=item.instructedCurrency,
+                payment_type=item.type,
+                payment_rail=item.rail,
+                remittance_unstructured=(item.remittance.unstructured if item.remittance else None),
+            )
+            settled += 1
+            results.append({
+                "index": idx,
+                "ok": True,
+                "paymentId": payment_doc["paymentId"],
+                "status": payment_doc["status"],
+            })
+        except ValueError as e:
+            results.append({"index": idx, "ok": False, "error": str(e)})
+        except Exception as e:
+            logging.error("BulkInitiate item %d failed: %s", idx, e)
+            results.append({"index": idx, "ok": False, "error": "Internal payment processing error."})
+
+    return _bian_response({
+        "requested": len(body.items),
+        "settled": settled,
+        "failed": len(body.items) - settled,
+        "results": results,
+    })
 
 
 @app.get("/PaymentOrderInitiation/{paymentorderinitiationid}/Retrieve")
