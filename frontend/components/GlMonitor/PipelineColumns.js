@@ -15,7 +15,7 @@ function FeedRows({ col, items, selected, lineage, onSelect, renderRow, rowId, k
     const key = keyOf ? keyOf(item, i) : i;
     if (item._batchTag === "LAST" && prevTag === "CURRENT") {
       out.push(
-        <div className={styles["batch-sep"]} key={`sep-${key}`}>current ↑  ·  ↓ last batch</div>
+        <div className={styles["batch-sep"]} key={`sep-${key}`}>current ↑  ·  ↓ last 2 batches</div>
       );
     }
     const isSel = selected.col === col && selected.idx === i;

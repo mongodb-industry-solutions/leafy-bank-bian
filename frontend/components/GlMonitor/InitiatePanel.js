@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import styles from "./GlMonitor.module.css";
 import Button from "@leafygreen-ui/button";
-import { PRESETS } from "@/lib/glMonitor/presets";
+import { PRESETS, generateBulkItems } from "@/lib/glMonitor/presets";
 import { coreApi, pipelineApi } from "@/lib/api/client";
 import BatchTimer from "./BatchTimer";
 
@@ -67,6 +67,26 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
     };
     if (p.remittance) payload.remittance = { unstructured: p.remittance };
     await fireTransaction(payload);
+    setBusy(null);
+  }
+
+  // Bulk fire: one POST to BulkInitiate (the service loops the batch sequentially),
+  // then a single refresh + single bounded pipeline poll — NOT one poll per item,
+  // which is what makes firing presets one-by-one drag.
+  async function fireBulk() {
+    setBusy("bulk");
+    setResult({ loading: true });
+    const items = generateBulkItems(5);
+    const { data, error } = await coreApi("PaymentOrderInitiation/BulkInitiate", { method: "POST", body: { items } });
+    if (error) {
+      setResult({ ok: false, text: `Error: ${error}` });
+      setBusy(null);
+      return;
+    }
+    const firstPid = data.results?.find((r) => r.ok)?.paymentId || "—";
+    setResult({ ok: true, bulk: true, requested: data.requested, settled: data.settled, failed: data.failed, syncing: true });
+    await pollForPipeline(firstPid);
+    setResult({ ok: true, bulk: true, requested: data.requested, settled: data.settled, failed: data.failed, syncing: false });
     setBusy(null);
   }
 
@@ -153,7 +173,12 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
                   className={`${styles["preset-btn"]} ${styles["preset-btn-action"]}`}
                   onClick={() => setShowCustom((s) => !s)}
                 >{showCustom ? "✕ Custom transaction" : "✏️ Custom transaction"}</button>
-                <button className={`${styles["preset-btn"]} ${styles["preset-btn-muted"]}`} disabled title="Coming soon">⏳ Bulk transactions</button>
+                <button
+                  className={`${styles["preset-btn"]} ${styles["preset-btn-action"]}`}
+                  disabled={busy === "bulk"}
+                  onClick={fireBulk}
+                  title="Fire a randomized batch of 5 transactions in one call"
+                >⚡ Bulk transactions{busy === "bulk" ? " …" : ""}</button>
               </div>
             </div>
 
@@ -224,8 +249,17 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
                   <div className={styles["empty-state"]}>Sending…</div>
                 ) : result.ok ? (
                   <div style={{ background: "var(--green-bg)", color: "var(--green-text)", borderRadius: 6, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 700 }}>Initiated:</span>
-                    <span style={{ fontFamily: "monospace", fontSize: 12 }}>{result.pid}</span>
+                    {result.bulk ? (
+                      <>
+                        <span style={{ fontWeight: 700 }}>Bulk initiated:</span>
+                        <span style={{ fontSize: 12 }}>{result.settled}/{result.requested} settled{result.failed ? `, ${result.failed} failed` : ""}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontWeight: 700 }}>Initiated:</span>
+                        <span style={{ fontFamily: "monospace", fontSize: 12 }}>{result.pid}</span>
+                      </>
+                    )}
                     <span style={{ fontSize: 11, color: "var(--green-text)" }}>
                       {result.syncing ? "Waiting for pipeline…" : "Pipeline updated"}
                     </span>

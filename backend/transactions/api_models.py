@@ -7,7 +7,7 @@ Inner record types use a `Body` suffix to avoid Pydantic forward-ref shadow bugs
 when the parent model declares an Optional field with the same name as the class.
 """
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,6 +38,15 @@ class PaymentOrderInitiateRequest(BaseModel):
     instructedAmount: float = Field(gt=0)
     instructedCurrency: str = Field(min_length=3, max_length=3)
     remittance: Optional[PaymentRemittanceBody] = None
+    model_config = ConfigDict(extra="forbid")
+
+
+class PaymentOrderBulkInitiateRequest(BaseModel):
+    """A batch of payment orders. Each item is initiated sequentially so the ACID
+    balance writes commit in order (no write conflicts on a shared debtor account).
+    A per-item failure is reported in the response, not raised — one bad item does
+    not abort the batch."""
+    items: List[PaymentOrderInitiateRequest] = Field(min_length=1, max_length=50)
     model_config = ConfigDict(extra="forbid")
 
 

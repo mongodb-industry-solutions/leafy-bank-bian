@@ -1,13 +1,15 @@
 // GL monitor batch-window tagging — ported from .docs/gl-monitor-static-ref/js/batch.js.
 import { parseTs } from "./format";
 
-// Tags each item CURRENT/LAST relative to the last batch window, keeping only
-// items that fall inside the last two windows. When no batch info is known,
-// returns every item untagged (caller shows the full total).
+// Tags each item CURRENT/LAST relative to the batch windows, keeping the current
+// (post-last-batch) window plus the last TWO batch windows. The windows are
+// anchored on lastBatchAt (not wall-clock now), so items persist until new
+// batches actually run — they don't vanish just because minutes elapsed. When no
+// batch info is known, returns every item untagged (caller shows the full total).
 export function filterByBatch(items, tsField, batchInfo) {
   if (!batchInfo || !batchInfo.lastBatchAt) return items.map((x) => ({ ...x, _batchTag: null }));
   const lastEnd = parseTs(batchInfo.lastBatchAt);
-  const lastStart = new Date(lastEnd.getTime() - batchInfo.intervalMs);
+  const lastStart = new Date(lastEnd.getTime() - 2 * batchInfo.intervalMs);
   return items
     .map((x) => {
       const t = parseTs(x[tsField]);
