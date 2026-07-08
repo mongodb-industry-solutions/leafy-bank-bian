@@ -167,6 +167,7 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
                     <datalist id="glm-customer-list">
                       <option value="CUST-00528224">Grace</option>
                       <option value="CUST-17352703">Monet</option>
+                      <option value="CUST-f88fb89e">Frida</option>
                     </datalist>
                   </div>
                   <div style={{ minWidth: 155, flex: 1.5 }}>
@@ -177,10 +178,12 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
                     <div className={styles["field-label"]}>Creditor Account (to)</div>
                     <input className={styles["form-input"]} list="glm-account-list" placeholder="ACC-…" value={custom.creditor} onChange={(e) => setField("creditor", e.target.value)} />
                     <datalist id="glm-account-list">
-                      <option value="ACC-e0583b3b">Grace primary</option>
-                      <option value="ACC-e0583b3f">Grace secondary</option>
-                      <option value="ACC-e0583b3c">Monet primary</option>
-                      <option value="ACC-8c8097a4">Monet secondary</option>
+                      <option value="ACC-e0583b3b">Grace savings</option>
+                      <option value="ACC-e0583b3f">Grace checking</option>
+                      <option value="ACC-e0583b3c">Monet checking</option>
+                      <option value="ACC-8c8097a4">Monet savings</option>
+                      <option value="ACC-e0583b3a">Frida checking</option>
+                      <option value="ACC-e0583b39">Frida savings</option>
                     </datalist>
                   </div>
                   <div style={{ minWidth: 90, flex: 0.7 }}>
