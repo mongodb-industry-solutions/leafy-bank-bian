@@ -50,6 +50,12 @@ def _restart_loop(name: str, fn, *args, restart_delay: int = 5) -> None:
         except Exception:
             logger.exception("%s crashed; restarting in %ds", name, restart_delay)
             time.sleep(restart_delay)
+            continue
+        # fn returned without raising: it exited on purpose (e.g. worker
+        # disabled). Do NOT re-invoke — that would busy-loop with no sleep and
+        # flood the logs. Stop the thread cleanly.
+        logger.info("%s exited; not restarting", name)
+        return
 
 
 @asynccontextmanager
