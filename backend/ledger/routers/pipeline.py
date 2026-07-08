@@ -36,12 +36,13 @@ def pipeline_health(request: Request) -> JSONResponse:
 def gl_dashboard(
     request: Request,
     period_code: Optional[str] = Query(None, alias="periodCode"),
+    months: int = Query(3, ge=1, le=24),
     top_n: int = Query(5, ge=1, le=50, alias="topN"),
 ) -> JSONResponse:
     connection = request.app.state.connection
     db_name = request.app.state.db_name
     data = pipeline_read_service.get_gl_dashboard(
-        connection, db_name, period_code=period_code, top_n=top_n
+        connection, db_name, period_code=period_code, months=months, top_n=top_n
     )
     return to_json_response(data)
 

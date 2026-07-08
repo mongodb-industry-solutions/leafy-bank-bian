@@ -121,15 +121,40 @@ def test_reconciliation_break_flips_status(monkeypatch):
     }
 
 
-def test_defaults_to_current_period(monkeypatch):
+def test_defaults_to_rolling_window(monkeypatch):
+    """No period_code → last `months` months (default 3), newest as periodCode."""
     conn = _conn({})
+    calls = []
     monkeypatch.setattr(
         pipeline_read_service.reconciliation_service,
         "reconcile_all_accounts",
-        lambda *a, **k: [],
+        lambda *a, **k: calls.append(k.get("period_code")) or [],
     )
-    monkeypatch.setattr(pipeline_read_service, "_current_period", lambda: "2026-07")
+    monkeypatch.setattr(
+        pipeline_read_service, "_last_n_periods",
+        lambda n: ["2026-05", "2026-06", "2026-07"],
+    )
 
     result = get_gl_dashboard(conn, "test_db")
 
+    assert result["periods"] == ["2026-05", "2026-06", "2026-07"]
     assert result["periodCode"] == "2026-07"
+    # reconciliation runs once per period in the window
+    assert calls == ["2026-05", "2026-06", "2026-07"]
+
+
+def test_single_period_ignores_window(monkeypatch):
+    """An explicit period_code scopes to that one month only."""
+    conn = _conn({})
+    calls = []
+    monkeypatch.setattr(
+        pipeline_read_service.reconciliation_service,
+        "reconcile_all_accounts",
+        lambda *a, **k: calls.append(k.get("period_code")) or [],
+    )
+
+    result = get_gl_dashboard(conn, "test_db", period_code="2025-05", months=3)
+
+    assert result["periods"] == ["2025-05"]
+    assert result["periodCode"] == "2025-05"
+    assert calls == ["2025-05"]
