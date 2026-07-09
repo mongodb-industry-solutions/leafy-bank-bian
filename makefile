@@ -39,6 +39,9 @@ dev-ledger:
 dev-frontend:
 	cd frontend && npm run dev
 
+ensure-indexes:
+	cd backend/ledger && poetry run python -m data.ensure_indexes
+
 # Standalone BIAN Data Model Explorer (separate Next.js app). Port 8004 matches
 # docker-compose and the frontend NavBar "Data Model" link default.
 dev-bian-model:
