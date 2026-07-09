@@ -9,6 +9,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Icon from "@leafygreen-ui/icon";
 import Code from "@leafygreen-ui/code";
+import { SegmentedControl, SegmentedControlOption } from "@leafygreen-ui/segmented-control";
 import styles from "./GlMonitor.module.css";
 import { Chip } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
@@ -25,6 +26,7 @@ function buildStages(d) {
   const le = d.ledgerEvent;
   const sls = d.subLedgerEntries || [];
   const jn = d.journalEntry;
+  const names = d.accountNames || {};
   const isRealtime = ["REALTIME", "NEAR_REALTIME"].includes(d.postingMode);
 
   const batchStatus = !le ? null : le.postingStatus === "POSTED" ? "POSTED" : "QUEUED";
@@ -86,12 +88,12 @@ function buildStages(d) {
         currency: le.debitLeg?.currency || le.creditLeg?.currency || "USD",
         debits: le.debitLeg ? [{
           accountCode: le.debitLeg.glAccountCode,
-          accountName: le.debitLeg.controlAccountCode ? `ctrl ${le.debitLeg.controlAccountCode}` : "",
+          accountName: names[le.debitLeg.glAccountCode] || "",
           amount: le.debitLeg.amount,
         }] : [],
         credits: le.creditLeg ? [{
           accountCode: le.creditLeg.glAccountCode,
-          accountName: le.creditLeg.controlAccountCode ? `ctrl ${le.creditLeg.controlAccountCode}` : "",
+          accountName: names[le.creditLeg.glAccountCode] || "",
           amount: le.creditLeg.amount,
         }] : [],
       } : null,
@@ -125,10 +127,10 @@ function buildStages(d) {
       ledger: sls.length ? {
         currency: sls[0]?.currency || "USD",
         debits: sls.filter((s) => s.side === "DEBIT").map((s) => ({
-          accountCode: s.controlAccountCode, accountName: s.subLedgerType || "", amount: s.amount,
+          accountCode: s.controlAccountCode, accountName: names[s.controlAccountCode] || s.subLedgerType || "", amount: s.amount,
         })),
         credits: sls.filter((s) => s.side === "CREDIT").map((s) => ({
-          accountCode: s.controlAccountCode, accountName: s.subLedgerType || "", amount: s.amount,
+          accountCode: s.controlAccountCode, accountName: names[s.controlAccountCode] || s.subLedgerType || "", amount: s.amount,
         })),
       } : null,
       pairs: sls.length ? (() => {
@@ -175,8 +177,10 @@ function buildStages(d) {
       // the flat pairs so the balance story reads spatially, not as a list.
       ledger: jn ? {
         currency: jn.currency || "USD",
-        debits: (jn.entries || []).filter((e) => e.side === "DEBIT"),
-        credits: (jn.entries || []).filter((e) => e.side === "CREDIT"),
+        debits: (jn.entries || []).filter((e) => e.side === "DEBIT")
+          .map((e) => ({ ...e, accountName: names[e.accountCode] || e.accountName || "" })),
+        credits: (jn.entries || []).filter((e) => e.side === "CREDIT")
+          .map((e) => ({ ...e, accountName: names[e.accountCode] || e.accountName || "" })),
       } : null,
       pairs: jn ? [
         ["Status", <Chip status={jn.status} key="c" />],
@@ -281,8 +285,19 @@ function TAccount({ ledger }) {
 function DetailPane({ stage }) {
   const [showJson, setShowJson] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [side, setSide] = useState("DEBIT");
+  // Reset the leg selector whenever a different stage is opened.
+  useEffect(() => { setSide("DEBIT"); }, [stage?.key]);
   if (!stage) return null;
-  const jsonText = stage.raw ? JSON.stringify(stage.raw, null, 2) : "";
+  // A multi-leg stage (e.g. Subledger) stores an array of entries carrying a
+  // `side`; let the user isolate one leg's JSON instead of one merged blob.
+  const legs = Array.isArray(stage.raw) && stage.raw.length > 1 && stage.raw.every((r) => r?.side)
+    ? stage.raw : null;
+  const jsonSource = legs
+    ? (side === "BOTH" ? legs : (legs.filter((r) => r.side === side).length === 1
+        ? legs.find((r) => r.side === side) : legs.filter((r) => r.side === side)))
+    : stage.raw;
+  const jsonText = jsonSource ? JSON.stringify(jsonSource, null, 2) : "";
   const copyJson = () => {
     navigator.clipboard.writeText(jsonText);
     setCopied(true);
@@ -313,6 +328,15 @@ function DetailPane({ stage }) {
               </button>
             )}
           </div>
+          {showJson && legs && (
+            <div style={{ marginTop: 8 }}>
+              <SegmentedControl size="xsmall" value={side} onChange={setSide} aria-label="Select leg">
+                <SegmentedControlOption value="DEBIT">Debit</SegmentedControlOption>
+                <SegmentedControlOption value="CREDIT">Credit</SegmentedControlOption>
+                <SegmentedControlOption value="BOTH">Both</SegmentedControlOption>
+              </SegmentedControl>
+            </div>
+          )}
           {showJson && (
             <div className={styles["ptrace-json-wrap"]}>
               <Code language="json" copyButtonAppearance="none">{jsonText}</Code>

@@ -1287,14 +1287,13 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 16px;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-top: 1px solid var(--hue-border, var(--border));
   font-size: 12px;
   font-weight: 700;
 }
-.ta-ok  { background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; }
-.ta-bad { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+.ta-ok  { background: #f0fdf4; color: #16a34a; }
+.ta-bad { background: #fef2f2; color: #dc2626; }
 
 @media (max-width: 900px) {
   .ptrace-explorer { grid-template-columns: 1fr; }

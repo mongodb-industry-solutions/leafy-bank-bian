@@ -443,6 +443,31 @@ def trace_payment(
 
     posting_mode = (ledger_event or {}).get("postingMode", {}).get("type")
 
+    # Resolve GL account codes → human-readable names for the UI T-account.
+    # Returned as a sibling map (not injected into the stored docs) so the raw
+    # "View JSON" still shows the documents exactly as persisted.
+    codes: set = set()
+    if ledger_event:
+        for leg in (ledger_event.get("debitLeg"), ledger_event.get("creditLeg")):
+            if leg:
+                codes.add(leg.get("glAccountCode"))
+                codes.add(leg.get("controlAccountCode"))
+    for row in (subledger_entries or []):
+        codes.add(row.get("controlAccountCode"))
+    if journal_entry:
+        for entry in journal_entry.get("entries", []):
+            codes.add(entry.get("accountCode"))
+    codes.discard(None)
+    codes.discard("")
+    account_names: dict = {}
+    if codes:
+        gl_coll = connection.get_collection(db_name, "glAccounts")
+        for acct in gl_coll.find(
+            {"accountCode": {"$in": list(codes)}},
+            {"_id": 0, "accountCode": 1, "accountName": 1},
+        ):
+            account_names[acct["accountCode"]] = acct.get("accountName")
+
     return {
         "paymentId": payment_id,
         "payment": payment,
@@ -451,4 +476,5 @@ def trace_payment(
         "subLedgerEntries": subledger_entries,
         "journalEntry": journal_entry,
         "postingMode": posting_mode,
+        "accountNames": account_names,
     }

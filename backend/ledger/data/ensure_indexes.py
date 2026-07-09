@@ -173,6 +173,13 @@ _SUBLEDGER_ENTRIES_VALIDATOR = {
     }
 }
 
+# Pacioli balance invariant: debitLeg.amount == creditLeg.amount per document.
+# Enforced at the DB level so any write that bypasses the service layer is rejected.
+# ledgerEvents carries a single debit/credit leg pair (not an array like journalEntries.entries).
+_LEDGER_EVENTS_BALANCE_VALIDATOR = {
+    "$expr": {"$eq": ["$debitLeg.amount", "$creditLeg.amount"]}
+}
+
 # Pacioli balance invariant: Σ DEBIT amount == Σ CREDIT amount per document.
 # Enforced at the DB level so any write that bypasses the service layer is rejected.
 # $map extracts the `amount` field from each filtered leg before $sum aggregates.
@@ -232,7 +239,7 @@ def ensure_validators(connection: MongoDBConnection, db_name: str) -> list[str]:
     """Apply collection-level validators. Idempotent — re-running replaces the validator in place."""
     db = connection.client[db_name]
     specs = [
-        ("ledgerEvents", _LEDGER_EVENTS_VALIDATOR),
+        ("ledgerEvents", {"$and": [_LEDGER_EVENTS_VALIDATOR, _LEDGER_EVENTS_BALANCE_VALIDATOR]}),
         ("subLedgerEntries", _SUBLEDGER_ENTRIES_VALIDATOR),
         ("journalEntries", _JOURNAL_BALANCE_VALIDATOR),
     ]
