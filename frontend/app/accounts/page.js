@@ -47,7 +47,7 @@ export default function AccountsPage() {
                 ></iframe>
               </div>
             )}
-            {selectedUser?.name === 'hellyrig' && (
+            {selectedUser?.name === 'gracehop' && (
               <div className={styles.iframeWrap}>
                 <iframe
                   width="640"
@@ -56,7 +56,7 @@ export default function AccountsPage() {
                 ></iframe>
               </div>
             )}
-            {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'hellyrig')) && (
+            {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'gracehop')) && (
               <div className={styles.iframeWrap}></div>
             )}
           </Card>
@@ -73,7 +73,7 @@ export default function AccountsPage() {
                     ></iframe>
                   </div>
                 )}
-                {selectedUser?.name === 'hellyrig' && (
+                {selectedUser?.name === 'gracehop' && (
                   <div className={styles.iframeWrap}>
                     <iframe
                       width="640"
@@ -82,7 +82,7 @@ export default function AccountsPage() {
                     ></iframe>
                   </div>
                 )}
-                {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'hellyrig')) && (
+                {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'gracehop')) && (
                   <Subtitle>Other analytics</Subtitle>
                 )}
               </div>
