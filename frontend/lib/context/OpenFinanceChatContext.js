@@ -16,7 +16,7 @@ const WELCOME_MESSAGE =
 // Initial recommendation chips shown alongside the welcome message.
 const WELCOME_SUGGESTIONS = [
   "Connect a bank for personalized financial advice",
-  "Connect a bank for general access to your accounts and data",
+  "I'd like to connect my bank accounts to get complete view of my finances",
 ];
 
 const OpenFinanceChatContext = createContext(null);
