@@ -96,9 +96,12 @@ class AccountsService:
                 ]
             }
 
+        # bookingDate is a date-only string, so same-day transactions tie; break the
+        # tie on _id (monotonic ObjectId) so the newest always sorts first and a
+        # freshly-settled transaction can't fall behind older same-day rows.
         cursor = (
             self.transactions.find(query)
-            .sort("bookingDate", -1)
+            .sort([("bookingDate", -1), ("_id", -1)])
             .limit(limit)
         )
         return list(cursor)
