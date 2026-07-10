@@ -183,8 +183,26 @@ function BqTab({ d }) {
   );
 }
 
+// Indexes are stored as strings, e.g. `{ "customerId": 1 } unique  [idx_customers_customerId]`.
+// Normalize each into the { name, key, unique, sparse, note } shape the table renders.
+function parseIndex(idx) {
+  if (idx && typeof idx === "object") return idx;
+  const s = String(idx);
+  const keyMatch = s.match(/\{[^}]*\}/);
+  const key = keyMatch ? keyMatch[0] : s;
+  const nameMatch = s.match(/\[([^\]]+)\]/);
+  const flags = keyMatch ? s.slice(keyMatch.index + keyMatch[0].length) : "";
+  return {
+    name: nameMatch ? nameMatch[1] : "",
+    key,
+    unique: /\bunique\b/.test(flags),
+    sparse: /\bsparse\b/.test(flags),
+    note: "",
+  };
+}
+
 function IndexesTab({ d }) {
-  const indexes = d.indexes || [];
+  const indexes = (d.indexes || []).map(parseIndex);
   if (!indexes.length) {
     return (
       <div className={styles.metaCard}>
@@ -200,7 +218,7 @@ function IndexesTab({ d }) {
       <tbody>
         {indexes.map((idx, i) => (
           <tr key={i}>
-            <td><code className={styles.fName}>{idx.name}</code></td>
+            <td><code className={styles.fName}>{idx.name || "—"}</code></td>
             <td><code className={styles.bqPath}>{idx.key}</code></td>
             <td>
               {idx.unique && <Badge variant="green">unique</Badge>}{" "}
@@ -242,7 +260,7 @@ function RelationshipsTab({ activeKey }) {
   );
 }
 
-function DomainView({ activeKey, demoCollections, demoDbKey }) {
+function DomainView({ activeKey, demoCollections }) {
   const info = DOMAIN_MAP.find((d) => d.key === activeKey);
   const d = COLL_DATA[activeKey];
   const [tab, setTab] = useState(0);
@@ -312,18 +330,6 @@ function DomainView({ activeKey, demoCollections, demoDbKey }) {
               <span className={styles.legendDot} style={{ background: c }} />
               {p}
             </span>
-          ))}
-        </div>
-        <div className={styles.footerCard}>
-          <div className={styles.footerCardLbl}>Database map</div>
-          {Object.entries(DB_MAP).map(([db, colls]) => (
-            <div key={db} className={styles.dbChip}>
-              <div className={styles.dbName}>
-                {db}
-                {db === demoDbKey && <span className={styles.demoPill}>demo</span>}
-              </div>
-              <div className={styles.dbColls}>{colls.join(", ")}</div>
-            </div>
           ))}
         </div>
       </div>
@@ -549,7 +555,7 @@ export default function BianDataModelPage() {
             ) : activeKey === PORTFOLIO_API_KEY ? (
               <PortfolioApiView />
             ) : (
-              <DomainView activeKey={activeKey} demoCollections={demoCollections} demoDbKey={activeDemo.dbKey} />
+              <DomainView activeKey={activeKey} demoCollections={demoCollections} />
             )}
           </div>
         </main>
