@@ -13,13 +13,31 @@ export function formatCurrency(amount) {
 }
 
 /**
+ * Parse a date value into a Date. A bare calendar date ("YYYY-MM-DD", as stored
+ * in bookingDate/valueDate) is parsed in the LOCAL zone, not UTC — otherwise
+ * `new Date("2026-07-11")` is UTC midnight and buckets a day earlier for viewers
+ * west of UTC (e.g. Toronto) vs. east (e.g. Mumbai). A booking date is a calendar
+ * day, so it must render identically regardless of the viewer's timezone. Values
+ * carrying a time component (createdAt, etc.) are genuine instants — parsed as-is.
+ * @param {string|Date|number} value
+ * @returns {Date}
+ */
+export function parseCalendarDate(value) {
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+  return new Date(value);
+}
+
+/**
  * Format a date string to locale date.
  * @param {string} dateStr - ISO date string or similar
  * @returns {string} locale-formatted date, or empty string if invalid
  */
 export function formatDate(dateStr) {
   if (!dateStr) return "";
-  const d = new Date(dateStr);
+  const d = parseCalendarDate(dateStr);
   return isNaN(d.getTime()) ? "" : d.toLocaleDateString();
 }
 
