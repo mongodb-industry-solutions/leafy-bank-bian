@@ -310,6 +310,114 @@
   to { transform: rotate(360deg); }
 }
 
+/* ─── Tool trace (agent thinking) ─── */
+
+.toolTrace {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.toolTraceHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  font-family: inherit;
+  text-align: left;
+}
+
+.toolTraceChevron {
+  margin-left: auto;
+  color: #9ca3af;
+  font-size: 11px;
+}
+
+.toolTraceBody {
+  padding: 4px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.traceStatus {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.traceTool {
+  border-left: 2px solid #007856;
+  padding-left: 10px;
+}
+
+.traceToolTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.traceToolName {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #007856;
+}
+
+.traceAgent {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.traceFeature {
+  font-size: 10px;
+  font-weight: 600;
+  color: #075e54;
+  background: #d7f5e6;
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
+.traceBlock {
+  position: relative;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 18px 10px 8px;
+  margin: 4px 0 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.traceLabel {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+}
+
 /* ─── Input ─── */
 
 .chatInput {

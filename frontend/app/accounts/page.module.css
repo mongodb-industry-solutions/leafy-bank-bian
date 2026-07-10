@@ -149,6 +149,44 @@
     gap: 12px;
 }
 
+.txnHeader {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.txnFilter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 4px 4px 12px;
+    border: 1px solid #E8EDEB;
+    border-radius: 999px;
+    background: #f9fbfa;
+}
+
+.txnFilterLabel {
+    color: #00684a;
+    font-weight: 600;
+}
+
+.clearFilterBtn {
+    border: none;
+    background: #00684a;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background-color 160ms ease;
+}
+
+.clearFilterBtn:hover {
+    background: #00503a;
+}
+
 .tableWrap {
     overflow: auto;
 }

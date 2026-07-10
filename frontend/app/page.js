@@ -25,8 +25,10 @@ import MobileActions from "@/components/MobileActions/MobileActions";
 
 
 // Leafy Bank accounts get a green badge; any other (external) bank gets blue.
-const bankBadgeVariant = (bank) =>
-  (bank || "").toLowerCase().replace(/\s/g, "") === "leafybank" ? "green" : "blue";
+const isExternalBank = (bank) =>
+  (bank || "").toLowerCase().replace(/\s/g, "") !== "leafybank";
+
+const bankBadgeVariant = (bank) => (isExternalBank(bank) ? "blue" : "green");
 
 const HomeContent = () => {
   const [modalOpen, setModalOpen] = useState(false);
@@ -117,7 +119,14 @@ const HomeContent = () => {
               {homeLoading ? (
                 <Body className={styles.cardBodyGray}>Loading...</Body>
               ) : bankAccounts.length > 0 ? (
-                bankAccounts.map((account) => (
+                // Show external accounts (Green Bank, MongoDB Bank, NeoFinance,
+                // …) first; stable sort keeps original order within each group.
+                [...bankAccounts]
+                  .sort(
+                    (a, b) =>
+                      isExternalBank(b.AccountBank) - isExternalBank(a.AccountBank)
+                  )
+                  .map((account) => (
                   <div
                     key={account._id}
                     className={styles.accountRow}
