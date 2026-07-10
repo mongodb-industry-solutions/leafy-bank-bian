@@ -4,6 +4,22 @@ import styles from "./GlDashboardSection.module.css";
 import { useGlDashboard } from "@/lib/api/hooks";
 import { fmt } from "@/lib/glMonitor/format";
 
+// "2026-05".."2026-07" → "May – Jul 2026"; single month → "Jul 2026".
+function periodRangeLabel(periods) {
+  if (!periods || periods.length === 0) return "";
+  const label = (p) => {
+    const [y, m] = p.split("-");
+    const d = new Date(Date.UTC(Number(y), Number(m) - 1, 1));
+    return { mon: d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }), y };
+  };
+  const first = label(periods[0]);
+  const last = label(periods[periods.length - 1]);
+  if (periods.length === 1) return `${first.mon} ${first.y}`;
+  return first.y === last.y
+    ? `${first.mon} – ${last.mon} ${last.y}`
+    : `${first.mon} ${first.y} – ${last.mon} ${last.y}`;
+}
+
 function StatCard({ label, value = "—" }) {
   return (
     <div className={styles.statCard}>
@@ -26,6 +42,19 @@ export default function GlDashboardSection({ refreshKey }) {
   const money = (v) => (v == null ? ph : `$${fmt(v, true)}`);
   // Drop the trailing "— Control" / "- Control" qualifier from control-account names.
   const cleanName = (n) => (n ? n.replace(/\s*[—–-]\s*control\s*$/i, "") : "—");
+  // Balance = Debit − Credit; render negatives with a leading minus sign.
+  const balanceCell = (v) => {
+    if (v == null) return ph;
+    const abs = fmt(Math.abs(v), true);
+    return v < 0 ? `-${abs}` : abs;
+  };
+  // These blocks are a rolling 3-month roll-up (not a single batch). Label the
+  // window from the periods the API actually aggregated so it reads unambiguously.
+  const scopeLabel = periodRangeLabel(dashboard?.periods);
+  // Totals across the accounts shown — nets to ~0 when this slice is balanced.
+  const totalDebit = accounts.reduce((sum, a) => sum + (a.debit || 0), 0);
+  const totalCredit = accounts.reduce((sum, a) => sum + (a.credit || 0), 0);
+  const totalBalance = totalDebit - totalCredit;
 
   return (
     <div className={styles.dashSection}>
@@ -33,14 +62,17 @@ export default function GlDashboardSection({ refreshKey }) {
       <div className={styles.chartPane}>
         <iframe
           style={{ background: "#FFFFFF", border: "none", borderRadius: 2, boxShadow: "0 2px 10px 0 rgba(70, 76, 79, .2)", width: "100%", height: "100%" }}
-          src="https://charts.mongodb.com/charts-jeffn-zsdtj/embed/charts?id=744b8747-2f48-4696-bdbe-b2a683f825e2&maxDataAge=3600&theme=light&autoRefresh=true"
+          src="https://charts.mongodb.com/charts-jeffn-zsdtj/embed/charts?id=9efe5dfd-d969-406d-a03f-35b2ca6f65e7&maxDataAge=60&theme=light&autoRefresh=true"
         />
       </div>
 
       {/* Column 2: Top control accounts table (replaces the bar chart) */}
       <div className={styles.chartPane}>
         <div className={styles.tableWrap}>
-          <div className={styles.tableTitle}>Top Control Accounts</div>
+          <div className={styles.tableHead}>
+            <div className={styles.tableTitle}>Top Control Accounts</div>
+            {scopeLabel && <span className={styles.scopeChip}>{scopeLabel}</span>}
+          </div>
           <div className={styles.tableBody}>
           <table className={styles.acctTable}>
             <thead>
@@ -60,24 +92,46 @@ export default function GlDashboardSection({ refreshKey }) {
                   </td>
                 </tr>
               ) : (
-                accounts.map((a) => (
-                  <tr key={a.accountCode}>
-                    <td>{a.accountCode}</td>
-                    <td>{cleanName(a.accountName)}</td>
-                    <td className={styles.num}>{fmt(a.debit, true)}</td>
-                    <td className={styles.num}>{fmt(a.credit, true)}</td>
-                    <td className={styles.num}>{fmt(a.balance, true)}</td>
+                <>
+                  {accounts.map((a) => (
+                    <tr key={a.accountCode}>
+                      <td>{a.accountCode}</td>
+                      <td>{cleanName(a.accountName)}</td>
+                      <td className={styles.num}>{fmt(a.debit, true)}</td>
+                      <td className={styles.num}>{fmt(a.credit, true)}</td>
+                      <td
+                        className={`${styles.num} ${
+                          a.balance < 0 ? styles.negative : ""
+                        }`}
+                      >
+                        {balanceCell(a.balance)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className={styles.totalRow}>
+                    <td colSpan={2}>Total</td>
+                    <td className={styles.num}>{fmt(totalDebit, true)}</td>
+                    <td className={styles.num}>{fmt(totalCredit, true)}</td>
+                    <td className={`${styles.num} ${totalBalance !== 0 ? styles.negative : ""}`}>
+                      {balanceCell(totalBalance)}
+                    </td>
                   </tr>
-                ))
+                </>
               )}
             </tbody>
           </table>
+          </div>
+          <div className={styles.tableNote}>
+            Balance = Debit − Credit · Total nets to zero when accounts shown are balanced · rolling 3-month roll-up
           </div>
         </div>
       </div>
 
       {/* Column 3: stat cards */}
       <div className={styles.statsPane}>
+        {scopeLabel && (
+          <div className={styles.statsScope}>Period: {scopeLabel}</div>
+        )}
         <div className={styles.statsRow}>
           <StatCard
             label="Total Journals"

@@ -118,7 +118,7 @@ export default function PipelineColumns({ columns, selected, lineage, onSelect, 
                 <BalanceChip balanced={e.debitLeg.amount === e.creditLeg.amount} />
               )}
             </div>
-            <div className={styles["row-detail"]}>{e.eventType || "—"} · {e.postingMode?.type || "—"}</div>
+            <div className={styles["row-detail"]}>{e.eventType || "—"} · {e.postingMode?.type || "—"} · {fmtMinor(e.debitLeg?.amount ?? e.creditLeg?.amount)}</div>
             <div className={styles["row-sub"]}>{fmtDate(e.occurredAt)} · v{e.mappingVersion || "?"}</div>
           </>
         )}

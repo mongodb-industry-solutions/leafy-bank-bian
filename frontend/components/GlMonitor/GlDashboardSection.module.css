@@ -32,15 +32,46 @@
   background: #fff;
 }
 
+.tableHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .tableTitle {
   font-size: 15px;
   font-weight: 700;
   color: #111827;
-  margin-bottom: 12px;
+}
+
+/* Small pill showing the aggregation window (e.g. "May – Jul 2026"). */
+.scopeChip {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4b5563;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
 }
 
 .tableBody {
   flex: 1;
+}
+
+/* Caption clarifying the balance formula + scope. */
+.tableNote {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* Negative control-account balance (accounting form: parenthesised). */
+.acctTable .negative {
+  color: #b91c1c;
 }
 
 .acctTable {
@@ -82,11 +113,27 @@
   padding: 24px 8px;
 }
 
+/* Total row summing debits/credits/balance across the accounts shown. */
+.acctTable .totalRow td {
+  font-weight: 700;
+  border-top: 2px solid #d1d5db;
+  border-bottom: none;
+  color: #111827;
+}
+
 /* ── stats pane ── */
 .statsPane {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* Scope label above the KPI tiles, mirroring the table's scope chip. */
+.statsScope {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  text-align: right;
 }
 
 .statsRow {
