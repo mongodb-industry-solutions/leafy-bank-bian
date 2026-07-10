@@ -25,7 +25,16 @@ export function formatCurrency(amount) {
 export function parseCalendarDate(value) {
   if (typeof value === "string") {
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (m) {
+      const y = Number(m[1]);
+      const mon = Number(m[2]) - 1;
+      const day = Number(m[3]);
+      const d = new Date(y, mon, day);
+      // Reject rollovers ("2026-02-30" → Mar 2): match native new Date("YYYY-MM-DD"),
+      // which yields Invalid Date for out-of-range days. Callers guard on isNaN.
+      if (d.getFullYear() === y && d.getMonth() === mon && d.getDate() === day) return d;
+      return new Date(NaN);
+    }
   }
   return new Date(value);
 }
