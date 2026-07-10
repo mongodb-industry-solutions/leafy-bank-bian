@@ -5,6 +5,7 @@ import Code from "@leafygreen-ui/code";
 import Badge from "@leafygreen-ui/badge";
 import Tooltip from "@leafygreen-ui/tooltip";
 import styles from "./TransactionsTable.module.css";
+import { parseCalendarDate } from "@/lib/api/format";
 
 // Leafy Bank transactions get a green badge; any other (external) bank gets blue.
 const bankBadgeVariant = (bank) =>
@@ -214,8 +215,8 @@ export default function TransactionsTable({
 
               transactions.forEach((t) => {
                 const raw = t._rawDate || t.date || "";
-                let dateValue = new Date(raw);
-                if (isNaN(dateValue)) dateValue = new Date(t.date || raw);
+                let dateValue = parseCalendarDate(raw);
+                if (isNaN(dateValue)) dateValue = parseCalendarDate(t.date || raw);
 
                 let key;
                 if (isNaN(dateValue)) {
@@ -248,7 +249,7 @@ export default function TransactionsTable({
                   ? groupLabels[key] || "Unknown"
                   : key === todayKey
                   ? "Today"
-                  : new Date(key).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+                  : parseCalendarDate(key).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 
                 return (
                   <React.Fragment key={key}>
