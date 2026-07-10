@@ -9,7 +9,7 @@ export const USER_MAP = {
         IncomeAmount: 5500,
         Currency: "USD",
         IncomeFrequency: "Monthly",
-        SpendingProfile: "Saver",
+        SpendingProfile: "Spender",
     },
     "66fe219d625d93a100528224": {
         UserName: "gracehop",
