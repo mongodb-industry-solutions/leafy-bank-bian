@@ -20,9 +20,11 @@ function periodRangeLabel(periods) {
     : `${first.mon} ${first.y} – ${last.mon} ${last.y}`;
 }
 
-function StatCard({ label, value = "—" }) {
+// status: "good" | "bad" | undefined — tints the card to surface health at a glance.
+function StatCard({ label, value = "—", status }) {
+  const statusCls = status === "good" ? styles.statGood : status === "bad" ? styles.statBad : "";
   return (
-    <div className={styles.statCard}>
+    <div className={`${styles.statCard} ${statusCls}`}>
       <span className={styles.statLabel}>{label}</span>
       <span className={styles.statValue}>{value}</span>
     </div>
@@ -112,7 +114,7 @@ export default function GlDashboardSection({ refreshKey }) {
                     <td colSpan={2}>Total</td>
                     <td className={styles.num}>{fmt(totalDebit, true)}</td>
                     <td className={styles.num}>{fmt(totalCredit, true)}</td>
-                    <td className={`${styles.num} ${totalBalance !== 0 ? styles.negative : ""}`}>
+                    <td className={`${styles.num} ${totalBalance === 0 ? styles.positive : styles.negative}`}>
                       {balanceCell(totalBalance)}
                     </td>
                   </tr>
@@ -144,10 +146,12 @@ export default function GlDashboardSection({ refreshKey }) {
           <StatCard
             label="Out of Balance"
             value={summary ? summary.outOfBalance : ph}
+            status={summary ? (summary.outOfBalance === 0 ? "good" : "bad") : undefined}
           />
           <StatCard
             label="Reconciliation"
             value={recon ? recon.status : ph}
+            status={recon ? (recon.status === "BALANCED" ? "good" : "bad") : undefined}
           />
         </div>
       </div>

@@ -74,6 +74,11 @@
   color: #b91c1c;
 }
 
+/* Balanced total row (nets to zero) — matches the stat cards' "good" green. */
+.acctTable .positive {
+  color: #15803d;
+}
+
 .acctTable {
   width: 100%;
   table-layout: fixed;
@@ -173,4 +178,23 @@
   font-weight: 700;
   color: #111827;
   line-height: 1;
+}
+
+/* Health tint for status cards (Out of Balance / Reconciliation). */
+.statGood {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.statGood .statValue {
+  color: #15803d;
+}
+
+.statBad {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.statBad .statValue {
+  color: #b91c1c;
 }
