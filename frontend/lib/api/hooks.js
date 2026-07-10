@@ -460,7 +460,7 @@ export function useAccountsPageData() {
 
   const recentTxns = [...internalTxns, ...externalTxns]
     .sort((a, b) => new Date(b._rawDate) - new Date(a._rawDate))
-    .slice(0, 20);
+    .slice(0, 50);
 
   return {
     allAccounts,
@@ -545,7 +545,7 @@ export function useCreditCardsPageData() {
 
   const cardTxns = [...internalCardTxns, ...externalCardTxns]
     .sort((a, b) => new Date(b._rawDate) - new Date(a._rawDate))
-    .slice(0, 20);
+    .slice(0, 50);
 
   return {
     creditCards,
