@@ -9,6 +9,86 @@ import { useEffect, useRef, useState } from "react";
 
 import styles from "./OpenFinanceAssistant.module.css";
 
+function formatArgs(args) {
+  if (args == null) return "";
+  if (typeof args === "string") return args;
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+
+// Collapsible trace of the agent's tool use for one assistant turn.
+function ToolTrace({ steps, live }) {
+  const [open, setOpen] = useState(true);
+  const toolCount = steps.filter((s) => s.kind === "tool").length;
+
+  // Auto-collapse once the bot finishes replying; user can still reopen.
+  useEffect(() => {
+    if (!live) setOpen(false);
+  }, [live]);
+
+  return (
+    <div className={styles.toolTrace}>
+      <button
+        type="button"
+        className={styles.toolTraceHeader}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {live && <div className={styles.spinner} />}
+        <span>
+          Thinking
+          {toolCount > 0 && ` · ${toolCount} tool${toolCount > 1 ? "s" : ""}`}
+        </span>
+        <span className={styles.toolTraceChevron}>{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <div className={styles.toolTraceBody}>
+          {steps.map((step, i) =>
+            step.kind === "status" ? (
+              <div key={i} className={styles.traceStatus}>
+                {step.message}
+              </div>
+            ) : (
+              <div key={i} className={styles.traceTool}>
+                <div className={styles.traceToolTop}>
+                  <span className={styles.traceToolName}>{step.tool}</span>
+                  {step.agent && (
+                    <span className={styles.traceAgent}>{step.agent}</span>
+                  )}
+                  {step.mongodbFeature && (
+                    <span className={styles.traceFeature}>
+                      {step.mongodbFeature}
+                    </span>
+                  )}
+                </div>
+                {step.args != null && formatArgs(step.args) && (
+                  <pre className={styles.traceBlock}>
+                    <span className={styles.traceLabel}>query</span>
+                    {formatArgs(step.args)}
+                  </pre>
+                )}
+                {step.result != null &&
+                  (step.result === "" ? null : (
+                    <pre className={styles.traceBlock}>
+                      <span className={styles.traceLabel}>result</span>
+                      {step.result}
+                    </pre>
+                  ))}
+                {step.result == null && !live && (
+                  <div className={styles.traceStatus}>Running…</div>
+                )}
+              </div>
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OpenFinanceAssistant({ isOpen, onClose }) {
   const {
     messages,
@@ -80,10 +160,15 @@ export default function OpenFinanceAssistant({ isOpen, onClose }) {
                       >
                         {msg.type === "assistant" ? (
                           <div className={styles.assistantContent}>
-                            <div
-                              className={styles.messageText}
-                              dangerouslySetInnerHTML={renderMarkdown(msg.text)}
-                            />
+                            {msg.steps?.length > 0 && (
+                              <ToolTrace steps={msg.steps} live={msg.streaming} />
+                            )}
+                            {msg.text && (
+                              <div
+                                className={styles.messageText}
+                                dangerouslySetInnerHTML={renderMarkdown(msg.text)}
+                              />
+                            )}
                           </div>
                         ) : (
                           <Body className={styles.messageText}>{msg.text}</Body>
@@ -102,15 +187,6 @@ export default function OpenFinanceAssistant({ isOpen, onClose }) {
                             {text}
                           </button>
                         ))}
-                      </div>
-                    )}
-
-                    {sending && (
-                      <div className={styles.stepIndicator}>
-                        <div className={styles.stepHeader}>
-                          <div className={styles.spinner} />
-                          <span>Thinking...</span>
-                        </div>
                       </div>
                     )}
 

@@ -242,6 +242,41 @@
   gap: 12px;
   width: 100%;
   flex: 1;
+  /* Keep the card at its original footprint (~4 rows) when extra accounts
+     (e.g. an external Green Bank account) are pulled in — scroll instead of
+     growing the panel. min-height:0 lets the flex item shrink below content. */
+  min-height: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  /* Reserve gutter so the scrollbar sits beside the rows, not over the amounts. */
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+  /* Firefox: thin, faint scrollbar (barely visible, darkens slightly on hover). */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(16, 24, 40, 0.08) transparent;
+}
+
+.accountList:hover {
+  scrollbar-color: rgba(16, 24, 40, 0.18) transparent;
+}
+
+/* WebKit (Chrome/Safari/Edge): thin, faint scrollbar. */
+.accountList::-webkit-scrollbar {
+  width: 5px;
+}
+
+.accountList::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.accountList::-webkit-scrollbar-thumb {
+  background-color: rgba(16, 24, 40, 0.08);
+  border-radius: 8px;
+  transition: background-color 160ms ease;
+}
+
+.accountList:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(16, 24, 40, 0.18);
 }
 
 .accountRow {

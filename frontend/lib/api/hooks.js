@@ -41,6 +41,22 @@ function normalizeTransaction(t) {
   };
 }
 
+// All identifiers a transaction may use to reference its owning account.
+// Internal txns key on accountId; external ones on payer/payee.accountNo. Both
+// shapes (and BIAN payer/payee.accountId) are collected so a selected account
+// can be matched regardless of source.
+function txnAccountKeys(t) {
+  return [
+    t.accountId,
+    t.payer?.accountId,
+    t.payee?.accountId,
+    t.payer?.accountNo,
+    t.payee?.accountNo,
+    t.payer?.accountNumber,
+    t.payee?.accountNumber,
+  ].filter(Boolean);
+}
+
 /**
  * Fetch internal Leafy Bank accounts for the logged-in user.
  * Calls BIAN CurrentAccountFulfillmentArrangement/Request.
@@ -417,6 +433,7 @@ export function useAccountsPageData() {
   const bankAccounts = accounts
     .filter((a) => a.AccountType === "Checking" || a.AccountType === "Savings")
     .map((a) => ({
+      id: a.accountId,
       title: `${a.AccountType} Account`,
       number: a.AccountNumber,
       amount: a.AccountBalance,
@@ -424,6 +441,7 @@ export function useAccountsPageData() {
     }));
 
   const extCards = externalAccounts.map((a) => ({
+    id: a.accountId || null,
     title: `${a.AccountType || "External"} (${a._sourceInstitution || "External"})`,
     number: a.AccountNumber || a.account_number || "",
     amount: a.AccountBalance || a.account_balance || 0,
@@ -441,6 +459,7 @@ export function useAccountsPageData() {
     paymentId: t.paymentId,
     transactionStatus: t.transactionStatus || t.status,
     _isExternal: false,
+    _accountKeys: txnAccountKeys(t),
     _rawDate: t.BookgDt || "",
     _rawDocument: t,
   }));
@@ -454,6 +473,7 @@ export function useAccountsPageData() {
     transactionStatus: t.transactionStatus || t.status,
     _isExternal: true,
     _sourceInstitution: t._sourceInstitution,
+    _accountKeys: txnAccountKeys(t),
     _rawDate: t.BookgDt || "",
     _rawDocument: t,
   }));
