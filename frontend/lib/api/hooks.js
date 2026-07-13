@@ -478,9 +478,10 @@ export function useAccountsPageData() {
     _rawDocument: t,
   }));
 
+  // Sorted but uncapped: consumers cap after any per-account filtering, so a
+  // sparse account's transactions aren't lost to a global top-N truncation.
   const recentTxns = [...internalTxns, ...externalTxns]
-    .sort((a, b) => new Date(b._rawDate) - new Date(a._rawDate))
-    .slice(0, 50);
+    .sort((a, b) => new Date(b._rawDate) - new Date(a._rawDate));
 
   return {
     allAccounts,

@@ -254,7 +254,7 @@ const HomeContent = () => {
 
       <section className={styles.activitySection}>
         <H3>Recent Activity</H3>
-        <TransactionsTable transactions={recentTxns} loading={txLoading} />
+        <TransactionsTable transactions={recentTxns.slice(0, 50)} loading={txLoading} />
       </section>
 
       <div className={styles.stickyButtonContainer}>

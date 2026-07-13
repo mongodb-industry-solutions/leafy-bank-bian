@@ -25,13 +25,15 @@ export default function AccountsPage() {
   const { allAccounts, recentTxns, accountsLoading, txLoading } = useAccountsPageData();
 
   // When an account card is selected, show only that account's transactions.
-  const visibleTxns = selectedAccount
-    ? recentTxns.filter((t) =>
-        t._accountKeys?.some(
-          (k) => k === selectedAccount.id || k === selectedAccount.number
+  const visibleTxns = (
+    selectedAccount
+      ? recentTxns.filter((t) =>
+          t._accountKeys?.some(
+            (k) => k === selectedAccount.id || k === selectedAccount.number
+          )
         )
-      )
-    : recentTxns;
+      : recentTxns
+  ).slice(0, 50);
 
   return (
     <main className={styles.container}>
