@@ -9,7 +9,7 @@ marked.setOptions({ breaks: true, gfm: true });
 
 const WELCOME_MESSAGE =
   "Hello! 👋 Welcome to Leafy Bank's Open Finance platform.\n\n" +
-  "I'm here to help you connect your external bank accounts securely and " +
+  "I'm here to help you connect your external bank or fintech accounts securely and " +
   "understand exactly what data you're sharing and why.\n\n" +
   "What would you like to do today?";
 

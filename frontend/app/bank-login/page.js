@@ -331,7 +331,7 @@ function BankLoginContent() {
             <div className={styles.doneBox}>
               <Subtitle>{statusText}</Subtitle>
               <Body>
-                Your data has been sent back to the chatbot. You can close this
+                Your data has been sent back to Leafy Bank. You can close this
                 tab.
               </Body>
             </div>

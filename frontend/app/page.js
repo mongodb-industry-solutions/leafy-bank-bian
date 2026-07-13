@@ -222,7 +222,7 @@ const HomeContent = () => {
               <button
                 onClick={() => setOpenFinanceOpen(true)}
                 className={styles.entitiesButton}
-                aria-label="Get a complete view of your finances"
+                aria-label="Get a complete view of your finances with Open Banking"
               >
                 <div className={styles.cardContent}>
                   <div className={styles.thumbWrap}>
@@ -235,7 +235,7 @@ const HomeContent = () => {
                   </div>
 
                   <div className={styles.cardText}>
-                    <Subtitle>Get a complete view of your finances</Subtitle>
+                    <Subtitle>Get a complete view of your finances with Open Banking</Subtitle>
                     <Body className={styles.cardBodyGray}>
                       Aggregate your other banks accounts in one place and make smarter financial decisions.
                     </Body>
