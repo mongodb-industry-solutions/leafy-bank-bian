@@ -546,8 +546,8 @@ steps:
       registry: 795250896452.dkr.ecr.us-east-1.amazonaws.com
       repo: industrysolutions/leafy-bank-bian-ledger
       tags:
-        - git-${DRONE_COMMIT_SHA:0:7}
-        - latest
+        - git-${DRONE_COMMIT_SHA:0:7}-prod
+        - prod-latest
       dockerfile: Dockerfile.ledger
       access_key:
         from_secret: ecr_access_key
@@ -696,7 +696,7 @@ steps:
       namespace: industrysolutions
       release: leafy-bank-bian-ledger
       values:
-        - "image.tag=git-${DRONE_COMMIT_SHA:0:7}"
+        - "image.tag=git-${DRONE_COMMIT_SHA:0:7}-prod"
         - "image.repository=795250896452.dkr.ecr.us-east-1.amazonaws.com/industrysolutions/leafy-bank-bian-ledger"
         - "ingress.enabled=true"
         - "ingress.hosts[0]=leafy-bank-bian-ledger.industrysolutions.prod.corp.mongodb.com"
