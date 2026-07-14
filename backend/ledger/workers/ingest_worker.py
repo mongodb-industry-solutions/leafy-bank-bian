@@ -4,7 +4,7 @@ Change stream on `transactions` inserts. For each settled payment, decomposes it
 into a one-doc ledgerEvent with debitLeg + creditLeg and writes it to `ledgerEvents`.
 Idempotent via unique idempotencyKey (= paymentId).
 
-Resume token persisted in `ledgerStreamTokens` so a restart replays nothing and
+Resume token persisted in `changeStreamTokens` so a restart replays nothing and
 misses nothing.
 """
 
@@ -35,16 +35,6 @@ _SOURCE_TYPE_PAYMENT = "PAYMENT"
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _derive_posting_mode(rail: str | None, payment_type: str | None) -> str:
-    rail = (rail or "").upper()
-    ptype = (payment_type or "").upper()
-    if rail == "WIRE" or "WIRE" in ptype:
-        return "REALTIME"
-    if rail == "ACH" or ptype == "ACH":
-        return "NEAR_REALTIME"
-    return "BATCH"
 
 
 def build_ledger_event(
@@ -116,7 +106,8 @@ def build_ledger_event(
         },
         "rail": txn.get("rail"),
         "paymentType": txn.get("paymentType"),
-        "postingMode": {"type": _derive_posting_mode(txn.get("rail"), txn.get("paymentType"))},
+        # All events settle via the scheduled gl_batch sweep; no realtime path.
+        "postingMode": {"type": "BATCH"},
         "reversalOf": None,
         "postingStatus": "PENDING",
         "postingResult": None,
@@ -126,12 +117,12 @@ def build_ledger_event(
 
 
 def _load_resume_token(connection: MongoDBConnection, db_name: str) -> dict | None:
-    doc = connection.get_collection(db_name, "ledgerStreamTokens").find_one({"workerId": WORKER_ID})
+    doc = connection.get_collection(db_name, "changeStreamTokens").find_one({"workerId": WORKER_ID})
     return doc.get("resumeToken") if doc else None
 
 
 def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict) -> None:
-    connection.get_collection(db_name, "ledgerStreamTokens").update_one(
+    connection.get_collection(db_name, "changeStreamTokens").update_one(
         {"workerId": WORKER_ID},
         {"$set": {"resumeToken": token, "updatedAt": _now_utc()}},
         upsert=True,
@@ -139,7 +130,14 @@ def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict)
 
 
 def _clear_resume_token(connection: MongoDBConnection, db_name: str) -> None:
-    connection.get_collection(db_name, "ledgerStreamTokens").delete_one({"workerId": WORKER_ID})
+    connection.get_collection(db_name, "changeStreamTokens").delete_one({"workerId": WORKER_ID})
+
+
+# Bounded retry for account lookups only — covers the transient case where a
+# transaction's change-stream event is seen before its payer/payee account
+# write has propagated.
+_ACCOUNT_LOOKUP_ATTEMPTS = 3
+_ACCOUNT_LOOKUP_RETRY_SECONDS = 0.25
 
 
 def process_transaction(
@@ -151,18 +149,22 @@ def process_transaction(
     """Fetch accounts, build and insert the ledgerEvent for one transaction."""
     payment_id = txn.get("paymentId")
     if not payment_id:
-        logger.warning("transaction missing paymentId; skipping")
-        return
+        raise ValueError("transaction missing paymentId")
 
     payer_account_id = (txn.get("payer") or {}).get("accountId")
     payee_account_id = (txn.get("payee") or {}).get("accountId")
     if not payer_account_id or not payee_account_id:
-        logger.warning("transaction %s missing payer/payee accountId; skipping", payment_id)
-        return
+        raise ValueError(f"transaction {payment_id} missing payer/payee accountId")
 
     accounts_coll = connection.get_collection(db_name, "accounts")
-    payer_account = accounts_coll.find_one({"accountId": payer_account_id})
-    payee_account = accounts_coll.find_one({"accountId": payee_account_id})
+    payer_account = payee_account = None
+    for attempt in range(_ACCOUNT_LOOKUP_ATTEMPTS):
+        payer_account = accounts_coll.find_one({"accountId": payer_account_id})
+        payee_account = accounts_coll.find_one({"accountId": payee_account_id})
+        if payer_account is not None and payee_account is not None:
+            break
+        if attempt < _ACCOUNT_LOOKUP_ATTEMPTS - 1:
+            time.sleep(_ACCOUNT_LOOKUP_RETRY_SECONDS)
 
     if payer_account is None:
         raise ValueError(f"payer account {payer_account_id!r} not found")
@@ -179,34 +181,37 @@ def process_transaction(
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:
     logger.info("ingest_worker starting — watching transactions on %s", db_name)
-    resume_token = _load_resume_token(connection, db_name)
-
     transactions = connection.get_collection(db_name, "transactions")
     pipeline = [{"$match": {"operationType": "insert"}}]
-    kwargs: dict = {"resume_after": resume_token} if resume_token else {}
 
-    try:
-        stream_cm = transactions.watch(pipeline, **kwargs)
-    except OperationFailure as exc:
-        if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
-            logger.warning(
-                "resume token no longer in oplog (%s); clearing and starting a fresh stream",
-                exc.details.get("codeName") if exc.details else exc,
-            )
-            _clear_resume_token(connection, db_name)
-            stream_cm = transactions.watch(pipeline)
-        else:
+    # Loops (rather than watching once) because NonResumableChangeStreamError can be
+    # raised by a getMore on an already-open cursor, not just by the initial watch()
+    # call — a stream that falls behind the oplog window mid-iteration hits the same
+    # error later. Both cases need the same clear-token-and-reopen recovery.
+    while True:
+        resume_token = _load_resume_token(connection, db_name)
+        kwargs: dict = {"resume_after": resume_token} if resume_token else {}
+        try:
+            with transactions.watch(pipeline, **kwargs) as stream:
+                for change in stream:
+                    txn = change.get("fullDocument", {})
+                    try:
+                        process_transaction(txn, connection, db_name, coa)
+                        _save_resume_token(connection, db_name, change["_id"])
+                    except Exception:
+                        logger.exception("error processing paymentId=%s", txn.get("paymentId"))
+                        raise
+        except OperationFailure as exc:
+            if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
+                logger.critical(
+                    "resume token no longer in oplog (%s); clearing and starting a fresh stream — "
+                    "any transactions inserted since the last saved token were NOT ingested into "
+                    "ledgerEvents and will not be retried.",
+                    exc.details.get("codeName") if exc.details else exc,
+                )
+                _clear_resume_token(connection, db_name)
+                continue
             raise
-
-    with stream_cm as stream:
-        for change in stream:
-            txn = change.get("fullDocument", {})
-            try:
-                process_transaction(txn, connection, db_name, coa)
-                _save_resume_token(connection, db_name, change["_id"])
-            except Exception:
-                logger.exception("error processing paymentId=%s", txn.get("paymentId"))
-                raise
 
 
 def main() -> None:

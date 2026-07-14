@@ -64,3 +64,130 @@
   font-size: 12px;
   color: #9ca3af;
 }
+
+.actionBtns {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+/* ── transaction detail panel ── */
+.detailPanel {
+  padding: 16px 20px;
+  background: #fafafa;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 160px;
+  gap: 0;
+  align-items: start;
+}
+
+.detailSection {
+  padding: 4px 20px 4px 0;
+  border-right: 1px solid #e5e7eb;
+  margin-right: 20px;
+}
+
+.detailSection:last-child {
+  border-right: none;
+  margin-right: 0;
+  padding-right: 0;
+}
+
+.detailSectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #9ca3af;
+  margin-bottom: 10px;
+}
+
+.kvTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.kvRow td {
+  padding: 4px 0;
+  vertical-align: middle;
+}
+
+.kvLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  white-space: nowrap;
+  padding-right: 12px !important;
+  width: 40%;
+}
+
+.kvValue {
+  font-size: 12px;
+  color: #111827;
+}
+
+.detailMono {
+  font-family: monospace;
+  font-size: 11px;
+  color: #374151;
+  background: #f3f4f6;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+}
+
+/* ── timeline ── */
+.timelineTrack {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+}
+
+.timelineStep {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.timelineLeft {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.timelineDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.timelineLine {
+  width: 2px;
+  height: 20px;
+  background: #e5e7eb;
+  border-radius: 1px;
+}
+
+.timelineStepBody {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 1px;
+}
+
+.timelineLabel {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.timelineTs {
+  font-size: 10px;
+  color: #9ca3af;
+}

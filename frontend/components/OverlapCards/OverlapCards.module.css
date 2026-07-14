@@ -31,6 +31,27 @@
     border-radius: 24px;
 }
 
+.clickable {
+    cursor: pointer;
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.clickable:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(16, 24, 40, 0.12);
+    border-color: rgba(16, 24, 40, 0.08);
+}
+
+.clickable:focus-visible {
+    outline: 3px solid rgba(59, 130, 246, 0.18);
+    outline-offset: 2px;
+}
+
+.active {
+    border-color: #00684a;
+    box-shadow: 0 0 0 2px rgba(0, 104, 74, 0.35);
+}
+
 .cardInner {
     display: flex;
     align-items: center;

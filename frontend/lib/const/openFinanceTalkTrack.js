@@ -13,14 +13,18 @@ export const OPEN_FINANCE_TALK_TRACK = [
       {
         heading: "1. Select a User Profile",
         body: [
-          "**Frida (banked user)**:",
-          "- Existing accounts, transactions, and financial history at Leafy Bank.",
-          "- Green Bank → Payroll Deductible Loan (3.67%, $20,000)",
-          "- MongoDB Bank → Vehicle Loan (4.63%, $10,000) + Personal Loan (5.25%, $1,500)",
+          "Two retail customers are available for the Open Finance journey:",
           "",
-          "**Helly (unbanked user)**:",
-          "- No prior relationship with Leafy Bank.",
-          "- NeoFinance → Personal Loan (6.50%, $1,200)"
+          "**Frida (Spender profile)**:",
+          "- Existing accounts, transactions, and financial history at Leafy Bank.",
+          "- Green Bank → Payroll Deductible Loan (11.99%, $24,150 balance)",
+          "- MongoDB Bank → Vehicle Loan (11.99%, $10,100) + Personal Loan (12.99%, $7,150)",
+          "- *Transaction history:* Green Bank and MongoDB Bank. Connect either one for the financial-advice path.",
+          "",
+          "**Grace (Saver profile)**:",
+          "- Existing Leafy Bank customer with a conservative spending pattern.",
+          "- NeoFinance → Personal Loan (6.50%, $840 balance)",
+          "- *Transaction history:* NeoFinance, Green Bank, and MongoDB Bank."
         ]
       },
       {
@@ -42,10 +46,14 @@ export const OPEN_FINANCE_TALK_TRACK = [
         body: [
           "When prompted:",
           "- Select an external bank",
-          "- 'Log in' via the new tab",
-          "- Approve the consent request",
+          "- Review the permissions the agent will access and why. You can respond three ways:",
+          "  - **I accept** — grant the full default permission set",
+          "  - **Remove permissions** — drop any data category you're not comfortable sharing before accepting",
+          "  - **I decline** — cancel the request",
+          "- The consent duration is fixed at **30 days** — the agent states it and asks for acceptance.",
+          "- 'Log in' via the new tab and approve the consent request.",
           "",
-          "You will automatically return to the demo to continue."
+          "After approving, the tab shows 'Consent approved!' with a **'You can close this tab'** confirmation."
         ]
       },
       {
@@ -70,24 +78,6 @@ export const OPEN_FINANCE_TALK_TRACK = [
           "",
           "Ask follow-up questions to continue the conversation — the agent maintains context using MongoDB-backed memory."
         ]
-      },
-      {
-        heading: "Spending Profiles",
-        body: [
-          "A dropdown in the top bar lets you switch spending profiles. The spending score directly affects the portability offer — the agent applies a 15–30% reduction on the external bank's current rate, with better scores unlocking larger discounts.",
-          "",
-          "**Balanced (default)**:",
-          "- Mix of groceries, utilities, dining, savings",
-          "- Score ~90 → Moderate rate reduction",
-          "",
-          "**Overspender**:",
-          "- Heavy discretionary spending: luxury dining, designer shopping, premium entertainment",
-          "- Score ~81 → Smallest rate reduction",
-          "",
-          "**Saver**:",
-          "- Budget groceries, thrift stores, multiple savings transfers",
-          "- Score ~100 → Largest rate reduction"
-        ]
       }
     ]
   },
@@ -104,8 +94,9 @@ export const OPEN_FINANCE_TALK_TRACK = [
         heading: "Core Capabilities",
         body: [
           "- **Queryable Encryption for consent privacy**: Protect consumer identity across every consent lifecycle event — creation, authorization, data retrieval, and revocation. The server never sees plaintext. You query encrypted fields with standard equality filters without changing application code.",
-          "- **Agentic data access with the MongoDB MCP Server**: Expose MongoDB collections as tools that LLM agents invoke directly. The internal data agent can answer natural language queries autonomously, no custom tool code required.",
-          "- **Supervisor agent orchestration**: LangGraph orchestrates specialized agents — Consent Agent, Portability Agent, and Internal Data Agent — and persists conversation state through checkpoint collections in MongoDB Atlas."
+          "- **Agentic data access with the MongoDB MCP Server**: Expose MongoDB collections as tools that LLM agents invoke directly. The Financial Advice Agent answers natural language queries autonomously, no custom tool code required.",
+          "- **Supervisor agent orchestration**: LangGraph orchestrates two specialized agents — a Consent Agent (external bank consent lifecycle) and a Financial Advice Agent (spending and portability analysis via the MongoDB MCP Server) — and persists conversation state through checkpoint collections in MongoDB Atlas.",
+          "- **Context-aware suggestion engine**: A Claude Haiku model generates the follow-up suggestion chips shown after each reply, keyed to the current step of the consent and advice flow."
         ]
       },
       {

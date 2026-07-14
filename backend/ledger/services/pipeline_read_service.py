@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database.connection import MongoDBConnection
+from services import reconciliation_service
 
 
 def _now_utc() -> datetime:
@@ -19,6 +20,20 @@ def _now_utc() -> datetime:
 
 def _current_period() -> str:
     return _now_utc().strftime("%Y-%m")
+
+
+def _last_n_periods(n: int) -> list[str]:
+    """Return the last n period codes ("YYYY-MM"), oldest first, including the current month."""
+    now = _now_utc()
+    year, month = now.year, now.month
+    periods: list[str] = []
+    for _ in range(max(1, n)):
+        periods.append(f"{year:04d}-{month:02d}")
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+    return list(reversed(periods))
 
 
 def _next_month_start(period_code: str) -> datetime:
@@ -42,6 +57,7 @@ def get_pipeline_health(
     db_name: str,
     *,
     batch_interval_seconds: int,
+    next_batch_at: str | None = None,
 ) -> dict:
     """Return counts and timing for the pipeline health bar."""
     le_coll = connection.get_collection(db_name, "ledgerEvents")
@@ -84,6 +100,7 @@ def get_pipeline_health(
         },
         "batchIntervalSeconds": batch_interval_seconds,
         "lastBatchAt": last_batch_at,
+        "nextBatchAt": next_batch_at,
     }
 
 
@@ -100,6 +117,7 @@ def list_transactions(
 ) -> dict:
     """Return recent settled transactions from the upstream collection."""
     coll = connection.get_collection(db_name, "transactions")
+    le_coll = connection.get_collection(db_name, "ledgerEvents")
 
     match: dict = {}
     if period_code:
@@ -128,6 +146,17 @@ def list_transactions(
         .sort("createdAt", -1)
         .limit(limit)
     )
+
+    # Attach ledgerEventId (idempotencyKey == paymentId, same join trace_payment uses).
+    payment_ids = [item["paymentId"] for item in items]
+    ledger_events = le_coll.find(
+        {"idempotencyKey": {"$in": payment_ids}},
+        {"_id": 0, "idempotencyKey": 1, "eventId": 1},
+    )
+    event_id_by_payment = {le["idempotencyKey"]: le["eventId"] for le in ledger_events}
+    for item in items:
+        item["ledgerEventId"] = event_id_by_payment.get(item["paymentId"])
+
     return {"items": items, "total": total}
 
 
@@ -215,6 +244,158 @@ def list_journal_entries(
 
 
 # ---------------------------------------------------------------------------
+# GL dashboard (monthly)
+# ---------------------------------------------------------------------------
+
+def get_gl_dashboard(
+    connection: MongoDBConnection,
+    db_name: str,
+    *,
+    period_code: Optional[str] = None,
+    months: int = 3,
+    top_n: int = 5,
+) -> dict:
+    """Aggregate every GL dashboard block in a single response.
+
+    All amounts are minor units (int), consistent with the rest of this service.
+    Scoping is monthly via periodCode ("YYYY-MM"). If period_code is given, that
+    single month is used; otherwise the last `months` months (default 3, including
+    the current month) are rolled up into one aggregate.
+    """
+    if period_code:
+        periods = [period_code]
+    else:
+        periods = _last_n_periods(months)
+
+    jnl_coll = connection.get_collection(db_name, "journalEntries")
+    le_coll = connection.get_collection(db_name, "ledgerEvents")
+    sl_coll = connection.get_collection(db_name, "subLedgerEntries")
+
+    # --- KPI tiles: journal count, debit/credit totals, out-of-balance count ---
+    # Per-journal DR/CR sums, then roll up. outOfBalance is structurally 0
+    # (assert_balanced_journal blocks unbalanced writes) but surfaced for the tile.
+    summary_pipeline = [
+        {"$match": {"periodCode": {"$in": periods}}},
+        {"$project": {
+            "currency": 1,
+            "debit": {"$sum": {"$map": {
+                "input": "$entries", "as": "e",
+                "in": {"$cond": [{"$eq": ["$$e.side", "DEBIT"]}, "$$e.amount", 0]},
+            }}},
+            "credit": {"$sum": {"$map": {
+                "input": "$entries", "as": "e",
+                "in": {"$cond": [{"$eq": ["$$e.side", "CREDIT"]}, "$$e.amount", 0]},
+            }}},
+        }},
+        {"$group": {
+            "_id": None,
+            "totalJournals": {"$sum": 1},
+            "totalDebit": {"$sum": "$debit"},
+            "totalCredit": {"$sum": "$credit"},
+            "outOfBalance": {"$sum": {"$cond": [{"$ne": ["$debit", "$credit"]}, 1, 0]}},
+            "currency": {"$first": "$currency"},
+        }},
+    ]
+    summary_rows = list(jnl_coll.aggregate(summary_pipeline))
+    if summary_rows:
+        row = summary_rows[0]
+        summary = {
+            "totalJournals": int(row["totalJournals"]),
+            "totalDebit": int(row["totalDebit"]),
+            "totalCredit": int(row["totalCredit"]),
+            "outOfBalance": int(row["outOfBalance"]),
+            "currency": row.get("currency") or "USD",
+        }
+    else:
+        summary = {
+            "totalJournals": 0, "totalDebit": 0, "totalCredit": 0,
+            "outOfBalance": 0, "currency": "USD",
+        }
+
+    # --- Journal Status donut: driven off ledgerEvents.postingStatus for the period.
+    # PENDING is surfaced as "posting". Total is the event count (may differ from
+    # totalJournals, since one batch journal aggregates many events).
+    status_counts: dict[str, int] = {"PENDING": 0, "POSTED": 0, "FAILED": 0}
+    status_pipeline = [
+        {"$match": {"meta.periodCode": {"$in": periods}}},
+        {"$group": {"_id": "$postingStatus", "n": {"$sum": 1}}},
+    ]
+    for r in le_coll.aggregate(status_pipeline):
+        if r["_id"] in status_counts:
+            status_counts[r["_id"]] = int(r["n"])
+    journal_status = {
+        "posted": status_counts["POSTED"],
+        "posting": status_counts["PENDING"],
+        "failed": status_counts["FAILED"],
+        "total": sum(status_counts.values()),
+    }
+
+    # --- Reconciliation roll-up: reduce per-account checks to one flag.
+    # Reconciliation is per account per period, so check each period in the
+    # window and sum. accountsChecked counts account-period pairs.
+    recon_results = reconciliation_service.reconcile_all_accounts_batched(
+        connection, db_name, period_codes=periods
+    )
+    breaks = sum(1 for r in recon_results if not r.is_reconciled)
+    reconciliation = {
+        "status": "BALANCED" if breaks == 0 else "OUT_OF_BALANCE",
+        "accountsChecked": len(recon_results),
+        "breaks": breaks,
+    }
+
+    # --- Top control accounts: DR/CR split + balance per control account, ranked.
+    top_pipeline = [
+        {"$match": {"periodCode": {"$in": periods}, "status": "POSTED"}},
+        {"$group": {
+            "_id": "$controlAccountCode",
+            "debit": {"$sum": {"$cond": [{"$eq": ["$side", "DEBIT"]}, "$amount", 0]}},
+            "credit": {"$sum": {"$cond": [{"$eq": ["$side", "CREDIT"]}, "$amount", 0]}},
+        }},
+        {"$addFields": {
+            "balance": {"$subtract": ["$debit", "$credit"]},
+            "activity": {"$add": ["$debit", "$credit"]},
+        }},
+        {"$sort": {"activity": -1, "_id": 1}},
+        {"$limit": top_n},
+        {"$lookup": {
+            "from": "glAccounts",
+            "localField": "_id",
+            "foreignField": "accountCode",
+            "as": "acct",
+        }},
+        {"$project": {
+            "_id": 0,
+            "accountCode": "$_id",
+            "accountName": {"$arrayElemAt": ["$acct.accountName", 0]},
+            "debit": 1,
+            "credit": 1,
+            "balance": 1,
+        }},
+    ]
+    top_accounts = [
+        {
+            "accountCode": r["accountCode"],
+            "accountName": r.get("accountName"),
+            "debit": int(r["debit"]),
+            "credit": int(r["credit"]),
+            "balance": int(r["balance"]),
+        }
+        for r in sl_coll.aggregate(top_pipeline)
+    ]
+
+    return {
+        # periodCode is the single month when one was requested, else the newest
+        # month in the window; periods lists every month the aggregate covers.
+        "periodCode": periods[-1],
+        "periods": periods,
+        "summary": summary,
+        "journalStatus": journal_status,
+        "reconciliation": reconciliation,
+        "topControlAccounts": top_accounts,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Trace
 # ---------------------------------------------------------------------------
 
@@ -228,6 +409,7 @@ def trace_payment(
     Returns None if paymentId is not found in transactions (caller raises 404).
     Partial results (stages not yet reached) are present as None in the dict.
     """
+    payment_coll = connection.get_collection(db_name, "payments")
     txn_coll = connection.get_collection(db_name, "transactions")
     le_coll = connection.get_collection(db_name, "ledgerEvents")
     sl_coll = connection.get_collection(db_name, "subLedgerEntries")
@@ -237,6 +419,10 @@ def trace_payment(
     txn = txn_coll.find_one({"paymentId": payment_id}, {"_id": 0})
     if txn is None:
         return None
+
+    # Payment — payments collection doc (initiation/clearing state, owned by
+    # the transactions service). Not a pipeline stage; the initiation record.
+    payment = payment_coll.find_one({"paymentId": payment_id}, {"_id": 0})
 
     # Stage 2 — ledgerEvent (idempotencyKey == paymentId, set by ingest_worker).
     ledger_event = le_coll.find_one({"idempotencyKey": payment_id}, {"_id": 0})
@@ -255,10 +441,40 @@ def trace_payment(
         if journal_id:
             journal_entry = jnl_coll.find_one({"journalId": journal_id}, {"_id": 0})
 
+    posting_mode = (ledger_event or {}).get("postingMode", {}).get("type")
+
+    # Resolve GL account codes → human-readable names for the UI T-account.
+    # Returned as a sibling map (not injected into the stored docs) so the raw
+    # "View JSON" still shows the documents exactly as persisted.
+    codes: set = set()
+    if ledger_event:
+        for leg in (ledger_event.get("debitLeg"), ledger_event.get("creditLeg")):
+            if leg:
+                codes.add(leg.get("glAccountCode"))
+                codes.add(leg.get("controlAccountCode"))
+    for row in (subledger_entries or []):
+        codes.add(row.get("controlAccountCode"))
+    if journal_entry:
+        for entry in journal_entry.get("entries", []):
+            codes.add(entry.get("accountCode"))
+    codes.discard(None)
+    codes.discard("")
+    account_names: dict = {}
+    if codes:
+        gl_coll = connection.get_collection(db_name, "glAccounts")
+        for acct in gl_coll.find(
+            {"accountCode": {"$in": list(codes)}},
+            {"_id": 0, "accountCode": 1, "accountName": 1},
+        ):
+            account_names[acct["accountCode"]] = acct.get("accountName")
+
     return {
         "paymentId": payment_id,
+        "payment": payment,
         "transaction": txn,
         "ledgerEvent": ledger_event,
         "subLedgerEntries": subledger_entries,
         "journalEntry": journal_entry,
+        "postingMode": posting_mode,
+        "accountNames": account_names,
     }

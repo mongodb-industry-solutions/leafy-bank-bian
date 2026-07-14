@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from routers._util import to_json_response
 from services import pipeline_read_service, reconciliation_service
+from workers import gl_batch
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -25,8 +26,24 @@ def pipeline_health(request: Request) -> JSONResponse:
     connection = request.app.state.connection
     db_name = request.app.state.db_name
     interval = int(os.getenv("GL_BATCH_INTERVAL_SECONDS", "600"))
+    next_batch_at = getattr(request.app.state, "batch_status", {}).get("nextRunAt")
     data = pipeline_read_service.get_pipeline_health(
-        connection, db_name, batch_interval_seconds=interval
+        connection, db_name, batch_interval_seconds=interval, next_batch_at=next_batch_at
+    )
+    return to_json_response(data)
+
+
+@router.get("/gl-dashboard")
+def gl_dashboard(
+    request: Request,
+    period_code: Optional[str] = Query(None, alias="periodCode"),
+    months: int = Query(3, ge=1, le=24),
+    top_n: int = Query(5, ge=1, le=50, alias="topN"),
+) -> JSONResponse:
+    connection = request.app.state.connection
+    db_name = request.app.state.db_name
+    data = pipeline_read_service.get_gl_dashboard(
+        connection, db_name, period_code=period_code, months=months, top_n=top_n
     )
     return to_json_response(data)
 
@@ -100,6 +117,15 @@ def trace_payment(payment_id: str, request: Request) -> JSONResponse:
     result = pipeline_read_service.trace_payment(payment_id, connection, db_name)
     if result is None:
         raise HTTPException(status_code=404, detail=f"payment {payment_id} not found")
+    return to_json_response(result)
+
+
+@router.post("/batch/trigger")
+def trigger_batch(request: Request) -> JSONResponse:
+    connection = request.app.state.connection
+    db_name = request.app.state.db_name
+    coa = request.app.state.coa
+    result = gl_batch.run_one_cycle(connection, db_name, coa)
     return to_json_response(result)
 
 

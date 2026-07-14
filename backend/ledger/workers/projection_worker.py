@@ -4,7 +4,11 @@ Change stream on `ledgerEvents` inserts. For each event, fans out into two
 subLedgerEntries (DEBIT + CREDIT) and stamps ledgerEvents.postingResult.
 Idempotent via unique idempotencyKey per sub-ledger entry.
 
-Resume token persisted in `ledgerStreamTokens`.
+Stage ③ (journal posting) is handled elsewhere: gl_batch's scheduled sweep
+aggregates the POSTED subledger legs into journalEntries. All events post via
+that batch path — there is no realtime posting.
+
+Resume token persisted in `changeStreamTokens`.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ import time
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from pymongo.errors import OperationFailure
+from pymongo.errors import BulkWriteError, OperationFailure
 
 from database.connection import MongoDBConnection
 from services.subledger_service import build_subledger_entries, write_subledger_entries
@@ -31,12 +35,12 @@ def _now_utc() -> datetime:
 
 
 def _load_resume_token(connection: MongoDBConnection, db_name: str) -> dict | None:
-    doc = connection.get_collection(db_name, "ledgerStreamTokens").find_one({"workerId": WORKER_ID})
+    doc = connection.get_collection(db_name, "changeStreamTokens").find_one({"workerId": WORKER_ID})
     return doc.get("resumeToken") if doc else None
 
 
 def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict) -> None:
-    connection.get_collection(db_name, "ledgerStreamTokens").update_one(
+    connection.get_collection(db_name, "changeStreamTokens").update_one(
         {"workerId": WORKER_ID},
         {"$set": {"resumeToken": token, "updatedAt": _now_utc()}},
         upsert=True,
@@ -44,7 +48,7 @@ def _save_resume_token(connection: MongoDBConnection, db_name: str, token: dict)
 
 
 def _clear_resume_token(connection: MongoDBConnection, db_name: str) -> None:
-    connection.get_collection(db_name, "ledgerStreamTokens").delete_one({"workerId": WORKER_ID})
+    connection.get_collection(db_name, "changeStreamTokens").delete_one({"workerId": WORKER_ID})
 
 
 def _mark_failed(event_id: str, reason: str, connection: MongoDBConnection, db_name: str) -> None:
@@ -67,7 +71,10 @@ def process_ledger_event(
 ) -> None:
     event_id = event.get("eventId")
     if not event_id:
-        logger.warning("ledgerEvent missing eventId; skipping")
+        # No stable id to dead-letter against — this indicates a malformed
+        # ledgerEvents doc (a bug upstream in ingest_worker), not a normal
+        # runtime condition, so it's logged loud rather than swallowed quietly.
+        logger.error("ledgerEvent missing eventId; skipping: %r", event)
         return
 
     if "debitLeg" not in event or "creditLeg" not in event:
@@ -93,40 +100,44 @@ def process_ledger_event(
 
         entries = build_subledger_entries(event)
         write_subledger_entries(entries, event_id, connection, db_name)
-    except ValueError as e:
+    except (ValueError, BulkWriteError) as e:
         _mark_failed(event_id, str(e), connection, db_name)
+        return
 
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:
     logger.info("projection_worker starting — watching ledgerEvents on %s", db_name)
-    resume_token = _load_resume_token(connection, db_name)
-
     ledger_events = connection.get_collection(db_name, "ledgerEvents")
     pipeline = [{"$match": {"operationType": "insert"}}]
-    kwargs: dict = {"resume_after": resume_token} if resume_token else {}
 
-    try:
-        stream_cm = ledger_events.watch(pipeline, **kwargs)
-    except OperationFailure as exc:
-        if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
-            logger.warning(
-                "resume token no longer in oplog (%s); clearing and starting a fresh stream",
-                exc.details.get("codeName") if exc.details else exc,
-            )
-            _clear_resume_token(connection, db_name)
-            stream_cm = ledger_events.watch(pipeline)
-        else:
+    # Loops (rather than watching once) because NonResumableChangeStreamError can be
+    # raised by a getMore on an already-open cursor, not just by the initial watch()
+    # call — a stream that falls behind the oplog window mid-iteration hits the same
+    # error later. Both cases need the same clear-token-and-reopen recovery.
+    while True:
+        resume_token = _load_resume_token(connection, db_name)
+        kwargs: dict = {"resume_after": resume_token} if resume_token else {}
+        try:
+            with ledger_events.watch(pipeline, **kwargs) as stream:
+                for change in stream:
+                    event = change.get("fullDocument", {})
+                    try:
+                        process_ledger_event(event, connection, db_name, coa)
+                        _save_resume_token(connection, db_name, change["_id"])
+                    except Exception:
+                        logger.exception("error projecting eventId=%s", event.get("eventId"))
+                        raise
+        except OperationFailure as exc:
+            if exc.has_error_label("NonResumableChangeStreamError") and resume_token is not None:
+                logger.critical(
+                    "resume token no longer in oplog (%s); clearing and starting a fresh stream — "
+                    "any ledgerEvents inserted since the last saved token were NOT projected into "
+                    "subLedgerEntries and will not be retried.",
+                    exc.details.get("codeName") if exc.details else exc,
+                )
+                _clear_resume_token(connection, db_name)
+                continue
             raise
-
-    with stream_cm as stream:
-        for change in stream:
-            event = change.get("fullDocument", {})
-            try:
-                process_ledger_event(event, connection, db_name, coa)
-                _save_resume_token(connection, db_name, change["_id"])
-            except Exception:
-                logger.exception("error projecting eventId=%s", event.get("eventId"))
-                raise
 
 
 def main() -> None:

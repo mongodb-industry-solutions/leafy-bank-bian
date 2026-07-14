@@ -10,7 +10,17 @@ import styles from './User.module.css';
 const User = ({ user = null, isSelectedUser = false, setOpen, setLocalSelectedUser = null }) => {
     const handleClick = () => {
         if (user.url) {
-            window.open(user.url, '_blank');
+            // Internal routes (relative paths) navigate in the same tab;
+            // external demo links open in a new tab.
+            if (user.url.startsWith('/')) {
+                // Persist the selection first — the destination route brings its
+                // own header (e.g. gl-pipeline-monitor's TopBar) that reads the
+                // user from UserContext/localStorage after this full-page nav.
+                setLocalSelectedUser?.(user);
+                window.location.href = user.url;
+            } else {
+                window.open(user.url, '_blank');
+            }
             return;
         }
         if (!setLocalSelectedUser) return;

@@ -5,6 +5,11 @@ import time
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+
+# Load .env before any project imports so module-level os.getenv() calls in
+# routers/workers see the values (import-time evaluation happens on first import).
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -19,8 +24,6 @@ from routers.proxy import router as proxy_router
 
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
-load_dotenv()
-
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -30,9 +33,6 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 if not MONGODB_URI:
     raise RuntimeError("MONGODB_URI environment variable is required")
 DB_NAME = os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")
-# Default false: docker-compose runs dedicated worker containers; only set true for
-# single-process local dev where no separate worker containers are running.
-ENABLE_EMBEDDED_WORKERS = os.getenv("ENABLE_EMBEDDED_WORKERS", "false").lower() == "true"
 ENABLE_CHANGE_STREAMS = os.getenv("ENABLE_CHANGE_STREAMS", "true").lower() == "true"
 
 # MongoClient is lazy — constructing it here does not require a live DB at boot.
@@ -46,6 +46,11 @@ def _restart_loop(name: str, fn, *args, restart_delay: int = 5) -> None:
         except Exception:
             logger.exception("%s crashed; restarting in %ds", name, restart_delay)
             time.sleep(restart_delay)
+            continue
+        # fn returned without raising: it exited on purpose. Do NOT re-invoke —
+        # that would busy-loop with no sleep and flood the logs. Stop cleanly.
+        logger.info("%s exited; not restarting", name)
+        return
 
 
 @asynccontextmanager
@@ -58,30 +63,32 @@ async def lifespan(app: FastAPI):
         ("ingest_worker",     ingest_worker.run,     (connection, DB_NAME, coa)),
         ("projection_worker", projection_worker.run, (connection, DB_NAME, coa)),
     ]
+    # Shared with the /pipeline/health route so the monitor can render an exact
+    # countdown; the gl_batch thread publishes nextRunAt into it each cycle.
+    batch_status: dict = {}
+    app.state.batch_status = batch_status
     batch_workers = [
-        ("gl_batch",          gl_batch.run,          (connection, DB_NAME, coa, interval)),
+        ("gl_batch",          gl_batch.run,          (connection, DB_NAME, coa, interval, batch_status)),
     ]
-    if ENABLE_EMBEDDED_WORKERS:
-        if ENABLE_CHANGE_STREAMS:
-            for name, fn, args in change_stream_workers:
-                threading.Thread(
-                    target=_restart_loop, args=(name, fn, *args),
-                    daemon=True, name=name,
-                ).start()
-                logger.info("started background worker: %s", name)
-        else:
-            logger.info("change streams disabled via ENABLE_CHANGE_STREAMS=false; skipping ingest and projection workers")
-        for name, fn, args in batch_workers:
+    if ENABLE_CHANGE_STREAMS:
+        for name, fn, args in change_stream_workers:
             threading.Thread(
                 target=_restart_loop, args=(name, fn, *args),
                 daemon=True, name=name,
             ).start()
             logger.info("started background worker: %s", name)
     else:
-        logger.info("embedded workers disabled; run dedicated worker containers")
+        logger.info("change streams disabled via ENABLE_CHANGE_STREAMS=false; skipping ingest and projection workers")
+    for name, fn, args in batch_workers:
+        threading.Thread(
+            target=_restart_loop, args=(name, fn, *args),
+            daemon=True, name=name,
+        ).start()
+        logger.info("started background worker: %s", name)
 
     app.state.connection = connection
     app.state.db_name = DB_NAME
+    app.state.coa = coa
     yield
 
 

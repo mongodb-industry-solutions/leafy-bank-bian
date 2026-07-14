@@ -32,8 +32,29 @@ function normalizeTransaction(t) {
     CdtDbtInd: t.direction === "OUTGOING" ? "DBIT" : "CRDT",
     Cdtr: { Nm: t.payee?.name },
     AddtlNtryInf: t.description,
-    BkTxCd: { Fmly: t.txnCode?.split("-")[0] ?? "PMNT" },
+    // BIAN txnCode is "PMNT-MCRD-POSD": family is the SECOND segment (MCRD=card),
+    // subfamily the third (POSD=point-of-sale). The card view filters on Fmly === "MCRD".
+    BkTxCd: {
+      Fmly: t.txnCode?.split("-")[1] ?? "PMNT",
+      SubFmly: t.txnCode?.split("-")[2],
+    },
   };
+}
+
+// All identifiers a transaction may use to reference its owning account.
+// Internal txns key on accountId; external ones on payer/payee.accountNo. Both
+// shapes (and BIAN payer/payee.accountId) are collected so a selected account
+// can be matched regardless of source.
+function txnAccountKeys(t) {
+  return [
+    t.accountId,
+    t.payer?.accountId,
+    t.payee?.accountId,
+    t.payer?.accountNo,
+    t.payee?.accountNo,
+    t.payer?.accountNumber,
+    t.payee?.accountNumber,
+  ].filter(Boolean);
 }
 
 /**
@@ -65,6 +86,42 @@ export function useAccounts() {
   }, [selectedUser?.id, dataRefreshKey]);
 
   return { accounts, loading, error };
+}
+
+/**
+ * Fetch every CURRENT/SAVINGS account bank-wide (any customer), each tagged
+ * with its owner's legal name, so a beneficiary picker can be a plain
+ * dropdown instead of a type-and-lookup field. GL/NOSTRO/VOSTRO accounts are
+ * excluded — those are internal ledger accounts, not payment counterparties.
+ * Calls BIAN CurrentAccountFulfillmentArrangement/Request + PartyReferenceDataDirectoryEntry/Request.
+ */
+export function useBeneficiaryAccounts() {
+  const [beneficiaryAccounts, setBeneficiaryAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      coreApi("CurrentAccountFulfillmentArrangement/Request", { method: "POST", body: {} }),
+      coreApi("PartyReferenceDataDirectoryEntry/Request", { method: "POST", body: {} }),
+    ]).then(([accountsRes, customersRes]) => {
+      const legalNameByCustomerId = new Map(
+        (customersRes.data?.customers ?? []).map((c) => [c.customerId, c.identification?.legalName]),
+      );
+      const options = (accountsRes.data?.accounts ?? [])
+        .filter((a) => a.type === "CURRENT" || a.type === "SAVINGS")
+        .map((a) => ({
+          id: a.accountId,
+          label: `${a.type} - ${a.accountNumber}`,
+          ownerName: legalNameByCustomerId.get(a.customerSnapshot?.customerId) ?? null,
+          currency: a.currency,
+        }));
+      setBeneficiaryAccounts(options);
+      setLoading(false);
+    });
+  }, []);
+
+  return { beneficiaryAccounts, loading };
 }
 
 /**
@@ -128,160 +185,27 @@ export function useCreditScore() {
 }
 
 /**
- * Fetch external accounts from ALL consented institutions (multi-bank).
- * Fires parallel fetches per authorized consent, merges results.
- * Each account is tagged with _sourceInstitution and _consentId.
+ * Fetch ALL cached external data (accounts, products, transactions) for the
+ * user in one round trip via the backend caching layer.
+ *
+ * The dashboard uses fetch-once-then-read-cache: on consent approval the
+ * consent listener calls fetch-and-cache; this hook then reads the durable
+ * cache, so the dashboard survives one-time-consent consumption and the
+ * sweeper-driven expiry model. Called ONCE per user, not per-consent.
+ *
+ * The cache returns raw BIAN source docs grouped by institution:
+ *   institutions[] -> { institution, consent_id, accounts[], products[], transactions[] }
+ * Accounts/products are already PascalCase (AccountBalance, ProductName, ...).
+ * Transactions are BIAN-shaped, so they run through normalizeTransaction here.
+ * Every row is tagged with _sourceInstitution and _consentId for per-bank badges.
+ *
+ * A partial payload (e.g. accounts + transactions but no products, when a
+ * consent lacks LOANS_READ) is normal — it never clears the consent.
  */
-export function useExternalAccounts() {
-  const { selectedUser, authorizedConsents, consentRefreshKey, removeConsent } =
-    useUser();
+export function useCachedExternalData() {
+  const { selectedUser, authorizedConsents, authorizedConsentIds, consentRefreshKey } = useUser();
   const [externalAccounts, setExternalAccounts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (
-      !selectedUser?.name ||
-      !selectedUser?.bearerToken ||
-      authorizedConsents.length === 0
-    ) {
-      setExternalAccounts([]);
-      return;
-    }
-    setLoading(true);
-
-    const fetchAll = async () => {
-      try {
-        const results = await Promise.all(
-          authorizedConsents.map(async ({ consentId, institution }) => {
-            const { data, error: err } = await coreApi(
-              "openfinance/secure/fetch-external-accounts-for-user/",
-              {
-                bearerToken: selectedUser.bearerToken,
-                params: {
-                  user_identifier: selectedUser.name,
-                  consent_id: consentId,
-                },
-              },
-            );
-            if (err) {
-              // 403 means consent is stale/revoked — remove it from context
-              if (err.startsWith("403")) {
-                removeConsent(consentId);
-              }
-              return [];
-            }
-            return (data?.accounts || []).map((a) => ({
-              ...a,
-              _sourceInstitution: institution,
-              _consentId: consentId,
-            }));
-          }),
-        );
-        setExternalAccounts(results.flat());
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedUser?.name,
-    selectedUser?.bearerToken,
-    authorizedConsents,
-    consentRefreshKey,
-  ]);
-
-  return { externalAccounts, loading, error };
-}
-
-/**
- * Fetch external products/loans from ALL consented institutions (multi-bank).
- * Fires parallel fetches per authorized consent, merges results.
- * Each product is tagged with _sourceInstitution and _consentId.
- */
-export function useExternalProducts() {
-  const { selectedUser, authorizedConsents, consentRefreshKey, removeConsent } =
-    useUser();
   const [externalProducts, setExternalProducts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (
-      !selectedUser?.name ||
-      !selectedUser?.bearerToken ||
-      authorizedConsents.length === 0
-    ) {
-      setExternalProducts([]);
-      return;
-    }
-    setLoading(true);
-
-    const fetchAll = async () => {
-      try {
-        const results = await Promise.all(
-          authorizedConsents.map(async ({ consentId, institution }) => {
-            const { data, error: err } = await coreApi(
-              "openfinance/secure/fetch-external-products-for-user/",
-              {
-                bearerToken: selectedUser.bearerToken,
-                params: {
-                  user_identifier: selectedUser.name,
-                  consent_id: consentId,
-                },
-              },
-            );
-            if (err) {
-              // 403 means consent is stale/revoked — remove it from context
-              if (err.startsWith("403")) {
-                removeConsent(consentId);
-              }
-              return [];
-            }
-            return (data?.products || []).map((p) => ({
-              ...p,
-              _sourceInstitution: institution,
-              _consentId: consentId,
-            }));
-          }),
-        );
-        setExternalProducts(results.flat());
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedUser?.name,
-    selectedUser?.bearerToken,
-    authorizedConsents,
-    consentRefreshKey,
-  ]);
-
-  return { externalProducts, loading, error };
-}
-
-/**
- * Fetch external transactions from ALL consented institutions (multi-bank).
- * Fires parallel fetches per authorized consent, merges results.
- * Each transaction is tagged with _sourceInstitution and _consentId.
- */
-export function useExternalTransactions() {
-  const {
-    selectedUser,
-    authorizedConsents,
-    consentRefreshKey,
-    removeConsent,
-    profile,
-  } = useUser();
   const [externalTransactions, setExternalTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -292,60 +216,117 @@ export function useExternalTransactions() {
       !selectedUser?.bearerToken ||
       authorizedConsents.length === 0
     ) {
+      setExternalAccounts([]);
+      setExternalProducts([]);
       setExternalTransactions([]);
       return;
     }
     setLoading(true);
+    let cancelled = false;
 
-    const fetchAll = async () => {
-      try {
-        const results = await Promise.all(
-          authorizedConsents.map(async ({ consentId, institution }) => {
-            const params = {
-              consent_id: consentId,
-            };
-            if (profile) params.profile = profile;
-
-            const { data, error: err } = await coreApi(
-              `openfinance/secure/customers/${selectedUser.name}/external-transactions`,
-              {
-                bearerToken: selectedUser.bearerToken,
-                params,
-              },
-            );
-            if (err) {
-              if (err.startsWith("403")) {
-                removeConsent(consentId);
-              }
-              return [];
-            }
-            return (data?.transactions || []).map((t) => ({
-              ...t,
-              _sourceInstitution:
-                institution || data?.source_institution || "External",
-              _consentId: consentId,
-            }));
-          }),
-        );
-        setExternalTransactions(results.flat());
-      } catch (e) {
-        setError(e.message);
-      } finally {
+    coreApi(
+      `openfinance/secure/customers/${selectedUser.name}/cached-data`,
+      {
+        bearerToken: selectedUser.bearerToken,
+        // Scope to THIS browser session's consents so cross-session/duplicate
+        // cached data from other sessions never appears on the dashboard.
+        params: { consent_ids: authorizedConsentIds.join(",") },
+      },
+    ).then(({ data, error: err }) => {
+      if (cancelled) return;
+      if (err || !data?.institutions) {
+        if (err) setError(err);
+        setExternalAccounts([]);
+        setExternalProducts([]);
+        setExternalTransactions([]);
         setLoading(false);
+        return;
       }
-    };
 
-    fetchAll();
+      const accounts = [];
+      const products = [];
+      const transactions = [];
+      for (const inst of data.institutions) {
+        const tag = {
+          _sourceInstitution: inst.institution || "External",
+          _consentId: inst.consent_id,
+        };
+        for (const a of inst.accounts || []) accounts.push({ ...a, ...tag });
+        for (const p of inst.products || []) products.push({ ...p, ...tag });
+        for (const t of inst.transactions || [])
+          transactions.push({ ...normalizeTransaction(t), ...tag });
+      }
+
+      setExternalAccounts(accounts);
+      setExternalProducts(products);
+      setExternalTransactions(transactions);
+      setError(null);
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedUser?.name,
     selectedUser?.bearerToken,
     authorizedConsents,
     consentRefreshKey,
-    profile,
   ]);
 
-  return { externalTransactions, loading, error };
+  return { externalAccounts, externalProducts, externalTransactions, loading, error };
+}
+
+/**
+ * Server-computed global position: folds internal Leafy Bank balances with the
+ * cached external data into { total_balance, total_debt, net_worth, by_institution }.
+ * Requires an authorized consent and that fetch-and-cache has run (Phase 1).
+ * Returns null when there is no consent — callers fall back to internal-only math.
+ */
+export function useGlobalPosition() {
+  const { selectedUser, authorizedConsents, authorizedConsentIds, consentRefreshKey } = useUser();
+  const [position, setPosition] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (
+      !selectedUser?.name ||
+      !selectedUser?.bearerToken ||
+      authorizedConsents.length === 0
+    ) {
+      setPosition(null);
+      return;
+    }
+    setLoading(true);
+    let cancelled = false;
+
+    coreApi(
+      `openfinance/secure/customers/${selectedUser.name}/global-position`,
+      {
+        bearerToken: selectedUser.bearerToken,
+        // Match the cached-data view: only this session's banks, so totals
+        // never double-count duplicates from other sessions.
+        params: { consent_ids: authorizedConsentIds.join(",") },
+      },
+    ).then(({ data, error }) => {
+      if (cancelled) return;
+      setPosition(error ? null : data);
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedUser?.name,
+    selectedUser?.bearerToken,
+    authorizedConsents,
+    consentRefreshKey,
+  ]);
+
+  return { position, loading };
 }
 
 // ────────────────────────────────────────────────────────────
@@ -363,9 +344,12 @@ import { formatDate, txCategory } from "./format";
 export function useHomeData() {
   const { accounts, loading: accountsLoading } = useAccounts();
   const { creditScore } = useCreditScore();
-  const { externalProducts } = useExternalProducts();
+  const { externalAccounts, externalProducts } = useCachedExternalData();
+  const { position } = useGlobalPosition();
 
-  const totalBalance = accounts
+  // Internal-only totals — used as the no-consent fallback and before the
+  // server-side global position has loaded.
+  const internalBalance = accounts
     .filter((a) => a.AccountBalance > 0)
     .reduce((sum, a) => sum + a.AccountBalance, 0);
 
@@ -378,11 +362,42 @@ export function useHomeData() {
     0,
   );
 
-  const bankAccounts = accounts.filter(
-    (a) => a.AccountType === "Checking" || a.AccountType === "Savings",
-  );
+  // Prefer the server-computed global position (folds internal + cached external);
+  // fall back to client-side internal + external math when it is unavailable.
+  const totalBalance = position?.total_balance ?? internalBalance;
+  const totalDebt = position?.total_debt ?? internalDebt + externalDebt;
 
-  const creditCards = accounts.filter((a) => a.AccountType === "CreditCard");
+  // Internal Leafy Bank accounts + external accounts pulled via consent.
+  // External docs are already PascalCase (AccountType/Number/Bank/Balance) and
+  // carry _sourceInstitution as their bank tag, so they need no remapping —
+  // just fall back to the tag for the badge when AccountBank is absent.
+  const isCheckingOrSavings = (a) =>
+    a.AccountType === "Checking" || a.AccountType === "Savings";
+
+  const externalBankAccounts = externalAccounts
+    .filter(isCheckingOrSavings)
+    .map((a) => ({ ...a, AccountBank: a.AccountBank || a._sourceInstitution }));
+
+  const bankAccounts = [
+    ...accounts.filter(isCheckingOrSavings),
+    ...externalBankAccounts,
+  ];
+
+  // Internal credit cards + external cards pulled via consent. External card
+  // docs use AccountType "CreditCard" (or Acct.Tp "CARD"); they're PascalCase
+  // like the accounts above, so tag the bank from _sourceInstitution when absent.
+  const isCreditCard = (a) =>
+    (a.AccountType || "").toUpperCase() === "CREDITCARD" ||
+    (a.Acct?.Tp || "") === "CARD";
+
+  const externalCreditCards = externalAccounts
+    .filter(isCreditCard)
+    .map((a) => ({ ...a, AccountBank: a.AccountBank || a._sourceInstitution }));
+
+  const creditCards = [
+    ...accounts.filter((a) => a.AccountType === "CreditCard"),
+    ...externalCreditCards,
+  ];
 
   const loans = externalProducts.map((p) => ({
     name: p.ProductName || p.ProductType || "Loan",
@@ -392,7 +407,7 @@ export function useHomeData() {
 
   return {
     totalBalance,
-    totalDebt: internalDebt + externalDebt,
+    totalDebt,
     bankAccounts,
     creditCards,
     creditScore,
@@ -409,13 +424,16 @@ export function useHomeData() {
 export function useAccountsPageData() {
   const { accounts, loading: accountsLoading } = useAccounts();
   const { transactions, loading: txLoading } = useTransactions();
-  const { externalAccounts } = useExternalAccounts();
-  const { externalTransactions, loading: extTxLoading } =
-    useExternalTransactions();
+  const {
+    externalAccounts,
+    externalTransactions,
+    loading: extTxLoading,
+  } = useCachedExternalData();
 
   const bankAccounts = accounts
     .filter((a) => a.AccountType === "Checking" || a.AccountType === "Savings")
     .map((a) => ({
+      id: a.accountId,
       title: `${a.AccountType} Account`,
       number: a.AccountNumber,
       amount: a.AccountBalance,
@@ -423,6 +441,7 @@ export function useAccountsPageData() {
     }));
 
   const extCards = externalAccounts.map((a) => ({
+    id: a.accountId || null,
     title: `${a.AccountType || "External"} (${a._sourceInstitution || "External"})`,
     number: a.AccountNumber || a.account_number || "",
     amount: a.AccountBalance || a.account_balance || 0,
@@ -438,7 +457,9 @@ export function useAccountsPageData() {
     amount: t.Amt?.value || 0,
     type: t.CdtDbtInd === "CRDT" ? "Credit" : "Debit",
     paymentId: t.paymentId,
+    transactionStatus: t.transactionStatus || t.status,
     _isExternal: false,
+    _accountKeys: txnAccountKeys(t),
     _rawDate: t.BookgDt || "",
     _rawDocument: t,
   }));
@@ -449,15 +470,18 @@ export function useAccountsPageData() {
     date: formatDate(t.BookgDt),
     amount: t.Amt?.value || 0,
     type: t.CdtDbtInd === "CRDT" ? "Credit" : "Debit",
+    transactionStatus: t.transactionStatus || t.status,
     _isExternal: true,
     _sourceInstitution: t._sourceInstitution,
+    _accountKeys: txnAccountKeys(t),
     _rawDate: t.BookgDt || "",
     _rawDocument: t,
   }));
 
+  // Sorted but uncapped: consumers cap after any per-account filtering, so a
+  // sparse account's transactions aren't lost to a global top-N truncation.
   const recentTxns = [...internalTxns, ...externalTxns]
-    .sort((a, b) => new Date(b._rawDate) - new Date(a._rawDate))
-    .slice(0, 20);
+    .sort((a, b) => new Date(b._rawDate) - new Date(a._rawDate));
 
   return {
     allAccounts,
@@ -475,9 +499,11 @@ export function useAccountsPageData() {
 export function useCreditCardsPageData() {
   const { accounts, loading: accountsLoading } = useAccounts();
   const { transactions, loading: txLoading } = useTransactions();
-  const { externalAccounts } = useExternalAccounts();
-  const { externalTransactions, loading: extTxLoading } =
-    useExternalTransactions();
+  const {
+    externalAccounts,
+    externalTransactions,
+    loading: extTxLoading,
+  } = useCachedExternalData();
 
   const internalCards = accounts
     .filter((a) => a.AccountType === "CreditCard")
@@ -503,6 +529,14 @@ export function useCreditCardsPageData() {
 
   const creditCards = [...internalCards, ...externalCards];
 
+  // Account numbers of the actual external credit cards. A transaction only
+  // counts as a card transaction if it belongs to one of these accounts —
+  // the MCRD (merchant-card) family alone also matches card purchases made
+  // on a checking account, which are not credit-card transactions.
+  const externalCardNumbers = new Set(
+    externalCards.map((c) => c.number).filter(Boolean),
+  );
+
   const internalCardTxns = transactions
     .filter((t) => t.Acct?.Tp === "CARD")
     .map((t) => ({
@@ -515,9 +549,10 @@ export function useCreditCardsPageData() {
       _rawDocument: t,
     }));
 
-  // External card transactions: filter by MCRD (merchant card) family code
+  // External card transactions: those posted to an actual credit-card account
+  // (matched by payer account number), not merely any MCRD-family transaction.
   const externalCardTxns = externalTransactions
-    .filter((t) => t.BkTxCd?.Fmly === "MCRD")
+    .filter((t) => externalCardNumbers.has(t.payer?.accountNo))
     .map((t) => ({
       category: txCategory(t),
       establishment: t.Cdtr?.Nm || t.AddtlNtryInf || "\u2014",
@@ -531,7 +566,7 @@ export function useCreditCardsPageData() {
 
   const cardTxns = [...internalCardTxns, ...externalCardTxns]
     .sort((a, b) => new Date(b._rawDate) - new Date(a._rawDate))
-    .slice(0, 20);
+    .slice(0, 50);
 
   return {
     creditCards,
@@ -547,7 +582,7 @@ export function useCreditCardsPageData() {
  */
 export function useLoansPageData() {
   const { hasActiveConsent } = useUser();
-  const { externalProducts, loading } = useExternalProducts();
+  const { externalProducts, loading } = useCachedExternalData();
 
   const loanCards = externalProducts.map((p) => ({
     title: p.ProductName || p.ProductType || "Loan",
@@ -622,22 +657,79 @@ export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
 }
 
 /**
- * Pipeline health snapshot — used for the next-GL-batch countdown.
- * Fetched once when `enabled` flips true.
+ * Polls /pipeline/health on a light cadence and returns the latest
+ * `lastBatchAt`. Batch-derived views (the journal column, the GL dashboard
+ * totals) use the returned value as a refetch key, so they update when the GL
+ * batch *actually* posts — reacting to real completion instead of a guessed
+ * timer. Returns the ISO string (its change is the "batch ran" signal) or null
+ * before the first batch. Interval defaults to 30s; the batch cadence is 10 min.
  */
-export function usePipelineHealth(enabled) {
-  const [health, setHealth] = useState(null);
+export function useBatchTick(enabled = true, intervalMs = 30000) {
+  const [lastBatchAt, setLastBatchAt] = useState(null);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    pipelineApi("health").then(({ data }) => {
-      if (!cancelled && data) setHealth(data);
+    let timer = null;
+
+    const poll = async () => {
+      const { data } = await pipelineApi("health");
+      if (cancelled) return;
+      if (data?.lastBatchAt) setLastBatchAt(data.lastBatchAt);
+      timer = setTimeout(poll, intervalMs);
+    };
+
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled, intervalMs]);
+
+  return lastBatchAt;
+}
+
+/**
+ * GL dashboard snapshot — one call feeds all dashboard blocks (KPI tiles,
+ * journal-status donut, reconciliation roll-up, top control accounts).
+ * Monthly granularity. Pass a periodCode for a single month, or omit it to
+ * roll up the last `months` months (default 3, including the current month).
+ * Amounts are minor units (int) — divide by 100 for display.
+ *
+ * @param {string|null} periodCode - "YYYY-MM" for a single month, or null for the rolling window
+ * @param {boolean} enabled - gate the fetch (e.g. only when the page is shown)
+ * @param {number} [topN=5] - number of top control accounts to return
+ * @param {number} [months=3] - window size when periodCode is null
+ * @param {*} [refreshKey] - change this to force a refetch (e.g. useBatchTick())
+ * @returns {{dashboard: object|null, loading: boolean, error: string|null}}
+ */
+export function useGlDashboard(periodCode, enabled, topN = 5, months = 3, refreshKey) {
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+
+    setLoading(true);
+    setError(null);
+    // Only send months for the rolling-window case; a fixed periodCode ignores it.
+    const params = periodCode ? { periodCode, topN } : { topN, months };
+    pipelineApi("gl-dashboard", params).then(({ data, error: err }) => {
+      if (cancelled) return;
+      if (err) {
+        setError(err);
+      } else {
+        setDashboard(data);
+      }
+      setLoading(false);
     });
+
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [periodCode, enabled, topN, months, refreshKey]);
 
-  return health;
+  return { dashboard, loading, error };
 }

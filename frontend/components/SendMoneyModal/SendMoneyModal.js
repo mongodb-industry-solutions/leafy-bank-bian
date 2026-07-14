@@ -6,16 +6,38 @@ import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 import styles from "./SendMoneyModal.module.css";
 import { useUser } from "@/lib/context/UserContext";
-import { useAccounts } from "@/lib/api/hooks";
+import { useAccounts, useBeneficiaryAccounts } from "@/lib/api/hooks";
 import { coreApi } from "@/lib/api/client";
 
-// Cosmetic only — the BIAN PaymentOrderInitiation has no payment-method field.
+// Drives the payment's rail, which in turn drives ledger postingMode routing
+// (BATCH / NEAR_REALTIME / REALTIME — see backend/ledger/workers/ingest_worker.py).
 const PAYMENT_METHODS = [
   { id: "cc", label: "Credit Card" },
   { id: "debit", label: "Debit Card" },
   { id: "bank_transfer", label: "Bank Transfer" },
   { id: "wire", label: "Wire Transfer" },
+  { id: "venmo", label: "Venmo" },
+  { id: "paypal", label: "PayPal" },
 ];
+const RAIL_BY_PAYMENT_METHOD = {
+  cc: "INTERNAL",
+  debit: "INTERNAL",
+  bank_transfer: "ACH",
+  wire: "WIRE",
+  venmo: "VENMO",
+  paypal: "PAYPAL",
+};
+
+const TRANSFER_METHODS = [
+  { id: "internal", label: "Internal Transfer" },
+  { id: "ach", label: "ACH Transfer" },
+  { id: "wire", label: "Wire Transfer" },
+];
+const RAIL_BY_TRANSFER_METHOD = {
+  internal: "INTERNAL",
+  ach: "ACH",
+  wire: "WIRE",
+};
 
 // view: null = picker, "digital-payment" = digital payment form, "transfer" = transfer form
 export default function SendMoneyModal({
@@ -25,6 +47,7 @@ export default function SendMoneyModal({
 }) {
   const { selectedUser, refreshData } = useUser();
   const { accounts } = useAccounts();
+  const { beneficiaryAccounts } = useBeneficiaryAccounts();
   const [view, setView] = useState(initialView);
 
   const [paymentAmount, setPaymentAmount] = useState("");
@@ -33,6 +56,7 @@ export default function SendMoneyModal({
   const [paymentBeneficiary, setPaymentBeneficiary] = useState("");
 
   const [transferAmount, setTransferAmount] = useState("");
+  const [transferMethod, setTransferMethod] = useState("internal");
   const [transferOriginator, setTransferOriginator] = useState("");
   const [transferBeneficiary, setTransferBeneficiary] = useState("");
 
@@ -44,15 +68,16 @@ export default function SendMoneyModal({
       setView(initialView ?? null);
     } else {
       setPaymentAmount(""); setPaymentMethod(""); setPaymentOriginator(""); setPaymentBeneficiary("");
-      setTransferAmount(""); setTransferOriginator(""); setTransferBeneficiary("");
+      setTransferAmount(""); setTransferMethod("internal"); setTransferOriginator(""); setTransferBeneficiary("");
       setSubmitting(false); setError(null);
     }
   }, [isOpen, initialView]);
 
   if (!isOpen) return null;
 
-  // Phase 1 (INTERNAL rail): debtor and creditor are both internal Leafy Bank
-  // accounts. Each option carries the ACC- ref and its currency.
+  // Originator is always one of the logged-in customer's own accounts.
+  // Beneficiary can be ANY bank account — prefetched bank-wide with owner
+  // names attached, see useBeneficiaryAccounts.
   const customerId = selectedUser?.id ? `CUST-${selectedUser.id.slice(-8)}` : null;
   const accountOptions = accounts.map((a) => ({
     id: a.accountId,
@@ -69,10 +94,11 @@ export default function SendMoneyModal({
     const amount = Number(isTransfer ? transferAmount : paymentAmount);
     const originator = isTransfer ? transferOriginator : paymentOriginator;
     const beneficiary = isTransfer ? transferBeneficiary : paymentBeneficiary;
+    const rail = (isTransfer ? RAIL_BY_TRANSFER_METHOD[transferMethod] : RAIL_BY_PAYMENT_METHOD[paymentMethod]) || "INTERNAL";
 
     if (!customerId) { setError("No customer selected."); return; }
     if (!amount || amount <= 0) { setError("Enter a valid amount."); return; }
-    if (!originator || !beneficiary) { setError("Select both accounts."); return; }
+    if (!originator || !beneficiary) { setError("Select an originator and beneficiary account."); return; }
     if (originator === beneficiary) {
       setError("Originator and beneficiary must differ.");
       return;
@@ -87,9 +113,9 @@ export default function SendMoneyModal({
       method: "POST",
       body: {
         customerId,
-        // type is validated but cosmetic; the rail is what matters in Phase 1.
+        // type is validated but cosmetic; the rail is what matters for posting mode.
         type: isTransfer ? "INTRABANK_TRANSFER" : "CREDIT_TRANSFER",
-        rail: "INTERNAL",
+        rail,
         debtor: { accountId: originator },
         creditor: { accountId: beneficiary },
         instructedAmount: amount,
@@ -106,6 +132,27 @@ export default function SendMoneyModal({
     refreshData();
     onClose();
   };
+
+  const renderBeneficiaryField = (idPrefix, beneficiary, setBeneficiary, originator) => (
+    <div className={styles.formGroup}>
+      <label className={styles.formLabel} htmlFor={`${idPrefix}-beneficiary`}>Beneficiary account</label>
+      <select
+        id={`${idPrefix}-beneficiary`}
+        className={styles.formSelect}
+        value={beneficiary}
+        onChange={(e) => setBeneficiary(e.target.value)}
+      >
+        <option value="">Select beneficiary account</option>
+        {beneficiaryAccounts
+          .filter((a) => a.id !== originator)
+          .map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.ownerName ? `${a.ownerName} — ${a.label}` : a.label}
+            </option>
+          ))}
+      </select>
+    </div>
+  );
 
   const title = view === "digital-payment"
     ? "Digital Payment"
@@ -205,20 +252,7 @@ export default function SendMoneyModal({
                   ))}
                 </select>
               </div>
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel} htmlFor="payment-beneficiary">Beneficiary account</label>
-                <select
-                  id="payment-beneficiary"
-                  className={styles.formSelect}
-                  value={paymentBeneficiary}
-                  onChange={(e) => setPaymentBeneficiary(e.target.value)}
-                >
-                  <option value="">Select beneficiary account</option>
-                  {accountOptions.map((a) => (
-                    <option key={a.id} value={a.id}>{a.label}</option>
-                  ))}
-                </select>
-              </div>
+              {renderBeneficiaryField("payment", paymentBeneficiary, setPaymentBeneficiary, paymentOriginator)}
             </div>
             <div className={styles.modalActions}>
               {error && <Body style={{ color: "#DB3030" }}>{error}</Body>}
@@ -246,6 +280,19 @@ export default function SendMoneyModal({
                 />
               </div>
               <div className={styles.formGroup}>
+                <label className={styles.formLabel} htmlFor="transfer-method">Transfer method</label>
+                <select
+                  id="transfer-method"
+                  className={styles.formSelect}
+                  value={transferMethod}
+                  onChange={(e) => setTransferMethod(e.target.value)}
+                >
+                  {TRANSFER_METHODS.map((tm) => (
+                    <option key={tm.id} value={tm.id}>{tm.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className={styles.formGroup}>
                 <label className={styles.formLabel} htmlFor="transfer-originator">Originator account</label>
                 <select
                   id="transfer-originator"
@@ -259,20 +306,7 @@ export default function SendMoneyModal({
                   ))}
                 </select>
               </div>
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel} htmlFor="transfer-beneficiary">Beneficiary account</label>
-                <select
-                  id="transfer-beneficiary"
-                  className={styles.formSelect}
-                  value={transferBeneficiary}
-                  onChange={(e) => setTransferBeneficiary(e.target.value)}
-                >
-                  <option value="">Select beneficiary account</option>
-                  {accountOptions.map((a) => (
-                    <option key={a.id} value={a.id}>{a.label}</option>
-                  ))}
-                </select>
-              </div>
+              {renderBeneficiaryField("transfer", transferBeneficiary, setTransferBeneficiary, transferOriginator)}
             </div>
             <div className={styles.modalActions}>
               {error && <Body style={{ color: "#DB3030" }}>{error}</Body>}

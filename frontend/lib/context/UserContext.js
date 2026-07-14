@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
+import { coreApi } from "@/lib/api/client";
 
 const UserContext = createContext(null);
 
@@ -8,7 +9,6 @@ export function UserProvider({ children }) {
   const [selectedUser, setSelectedUser] = useState(null);
   // Multi-bank: Map<consentId, { status, institution }>
   const [consents, setConsents] = useState(new Map());
-  const [profile, setProfile] = useState("balanced");
   const [consentRefreshKey, setConsentRefreshKey] = useState(0);
   // Bumped to force core data (accounts/transactions) re-fetch, e.g. after a payment.
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
@@ -32,7 +32,6 @@ export function UserProvider({ children }) {
   const selectUser = useCallback((user) => {
     // Clear previous session
     setConsents(new Map());
-    setProfile("balanced");
     setChatMessages(null);
     setChatThreadId(null);
 
@@ -45,7 +44,6 @@ export function UserProvider({ children }) {
     localStorage.removeItem("selectedUser");
     setSelectedUser(null);
     setConsents(new Map());
-    setProfile("balanced");
   }, []);
 
   // Update bearer token (e.g. from bank-login get-authorization)
@@ -80,6 +78,81 @@ export function UserProvider({ children }) {
     });
     setConsentRefreshKey((k) => k + 1);
   }, []);
+
+  // Listen for consent completion broadcast from the bank-login tab.
+  // useBankLogin posts { type: "consent_complete", consentId, institution, bearerToken }
+  // on the "leafy-bank-consent" channel. Register the consent, store the token,
+  // then prime the backend cache so the dashboard can read it once per user.
+  useEffect(() => {
+    const channel = new BroadcastChannel("leafy-bank-consent");
+
+    channel.onmessage = (event) => {
+      const msg = event.data;
+      if (msg?.type !== "consent_complete" || !msg.consentId) return;
+
+      if (msg.bearerToken) updateBearerToken(msg.bearerToken);
+      addConsent(msg.consentId, "authorized", msg.institution);
+
+      // Prime the cache (fetch-and-cache) so useCachedExternalData has data to read.
+      const userName = selectedUser?.name;
+      if (userName && msg.bearerToken) {
+        coreApi(
+          `openfinance/secure/customers/${userName}/fetch-and-cache`,
+          {
+            method: "POST",
+            bearerToken: msg.bearerToken,
+            params: { consent_id: msg.consentId },
+          },
+        ).then(() => {
+          // Re-read the cache once population completes.
+          setConsentRefreshKey((k) => k + 1);
+        });
+      }
+    };
+
+    return () => channel.close();
+  }, [selectedUser?.name, addConsent, updateBearerToken]);
+
+  // Reconcile local consents against backend status: the ConsentSweeper expires
+  // consents server-side (and purges their cached data) with no push to the client,
+  // so poll and drop any we track that are no longer AUTHORISED. Empties
+  // authorizedConsents on expiry → "Connected to X" badges + Global Position vanish
+  // on their own (both derive from authorizedConsents).
+  useEffect(() => {
+    if (!selectedUser?.name || !selectedUser?.bearerToken || consents.size === 0) return;
+
+    let cancelled = false;
+    const reconcile = async () => {
+      // Trailing slash matches the router's `@router.get("/")` — without it
+      // FastAPI 307-redirects to the slash form (extra round-trip, and some
+      // proxies drop the Authorization header on the redirect hop).
+      const { data, error } = await coreApi(
+        `openfinance/secure/consents/`,
+        { bearerToken: selectedUser.bearerToken, params: { consumer_id: selectedUser.name } },
+      );
+      if (cancelled || error || !data?.consents) return;
+
+      const stillActive = new Set(
+        data.consents
+          .filter((c) => c.Status === "AUTHORISED")
+          .map((c) => c.ConsentId),
+      );
+      for (const consentId of consents.keys()) {
+        if (!stillActive.has(consentId)) removeConsent(consentId);
+      }
+    };
+
+    reconcile(); // immediate check on mount / dependency change
+    const id = setInterval(reconcile, 30000); // and every 30s
+    const onFocus = () => reconcile();
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [selectedUser?.name, selectedUser?.bearerToken, consents, removeConsent]);
 
   // Derived: all authorized consents as array
   const authorizedConsents = useMemo(
@@ -120,8 +193,6 @@ export function UserProvider({ children }) {
     consentStatus,
     sourceInstitution,
     setConsent,
-    profile,
-    setProfile,
     consentRefreshKey,
     dataRefreshKey,
     refreshData,

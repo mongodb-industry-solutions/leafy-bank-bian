@@ -44,15 +44,30 @@ export async function coreApi(path, { method = "GET", body = null, bearerToken =
 }
 
 /**
- * GL pipeline monitor client (read-only, ledger service via the proxy).
+ * GL pipeline monitor client (ledger service via the proxy). GET by default;
+ * pass options.method/body for the manual batch trigger (POST /pipeline/batch/trigger).
  * @param {string} path - path after the prefix, e.g. "trace/PAY-123" or "health"
+ * @param {object} [params] - query params as key-value pairs (kept separate from path to avoid URL normalization issues)
+ * @param {object} [options]
+ * @param {string} [options.method="GET"]
+ * @param {object} [options.body]
  * @returns {Promise<{data: any, error: string|null}>}
  */
-export async function pipelineApi(path) {
+export async function pipelineApi(path, params = null, { method = "GET", body = null } = {}) {
+  let url = `${CORE_BASE}/pipeline/${path}`;
+  if (params) {
+    const clean = Object.fromEntries(
+      Object.entries(params).filter(([, v]) => v !== null && v !== undefined)
+    );
+    const qs = new URLSearchParams(clean).toString();
+    if (qs) url += (url.includes("?") ? "&" : "?") + qs;
+  }
+
   try {
-    const res = await fetch(`${CORE_BASE}/pipeline/${path}`, {
-      method: "GET",
+    const res = await fetch(url, {
+      method,
       headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : null,
     });
 
     if (!res.ok) {
@@ -102,6 +117,28 @@ export async function chatApi(path, { method = "POST", body = null } = {}) {
  */
 export async function chatStream(path, body) {
   const res = await fetch(`${CHATBOT_BASE}/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`${res.status}: ${await res.text()}`);
+  }
+
+  return res;
+}
+
+/**
+ * Open Finance react-agent chatbot streaming — returns the raw Response for SSE.
+ * Use this (not chatStream) for the consent flow: the consent thread lives on the
+ * Open Finance chatbot, so its /chat/stream/resume must hit the same backend.
+ * @param {string} path - e.g. "chat/stream/resume"
+ * @param {object} body - request body
+ * @returns {Promise<Response>}
+ */
+export async function openFinanceChatStream(path, body) {
+  const res = await fetch(`${OPENFINANCE_CHAT_BASE}/${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

@@ -8,7 +8,11 @@ from __future__ import annotations
 import pytest
 from bson import Int64
 
-from services.journal_service import assert_balanced_journal, build_journal_entry
+from services.journal_service import (
+    assert_balanced_journal,
+    build_journal_entry,
+    run_batch,
+)
 from shared.coa_cache import ChartOfAccounts
 
 
@@ -286,3 +290,26 @@ def test_same_control_account_both_sides_produces_two_lines():
     assert len(journal["entries"]) == 2
     sides = [e["side"] for e in journal["entries"]]
     assert sides == ["DEBIT", "CREDIT"]
+
+
+# --- build_journal_entry: realtime overrides ----------------------------------
+
+def test_realtime_overrides_flow_into_journal():
+    journal, _, _ = build_journal_entry(
+        "RT-LE-abc", _PERIOD, _balanced_agg_rows(),
+        idempotency_key="JOURNAL-RT-LE-abc",
+        source_type="REALTIME_POSTING",
+        source_id="LE-abc",
+    )
+    assert journal["idempotencyKey"] == "JOURNAL-RT-LE-abc"
+    assert journal["sourceReference"]["sourceType"] == "REALTIME_POSTING"
+    assert journal["sourceReference"]["sourceId"] == "LE-abc"
+    assert journal["journalType"] == "SYSTEM"  # validator only allows SYSTEM/MANUAL/REVERSAL
+
+
+def test_overrides_default_to_batch_values():
+    journal, _, _ = build_journal_entry(_BATCH_ID, _PERIOD, _balanced_agg_rows())
+    assert journal["idempotencyKey"] == f"JOURNAL-{_BATCH_ID}-{_PERIOD}"
+    assert journal["sourceReference"]["sourceType"] == "BATCH_POSTING"
+    assert journal["sourceReference"]["sourceId"] == _BATCH_ID
+

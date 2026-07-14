@@ -20,9 +20,21 @@ import { useUser } from "@/lib/context/UserContext";
 
 export default function AccountsPage() {
   const [modalOpen, setModalOpen] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState(null);
   const { selectedUser } = useUser();
   const { allAccounts, recentTxns, accountsLoading, txLoading } = useAccountsPageData();
-  
+
+  // When an account card is selected, show only that account's transactions.
+  const visibleTxns = (
+    selectedAccount
+      ? recentTxns.filter((t) =>
+          t._accountKeys?.some(
+            (k) => k === selectedAccount.id || k === selectedAccount.number
+          )
+        )
+      : recentTxns
+  ).slice(0, 50);
+
   return (
     <main className={styles.container}>
       <H2>Accounts Overview</H2>
@@ -33,7 +45,11 @@ export default function AccountsPage() {
               <Body>Loading accounts...</Body>
             ) : (
               <div className={styles.scrollWrapper}>
-                <OverlapCards items={allAccounts.length > 0 ? allAccounts : []} />
+                <OverlapCards
+                  items={allAccounts.length > 0 ? allAccounts : []}
+                  onSelect={setSelectedAccount}
+                  selectedKey={selectedAccount?.number ?? null}
+                />
               </div>
             )}
           </Card>
@@ -47,7 +63,7 @@ export default function AccountsPage() {
                 ></iframe>
               </div>
             )}
-            {selectedUser?.name === 'hellyrig' && (
+            {selectedUser?.name === 'gracehop' && (
               <div className={styles.iframeWrap}>
                 <iframe
                   width="640"
@@ -56,7 +72,7 @@ export default function AccountsPage() {
                 ></iframe>
               </div>
             )}
-            {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'hellyrig')) && (
+            {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'gracehop')) && (
               <div className={styles.iframeWrap}></div>
             )}
           </Card>
@@ -73,7 +89,7 @@ export default function AccountsPage() {
                     ></iframe>
                   </div>
                 )}
-                {selectedUser?.name === 'hellyrig' && (
+                {selectedUser?.name === 'gracehop' && (
                   <div className={styles.iframeWrap}>
                     <iframe
                       width="640"
@@ -82,7 +98,7 @@ export default function AccountsPage() {
                     ></iframe>
                   </div>
                 )}
-                {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'hellyrig')) && (
+                {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'gracehop')) && (
                   <Subtitle>Other analytics</Subtitle>
                 )}
               </div>
@@ -128,8 +144,24 @@ export default function AccountsPage() {
       </section>
 
       <section className={styles.bottomSection}>
-        <H2>Transactions</H2>
-        <TransactionsTable transactions={recentTxns} loading={txLoading} />
+        <div className={styles.txnHeader}>
+          <H2>Transactions</H2>
+          {selectedAccount && (
+            <div className={styles.txnFilter}>
+              <Body className={styles.txnFilterLabel}>
+                {selectedAccount.title} · {selectedAccount.number}
+              </Body>
+              <button
+                type="button"
+                className={styles.clearFilterBtn}
+                onClick={() => setSelectedAccount(null)}
+              >
+                Show all
+              </button>
+            </div>
+          )}
+        </div>
+        <TransactionsTable transactions={visibleTxns} loading={txLoading} />
       </section>
 
       <LeafyBankAssistant

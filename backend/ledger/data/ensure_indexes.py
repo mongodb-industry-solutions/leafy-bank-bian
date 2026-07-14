@@ -33,6 +33,12 @@ LEDGER_EVENTS_INDEXES = [
     {"name": "idx_idempotency_key_unique", "keys": [("idempotencyKey", ASCENDING)], "unique": True},
     {"name": "idx_group_id", "keys": [("groupId", ASCENDING)]},
     {"name": "idx_posting_status_occurred", "keys": [("postingStatus", ASCENDING), ("occurredAt", ASCENDING)]},
+    # Serves the ledger-events feed's occurredAt sort when no postingStatus filter is
+    # present (idx_posting_status_occurred can only serve the sort with a status equality).
+    {"name": "idx_occurred_at", "keys": [("occurredAt", ASCENDING)]},
+    # periodCode lives at meta.periodCode on ledgerEvents; used by the dashboard
+    # journal-status donut and the period-scoped feed match.
+    {"name": "idx_meta_period_code", "keys": [("meta.periodCode", ASCENDING)]},
 ]
 
 SUBLEDGER_ENTRIES_INDEXES = [
@@ -51,6 +57,10 @@ SUBLEDGER_ENTRIES_INDEXES = [
     # Reconciliation period-scoped query: controlAccountCode + status=POSTED + periodCode.
     # Superset of idx_control_account_status; also serves the all-time path via prefix scan.
     {"name": "idx_control_account_status_period", "keys": [("controlAccountCode", ASCENDING), ("status", ASCENDING), ("periodCode", ASCENDING)]},
+    # trace_payment Stage 3: subLedgerEntries WHERE sourceReference.sourceId == eventId.
+    {"name": "idx_source_id", "keys": [("sourceReference.sourceId", ASCENDING)]},
+    # Serves the subledger feed's postingDate sort.
+    {"name": "idx_posting_date", "keys": [("postingDate", ASCENDING)]},
 ]
 
 JOURNAL_ENTRIES_INDEXES = [
@@ -61,6 +71,10 @@ JOURNAL_ENTRIES_INDEXES = [
     # Period-scoped queries hit idx_period_code first (document level), then this index on
     # the unwound entries — keeps the reconciliation aggregation bounded to monthly volume.
     {"name": "idx_entries_account_code", "keys": [("entries.accountCode", ASCENDING)]},
+    # Serves the journals feed's postingDate sort.
+    {"name": "idx_posting_date", "keys": [("postingDate", ASCENDING)]},
+    # Serves get_pipeline_health's lastBatchAt lookup: find_one sort createdAt DESC.
+    {"name": "idx_created_at", "keys": [("createdAt", ASCENDING)]},
 ]
 
 STREAM_TOKENS_INDEXES = [
@@ -159,6 +173,13 @@ _SUBLEDGER_ENTRIES_VALIDATOR = {
     }
 }
 
+# Pacioli balance invariant: debitLeg.amount == creditLeg.amount per document.
+# Enforced at the DB level so any write that bypasses the service layer is rejected.
+# ledgerEvents carries a single debit/credit leg pair (not an array like journalEntries.entries).
+_LEDGER_EVENTS_BALANCE_VALIDATOR = {
+    "$expr": {"$eq": ["$debitLeg.amount", "$creditLeg.amount"]}
+}
+
 # Pacioli balance invariant: Σ DEBIT amount == Σ CREDIT amount per document.
 # Enforced at the DB level so any write that bypasses the service layer is rejected.
 # $map extracts the `amount` field from each filtered leg before $sum aggregates.
@@ -218,7 +239,7 @@ def ensure_validators(connection: MongoDBConnection, db_name: str) -> list[str]:
     """Apply collection-level validators. Idempotent — re-running replaces the validator in place."""
     db = connection.client[db_name]
     specs = [
-        ("ledgerEvents", _LEDGER_EVENTS_VALIDATOR),
+        ("ledgerEvents", {"$and": [_LEDGER_EVENTS_VALIDATOR, _LEDGER_EVENTS_BALANCE_VALIDATOR]}),
         ("subLedgerEntries", _SUBLEDGER_ENTRIES_VALIDATOR),
         ("journalEntries", _JOURNAL_BALANCE_VALIDATOR),
     ]
@@ -236,7 +257,7 @@ def ensure_ledger_indexes(connection: MongoDBConnection, db_name: str) -> dict[s
         "ledgerEvents": _ensure(connection, db_name, "ledgerEvents", LEDGER_EVENTS_INDEXES),
         "subLedgerEntries": _ensure(connection, db_name, "subLedgerEntries", SUBLEDGER_ENTRIES_INDEXES),
         "journalEntries": _ensure(connection, db_name, "journalEntries", JOURNAL_ENTRIES_INDEXES),
-        "ledgerStreamTokens": _ensure(connection, db_name, "ledgerStreamTokens", STREAM_TOKENS_INDEXES),
+        "changeStreamTokens": _ensure(connection, db_name, "changeStreamTokens", STREAM_TOKENS_INDEXES),
         "validators": ensure_validators(connection, db_name),
     }
 

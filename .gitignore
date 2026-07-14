@@ -1,6 +1,7 @@
 # Secrets — never commit
 .vscode/
 .docs/
+.playwright-mcp
 **/.env
 **/.env.*
 !**/.env.example
@@ -20,6 +21,7 @@
 
 # Kanopy
 knowledge_base_kanopy/
+content/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -199,3 +201,5 @@ cython_debug/
 security_check.sh
 setup-hooks.sh
 setup-drone-secrets.sh
+backend/ledger/static/gl_monitor_ref.html
+GL_Design_Jun23, Tested.md

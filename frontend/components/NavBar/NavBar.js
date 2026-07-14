@@ -46,17 +46,22 @@ const NavBar = ({ bianModelUrl }) => {
     return <NavBarContent bianModelUrl={bianModelUrl} />;
 };
 
+
 const NavBarContent = ({ bianModelUrl }) => {
-    const { selectedUser, profile, setProfile, authorizedConsents, clearUser } = useUser();
+    const { selectedUser, authorizedConsents, clearUser } = useUser();
     const pathname = usePathname();
     const router = useRouter();
-    const userName = selectedUser?.name || "User";
-    const userRole = selectedUser?.role || "";
+    const hideNavLinks = pathname?.startsWith("/gl-pipeline-monitor");
+    const isGlMonitor = hideNavLinks;
+    const userName = isGlMonitor ? "marcowenz" : (selectedUser?.name || "User");
+    const userRole = isGlMonitor ? "Bank Ops Admin" : (selectedUser?.role || "");
     const userID = selectedUser?.id || "12345";
+    const userAvatar = isGlMonitor ? "/user_avatar.png" : `/users/${userID}.png`;
     const [showUserModal, setShowUserModal] = useState(false);
 
     const handleSwitchUser = (e) => {
         e.stopPropagation();
+        setShowUserModal(false);
         clearUser();
         router.push('/');
     };
@@ -65,9 +70,9 @@ const NavBarContent = ({ bianModelUrl }) => {
         <>
             <Modal open={showUserModal} setOpen={setShowUserModal} aria-label="User info">
                 <div className={styles.userModalContent}>
-                    {selectedUser?.id && (
+                    {(isGlMonitor || selectedUser?.id) && (
                         <Image
-                            src={`/users/${userID}.png`}
+                            src={userAvatar}
                             alt={userName}
                             width={150}
                             height={80}
@@ -76,13 +81,11 @@ const NavBarContent = ({ bianModelUrl }) => {
                     )}
                     <Body weight="medium">{userName}</Body>
                     {userRole && <Body className={styles.userRole}>{userRole}</Body>}
-                    {/* additional tags */}
                     <div className={styles.userTags}>
-                        <div className={styles.tag}>Employer: {selectedUser?.employer || 'N/A'}</div>
-                        <div className={styles.tag}>Type: {selectedUser?.employmentType || 'N/A'}</div>
-                        <div className={styles.tag}>Job Title: {selectedUser?.jobTitle || 'N/A'}</div>
-                        <div className={styles.tag}>Income: {selectedUser?.incomeAmount || 'N/A'} {selectedUser?.currency || ''} / {selectedUser?.incomeFrequency || ''}</div>
-                        <div className={styles.tag}>Spending Profile: {selectedUser?.spendingProfile || 'N/A'}</div>
+                        <div className={styles.tag}>Employer: {isGlMonitor ? 'Leafy Bank' : (selectedUser?.employer || 'N/A')}</div>
+                        <div className={styles.tag}>Type: {isGlMonitor ? 'Full-time' : (selectedUser?.employmentType || 'N/A')}</div>
+                        <div className={styles.tag}>Job Title: {isGlMonitor ? 'Bank Operations Administrator' : (selectedUser?.jobTitle || 'N/A')}</div>
+                        <div className={styles.tag}>Access Level: {isGlMonitor ? 'Back Office' : (selectedUser?.spendingProfile || 'N/A')}</div>
                     </div>
                     <button className={styles.switchUserModalBtn} onClick={handleSwitchUser}>
                         <Icon glyph="Refresh" size="small" /> Switch user
@@ -97,12 +100,16 @@ const NavBarContent = ({ bianModelUrl }) => {
                 </div>
 
                 <nav className={styles.center} aria-label="Main navigation">
-                    <Link href="/" className={styles.navLink}>
-                        <Body weight="medium" className={pathname === "/" ? styles.navLinkActive : ""}>My Bank</Body>
-                    </Link>
-                    <Link href="/portfolio" className={styles.navLink}>
-                        <Body weight="medium" className={pathname === "/portfolio" ? styles.navLinkActive : ""}>Asset & Crypto Portfolio</Body>
-                    </Link>
+                    {!hideNavLinks && (
+                        <>
+                            <Link href="/" className={styles.navLink}>
+                                <Body weight="medium" className={pathname === "/" ? styles.navLinkActive : ""}>My Bank</Body>
+                            </Link>
+                            <Link href="/portfolio" className={styles.navLink}>
+                                <Body weight="medium" className={pathname === "/portfolio" ? styles.navLinkActive : ""}>Asset & Crypto Portfolio</Body>
+                            </Link>
+                        </>
+                    )}
                 </nav>
 
                 <div className={styles.right}>
@@ -112,20 +119,6 @@ const NavBarContent = ({ bianModelUrl }) => {
                         </span>
                     ))}
 
-                    {/*}
-                        <div className={styles.profileContainer}>
-                        <label className={styles.profileLabel}>Spending Profile</label>
-                        <select
-                            className={styles.profileSelect}
-                            value={profile}
-                            onChange={(e) => setProfile(e.target.value)}
-                        >
-                            <option value="balanced">Balanced</option>
-                            <option value="overspender">Overspender</option>
-                            <option value="saver">Saver</option>
-                        </select>
-                    </div>*/}
-
                     {bianModelUrl && (
                         <a
                             href={`${bianModelUrl}/bian-data-model?demo=leafy-bank`}
@@ -134,15 +127,15 @@ const NavBarContent = ({ bianModelUrl }) => {
                             className={styles.bianModelLink}
                             title="Explore the BIAN-aligned data model"
                         >
-                            <Icon glyph="Diagram3" size="small" />
-                            <Body weight="medium">Data Model</Body>
+                            <Icon glyph="Visibility" size="small" />
+                            <Body weight="medium">View Data Model</Body>
                         </a>
                     )}
 
                     <div className={styles.userInfoContainer} onClick={() => setShowUserModal(true)}>
-                        {selectedUser?.id && (
+                        {(isGlMonitor || selectedUser?.id) && (
                             <Image
-                                src={`/users/${userID}.png`}
+                                src={userAvatar}
                                 alt={userName}
                                 width={30}
                                 height={40}

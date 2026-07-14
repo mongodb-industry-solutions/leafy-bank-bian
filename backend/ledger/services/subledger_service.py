@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 
 from bson import Decimal128, ObjectId
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import BulkWriteError, DuplicateKeyError
 
 from database.connection import MongoDBConnection
 from shared.refs import PREFIX_SUBLEDGER_ENTRY, derive_ref
@@ -183,7 +183,6 @@ def write_subledger_entries(
                         "postingResult": {
                             "subLedgerIdDebit": debit_entry["subLedgerId"],
                             "subLedgerIdCredit": credit_entry["subLedgerId"],
-                            "postedAt": _now_utc(),
                         },
                     }},
                     session=session,
@@ -191,5 +190,10 @@ def write_subledger_entries(
     except DuplicateKeyError:
         logger.info("subLedgerEntries already exist for eventId=%s; skipping", event_id)
         return
+    except BulkWriteError as exc:
+        if all(e.get("code") == 11000 for e in exc.details.get("writeErrors", [])):
+            logger.info("subLedgerEntries already exist for eventId=%s; skipping", event_id)
+            return
+        raise
 
     logger.info("projected %d subLedgerEntries for eventId=%s", len(entries), event_id)

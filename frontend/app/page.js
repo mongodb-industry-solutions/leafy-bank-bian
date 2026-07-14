@@ -25,8 +25,10 @@ import MobileActions from "@/components/MobileActions/MobileActions";
 
 
 // Leafy Bank accounts get a green badge; any other (external) bank gets blue.
-const bankBadgeVariant = (bank) =>
-  (bank || "").toLowerCase().replace(/\s/g, "") === "leafybank" ? "green" : "blue";
+const isExternalBank = (bank) =>
+  (bank || "").toLowerCase().replace(/\s/g, "") !== "leafybank";
+
+const bankBadgeVariant = (bank) => (isExternalBank(bank) ? "blue" : "green");
 
 const HomeContent = () => {
   const [modalOpen, setModalOpen] = useState(false);
@@ -117,7 +119,14 @@ const HomeContent = () => {
               {homeLoading ? (
                 <Body className={styles.cardBodyGray}>Loading...</Body>
               ) : bankAccounts.length > 0 ? (
-                bankAccounts.map((account) => (
+                // Show external accounts (Green Bank, MongoDB Bank, NeoFinance,
+                // …) first; stable sort keeps original order within each group.
+                [...bankAccounts]
+                  .sort(
+                    (a, b) =>
+                      isExternalBank(b.AccountBank) - isExternalBank(a.AccountBank)
+                  )
+                  .map((account) => (
                   <div
                     key={account._id}
                     className={styles.accountRow}
@@ -213,7 +222,7 @@ const HomeContent = () => {
               <button
                 onClick={() => setOpenFinanceOpen(true)}
                 className={styles.entitiesButton}
-                aria-label="Get a complete view of your finances"
+                aria-label="Get a complete view of your finances with Open Banking"
               >
                 <div className={styles.cardContent}>
                   <div className={styles.thumbWrap}>
@@ -226,7 +235,7 @@ const HomeContent = () => {
                   </div>
 
                   <div className={styles.cardText}>
-                    <Subtitle>Get a complete view of your finances</Subtitle>
+                    <Subtitle>Get a complete view of your finances with Open Banking</Subtitle>
                     <Body className={styles.cardBodyGray}>
                       Aggregate your other banks accounts in one place and make smarter financial decisions.
                     </Body>
@@ -245,7 +254,7 @@ const HomeContent = () => {
 
       <section className={styles.activitySection}>
         <H3>Recent Activity</H3>
-        <TransactionsTable transactions={recentTxns} loading={txLoading} />
+        <TransactionsTable transactions={recentTxns.slice(0, 50)} loading={txLoading} />
       </section>
 
       <div className={styles.stickyButtonContainer}>

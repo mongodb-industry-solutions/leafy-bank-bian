@@ -174,3 +174,84 @@ def reconcile_all_accounts(
         reconcile_account(code, connection, db_name, period_code=period_code)
         for code in account_codes
     ]
+
+
+def reconcile_all_accounts_batched(
+    connection: MongoDBConnection,
+    db_name: str,
+    *,
+    period_codes: list[str],
+) -> list[ReconciliationResult]:
+    """Reconcile every journaled account across the given periods in two aggregations.
+
+    Equivalent to calling reconcile_all_accounts once per period and concatenating
+    the results, but replaces the (periods × accounts × 2) aggregation fan-out with
+    exactly two grouped aggregations — one per collection. Use this for the dashboard
+    roll-up, where only the reconciled/break tally is needed.
+
+    The checked set mirrors reconcile_all_accounts: one result per
+    (controlAccountCode, period) that has journaled subLedgerEntries in that period.
+    """
+    if not period_codes:
+        return []
+
+    sl_coll = connection.get_collection(db_name, "subLedgerEntries")
+    jnl_coll = connection.get_collection(db_name, "journalEntries")
+
+    # Subledger signed sums grouped by (period, controlAccountCode), journaled rows only.
+    sl_pipeline = [
+        {"$match": {
+            "status": "POSTED",
+            "journalEntryId": {"$ne": ""},
+            "periodCode": {"$in": period_codes},
+        }},
+        {"$group": {
+            "_id": {"period": "$periodCode", "account": "$controlAccountCode"},
+            "signedSum": {"$sum": {"$cond": [
+                {"$eq": ["$side", "DEBIT"]},
+                "$amount",
+                {"$multiply": [-1, "$amount"]},
+            ]}},
+        }},
+    ]
+    sl_sums: dict[tuple[str, str], int] = {
+        (r["_id"]["period"], r["_id"]["account"]): int(r["signedSum"])
+        for r in sl_coll.aggregate(sl_pipeline)
+    }
+
+    # Journal signed sums grouped by (period, entries.accountCode).
+    jnl_pipeline = [
+        {"$match": {"periodCode": {"$in": period_codes}}},
+        {"$unwind": "$entries"},
+        {"$group": {
+            "_id": {"period": "$periodCode", "account": "$entries.accountCode"},
+            "signedSum": {"$sum": {"$cond": [
+                {"$eq": ["$entries.side", "DEBIT"]},
+                "$entries.amount",
+                {"$multiply": [-1, "$entries.amount"]},
+            ]}},
+        }},
+    ]
+    jnl_sums: dict[tuple[str, str], int] = {
+        (r["_id"]["period"], r["_id"]["account"]): int(r["signedSum"])
+        for r in jnl_coll.aggregate(jnl_pipeline)
+    }
+
+    checked_at = _now_utc()
+    results: list[ReconciliationResult] = []
+    for (period, account), sl_sum in sl_sums.items():
+        jnl_sum = jnl_sums.get((period, account), 0)
+        result = ReconciliationResult(
+            account_code=account,
+            period_code=period,
+            subledger_sum=sl_sum,
+            journal_sum=jnl_sum,
+            checked_at=checked_at,
+        )
+        if not result.is_reconciled:
+            logger.warning(
+                "reconciliation FAIL account=%s period=%s sl=%d jnl=%d",
+                account, period, sl_sum, jnl_sum,
+            )
+        results.append(result)
+    return results

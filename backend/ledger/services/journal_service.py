@@ -53,12 +53,22 @@ def build_journal_entry(
     period_code: str,
     agg_rows: list[dict],
     coa: Optional["ChartOfAccounts"] = None,
+    *,
+    idempotency_key: Optional[str] = None,
+    source_type: str = _SOURCE_TYPE_BATCH,
+    source_id: Optional[str] = None,
 ) -> tuple[dict, list[str], list[str]]:
-    """Assemble ONE balanced summary journal for a (batch window, period).
+    """Assemble ONE balanced journal for a (window, period).
+
+    Batch path: one line per (controlAccountCode, side) summarizing many txns.
+    Realtime path: same shape with count=1 rows — one journal per transaction.
 
     agg_rows: list of {_id:{controlAccountCode,side}, amount, currency, count, subLedgerIds, eventIds}.
+    idempotency_key / source_type / source_id default to the batch values.
     Returns (journal_doc, all_subLedgerIds, all_eventIds).
     """
+    idempotency_key = idempotency_key or f"JOURNAL-{batch_id}-{period_code}"
+    source_id = source_id or batch_id
     # One line per (controlAccountCode, side). DEBIT-first, then accountCode asc.
     lines_in = sorted(
         agg_rows,
@@ -96,7 +106,7 @@ def build_journal_entry(
     journal = {
         "_id": oid,
         "journalId": derive_ref(PREFIX_JOURNAL_ENTRY, oid),
-        "idempotencyKey": f"JOURNAL-{batch_id}-{period_code}",
+        "idempotencyKey": idempotency_key,
         "periodCode": period_code,
         "valueDate": now.date().isoformat(),                     # string per v30
         "postingDate": now.date().isoformat(),                   # string per v30
@@ -108,8 +118,8 @@ def build_journal_entry(
         "createdBy": "GL_BATCH_PIPELINE",                        # required; SoD $ne approvedBy (leave approvedBy absent)
         "sourceReference": {
             "sourceSystem": _SOURCE_SYSTEM,
-            "sourceId": batch_id,
-            "sourceType": _SOURCE_TYPE_BATCH,
+            "sourceId": source_id,
+            "sourceType": source_type,
             "sourceCollection": "subLedgerEntries",
             "periodCode": period_code,
             "txnCount": len(set(event_ids)),
@@ -153,6 +163,7 @@ def write_journal(
                     {"$set": {
                         "postingStatus": "POSTED",
                         "postingResult.journalEntryId": journal_id,
+                        "postingResult.postedAt": _now_utc(),
                     }},
                     session=session,
                 )

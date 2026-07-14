@@ -10,7 +10,7 @@ import { Subtitle, Body } from "@leafygreen-ui/typography";
 const bankBadgeVariant = (bank) =>
   (bank || "").toLowerCase().replace(/\s/g, "") === "leafybank" ? "green" : "blue";
 
-export default function OverlapCards({ items = [] }) {
+export default function OverlapCards({ items = [], onSelect, selectedKey }) {
   // Handle empty state
   if (!items || items.length === 0) {
     return (
@@ -27,10 +27,13 @@ export default function OverlapCards({ items = [] }) {
     );
   }
 
+  const clickable = typeof onSelect === "function";
+
   return (
     <div className={styles.container}>
-      {items.map((it, idx) => (
-        <Card key={idx} className={styles.card}>
+      {items.map((it, idx) => {
+        const isActive = clickable && selectedKey != null && selectedKey === it.number;
+        const cardBody = (
           <div className={styles.cardInner}>
             <div>
               <Subtitle>{it.title}</Subtitle>
@@ -48,8 +51,35 @@ export default function OverlapCards({ items = [] }) {
               </div>
             )}
           </div>
-        </Card>
-      ))}
+        );
+
+        if (!clickable) {
+          return (
+            <Card key={idx} className={styles.card}>
+              {cardBody}
+            </Card>
+          );
+        }
+
+        return (
+          <Card
+            key={idx}
+            className={`${styles.card} ${styles.clickable} ${isActive ? styles.active : ""}`}
+            role="button"
+            tabIndex={0}
+            aria-pressed={isActive}
+            onClick={() => onSelect(isActive ? null : it)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(isActive ? null : it);
+              }
+            }}
+          >
+            {cardBody}
+          </Card>
+        );
+      })}
     </div>
   );
 }
