@@ -428,10 +428,8 @@ steps:
 ########################
 # PRODUCTION (branch: main)
 #
-# NOTE: ledger has no prod deploy yet — kept commented to mirror the
-# original leafy-bank-backend-ledger repo. Uncomment publish-ledger-prod
-# and deploy-ledger-production (and add environment/ledger/prod.yaml)
-# when ledger is ready for production.
+# All four backend services + frontend deploy to prod. Each step fires
+# only when its own source files (or environment/production.yaml) change.
 ########################
 kind: pipeline
 type: kubernetes
