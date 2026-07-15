@@ -41,6 +41,16 @@ const categoryColors = {
   "Department Stores": "#EC4899",
   Healthcare: "#06B6D4",
   Pharmacy: "#06B6D4",
+  // External open-finance feed categories (transactionCategory field).
+  Shopping: "#EC4899",
+  Transport: "#3B82F6",
+  SavingsTransfer: "#10B981",
+  AccountTransfer: "#10B981",
+  Services: "#F59E0B",
+  Subscription: "#8B5CF6",
+  Rent: "#EF4444",
+  Insurance: "#14B8A6",
+  Medical: "#06B6D4",
   Other: "#dfdfdf",
 };
 

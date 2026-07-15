@@ -83,6 +83,8 @@ const TX_CODE_CATEGORIES = {
  * Priority: Purpose code → Transaction subfamily → "Other".
  */
 export function txCategory(tx) {
+  // External open-finance transactions carry the authoritative category directly.
+  if (tx.transactionCategory) return tx.transactionCategory;
   const purposeCode = tx.Purp?.Cd;
   if (purposeCode && PURPOSE_CODE_CATEGORIES[purposeCode]) {
     return PURPOSE_CODE_CATEGORIES[purposeCode];
