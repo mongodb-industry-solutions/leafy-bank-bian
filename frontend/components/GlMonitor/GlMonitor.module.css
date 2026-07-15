@@ -420,6 +420,44 @@
   z-index: 0;
 }
 
+/* Hop labels between stages, marking the processing mechanism (change stream
+   vs. scheduled batch). Positioned at each segment midpoint: 25% / 50% / 75%. */
+.stepper-flow-label {
+  position: absolute;
+  top: 29px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #00684A;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.stepper-flow-label .live-dot {
+  width: 6px;
+  height: 6px;
+  background: #00ED64;
+  box-shadow: 0 0 0 2px #C0FAE6;
+}
+
+.stepper-flow-label-01 { left: 25%; }
+.stepper-flow-label-12 { left: 50%; }
+.stepper-flow-label-23 { left: 75%; color: #9333ea; }
+
+.stepper-batch-icon {
+  font-size: 10px;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepper-flow-label .live-dot { animation: none; }
+}
+
 .stepper-step {
   display: flex;
   flex-direction: column;
