@@ -12,7 +12,6 @@ import { coreApi } from "@/lib/api/client";
 // Drives the payment's rail, which in turn drives ledger postingMode routing
 // (BATCH / NEAR_REALTIME / REALTIME — see backend/ledger/workers/ingest_worker.py).
 const PAYMENT_METHODS = [
-  { id: "cc", label: "Credit Card" },
   { id: "debit", label: "Debit Card" },
   { id: "bank_transfer", label: "Bank Transfer" },
   { id: "wire", label: "Wire Transfer" },
@@ -20,7 +19,6 @@ const PAYMENT_METHODS = [
   { id: "paypal", label: "PayPal" },
 ];
 const RAIL_BY_PAYMENT_METHOD = {
-  cc: "INTERNAL",
   debit: "INTERNAL",
   bank_transfer: "ACH",
   wire: "WIRE",

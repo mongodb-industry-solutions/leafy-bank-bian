@@ -18,6 +18,22 @@ export default function PipelineStepper() {
             <div className={styles["stepper-title"]}>{s.title}</div>
           </div>
         ))}
+
+        {/* Hop labels marking the processing mechanism between stages. Both
+            0→1 (ingest_worker) and 1→2 (projection_worker) are async, change-
+            stream-driven; 2→3 (gl_batch) is a scheduled batch. */}
+        <div className={`${styles["stepper-flow-label"]} ${styles["stepper-flow-label-01"]}`}>
+          <span className={styles["live-dot"]} />
+          change stream
+        </div>
+        <div className={`${styles["stepper-flow-label"]} ${styles["stepper-flow-label-12"]}`}>
+          <span className={styles["live-dot"]} />
+          change stream
+        </div>
+        <div className={`${styles["stepper-flow-label"]} ${styles["stepper-flow-label-23"]}`}>
+          <span className={styles["stepper-batch-icon"]}>⏱</span>
+          scheduled batch
+        </div>
       </div>
     </div>
   );
