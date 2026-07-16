@@ -7,17 +7,20 @@ import { H2, Description } from '@leafygreen-ui/typography';
 import styles from './Login.module.css';
 import User from '@/components/User/User';
 import { USER_LIST } from "@/lib/constants";
-import Banner from "@leafygreen-ui/banner";
 import { useUser } from "@/lib/context/UserContext";
 
 const Login = ({ onDone }) => {
     const { selectUser } = useUser();
     const [open, setOpen] = useState(true);
     const [selectedLocal, setSelectedLocal] = useState(null);
-    const [step, setStep] = useState('choose'); // 'choose' | 'retail' | 'backoffice'
+    const [step, setStep] = useState('choose'); // 'choose' | 'backoffice'
 
-    const retailUsers = USER_LIST.filter(u => u.section === 'retail');
     const backofficeUsers = USER_LIST.filter(u => u.section === 'backoffice');
+    // Bank Customer logs in directly as Frida; switching users is done from the
+    // NavBar dropdown afterwards.
+    const defaultRetailUser =
+        USER_LIST.find(u => u.section === 'retail' && u.name === 'Frida') ||
+        USER_LIST.find(u => u.section === 'retail');
 
     const handleUserSelect = (user) => {
         setSelectedLocal(user);
@@ -75,7 +78,7 @@ const Login = ({ onDone }) => {
                             <div className={styles.categoryContainer}>
                                 <div
                                     className={`${styles.categoryCard} ${styles.categoryRetail}`}
-                                    onClick={() => setStep('retail')}
+                                    onClick={() => defaultRetailUser && handleUserSelect(defaultRetailUser)}
                                 >
                                     <div className={styles.categoryEmoji}>🏦</div>
                                     <div className={styles.categoryTitle}>Bank Customer</div>
@@ -94,28 +97,6 @@ const Login = ({ onDone }) => {
                                     </div>
                                 </div>
                             </div>
-                        </>
-                    )}
-
-                    {step === 'retail' && (
-                        <>
-                            <Description className={styles.descriptionModal}>
-                                Select a bank customer to login as:
-                            </Description>
-                            <div className={styles.usersContainer}>
-                                {retailUsers.map(user => (
-                                    <User
-                                        user={user}
-                                        isSelectedUser={selectedLocal && selectedLocal.id === user.id}
-                                        key={user.id}
-                                        setOpen={setOpen}
-                                        setLocalSelectedUser={handleUserSelect}
-                                    />
-                                ))}
-                            </div>
-                            <Banner variant="warning" className={styles.warningBanner}>
-                                Please make sure pop-ups are enabled in your browser to ensure the demo runs smoothly and all features display correctly.
-                            </Banner>
                         </>
                     )}
 
