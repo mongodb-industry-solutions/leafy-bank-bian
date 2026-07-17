@@ -29,8 +29,11 @@ function normalizeTransaction(t) {
     ...t,
     BookgDt: t.bookingDate,
     Amt: { value: t.amount },
-    CdtDbtInd: t.direction === "OUTGOING" ? "DBIT" : "CRDT",
-    Cdtr: { Nm: t.payee?.name },
+    // Direction and counterparty are framed relative to the viewer by the backend
+    // (viewerDirection/counterparty). Fall back to the stored sender-oriented fields
+    // for any doc that predates that framing.
+    CdtDbtInd: (t.viewerDirection || t.direction) === "OUTGOING" ? "DBIT" : "CRDT",
+    Cdtr: { Nm: (t.counterparty || t.payee)?.name },
     AddtlNtryInf: t.description,
     // BIAN txnCode is "PMNT-MCRD-POSD": family is the SECOND segment (MCRD=card),
     // subfamily the third (POSD=point-of-sale). The card view filters on Fmly === "MCRD".
