@@ -42,7 +42,7 @@ export function useBankLogin({ consentId, institutionName, threadId }) {
 
     coreApi(
       "openfinance/public/get-authorization",
-      { params: { user_identifier: selectedUser.name } }
+      { params: { user_identifier: selectedUser.bankUsername } }
     ).then(({ data, error }) => {
       if (data?.BearerToken) {
         setToken(data.BearerToken);
@@ -110,7 +110,7 @@ export function useBankLogin({ consentId, institutionName, threadId }) {
     try {
       const res = await openFinanceChatStream("chat/stream/resume", {
         thread_id: threadId,
-        user_id: selectedUser.name,
+        user_id: selectedUser.bankUsername,
         resume_data: { status: "success" },
       });
       await processSSEForConsent(res);
@@ -130,7 +130,7 @@ export function useBankLogin({ consentId, institutionName, threadId }) {
     try {
       const res = await openFinanceChatStream("chat/stream/resume", {
         thread_id: threadId,
-        user_id: selectedUser.name,
+        user_id: selectedUser.bankUsername,
         resume_data: { approved },
       });
 
