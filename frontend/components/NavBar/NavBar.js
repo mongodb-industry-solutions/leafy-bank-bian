@@ -27,18 +27,9 @@ const NavBar = ({ bianModelUrl }) => {
                     </Link>
                 </div>
 
-                <nav className={styles.center} aria-label="Main navigation">
-                    <Link href="/" className={styles.navLink}>
-                        <Body weight="medium">Personal Banking</Body>
-                    </Link>
-                    <Link href="/portfolio" className={styles.navLink}>
-                        <Body weight="medium">Investment Accounts</Body>
-                    </Link>
-                </nav>
+                <nav className={styles.center} aria-label="Main navigation" />
 
-                <div className={styles.right}>
-                    <Body>User</Body>
-                </div>
+                <div className={styles.right} />
             </header>
         );
     }
@@ -48,9 +39,13 @@ const NavBar = ({ bianModelUrl }) => {
 
 
 const NavBarContent = ({ bianModelUrl }) => {
-    const { authorizedConsents } = useUser();
+    const { selectedUser, authorizedConsents } = useUser();
     const pathname = usePathname();
-    const hideNavLinks = pathname?.startsWith("/gl-pipeline-monitor");
+    const isGlMonitor = pathname?.startsWith("/gl-pipeline-monitor");
+    // Before a user is chosen (welcome modal), show only the logo — no nav links or user controls.
+    // The GL monitor runs as an implicit ops user, so it's always treated as signed in.
+    const hasUser = isGlMonitor || !!selectedUser?.id;
+    const hideNavLinks = isGlMonitor || !hasUser;
 
     return (
         <header className={styles.navBar}>
@@ -74,26 +69,30 @@ const NavBarContent = ({ bianModelUrl }) => {
             </nav>
 
             <div className={styles.right}>
-                {authorizedConsents.map(({ consentId, institution }) => (
-                    <span key={consentId} className={styles.consentBadge}>
-                        Connected to {institution}
-                    </span>
-                ))}
+                {hasUser && (
+                    <>
+                        {authorizedConsents.map(({ consentId, institution }) => (
+                            <span key={consentId} className={styles.consentBadge}>
+                                Connected to {institution}
+                            </span>
+                        ))}
 
-                {bianModelUrl && (
-                    <a
-                        href={`${bianModelUrl}/bian-data-model?demo=leafy-bank`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={styles.bianModelLink}
-                        title="Explore the BIAN-aligned data model"
-                    >
-                        <Icon glyph="Visibility" size="small" />
-                        <Body weight="medium">View Data Model</Body>
-                    </a>
+                        {bianModelUrl && (
+                            <a
+                                href={`${bianModelUrl}/bian-data-model?demo=leafy-bank`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={styles.bianModelLink}
+                                title="Explore the BIAN-aligned data model"
+                            >
+                                <Icon glyph="Visibility" size="small" />
+                                <Body weight="medium">View Data Model</Body>
+                            </a>
+                        )}
+
+                        <UserInfo />
+                    </>
                 )}
-
-                <UserInfo />
             </div>
         </header>
     );
