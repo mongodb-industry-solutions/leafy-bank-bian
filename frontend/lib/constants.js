@@ -1,6 +1,9 @@
 export const USER_MAP = {
     "65a546ae4a8f64e8f88fb89e": {
         UserName: "Frida",
+        // Backend openfinance identity (DB UserName). Display name diverged from
+        // the DB username in QA commit 7cc8831; keep the real one for API calls.
+        BankUserName: "fridaklo",
         Role: "Leafy Bank Customer",
         Section: "retail",
         Employer: "Deloitte Mexico",
@@ -13,6 +16,7 @@ export const USER_MAP = {
     },
     "66fe219d625d93a100528224": {
         UserName: "Grace",
+        BankUserName: "gracehop",
         Role: "Leafy Bank Customer",
         Section: "retail",
         Employer: "U.S. Naval Reserve",
@@ -94,6 +98,8 @@ export const USER_MAP = {
 export const USER_LIST = Object.entries(USER_MAP).map(([id, details]) => ({
     id,
     name: details.UserName,
+    // Identifier sent to the openfinance backend; falls back to the display name.
+    bankUsername: details.BankUserName ?? details.UserName,
     role: details.Role,
     section: details.Section,
     employer: details.Employer,

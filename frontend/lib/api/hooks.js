@@ -228,7 +228,7 @@ export function useCachedExternalData() {
     let cancelled = false;
 
     coreApi(
-      `openfinance/secure/customers/${selectedUser.name}/cached-data`,
+      `openfinance/secure/customers/${selectedUser.bankUsername}/cached-data`,
       {
         bearerToken: selectedUser.bearerToken,
         // Scope to THIS browser session's consents so cross-session/duplicate
@@ -305,7 +305,7 @@ export function useGlobalPosition() {
     let cancelled = false;
 
     coreApi(
-      `openfinance/secure/customers/${selectedUser.name}/global-position`,
+      `openfinance/secure/customers/${selectedUser.bankUsername}/global-position`,
       {
         bearerToken: selectedUser.bearerToken,
         // Match the cached-data view: only this session's banks, so totals

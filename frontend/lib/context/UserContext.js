@@ -94,7 +94,7 @@ export function UserProvider({ children }) {
       addConsent(msg.consentId, "authorized", msg.institution);
 
       // Prime the cache (fetch-and-cache) so useCachedExternalData has data to read.
-      const userName = selectedUser?.name;
+      const userName = selectedUser?.bankUsername;
       if (userName && msg.bearerToken) {
         coreApi(
           `openfinance/secure/customers/${userName}/fetch-and-cache`,
@@ -128,7 +128,7 @@ export function UserProvider({ children }) {
       // proxies drop the Authorization header on the redirect hop).
       const { data, error } = await coreApi(
         `openfinance/secure/consents/`,
-        { bearerToken: selectedUser.bearerToken, params: { consumer_id: selectedUser.name } },
+        { bearerToken: selectedUser.bearerToken, params: { consumer_id: selectedUser.bankUsername } },
       );
       if (cancelled || error || !data?.consents) return;
 

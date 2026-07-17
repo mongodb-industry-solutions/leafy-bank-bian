@@ -115,7 +115,7 @@ export function OpenFinanceChatProvider({ children }) {
     try {
       const res = await openFinanceChatStream("chat/stream", {
         thread_id: threadIdRef.current,
-        user_id: selectedUser.name,
+        user_id: selectedUser.bankUsername,
         message: text,
       });
 
