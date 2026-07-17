@@ -14,7 +14,7 @@ env:
   EOD_TOPUP_AMOUNT: "500"
   PAYMENT_LIMIT_USD: "500"
   TRANSACTIONS_BASE_URL: http://leafy-bank-bian-transactions-web-app:80
-  CONSENT_BACKEND_URL: http://open-finance-next-gen-web-app:80
+  CONSENT_BACKEND_URL: http://open-finance-next-gen-prod-web-app:80
   ACCOUNTS_BACKEND_URL: http://leafy-bank-bian-accounts-web-app:80
   TRANSACTIONS_BACKEND_URL: http://leafy-bank-bian-transactions-web-app:80
   LEDGER_BACKEND_URL: http://leafy-bank-bian-ledger-web-app:80

@@ -329,7 +329,7 @@ const HomeContent = () => {
 };
 
 export default function Home() {
-  const { selectedUser, clearUser } = useUser();
+  const { selectedUser, clearUser, isFreshBrowserLoad } = useUser();
   const [loginDone, setLoginDone] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -337,14 +337,14 @@ export default function Home() {
     setMounted(true);
   }, []);
 
-  // Fresh page load (refresh/new tab) → clear user so Login shows.
-  // Client-side navigation (logo click) → flag already set, skip clear.
+  // Genuine fresh browser load (refresh/new tab) → clear user so Login shows.
+  // Client-side navigation (logo click) and intentional in-app full-page
+  // navigations (backoffice personas) are preserved — see isFreshBrowserLoad.
   useEffect(() => {
-    if (!window.__LEAFY_SESSION__) {
-      window.__LEAFY_SESSION__ = true;
+    if (isFreshBrowserLoad()) {
       clearUser();
     }
-  }, [clearUser]);
+  }, [isFreshBrowserLoad, clearUser]);
 
   // Sync loginDone with user selection state in both directions
   useEffect(() => {

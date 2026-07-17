@@ -32,7 +32,7 @@ const USERS_BY_SECTION = SECTION_ORDER
  * the session so the Login screen reappears.
  */
 const UserInfo = () => {
-    const { selectedUser, selectUser, clearUser } = useUser();
+    const { selectedUser, selectUser, clearUser, markIntentionalNavigation } = useUser();
     const pathname = usePathname();
     const router = useRouter();
     const [showUserModal, setShowUserModal] = useState(false);
@@ -64,6 +64,9 @@ const UserInfo = () => {
         setShowUserDropdown(false);
         if (user.url) {
             if (user.url.startsWith("/")) {
+                // Full-page nav to an internal route — flag it as intentional so
+                // the destination isn't treated as a fresh browser load.
+                markIntentionalNavigation();
                 selectUser(user);
                 window.location.href = user.url;
             } else {
@@ -71,6 +74,10 @@ const UserInfo = () => {
             }
             return;
         }
+        // Backoffice personas reach their route via a full page load, so a later
+        // router.push("/") lands in a runtime that hasn't mounted Home yet and
+        // would be misread as a refresh — mark it intentional to keep the user.
+        markIntentionalNavigation();
         selectUser(user);
         router.push("/");
     };
