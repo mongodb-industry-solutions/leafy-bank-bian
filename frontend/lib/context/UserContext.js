@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { coreApi } from "@/lib/api/client";
+import { USER_MAP } from "@/lib/constants";
 
 const UserContext = createContext(null);
 
@@ -22,7 +23,14 @@ export function UserProvider({ children }) {
     const stored = localStorage.getItem("selectedUser");
     if (stored) {
       try {
-        setSelectedUser(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        // Backfill bankUsername for sessions persisted before this field existed,
+        // so openfinance calls send the DB username, not the display name.
+        if (parsed && !parsed.bankUsername) {
+          const details = USER_MAP[parsed.id];
+          parsed.bankUsername = details?.BankUserName ?? details?.UserName ?? parsed.name;
+        }
+        setSelectedUser(parsed);
       } catch {
         localStorage.removeItem("selectedUser");
       }

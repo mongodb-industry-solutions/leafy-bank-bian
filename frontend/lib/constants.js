@@ -1,8 +1,8 @@
 export const USER_MAP = {
     "65a546ae4a8f64e8f88fb89e": {
         UserName: "Frida",
-        // Backend openfinance identity (DB UserName). Display name diverged from
-        // the DB username in QA commit 7cc8831; keep the real one for API calls.
+        // Backend openfinance identity (DB UserName). The display name (UserName
+        // above) diverged from the DB username, so keep the real one for API calls.
         BankUserName: "fridaklo",
         Role: "Leafy Bank Customer",
         Section: "retail",
