@@ -75,7 +75,7 @@ export default function LeafyBankAssistant({ isOpen, onClose, initialPrompt }) {
     }
   }, [isOpen, initialPrompt]);
 
-  const showSuggestions = true;
+  const showSuggestions = !messages.some((msg) => msg.type === "user") && !sending;
 
   return (
     <>

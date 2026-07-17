@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { coreApi } from "@/lib/api/client";
+import { USER_MAP } from "@/lib/constants";
 
 const UserContext = createContext(null);
 
@@ -22,7 +23,14 @@ export function UserProvider({ children }) {
     const stored = localStorage.getItem("selectedUser");
     if (stored) {
       try {
-        setSelectedUser(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        // Backfill bankUsername for sessions persisted before this field existed,
+        // so openfinance calls send the DB username, not the display name.
+        if (parsed && !parsed.bankUsername) {
+          const details = USER_MAP[parsed.id];
+          parsed.bankUsername = details?.BankUserName ?? details?.UserName ?? parsed.name;
+        }
+        setSelectedUser(parsed);
       } catch {
         localStorage.removeItem("selectedUser");
       }
@@ -94,7 +102,7 @@ export function UserProvider({ children }) {
       addConsent(msg.consentId, "authorized", msg.institution);
 
       // Prime the cache (fetch-and-cache) so useCachedExternalData has data to read.
-      const userName = selectedUser?.name;
+      const userName = selectedUser?.bankUsername;
       if (userName && msg.bearerToken) {
         coreApi(
           `openfinance/secure/customers/${userName}/fetch-and-cache`,
@@ -128,7 +136,7 @@ export function UserProvider({ children }) {
       // proxies drop the Authorization header on the redirect hop).
       const { data, error } = await coreApi(
         `openfinance/secure/consents/`,
-        { bearerToken: selectedUser.bearerToken, params: { consumer_id: selectedUser.name } },
+        { bearerToken: selectedUser.bearerToken, params: { consumer_id: selectedUser.bankUsername } },
       );
       if (cancelled || error || !data?.consents) return;
 

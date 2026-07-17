@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useLayoutEffect } from "react";
 import styles from "./GlMonitor.module.css";
 import { Chip, VariantChip, BalanceChip } from "./Bits";
 import { fmt, fmtMinor, fmtDate } from "@/lib/glMonitor/format";
@@ -27,6 +27,8 @@ function FeedRows({ col, items, selected, lineage, onSelect, renderRow, rowId, k
         className={cls}
         key={key}
         id={rowId ? rowId(item) : undefined}
+        data-linked={isLinked ? "1" : undefined}
+        data-selected={isSel ? "1" : undefined}
         onClick={() => onSelect(col, i, item)}
       >
         {renderRow(item)}
@@ -38,7 +40,7 @@ function FeedRows({ col, items, selected, lineage, onSelect, renderRow, rowId, k
 }
 
 // features: array of MongoDB feature-tag labels for the footer (null = no footer).
-function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, features, col, selected, lineage, onSelect, renderRow, emptyMsg, rowId, keyOf }) {
+function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, features, col, selected, lineage, onSelect, renderRow, emptyMsg, rowId, keyOf, bodyRef }) {
   let body;
   if (state.loading) body = <div className={styles["empty-state"]}>Loading…</div>;
   else if (state.error) body = <div className={styles["error-state"]}>Error: {state.error}</div>;
@@ -59,7 +61,7 @@ function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, feat
           <span className={styles["col-count"]}>{count}</span>
         </div>
       </div>
-      <div className={styles["col-body"]}>{body}</div>
+      <div className={styles["col-body"]} ref={bodyRef}>{body}</div>
       {features && (
         <div className={styles["col-features-footer"]}>
           <span className={styles["col-features-label"]}>MongoDB Features In Use</span>
@@ -74,13 +76,44 @@ function Column({ headerBg, stageCls, stageLabel, title, sub, count, state, feat
   );
 }
 
+// Scroll a column body so its linked/selected rows sit centered in view, so the
+// whole highlighted chain is visible across all four columns after a click.
+function centerLinkedRows(body) {
+  if (!body) return;
+  const rows = body.querySelectorAll('[data-linked="1"],[data-selected="1"]');
+  if (!rows.length) return;
+  const bodyRect = body.getBoundingClientRect();
+  let min = Infinity;
+  let max = -Infinity;
+  rows.forEach((r) => {
+    const rect = r.getBoundingClientRect();
+    const top = rect.top - bodyRect.top + body.scrollTop;
+    min = Math.min(min, top);
+    max = Math.max(max, top + rect.height);
+  });
+  const target = (min + max) / 2 - body.clientHeight / 2;
+  const maxScroll = body.scrollHeight - body.clientHeight;
+  body.scrollTo({ top: Math.min(Math.max(0, target), maxScroll), behavior: "smooth" });
+}
+
 export default function PipelineColumns({ columns, selected, lineage, onSelect, onTraceTx }) {
+  const bodyRefs = { tx: useRef(null), le: useRef(null), sl: useRef(null), jn: useRef(null) };
+
+  // After a selection resolves a lineage, bring each column's linked rows into
+  // view together. Keyed on the click, not on lineage identity (recomputed each render).
+  useLayoutEffect(() => {
+    if (!lineage) return;
+    Object.values(bodyRefs).forEach((ref) => centerLinkedRows(ref.current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected.col, selected.idx, !!lineage]);
+
   return (
     <div className={styles.pipeline}>
       <Column
         headerBg="var(--col1)" stageCls="stage-tx" stageLabel="upstream" title="Transactions"
         sub="settled payments · read-only" count={columns.tx.count} state={columns.tx}
         features={null} col="tx" selected={selected} lineage={lineage} onSelect={onSelect}
+        bodyRef={bodyRefs.tx}
         keyOf={(t, i) => t.paymentId ?? i}
         emptyMsg="No transactions in last 2 batch windows"
         renderRow={(t) => (
@@ -107,6 +140,7 @@ export default function PipelineColumns({ columns, selected, lineage, onSelect, 
         sub="ingest_worker · change stream" count={columns.le.count} state={columns.le}
         features={["Change Streams", "Resume Tokens", "DuplicateKeyError idempotency", "$jsonSchema validator"]}
         col="le" selected={selected} lineage={lineage} onSelect={onSelect} rowId={(e) => `le-row-${e.eventId}`}
+        bodyRef={bodyRefs.le}
         keyOf={(e, i) => e.eventId ?? i}
         emptyMsg="No ledger events in last 2 batch windows"
         renderRow={(e) => (
@@ -129,6 +163,7 @@ export default function PipelineColumns({ columns, selected, lineage, onSelect, 
         sub="projection_worker · ACID txn" count={columns.sl.count} state={columns.sl}
         features={["Change Streams", "ACID multi-doc transaction", "$jsonSchema validator", "Partial index (journalEntryId ≠ \"\")"]}
         col="sl" selected={selected} lineage={lineage} onSelect={onSelect}
+        bodyRef={bodyRefs.sl}
         keyOf={(s, i) => s.subLedgerId ?? i}
         emptyMsg="No subledger entries in last 2 batch windows"
         renderRow={(s) => (
@@ -152,6 +187,7 @@ export default function PipelineColumns({ columns, selected, lineage, onSelect, 
         sub="gl_batch · scheduled" count={columns.jn.count} state={columns.jn}
         features={["Aggregation ($group $sum $addToSet)", "ACID transaction", "$expr Pacioli validator", "Multikey index (entries.accountCode)"]}
         col="jn" selected={selected} lineage={lineage} onSelect={onSelect}
+        bodyRef={bodyRefs.jn}
         keyOf={(j, i) => j.journalId ?? i}
         emptyMsg="No journal entries in last 2 batch windows"
         renderRow={(j) => {

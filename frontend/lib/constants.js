@@ -1,6 +1,9 @@
 export const USER_MAP = {
     "65a546ae4a8f64e8f88fb89e": {
-        UserName: "fridaklo",
+        UserName: "Frida",
+        // Backend openfinance identity (DB UserName). The display name (UserName
+        // above) diverged from the DB username, so keep the real one for API calls.
+        BankUserName: "fridaklo",
         Role: "Leafy Bank Customer",
         Section: "retail",
         Employer: "Deloitte Mexico",
@@ -12,7 +15,8 @@ export const USER_MAP = {
         SpendingProfile: "Spender",
     },
     "66fe219d625d93a100528224": {
-        UserName: "gracehop",
+        UserName: "Grace",
+        BankUserName: "gracehop",
         Role: "Leafy Bank Customer",
         Section: "retail",
         Employer: "U.S. Naval Reserve",
@@ -24,12 +28,12 @@ export const USER_MAP = {
         SpendingProfile: "Saver",
     },
     "67a1000000000000000000001": {
-        UserName: "marcowenz",
-        Role: "Bank Operations Admin",
+        UserName: "Marc",
+        Role: "Finance Operator",
         Section: "backoffice",
         Employer: "Leafy Bank",
         EmploymentType: "FullTime",
-        JobTitle: "Bank Operations Admin",
+        JobTitle: "Finance Operator",
         IncomeAmount: null,
         Currency: "USD",
         IncomeFrequency: null,
@@ -37,7 +41,7 @@ export const USER_MAP = {
         Features: ["General Ledger Pipeline Monitor"],
     },
     "67a1000000000000000000002": {
-        UserName: "anaruiz",
+        UserName: "Ana",
         Role: "Risk Analyst",
         Section: "backoffice",
         Employer: "Leafy Bank",
@@ -47,36 +51,24 @@ export const USER_MAP = {
         Currency: "USD",
         IncomeFrequency: null,
         Url: "https://fsi-fraud-detection.industrysolutions.prod.corp.mongodb.com/?userEmail=ainhoa.mugica%40mongodb.com&sessionGoal=Development+%2F+Test",
-        Features: [{ group: "ThreatSight360", items: ["Entity Management", "Entity Resolution", "Transaction Screening", "Agentic Investigation"] }],
+        Features: [{ group: "ThreatSight360", items: ["Entity Management", "Entity Resolution", "Transaction Screening", "Agentic Investigation", "Risk Model Management"] }],
     },
-    "67a1000000000000000000003": {
-        UserName: "davidpark",
-        Role: "Risk Manager",
-        Section: "backoffice",
-        Employer: "Leafy Bank",
-        EmploymentType: "FullTime",
-        JobTitle: "Risk Manager",
-        IncomeAmount: null,
-        Currency: "USD",
-        IncomeFrequency: null,
-        Url: "https://fsi-fraud-detection.industrysolutions.prod.corp.mongodb.com/",
-        Features: [{ group: "ThreatSight360", items: ["Risk Model Management"] }],
-    },
+
     "67a1000000000000000000004": {
-        UserName: "sophiachen",
-        Role: "Relationship Manager",
+        UserName: "Sophia",
+        Role: "Investment Portfolio Manager",
         Section: "backoffice",
         Employer: "Leafy Bank",
         EmploymentType: "FullTime",
-        JobTitle: "Relationship Manager",
+        JobTitle: "Investment Portfolio Manager",
         IncomeAmount: null,
         Currency: "USD",
         IncomeFrequency: null,
-        Url:"https://leafy-bank-ui.industrysolutions.prod.corp.mongodb.com/asset-portfolio",
+        Url: "https://leafy-bank-ui.industrysolutions.prod.corp.mongodb.com/asset-portfolio",
         Features: ["Asset and Crypto Portfolio Management"],
     },
-    "67a1000000000000000000005": {
-        UserName: "lucastorres",
+    "67a1000000000000000000003": {
+        UserName: "Luke",
         Role: "Payments Operations",
         Section: "backoffice",
         Employer: "Leafy Bank",
@@ -88,11 +80,26 @@ export const USER_MAP = {
         Url: "https://fsi-payments-processing.industrysolutions.prod.corp.mongodb.com/",
         Features: ["Agentic Payments System"],
     },
+    "67a1000000000000000000006": {
+        UserName: "Maria",
+        Role: "Document Analyst",
+        Section: "backoffice",
+        Employer: "Leafy Bank",
+        EmploymentType: "FullTime",
+        JobTitle: "Document Analyst",
+        IncomeAmount: null,
+        Currency: "USD",
+        IncomeFrequency: null,
+        Url: "https://document-intelligence-ui.industrysolutions.prod.corp.mongodb.com/use-case",
+        Features: ["Document Intelligence"],
+    },
 };
 
 export const USER_LIST = Object.entries(USER_MAP).map(([id, details]) => ({
     id,
     name: details.UserName,
+    // Identifier sent to the openfinance backend; falls back to the display name.
+    bankUsername: details.BankUserName ?? details.UserName,
     role: details.Role,
     section: details.Section,
     employer: details.Employer,

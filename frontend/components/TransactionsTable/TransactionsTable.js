@@ -36,12 +36,23 @@ const categoryColors = {
   Entertainment: "#8B5CF6",
   "Movie Theatres": "#8B5CF6",
   "Streaming Services": "#8B5CF6",
-  Utilities: "#EF4444",
   "Clothing Stores": "#EC4899",
   "Department Stores": "#EC4899",
-  Healthcare: "#06B6D4",
   Pharmacy: "#06B6D4",
-  Other: "#dfdfdf",
+  // External open-finance feed categories (transactionCategory field).
+  // Colors match the "Spending per Category" Atlas Chart legend.
+  Shopping: "#00C767",
+  Services: "#1A6DFF",
+  SavingsTransfer: "#F0AD00",
+  Transport: "#E6007E",
+  Healthcare: "#00B3E6",
+  Utilities: "#12594B",
+  Insurance: "#F06E0A",
+  Medical: "#9B5DE5",
+  Subscription: "#0D7C86",
+  AccountTransfer: "#5C6C75",
+  Rent: "#12594B",
+  Other: "#B31B1B",
 };
 
 const defaultGetCategoryColor = (category) =>

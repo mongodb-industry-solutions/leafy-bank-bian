@@ -29,8 +29,11 @@ function normalizeTransaction(t) {
     ...t,
     BookgDt: t.bookingDate,
     Amt: { value: t.amount },
-    CdtDbtInd: t.direction === "OUTGOING" ? "DBIT" : "CRDT",
-    Cdtr: { Nm: t.payee?.name },
+    // Direction and counterparty are framed relative to the viewer by the backend
+    // (viewerDirection/counterparty). Fall back to the stored sender-oriented fields
+    // for any doc that predates that framing.
+    CdtDbtInd: (t.viewerDirection || t.direction) === "OUTGOING" ? "DBIT" : "CRDT",
+    Cdtr: { Nm: (t.counterparty || t.payee)?.name },
     AddtlNtryInf: t.description,
     // BIAN txnCode is "PMNT-MCRD-POSD": family is the SECOND segment (MCRD=card),
     // subfamily the third (POSD=point-of-sale). The card view filters on Fmly === "MCRD".
@@ -225,7 +228,7 @@ export function useCachedExternalData() {
     let cancelled = false;
 
     coreApi(
-      `openfinance/secure/customers/${selectedUser.name}/cached-data`,
+      `openfinance/secure/customers/${selectedUser.bankUsername}/cached-data`,
       {
         bearerToken: selectedUser.bearerToken,
         // Scope to THIS browser session's consents so cross-session/duplicate
@@ -302,7 +305,7 @@ export function useGlobalPosition() {
     let cancelled = false;
 
     coreApi(
-      `openfinance/secure/customers/${selectedUser.name}/global-position`,
+      `openfinance/secure/customers/${selectedUser.bankUsername}/global-position`,
       {
         bearerToken: selectedUser.bearerToken,
         // Match the cached-data view: only this session's banks, so totals

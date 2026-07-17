@@ -79,6 +79,7 @@ class AccountsService:
             )
 
         if account_ref:
+            owned_ids = [account_ref]
             query = {"$or": [{"payer.accountId": account_ref}, {"payee.accountId": account_ref}]}
         else:
             owned = list(
@@ -104,7 +105,20 @@ class AccountsService:
             .sort([("bookingDate", -1), ("_id", -1)])
             .limit(limit)
         )
-        return list(cursor)
+
+        # The stored doc is written from the sender's perspective (direction always
+        # OUTGOING, payer=sender, payee=recipient). The SAME doc is returned to both
+        # parties, so re-frame it relative to the viewer at read time (no DB write):
+        # if the viewer owns the payee side, this is money IN and the counterparty is
+        # the payer; otherwise it's money OUT and the counterparty is the payee.
+        owned = set(owned_ids)
+        results = []
+        for txn in cursor:
+            is_incoming = (txn.get("payee") or {}).get("accountId") in owned
+            txn["viewerDirection"] = "INCOMING" if is_incoming else "OUTGOING"
+            txn["counterparty"] = txn.get("payer") if is_incoming else txn.get("payee")
+            results.append(txn)
+        return results
 
     def create_account(
         self,
