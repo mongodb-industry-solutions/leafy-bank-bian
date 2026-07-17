@@ -10,6 +10,7 @@ import Image from "next/image";
 import Icon from "@leafygreen-ui/icon";
 import Link from "next/link";
 import ProductCard from "@/components/ProductCard/ProductCard";
+import CollapsibleProductCard from "@/components/ProductCard/CollapsibleProductCard";
 import LeafyBankAssistant from "../components/LeafyBankAssistant/LeafyBankAssistant";
 import OpenFinanceAssistant from "@/components/OpenFinanceAssistant/OpenFinanceAssistant";
 import Login from "@/components/Login/Login";
@@ -42,6 +43,106 @@ const HomeContent = () => {
   const [accountType, setAccountType] = useState("");
   const [sendMoneyOpen, setSendMoneyOpen] = useState(false);
   const [openFinanceOpen, setOpenFinanceOpen] = useState(false);
+
+  const accountsContent = (
+    <div className={styles.accountList}>
+      {homeLoading ? (
+        <Body className={styles.cardBodyGray}>Loading...</Body>
+      ) : bankAccounts.length > 0 ? (
+        // Show external accounts (Green Bank, MongoDB Bank, NeoFinance,
+        // …) first; stable sort keeps original order within each group.
+        [...bankAccounts]
+          .sort(
+            (a, b) =>
+              isExternalBank(b.AccountBank) - isExternalBank(a.AccountBank)
+          )
+          .map((account) => (
+            <div key={account._id} className={styles.accountRow}>
+              <div className={styles.accountInfo}>
+                <Body>{account.AccountType} Account</Body>
+                <Body className={styles.cardBodyGray}>
+                  Account Number: {account.AccountNumber}
+                </Body>
+                {account.AccountBank && (
+                  <Badge variant={bankBadgeVariant(account.AccountBank)} className={styles.accountBankBadge}>
+                    {account.AccountBank}
+                  </Badge>
+                )}
+              </div>
+              <div className={styles.accountAmount}>
+                <Subtitle>
+                  {formatCurrency(account.AccountBalance)}
+                </Subtitle>
+              </div>
+            </div>
+          ))
+      ) : (
+        <Body className={styles.cardBodyGray}>No accounts found</Body>
+      )}
+    </div>
+  );
+
+  const openAccountButton = (
+    <Button
+      size="small"
+      variant="default"
+      leftGlyph={<Icon glyph="Plus" />}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setAccountModalOpen(true);
+      }}
+    >
+      Open <span className={styles.hideOnMobile}>Account</span>
+    </Button>
+  );
+
+  const creditCardsContent = (
+    <div className={styles.accountList}>
+      {creditCards.map((card) => (
+        <div key={card._id} className={styles.accountRow}>
+          <div className={styles.accountInfo}>
+            <Body>{card.AccountDescription || "Credit Card"}</Body>
+            <Body className={styles.cardBodyGray}>{card.AccountNumber}</Body>
+            {card.AccountBank && (
+              <Badge variant={bankBadgeVariant(card.AccountBank)} className={styles.accountBankBadge}>
+                {card.AccountBank}
+              </Badge>
+            )}
+          </div>
+          <div className={styles.accountAmount}>
+            <Subtitle>{formatCurrency(card.AccountBalance)}</Subtitle>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const loansContent = (
+    <div className={styles.accountList}>
+      {loans.length > 0 ? (
+        loans.map((loan, i) => (
+          <div key={i} className={styles.accountRow}>
+            <div className={styles.accountInfo}>
+              <Body>{loan.name}</Body>
+              {loan.institution && (
+                <Badge variant={bankBadgeVariant(loan.institution)} className={styles.accountBankBadge}>
+                  {loan.institution}
+                </Badge>
+              )}
+            </div>
+            <div className={styles.accountAmount}>
+              <Subtitle>{formatCurrency(loan.balance)}</Subtitle>
+            </div>
+          </div>
+        ))
+      ) : (
+        <Body className={styles.cardBodyGray}>
+          Connect a bank via chatbot to see loans
+        </Body>
+      )}
+    </div>
+  );
 
   return (
     <main className={styles.container}>
@@ -94,118 +195,47 @@ const HomeContent = () => {
         <div className={styles.productsHeader}>
           <H2>Products</H2>
         </div>
-        <div className={styles.rowThreeEqual}>
-          <ProductCard
-            href="/accounts"
-            imgSrc="/bank.png"
-            imgAlt="accounts"
-            title="Accounts"
-            actionButton={
-              <Button
-                size="small"
-                variant="default"
-                leftGlyph={<Icon glyph="Plus" />}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setAccountModalOpen(true);
-                }}
-              >
-                Open <span className={styles.hideOnMobile}>Account</span>
-              </Button>
-            }
-          >
-            <div className={styles.accountList}>
-              {homeLoading ? (
-                <Body className={styles.cardBodyGray}>Loading...</Body>
-              ) : bankAccounts.length > 0 ? (
-                // Show external accounts (Green Bank, MongoDB Bank, NeoFinance,
-                // …) first; stable sort keeps original order within each group.
-                [...bankAccounts]
-                  .sort(
-                    (a, b) =>
-                      isExternalBank(b.AccountBank) - isExternalBank(a.AccountBank)
-                  )
-                  .map((account) => (
-                  <div
-                    key={account._id}
-                    className={styles.accountRow}
-                  >
-                    <div className={styles.accountInfo}>
-                      <Body>{account.AccountType} Account</Body>
-                      <Body className={styles.cardBodyGray}>
-                        Account Number: {account.AccountNumber}
-                      </Body>
-                      {account.AccountBank && (
-                        <Badge variant={bankBadgeVariant(account.AccountBank)} className={styles.accountBankBadge}>
-                          {account.AccountBank}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className={styles.accountAmount}>
-                      <Subtitle>
-                        {formatCurrency(account.AccountBalance)}
-                      </Subtitle>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <Body className={styles.cardBodyGray}>
-                  No accounts found
-                </Body>
-              )}
-            </div>
-          </ProductCard>
+        {hasExternalBank ? (
+          <div className={styles.rowThreeEqual}>
+            <ProductCard
+              href="/accounts"
+              imgSrc="/bank.png"
+              imgAlt="accounts"
+              title="Accounts"
+              actionButton={openAccountButton}
+            >
+              {accountsContent}
+            </ProductCard>
 
-          <ProductCard href="/credit-cards" imgSrc="/card.png" imgAlt="credit-cards" title="Credit Cards">
-            <div className={styles.accountList}>
-              {creditCards.map((card) => (
-                <div key={card._id} className={styles.accountRow}>
-                  <div className={styles.accountInfo}>
-                    <Body>{card.AccountDescription || "Credit Card"}</Body>
-                    <Body className={styles.cardBodyGray}>
-                      {card.AccountNumber}
-                    </Body>
-                    {card.AccountBank && (
-                      <Badge variant={bankBadgeVariant(card.AccountBank)} className={styles.accountBankBadge}>
-                        {card.AccountBank}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className={styles.accountAmount}>
-                    <Subtitle>{formatCurrency(card.AccountBalance)}</Subtitle>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </ProductCard>
+            <ProductCard href="/credit-cards" imgSrc="/card.png" imgAlt="credit-cards" title="Credit Cards">
+              {creditCardsContent}
+            </ProductCard>
 
-          <ProductCard href="/loans" imgSrc="/loan.png" imgAlt="loans" title="Loans">
-            <div className={styles.accountList}>
-              {loans.length > 0 ? (
-                loans.map((loan, i) => (
-                  <div key={i} className={styles.accountRow}>
-                    <div className={styles.accountInfo}>
-                      <Body>{loan.name}</Body>
-                      {loan.institution && (
-                        <Badge variant={bankBadgeVariant(loan.institution)} className={styles.accountBankBadge}>
-                          {loan.institution}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className={styles.accountAmount}>
-                      <Subtitle>{formatCurrency(loan.balance)}</Subtitle>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <Body className={styles.cardBodyGray}>
-                  Connect a bank via chatbot to see loans
-                </Body>
-              )}
-            </div>
-          </ProductCard>
-        </div>
+            <ProductCard href="/loans" imgSrc="/loan.png" imgAlt="loans" title="Loans">
+              {loansContent}
+            </ProductCard>
+          </div>
+        ) : (
+          <div className={styles.stackedProducts}>
+            <ProductCard
+              href="/accounts"
+              imgSrc="/bank.png"
+              imgAlt="accounts"
+              title="Accounts"
+              actionButton={openAccountButton}
+            >
+              {accountsContent}
+            </ProductCard>
+
+            <CollapsibleProductCard href="/credit-cards" imgSrc="/card.png" imgAlt="credit-cards" title="Credit Cards">
+              {creditCardsContent}
+            </CollapsibleProductCard>
+
+            <CollapsibleProductCard href="/loans" imgSrc="/loan.png" imgAlt="loans" title="Loans">
+              {loansContent}
+            </CollapsibleProductCard>
+          </div>
+        )}
         <div className={styles.sectionDots}>
           <span className={styles.sectionDot} />
           <span className={styles.sectionDot} />

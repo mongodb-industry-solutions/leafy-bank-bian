@@ -153,6 +153,15 @@
   width: 100%;
 }
 
+/* Stacked products layout: Accounts on top, collapsible cards below.
+   Used when no external bank is connected. */
+.stackedProducts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
 /* Global Position row: two equal cards spanning the full width. */
 .gpRow {
   display: grid;
