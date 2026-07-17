@@ -39,7 +39,7 @@ export default function CreditCardsPage() {
             )}
           </Card>
           <Card className={styles.topCard}>
-            {selectedUser?.name === 'fridaklo' && (
+            {selectedUser?.bankUsername === 'fridaklo' && (
               <div className={styles.iframeWrap}>
                 <iframe
                   width="640"
@@ -48,7 +48,7 @@ export default function CreditCardsPage() {
                 ></iframe>
               </div>
             )}
-            {selectedUser?.name === 'gracehop' && (
+            {selectedUser?.bankUsername === 'gracehop' && (
               <div className={styles.iframeWrap}>
                 <iframe
                   width="640"
@@ -57,7 +57,7 @@ export default function CreditCardsPage() {
                 ></iframe>
               </div>
             )}
-            {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'gracehop')) && (
+            {(!selectedUser?.bankUsername || (selectedUser?.bankUsername !== 'fridaklo' && selectedUser?.bankUsername !== 'gracehop')) && (
               <div className={styles.iframeWrap}></div>
             )}
           </Card>
@@ -65,7 +65,7 @@ export default function CreditCardsPage() {
           <div className={styles.stackColumn}>
             <Card className={styles.stackTopCard}>
               <div className={styles.stackTopInner}>
-                {selectedUser?.name === 'fridaklo' && (
+                {selectedUser?.bankUsername === 'fridaklo' && (
                   <div className={styles.iframeWrap}>
                     <iframe
                       width="640"
@@ -74,7 +74,7 @@ export default function CreditCardsPage() {
                     ></iframe>
                   </div>
                 )}
-                {selectedUser?.name === 'gracehop' && (
+                {selectedUser?.bankUsername === 'gracehop' && (
                   <div className={styles.iframeWrap}>
                     <iframe
                       width="640"
@@ -83,7 +83,7 @@ export default function CreditCardsPage() {
                     ></iframe>
                   </div>
                 )}
-                {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'gracehop')) && (
+                {(!selectedUser?.bankUsername || (selectedUser?.bankUsername !== 'fridaklo' && selectedUser?.bankUsername !== 'gracehop')) && (
                   <Subtitle>Other analytics</Subtitle>
                 )}
               </div>

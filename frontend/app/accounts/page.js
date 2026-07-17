@@ -51,17 +51,17 @@ export default function AccountsPage() {
             )}
           </Card>
           <Card className={styles.topCard}>
-            {selectedUser?.name === 'fridaklo' && (
+            {selectedUser?.bankUsername === 'fridaklo' && (
               <div className={styles.iframeWrap}>
                 <ConsentGatedChart chartId="8867e720-081f-4b5a-9302-fb9b2b3622db" />
               </div>
             )}
-            {selectedUser?.name === 'gracehop' && (
+            {selectedUser?.bankUsername === 'gracehop' && (
               <div className={styles.iframeWrap}>
                 <ConsentGatedChart chartId="c5fc1948-d42d-4e46-a3c2-3e0c3cb1e637" />
               </div>
             )}
-            {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'gracehop')) && (
+            {(!selectedUser?.bankUsername || (selectedUser?.bankUsername !== 'fridaklo' && selectedUser?.bankUsername !== 'gracehop')) && (
               <div className={styles.iframeWrap}></div>
             )}
           </Card>
@@ -69,17 +69,17 @@ export default function AccountsPage() {
           <div className={styles.stackColumn}>
             <Card className={styles.stackTopCard}>
               <div className={styles.stackTopInner}>
-                {selectedUser?.name === 'fridaklo' && (
+                {selectedUser?.bankUsername === 'fridaklo' && (
                   <div className={styles.iframeWrap}>
                     <ConsentGatedChart chartId="fdc4b222-d67f-44d1-8809-767eae9e4f8a" />
                   </div>
                 )}
-                {selectedUser?.name === 'gracehop' && (
+                {selectedUser?.bankUsername === 'gracehop' && (
                   <div className={styles.iframeWrap}>
                     <ConsentGatedChart chartId="62d1db18-3a11-4806-b5b6-3fbdd5482f45" />
                   </div>
                 )}
-                {(!selectedUser?.name || (selectedUser?.name !== 'fridaklo' && selectedUser?.name !== 'gracehop')) && (
+                {(!selectedUser?.bankUsername || (selectedUser?.bankUsername !== 'fridaklo' && selectedUser?.bankUsername !== 'gracehop')) && (
                   <Subtitle>Other analytics</Subtitle>
                 )}
               </div>
