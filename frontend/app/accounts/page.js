@@ -13,6 +13,7 @@ import MobileActions from "@/components/MobileActions/MobileActions";
 import { useAccountsPageData } from "@/lib/api/hooks";
 import { useUser } from "@/lib/context/UserContext";
 import ConsentGatedChart from "@/components/ConsentGatedChart/ConsentGatedChart";
+import { chartIds } from "@/lib/config/charts";
 
 
 
@@ -53,12 +54,12 @@ export default function AccountsPage() {
           <Card className={styles.topCard}>
             {selectedUser?.bankUsername === 'fridaklo' && (
               <div className={styles.iframeWrap}>
-                <ConsentGatedChart chartId="8867e720-081f-4b5a-9302-fb9b2b3622db" />
+                <ConsentGatedChart chartId={chartIds.fridaklo.top} />
               </div>
             )}
             {selectedUser?.bankUsername === 'gracehop' && (
               <div className={styles.iframeWrap}>
-                <ConsentGatedChart chartId="c5fc1948-d42d-4e46-a3c2-3e0c3cb1e637" />
+                <ConsentGatedChart chartId={chartIds.gracehop.top} />
               </div>
             )}
             {(!selectedUser?.bankUsername || (selectedUser?.bankUsername !== 'fridaklo' && selectedUser?.bankUsername !== 'gracehop')) && (
@@ -71,12 +72,12 @@ export default function AccountsPage() {
               <div className={styles.stackTopInner}>
                 {selectedUser?.bankUsername === 'fridaklo' && (
                   <div className={styles.iframeWrap}>
-                    <ConsentGatedChart chartId="fdc4b222-d67f-44d1-8809-767eae9e4f8a" />
+                    <ConsentGatedChart chartId={chartIds.fridaklo.lower} />
                   </div>
                 )}
                 {selectedUser?.bankUsername === 'gracehop' && (
                   <div className={styles.iframeWrap}>
-                    <ConsentGatedChart chartId="62d1db18-3a11-4806-b5b6-3fbdd5482f45" />
+                    <ConsentGatedChart chartId={chartIds.gracehop.lower} />
                   </div>
                 )}
                 {(!selectedUser?.bankUsername || (selectedUser?.bankUsername !== 'fridaklo' && selectedUser?.bankUsername !== 'gracehop')) && (
