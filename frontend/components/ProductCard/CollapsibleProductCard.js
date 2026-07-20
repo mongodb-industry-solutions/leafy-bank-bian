@@ -8,15 +8,14 @@ import styles from "./ProductCard.module.css";
 /**
  * Collapsible variant of the product card used on the home page.
  *
- * Renders a header (image + title) with the card body always shown. The header
- * is not clickable — clicking the card does nothing. Used for Credit Cards and
+ * Renders a header (image + title) only — collapsed, with no chevron toggle and
+ * not clickable, so clicking the card does nothing. Used for Credit Cards and
  * Loans when no external bank is connected.
  */
 export default function CollapsibleProductCard({
   imgSrc,
   imgAlt,
   title,
-  children,
 }) {
   return (
     <div className={styles.collapsibleCard}>
@@ -33,8 +32,6 @@ export default function CollapsibleProductCard({
             <Subtitle>{title}</Subtitle>
           </div>
         </div>
-
-        <div className={styles.collapsibleContent}>{children}</div>
       </Card>
     </div>
   );

@@ -137,9 +137,7 @@ const HomeContent = () => {
           </div>
         ))
       ) : (
-        <Body className={styles.cardBodyGray}>
-          Connect a bank via chatbot to see loans
-        </Body>
+        <Body className={styles.cardBodyGray}>&nbsp;</Body>
       )}
     </div>
   );
