@@ -7,7 +7,7 @@
  *
  * The BIAN backend is split across services. We route by the first path
  * segment (the BIAN service-domain name):
- *   - CurrentAccountFulfillmentArrangement/*, PartyReferenceDataDirectoryEntry/*
+ *   - CurrentAccount/*, PartyReferenceDataDirectory/*
  *       → ACCOUNTS_BACKEND_URL     (accounts service)
  *   - PaymentOrderInitiation/*       → TRANSACTIONS_BACKEND_URL (transactions service)
  *   - everything else (openfinance/*, encryption-demo/*, …)
@@ -26,8 +26,8 @@ const LEDGER_BACKEND =
 // First path segment (BIAN service domain) → backend base URL.
 // Unmapped prefixes fall through to CONSENT_BACKEND.
 const BACKEND_BY_PREFIX = {
-  PartyReferenceDataDirectoryEntry: ACCOUNTS_BACKEND,
-  CurrentAccountFulfillmentArrangement: ACCOUNTS_BACKEND,
+  PartyReferenceDataDirectory: ACCOUNTS_BACKEND,
+  CurrentAccount: ACCOUNTS_BACKEND,
   PaymentOrderInitiation: TRANSACTIONS_BACKEND,
   // GL pipeline monitor routes (read-only) live on the ledger service.
   pipeline: LEDGER_BACKEND,

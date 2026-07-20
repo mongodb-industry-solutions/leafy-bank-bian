@@ -4,8 +4,8 @@ This is the single source of truth for the "BIAN API" tab in the frontend
 explorer modal. The catalog spans two backend services:
 
   - leafy-bank-backend-accounts (this service, :8080)
-      * PartyReferenceDataDirectoryEntry
-      * CurrentAccountFulfillmentArrangement
+      * PartyReferenceDataDirectory
+      * CurrentAccount
   - leafy-bank-backend-transactions (:8001)
       * PaymentOrderInitiation
 
@@ -20,7 +20,7 @@ Per-operation metadata:
   id                       - stable client-side key
   bianBehaviorQualifier    - optional BIAN sub-record (e.g. "CustomerKYCRecord")
   bianAction               - Retrieve | Request | Initiate | Control
-  method                   - always "POST"
+  method                   - "GET" for Retrieve; "POST" for mutations (Initiate/Control) and Request
   path                     - PascalCase BIAN URL
   summary                  - one-line human description
   headers                  - list of header descriptors (e.g. Idempotency-Key)
@@ -33,7 +33,7 @@ Per-operation metadata:
 API_CATALOG = {
     "version": "v14",
     "description": (
-        "BIAN v14 contract layer for Leafy Bank. Verb-in-URL, POST-only. "
+        "BIAN v14 contract layer for Leafy Bank. Verb-in-URL; Retrieve is GET, mutations are POST. "
         "Two services: accounts (:8080) and transactions (:8001)."
     ),
     "conventions": {
@@ -66,16 +66,16 @@ API_CATALOG = {
             "port": 8080,
             "serviceDomains": [
                 {
-                    "key": "PartyReferenceDataDirectoryEntry",
-                    "label": "Party Reference Data Directory Entry",
+                    "key": "PartyReferenceDataDirectory",
+                    "label": "Party Reference Data Directory",
                     "description": "Customer master data and KYC.",
                     "operations": [
                         {
                             "id": "retrieveCustomer",
                             "bianBehaviorQualifier": None,
                             "bianAction": "Retrieve",
-                            "method": "POST",
-                            "path": "/PartyReferenceDataDirectoryEntry/Retrieve",
+                            "method": "GET",
+                            "path": "/PartyReferenceDataDirectory/{partyreferencedatadirectoryid}/Retrieve",
                             "summary": "Look up one customer by CustomerReference.",
                             "headers": [],
                             "enums": {},
@@ -120,7 +120,7 @@ API_CATALOG = {
                             "bianBehaviorQualifier": None,
                             "bianAction": "Request",
                             "method": "POST",
-                            "path": "/PartyReferenceDataDirectoryEntry/Request",
+                            "path": "/PartyReferenceDataDirectory/Request",
                             "summary": "List/query customers. All filters optional; empty body returns all.",
                             "headers": [],
                             "enums": {
@@ -178,8 +178,8 @@ API_CATALOG = {
                             "id": "retrieveCustomerKYC",
                             "bianBehaviorQualifier": "CustomerKYCRecord",
                             "bianAction": "Retrieve",
-                            "method": "POST",
-                            "path": "/PartyReferenceDataDirectoryEntry/CustomerKYCRecord/Retrieve",
+                            "method": "GET",
+                            "path": "/PartyReferenceDataDirectory/{partyreferencedatadirectoryid}/CustomerKYCRecord/Retrieve",
                             "summary": "Retrieve the KYC record for one customer.",
                             "headers": [],
                             "enums": {},
@@ -214,7 +214,7 @@ API_CATALOG = {
                     ],
                 },
                 {
-                    "key": "CurrentAccountFulfillmentArrangement",
+                    "key": "CurrentAccount",
                     "label": "Current Account Fulfillment Arrangement",
                     "description": "Account opening, retrieval, listing, control, balance, and transaction history.",
                     "operations": [
@@ -223,7 +223,7 @@ API_CATALOG = {
                             "bianBehaviorQualifier": None,
                             "bianAction": "Initiate",
                             "method": "POST",
-                            "path": "/CurrentAccountFulfillmentArrangement/Initiate",
+                            "path": "/CurrentAccount/Initiate",
                             "summary": "Open a new current account for an existing customer.",
                             "headers": [],
                             "enums": {
@@ -289,8 +289,8 @@ API_CATALOG = {
                             "id": "retrieveCurrentAccount",
                             "bianBehaviorQualifier": None,
                             "bianAction": "Retrieve",
-                            "method": "POST",
-                            "path": "/CurrentAccountFulfillmentArrangement/Retrieve",
+                            "method": "GET",
+                            "path": "/CurrentAccount/{currentaccountid}/Retrieve",
                             "summary": "Look up one account by CurrentAccountReference or CurrentAccountNumber.",
                             "headers": [],
                             "enums": {},
@@ -340,7 +340,7 @@ API_CATALOG = {
                             "bianBehaviorQualifier": None,
                             "bianAction": "Request",
                             "method": "POST",
-                            "path": "/CurrentAccountFulfillmentArrangement/Request",
+                            "path": "/CurrentAccount/Request",
                             "summary": "List/query accounts. All filters optional.",
                             "headers": [],
                             "enums": {
@@ -398,7 +398,7 @@ API_CATALOG = {
                             "bianBehaviorQualifier": None,
                             "bianAction": "Control",
                             "method": "POST",
-                            "path": "/CurrentAccountFulfillmentArrangement/Control",
+                            "path": "/CurrentAccount/Control",
                             "summary": "State-change action on an account. Phase 1 supports Close only.",
                             "headers": [],
                             "enums": {
@@ -441,8 +441,8 @@ API_CATALOG = {
                             "id": "retrieveCurrentAccountBalance",
                             "bianBehaviorQualifier": "CurrentAccountBalanceRecord",
                             "bianAction": "Retrieve",
-                            "method": "POST",
-                            "path": "/CurrentAccountFulfillmentArrangement/CurrentAccountBalanceRecord/Retrieve",
+                            "method": "GET",
+                            "path": "/CurrentAccount/{currentaccountid}/CurrentAccountBalanceRecord/Retrieve",
                             "summary": "Get the current balance record for one account.",
                             "headers": [],
                             "enums": {},
@@ -483,7 +483,7 @@ API_CATALOG = {
                             "bianBehaviorQualifier": "CurrentAccountTransaction",
                             "bianAction": "Request",
                             "method": "POST",
-                            "path": "/CurrentAccountFulfillmentArrangement/CurrentAccountTransaction/Request",
+                            "path": "/CurrentAccount/CurrentAccountTransaction/Request",
                             "summary": "List recent ledger legs for an account (written by the transactions service).",
                             "headers": [],
                             "enums": {

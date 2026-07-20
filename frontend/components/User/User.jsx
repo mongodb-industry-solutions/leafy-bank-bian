@@ -5,9 +5,11 @@
 import React from 'react';
 import { Body } from '@leafygreen-ui/typography';
 import Card from '@leafygreen-ui/card';
+import { useUser } from '@/lib/context/UserContext';
 import styles from './User.module.css';
 
 const User = ({ user = null, isSelectedUser = false, setOpen, setLocalSelectedUser = null }) => {
+    const { markIntentionalNavigation } = useUser();
     const handleClick = () => {
         if (user.url) {
             // Internal routes (relative paths) navigate in the same tab;
@@ -16,6 +18,8 @@ const User = ({ user = null, isSelectedUser = false, setOpen, setLocalSelectedUs
                 // Persist the selection first — the destination route brings its
                 // own header (e.g. gl-pipeline-monitor's TopBar) that reads the
                 // user from UserContext/localStorage after this full-page nav.
+                // Flag the nav as intentional so it isn't seen as a fresh load.
+                markIntentionalNavigation();
                 setLocalSelectedUser?.(user);
                 window.location.href = user.url;
             } else {

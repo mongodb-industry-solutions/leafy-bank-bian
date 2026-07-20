@@ -1,24 +1,21 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import styles from "./page.module.css";
 import { H2, Body, Subtitle } from "@leafygreen-ui/typography";
 import Card from "@leafygreen-ui/card";
-import Image from "next/image";
-import Icon from "@leafygreen-ui/icon";
 import IconButton from "@leafygreen-ui/icon-button";
 import Code from "@leafygreen-ui/code";
 import TransactionsTable from "@/components/TransactionsTable/TransactionsTable";
 import OverlapCards from "../../components/OverlapCards/OverlapCards";
-import LeafyBankAssistant from "../../components/LeafyBankAssistant/LeafyBankAssistant";
 import MobileActions from "@/components/MobileActions/MobileActions";
 import { useCreditCardsPageData } from "@/lib/api/hooks";
 import { useUser } from "@/lib/context/UserContext";
+import ConsentGatedChart from "@/components/ConsentGatedChart/ConsentGatedChart";
 
 
 
 export default function CreditCardsPage() {
-  const [modalOpen, setModalOpen] = useState(false);
   const { selectedUser } = useUser();
   const { creditCards, cardTxns, accountsLoading, txLoading } = useCreditCardsPageData();
   
@@ -41,20 +38,12 @@ export default function CreditCardsPage() {
           <Card className={styles.topCard}>
             {selectedUser?.bankUsername === 'fridaklo' && (
               <div className={styles.iframeWrap}>
-                <iframe
-                  width="640"
-                  height="480"
-                  src="https://charts.mongodb.com/charts-jeffn-zsdtj/embed/charts?id=1066e97f-6628-49be-a720-462c0d87d32c&maxDataAge=3600&theme=light&autoRefresh=true"
-                ></iframe>
+                <ConsentGatedChart chartId="8867e720-081f-4b5a-9302-fb9b2b3622db" />
               </div>
             )}
             {selectedUser?.bankUsername === 'gracehop' && (
               <div className={styles.iframeWrap}>
-                <iframe
-                  width="640"
-                  height="480"
-                  src="https://charts.mongodb.com/charts-jeffn-zsdtj/embed/charts?id=45137520-16e5-430a-8a12-b07deca1b69e&maxDataAge=3600&theme=light&autoRefresh=true"
-                ></iframe>
+                <ConsentGatedChart chartId="c5fc1948-d42d-4e46-a3c2-3e0c3cb1e637" />
               </div>
             )}
             {(!selectedUser?.bankUsername || (selectedUser?.bankUsername !== 'fridaklo' && selectedUser?.bankUsername !== 'gracehop')) && (
@@ -67,55 +56,18 @@ export default function CreditCardsPage() {
               <div className={styles.stackTopInner}>
                 {selectedUser?.bankUsername === 'fridaklo' && (
                   <div className={styles.iframeWrap}>
-                    <iframe
-                      width="640"
-                      height="480"
-                      src="https://charts.mongodb.com/charts-jeffn-zsdtj/embed/charts?id=b2f07682-5ce1-4955-9e7f-703ba881404b&maxDataAge=3600&theme=light&autoRefresh=true"
-                    ></iframe>
+                    <ConsentGatedChart chartId="fdc4b222-d67f-44d1-8809-767eae9e4f8a" />
                   </div>
                 )}
                 {selectedUser?.bankUsername === 'gracehop' && (
                   <div className={styles.iframeWrap}>
-                    <iframe
-                      width="640"
-                      height="480"
-                      src="https://charts.mongodb.com/charts-jeffn-zsdtj/embed/charts?id=b421bdc8-3f1f-42ec-ac02-91196c36a1dd&maxDataAge=3600&theme=light&autoRefresh=true"
-                    ></iframe>
+                    <ConsentGatedChart chartId="62d1db18-3a11-4806-b5b6-3fbdd5482f45" />
                   </div>
                 )}
                 {(!selectedUser?.bankUsername || (selectedUser?.bankUsername !== 'fridaklo' && selectedUser?.bankUsername !== 'gracehop')) && (
                   <Subtitle>Other analytics</Subtitle>
                 )}
               </div>
-            </Card>
-
-            <Card className={styles.stackBottomCard}>
-              <button
-                onClick={() => setModalOpen(true)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
-                  cursor: "pointer",
-                  width: "100%",
-                }}
-                aria-label="Upgrade to Platinum"
-              >
-                <div className={styles.cardContent}>
-                  <div className={styles.thumbWrap}>
-                    <Image src="/credit_card.gif" alt="card icon" width={80} height={56} />
-                  </div>
-
-                  <div className={styles.cardText}>
-                    <Subtitle>Maybe it&apos;s time for a credit card?</Subtitle>
-                    <Body className={styles.cardBodyGray}>Let Leafy Assistant guide you</Body>
-                  </div>
-
-                  <div className={styles.iconRight}>
-                    <Icon glyph="ChevronRight" size="small" />
-                  </div>
-                </div>
-              </button>
             </Card>
           </div>
         </div>
@@ -128,8 +80,6 @@ export default function CreditCardsPage() {
           loading={txLoading}
         />
       </section>
-
-      <LeafyBankAssistant isOpen={modalOpen} onClose={() => setModalOpen(false)} />
 
       {/* Mobile-only bottom navigation + its action modals. */}
       <MobileActions />

@@ -1,5 +1,5 @@
-"""Pydantic request models for the BIAN PartyReferenceDataDirectoryEntry +
-CurrentAccountFulfillmentArrangement service domains.
+"""Pydantic request models for the BIAN PartyReferenceDataDirectory +
+CurrentAccount service domains.
 
 Field names use camelCase alias names (matching Mongo storage). The registry
 handles BIAN documentation mapping; no wire translation is done at request time.
@@ -21,12 +21,8 @@ CurrentAccountTypeEnum = Literal[
 ]
 
 
-# ---------- PartyReferenceDataDirectoryEntry ----------
-
-class PartyReferenceRetrieveRequest(BaseModel):
-    customerId: str = Field(min_length=1)
-    model_config = ConfigDict(extra="forbid")
-
+# ---------- PartyReferenceDataDirectory ----------
+# Retrieve / CustomerKYCRecord Retrieve are GET (query params), no request model.
 
 class PartyReferenceRequestRequest(BaseModel):
     status: Optional[PartyApexStatusType] = None
@@ -35,12 +31,8 @@ class PartyReferenceRequestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CustomerKYCRetrieveRequest(BaseModel):
-    customerId: str = Field(min_length=1)
-    model_config = ConfigDict(extra="forbid")
-
-
-# ---------- CurrentAccountFulfillmentArrangement ----------
+# ---------- CurrentAccount ----------
+# Retrieve / CurrentAccountBalanceRecord Retrieve are GET (query params), no request model.
 
 class AccountInitiateRequest(BaseModel):
     customerId: str = Field(min_length=1)
@@ -50,18 +42,6 @@ class AccountInitiateRequest(BaseModel):
     currency: str = Field(min_length=3, max_length=3)
     initialDeposit: float = Field(ge=0)
     model_config = ConfigDict(extra="forbid")
-
-
-class AccountRetrieveRequest(BaseModel):
-    accountId: Optional[str] = None
-    accountNumber: Optional[str] = None
-    model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def _at_least_one(self):
-        if not self.accountId and not self.accountNumber:
-            raise ValueError("One of accountId or accountNumber is required.")
-        return self
 
 
 class AccountRequestRequest(BaseModel):
@@ -75,11 +55,6 @@ class AccountControlRequest(BaseModel):
     accountId: str = Field(min_length=1)
     controlAction: Literal["Close"]
     controlReason: Optional[str] = None
-    model_config = ConfigDict(extra="forbid")
-
-
-class AccountBalanceRetrieveRequest(BaseModel):
-    accountId: str = Field(min_length=1)
     model_config = ConfigDict(extra="forbid")
 
 

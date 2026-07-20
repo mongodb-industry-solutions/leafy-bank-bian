@@ -6,6 +6,15 @@ import { USER_MAP } from "@/lib/constants";
 
 const UserContext = createContext(null);
 
+// True once the app runtime has mounted. Lives at module scope (not on
+// `window`) so it survives client-side navigation but resets on any full page
+// load — a refresh, a new tab, or an in-app `window.location.href` navigation.
+let runtimeMounted = false;
+// Breadcrumb set immediately before an intentional in-app full-page navigation
+// (e.g. jumping to a backoffice route, or switching back from one). Its presence
+// on the next full load distinguishes that navigation from a genuine refresh.
+const INTENTIONAL_NAV_KEY = "leafy_intentional_nav";
+
 export function UserProvider({ children }) {
   const [selectedUser, setSelectedUser] = useState(null);
   // Multi-bank: Map<consentId, { status, institution }>
@@ -52,6 +61,35 @@ export function UserProvider({ children }) {
     localStorage.removeItem("selectedUser");
     setSelectedUser(null);
     setConsents(new Map());
+  }, []);
+
+  // Record that the next full page load is an intentional in-app navigation, so
+  // the destination isn't misread as a fresh browser load that ends the session.
+  // Call before any `window.location.href`/`router.push` that may cross a route
+  // reached via a full page load (backoffice personas navigate this way).
+  const markIntentionalNavigation = useCallback(() => {
+    try {
+      sessionStorage.setItem(INTENTIONAL_NAV_KEY, "1");
+    } catch {
+      /* sessionStorage unavailable (SSR/private mode) — fall back to clearing */
+    }
+  }, []);
+
+  // Decide, once per runtime, whether this mount is a genuine fresh browser load
+  // (refresh / new tab) versus a continuation of an in-app session. Returns false
+  // for client-side navigations (runtime already mounted) and for intentional
+  // full-page navigations (breadcrumb present, consumed here).
+  const isFreshBrowserLoad = useCallback(() => {
+    if (runtimeMounted) return false;
+    runtimeMounted = true;
+    let intentional = false;
+    try {
+      intentional = sessionStorage.getItem(INTENTIONAL_NAV_KEY) === "1";
+      sessionStorage.removeItem(INTENTIONAL_NAV_KEY);
+    } catch {
+      /* treat as fresh load if sessionStorage is unavailable */
+    }
+    return !intentional;
   }, []);
 
   // Update bearer token (e.g. from bank-login get-authorization)
@@ -188,6 +226,8 @@ export function UserProvider({ children }) {
     selectedUser,
     selectUser,
     clearUser,
+    markIntentionalNavigation,
+    isFreshBrowserLoad,
     updateBearerToken,
     // Multi-bank API
     consents,
