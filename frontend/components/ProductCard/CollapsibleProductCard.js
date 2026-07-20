@@ -21,7 +21,7 @@ export default function CollapsibleProductCard({
     <div className={styles.collapsibleCard}>
       <Card className={styles.collapsibleLeafyCard}>
         <div className={styles.collapsibleHeader}>
-          <div className={styles.collapsibleTitleLink}>
+          <div className={styles.productHeaderLeft}>
             <Image
               src={imgSrc}
               alt={imgAlt}

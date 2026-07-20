@@ -59,21 +59,25 @@ export default function ProductCard({
   );
 
   if (locked) {
-    return (
-      <div className={`${styles.card} ${styles.cardProduct}`}>
-        <div
-          className={styles.cardLink}
-          role="button"
-          tabIndex={0}
-          aria-disabled="true"
-          onClick={onLockedClick}
-          onKeyDown={(e) => {
+    // Interactive only when a handler is provided; otherwise a plain,
+    // non-focusable container so it isn't announced as a disabled button.
+    const interactiveProps = onLockedClick
+      ? {
+          role: "button",
+          tabIndex: 0,
+          onClick: onLockedClick,
+          onKeyDown: (e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
-              onLockedClick?.();
+              onLockedClick();
             }
-          }}
-        >
+          },
+        }
+      : {};
+
+    return (
+      <div className={`${styles.card} ${styles.cardProduct}`}>
+        <div className={styles.cardLink} {...interactiveProps}>
           {inner}
         </div>
       </div>

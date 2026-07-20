@@ -19,10 +19,8 @@ import { chartIds } from "@/lib/config/charts";
 
 
 export default function AccountsPage() {
-  const [selectedAccount, setSelectedAccount] = useState(null);
-  const { selectedUser, hasActiveConsent } = useUser();
+  const { hasActiveConsent } = useUser();
   const router = useRouter();
-  const { allAccounts, recentTxns, accountsLoading, txLoading } = useAccountsPageData();
 
   // Consent gate: the accounts panel is only reachable while an Open Finance
   // consent is active. Without one (direct URL, or consent expired/revoked
@@ -31,7 +29,16 @@ export default function AccountsPage() {
     if (!hasActiveConsent) router.replace("/");
   }, [hasActiveConsent, router]);
 
+  // Render (and thereby fetch account/transaction data) only when consent holds.
   if (!hasActiveConsent) return null;
+
+  return <AccountsContent />;
+}
+
+function AccountsContent() {
+  const [selectedAccount, setSelectedAccount] = useState(null);
+  const { selectedUser } = useUser();
+  const { allAccounts, recentTxns, accountsLoading, txLoading } = useAccountsPageData();
 
   // When an account card is selected, show only that account's transactions.
   const visibleTxns = (

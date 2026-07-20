@@ -137,7 +137,7 @@ const HomeContent = () => {
           </div>
         ))
       ) : (
-        <Body className={styles.cardBodyGray}>&nbsp;</Body>
+        <Body className={styles.cardBodyGray} aria-hidden="true">&nbsp;</Body>
       )}
     </div>
   );
