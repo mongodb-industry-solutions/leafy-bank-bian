@@ -62,7 +62,7 @@ function txnAccountKeys(t) {
 
 /**
  * Fetch internal Leafy Bank accounts for the logged-in user.
- * Calls BIAN CurrentAccountFulfillmentArrangement/Request.
+ * Calls BIAN CurrentAccount/Request.
  */
 export function useAccounts() {
   const { selectedUser, dataRefreshKey } = useUser();
@@ -78,7 +78,7 @@ export function useAccounts() {
     setLoading(true);
 
     const customerId = `CUST-${selectedUser.id.slice(-8)}`;
-    coreApi("CurrentAccountFulfillmentArrangement/Request", {
+    coreApi("CurrentAccount/Request", {
       method: "POST",
       body: { customerId },
     }).then(({ data, error: err }) => {
@@ -96,7 +96,7 @@ export function useAccounts() {
  * with its owner's legal name, so a beneficiary picker can be a plain
  * dropdown instead of a type-and-lookup field. GL/NOSTRO/VOSTRO accounts are
  * excluded — those are internal ledger accounts, not payment counterparties.
- * Calls BIAN CurrentAccountFulfillmentArrangement/Request + PartyReferenceDataDirectoryEntry/Request.
+ * Calls BIAN CurrentAccount/Request + PartyReferenceDataDirectory/Request.
  */
 export function useBeneficiaryAccounts() {
   const [beneficiaryAccounts, setBeneficiaryAccounts] = useState([]);
@@ -105,8 +105,8 @@ export function useBeneficiaryAccounts() {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      coreApi("CurrentAccountFulfillmentArrangement/Request", { method: "POST", body: {} }),
-      coreApi("PartyReferenceDataDirectoryEntry/Request", { method: "POST", body: {} }),
+      coreApi("CurrentAccount/Request", { method: "POST", body: {} }),
+      coreApi("PartyReferenceDataDirectory/Request", { method: "POST", body: {} }),
     ]).then(([accountsRes, customersRes]) => {
       const legalNameByCustomerId = new Map(
         (customersRes.data?.customers ?? []).map((c) => [c.customerId, c.identification?.legalName]),
@@ -129,7 +129,7 @@ export function useBeneficiaryAccounts() {
 
 /**
  * Fetch all transactions for the logged-in user.
- * Calls BIAN CurrentAccountFulfillmentArrangement/CurrentAccountTransaction/Request.
+ * Calls BIAN CurrentAccount/CurrentAccountTransaction/Request.
  */
 export function useTransactions() {
   const { selectedUser, dataRefreshKey } = useUser();
@@ -145,7 +145,7 @@ export function useTransactions() {
     setLoading(true);
 
     const customerId = `CUST-${selectedUser.id.slice(-8)}`;
-    coreApi("CurrentAccountFulfillmentArrangement/CurrentAccountTransaction/Request", {
+    coreApi("CurrentAccount/CurrentAccountTransaction/Request", {
       method: "POST",
       body: { customerId, limit: 50 },
     }).then(({ data, error: err }) => {
@@ -160,7 +160,7 @@ export function useTransactions() {
 
 /**
  * Fetch credit risk rating for the logged-in user via BIAN KYC record.
- * Calls BIAN PartyReferenceDataDirectoryEntry/CustomerKYCRecord/Retrieve.
+ * Calls BIAN PartyReferenceDataDirectory/{id}/CustomerKYCRecord/Retrieve.
  */
 export function useCreditScore() {
   const { selectedUser } = useUser();
@@ -175,9 +175,8 @@ export function useCreditScore() {
     setLoading(true);
 
     const customerId = `CUST-${selectedUser.id.slice(-8)}`;
-    coreApi("PartyReferenceDataDirectoryEntry/CustomerKYCRecord/Retrieve", {
-      method: "POST",
-      body: { customerId },
+    coreApi(`PartyReferenceDataDirectory/${customerId}/CustomerKYCRecord/Retrieve`, {
+      method: "GET",
     }).then(({ data }) => {
       if (data?.kyc?.riskRating) setCreditScore(data.kyc.riskRating);
       setLoading(false);

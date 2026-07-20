@@ -15,14 +15,10 @@ from fastapi.responses import Response
 
 from api_models import (
     AccountActivityRequestRequest,
-    AccountBalanceRetrieveRequest,
     AccountControlRequest,
     AccountInitiateRequest,
     AccountRequestRequest,
-    AccountRetrieveRequest,
-    CustomerKYCRetrieveRequest,
     PartyReferenceRequestRequest,
-    PartyReferenceRetrieveRequest,
 )
 from bian.api_catalog import API_CATALOG
 from database.connection import MongoDBConnection
@@ -74,7 +70,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Leafy Bank — Accounts (BIAN PartyReferenceDataDirectoryEntry + CurrentAccountFulfillmentArrangement)",
+    title="Leafy Bank — Accounts (BIAN PartyReferenceDataDirectory + CurrentAccount)",
     lifespan=lifespan,
 )
 
@@ -110,8 +106,8 @@ async def read_root():
     return {
         "service": "leafy-bank-accounts",
         "bian": [
-            "PartyReferenceDataDirectoryEntry",
-            "CurrentAccountFulfillmentArrangement",
+            "PartyReferenceDataDirectory",
+            "CurrentAccount",
         ],
         "bianVersion": registry.bian_version,
     }
@@ -131,12 +127,12 @@ async def topup_run():
     return {"credited": credited, "threshold": threshold, "amount": amount}
 
 
-# ---------- PartyReferenceDataDirectoryEntry ----------
+# ---------- PartyReferenceDataDirectory ----------
 
-@app.post("/PartyReferenceDataDirectoryEntry/Retrieve")
-async def party_retrieve(body: PartyReferenceRetrieveRequest):
+@app.get("/PartyReferenceDataDirectory/{partyreferencedatadirectoryid}/Retrieve")
+async def party_retrieve(partyreferencedatadirectoryid: str):
     try:
-        customer = customers_service.get_customer(body.customerId)
+        customer = customers_service.get_customer(partyreferencedatadirectoryid)
         if not customer:
             raise HTTPException(status_code=404, detail="customerId not found.")
         return _bian_response({
@@ -146,11 +142,11 @@ async def party_retrieve(body: PartyReferenceRetrieveRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("PartyReferenceDataDirectoryEntry/Retrieve failed: %s", e)
+        logging.error("PartyReferenceDataDirectory/{id}/Retrieve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal retrieve error.")
 
 
-@app.post("/PartyReferenceDataDirectoryEntry/Request")
+@app.post("/PartyReferenceDataDirectory/Request")
 async def party_request(body: PartyReferenceRequestRequest):
     try:
         customers = customers_service.list_customers(body.model_dump(exclude_none=True))
@@ -160,14 +156,14 @@ async def party_request(body: PartyReferenceRequestRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("PartyReferenceDataDirectoryEntry/Request failed: %s", e)
+        logging.error("PartyReferenceDataDirectory/Request failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal list error.")
 
 
-@app.post("/PartyReferenceDataDirectoryEntry/CustomerKYCRecord/Retrieve")
-async def party_kyc_retrieve(body: CustomerKYCRetrieveRequest):
+@app.get("/PartyReferenceDataDirectory/{partyreferencedatadirectoryid}/CustomerKYCRecord/Retrieve")
+async def party_kyc_retrieve(partyreferencedatadirectoryid: str):
     try:
-        doc = customers_service.get_customer_kyc(body.customerId)
+        doc = customers_service.get_customer_kyc(partyreferencedatadirectoryid)
         if not doc:
             raise HTTPException(status_code=404, detail="customerId not found.")
         return _bian_response({
@@ -177,13 +173,13 @@ async def party_kyc_retrieve(body: CustomerKYCRetrieveRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("PartyReferenceDataDirectoryEntry/CustomerKYCRecord/Retrieve failed: %s", e)
+        logging.error("PartyReferenceDataDirectory/{id}/CustomerKYCRecord/Retrieve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal KYC retrieve error.")
 
 
-# ---------- CurrentAccountFulfillmentArrangement ----------
+# ---------- CurrentAccount ----------
 
-@app.post("/CurrentAccountFulfillmentArrangement/Initiate")
+@app.post("/CurrentAccount/Initiate")
 async def account_initiate(body: AccountInitiateRequest):
     try:
         account_doc = accounts_service.create_account(
@@ -203,17 +199,14 @@ async def account_initiate(body: AccountInitiateRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logging.error("CurrentAccountFulfillmentArrangement/Initiate failed: %s", e)
+        logging.error("CurrentAccount/Initiate failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal initiate error.")
 
 
-@app.post("/CurrentAccountFulfillmentArrangement/Retrieve")
-async def account_retrieve(body: AccountRetrieveRequest):
+@app.get("/CurrentAccount/{currentaccountid}/Retrieve")
+async def account_retrieve(currentaccountid: str):
     try:
-        if body.accountId:
-            account = accounts_service.get_account(body.accountId)
-        else:
-            account = accounts_service.get_account_by_number(body.accountNumber)
+        account = accounts_service.get_account(currentaccountid)
         if not account:
             raise HTTPException(status_code=404, detail="Account not found.")
         return _bian_response({
@@ -223,11 +216,11 @@ async def account_retrieve(body: AccountRetrieveRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("CurrentAccountFulfillmentArrangement/Retrieve failed: %s", e)
+        logging.error("CurrentAccount/{id}/Retrieve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal retrieve error.")
 
 
-@app.post("/CurrentAccountFulfillmentArrangement/Request")
+@app.post("/CurrentAccount/Request")
 async def account_request(body: AccountRequestRequest):
     try:
         accounts = accounts_service.list_accounts(body.model_dump(exclude_none=True))
@@ -237,11 +230,11 @@ async def account_request(body: AccountRequestRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("CurrentAccountFulfillmentArrangement/Request failed: %s", e)
+        logging.error("CurrentAccount/Request failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal list error.")
 
 
-@app.post("/CurrentAccountFulfillmentArrangement/Control")
+@app.post("/CurrentAccount/Control")
 async def account_control(body: AccountControlRequest):
     try:
         account = accounts_service.control_close(body.accountId, body.controlReason)
@@ -255,14 +248,14 @@ async def account_control(body: AccountControlRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logging.error("CurrentAccountFulfillmentArrangement/Control failed: %s", e)
+        logging.error("CurrentAccount/Control failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal control error.")
 
 
-@app.post("/CurrentAccountFulfillmentArrangement/CurrentAccountBalanceRecord/Retrieve")
-async def account_balance_retrieve(body: AccountBalanceRetrieveRequest):
+@app.get("/CurrentAccount/{currentaccountid}/CurrentAccountBalanceRecord/Retrieve")
+async def account_balance_retrieve(currentaccountid: str):
     try:
-        doc = accounts_service.get_balance(body.accountId)
+        doc = accounts_service.get_balance(currentaccountid)
         if not doc:
             raise HTTPException(status_code=404, detail="Account not found.")
         return _bian_response({
@@ -274,13 +267,13 @@ async def account_balance_retrieve(body: AccountBalanceRetrieveRequest):
         raise
     except Exception as e:
         logging.error(
-            "CurrentAccountFulfillmentArrangement/CurrentAccountBalanceRecord/Retrieve failed: %s",
+            "CurrentAccount/{id}/CurrentAccountBalanceRecord/Retrieve failed: %s",
             e,
         )
         raise HTTPException(status_code=500, detail="Internal balance retrieve error.")
 
 
-@app.post("/CurrentAccountFulfillmentArrangement/CurrentAccountTransaction/Request")
+@app.post("/CurrentAccount/CurrentAccountTransaction/Request")
 async def account_activity_request(body: AccountActivityRequestRequest):
     try:
         legs = accounts_service.get_recent_activity(
@@ -300,7 +293,7 @@ async def account_activity_request(body: AccountActivityRequestRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logging.error(
-            "CurrentAccountFulfillmentArrangement/CurrentAccountTransaction/Request failed: %s", e
+            "CurrentAccount/CurrentAccountTransaction/Request failed: %s", e
         )
         raise HTTPException(status_code=500, detail="Internal activity error.")
 
