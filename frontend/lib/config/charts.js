@@ -28,6 +28,12 @@ const CHART_IDS = {
   },
 };
 
-const env = process.env.NEXT_PUBLIC_CHARTS_ENV === "prod" ? "prod" : "staging";
+const env = process.env.NEXT_PUBLIC_CHARTS_ENV ?? "staging";
+
+if (!CHART_IDS[env]) {
+  throw new Error(
+    `Invalid NEXT_PUBLIC_CHARTS_ENV: "${env}". Expected "staging" or "prod".`
+  );
+}
 
 export const chartIds = CHART_IDS[env];
