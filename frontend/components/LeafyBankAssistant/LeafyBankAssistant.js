@@ -75,7 +75,11 @@ export default function LeafyBankAssistant({ isOpen, onClose, initialPrompt }) {
     }
   }, [isOpen, initialPrompt]);
 
-  const showSuggestions = !messages.some((msg) => msg.type === "user") && !sending;
+  const askedTexts = new Set(
+    messages.filter((msg) => msg.type === "user").map((msg) => msg.text),
+  );
+  const remainingSuggestions = SUGGESTIONS.filter((text) => !askedTexts.has(text));
+  const showSuggestions = !sending && remainingSuggestions.length > 0;
 
   return (
     <>
@@ -146,7 +150,7 @@ export default function LeafyBankAssistant({ isOpen, onClose, initialPrompt }) {
 
                         {showSuggestions && (
                           <div className={styles.suggestions}>
-                            {SUGGESTIONS.map((text, i) => (
+                            {remainingSuggestions.map((text, i) => (
                               <button
                                 key={i}
                                 className={styles.suggestionChip}
