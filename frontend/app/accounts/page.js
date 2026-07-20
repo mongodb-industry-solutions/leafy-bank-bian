@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import styles from "./page.module.css";
 import { H2, Body, Subtitle } from "@leafygreen-ui/typography";
 import Card from "@leafygreen-ui/card";
@@ -19,8 +20,18 @@ import { chartIds } from "@/lib/config/charts";
 
 export default function AccountsPage() {
   const [selectedAccount, setSelectedAccount] = useState(null);
-  const { selectedUser } = useUser();
+  const { selectedUser, hasActiveConsent } = useUser();
+  const router = useRouter();
   const { allAccounts, recentTxns, accountsLoading, txLoading } = useAccountsPageData();
+
+  // Consent gate: the accounts panel is only reachable while an Open Finance
+  // consent is active. Without one (direct URL, or consent expired/revoked
+  // while viewing) send the user back to the dashboard to grant consent.
+  useEffect(() => {
+    if (!hasActiveConsent) router.replace("/");
+  }, [hasActiveConsent, router]);
+
+  if (!hasActiveConsent) return null;
 
   // When an account card is selected, show only that account's transactions.
   const visibleTxns = (

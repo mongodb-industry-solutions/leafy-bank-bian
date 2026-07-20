@@ -223,6 +223,7 @@ const HomeContent = () => {
               imgAlt="accounts"
               title="Accounts"
               actionButton={openAccountButton}
+              locked
             >
               {accountsContent}
             </ProductCard>
