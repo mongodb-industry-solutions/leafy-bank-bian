@@ -137,9 +137,7 @@ const HomeContent = () => {
           </div>
         ))
       ) : (
-        <Body className={styles.cardBodyGray}>
-          Connect a bank via chatbot to see loans
-        </Body>
+        <Body className={styles.cardBodyGray} aria-hidden="true">&nbsp;</Body>
       )}
     </div>
   );
@@ -223,6 +221,7 @@ const HomeContent = () => {
               imgAlt="accounts"
               title="Accounts"
               actionButton={openAccountButton}
+              locked
             >
               {accountsContent}
             </ProductCard>

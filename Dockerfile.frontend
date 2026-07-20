@@ -6,9 +6,14 @@ COPY frontend/ .
 # Browser-facing URL of the standalone BIAN Data Model Explorer. Baked at
 # build time because pages are statically prerendered — a runtime env var
 # would not reach the prerendered HTML. Per-environment value comes from the
-# kaniko build_args in .drone-pending.yml; defaults to local docker-compose.
+# kaniko build_args in .drone.yml; defaults to local docker-compose.
 ARG BIAN_MODEL_URL=http://localhost:8004
 ENV BIAN_MODEL_URL=$BIAN_MODEL_URL
+# Selects the Atlas Charts embed-ID set (staging|prod). Baked at build time
+# because NEXT_PUBLIC_* vars are inlined into the client bundle during build.
+# Per-environment value comes from the kaniko build_args in .drone.yml.
+ARG NEXT_PUBLIC_CHARTS_ENV=staging
+ENV NEXT_PUBLIC_CHARTS_ENV=$NEXT_PUBLIC_CHARTS_ENV
 RUN npm run build
 # Kanopy requires port 8080
 ENV PORT=8080

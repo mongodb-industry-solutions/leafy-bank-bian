@@ -163,6 +163,7 @@ steps:
       dockerfile: Dockerfile.frontend
       build_args:
         - BIAN_MODEL_URL=https://leafy-bank-bian-model.industrysolutions.staging.corp.mongodb.com
+        - NEXT_PUBLIC_CHARTS_ENV=staging
       access_key:
         from_secret: ecr_access_key
       secret_key:
@@ -455,6 +456,7 @@ steps:
       dockerfile: Dockerfile.frontend
       build_args:
         - BIAN_MODEL_URL=https://leafy-bank-bian-model.industrysolutions.prod.corp.mongodb.com
+        - NEXT_PUBLIC_CHARTS_ENV=prod
       access_key:
         from_secret: ecr_access_key
       secret_key:
