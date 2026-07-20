@@ -25,7 +25,7 @@
 
 export const LEAFY_BANK_API_CATALOG = {
   "version": "v1.0",
-  "description": "Leafy Bank — BIAN v14 Semantic API. Verb-in-URL convention; all operations are POST. JSON request bodies are strict (extra fields rejected) and use ISO 4217 currency codes with money encoded as JSON numbers. Body keys use mongo collection alias (camelCase) field names; the BIAN v14 canonical name for each field is documented in the data-model tab.",
+  "description": "Leafy Bank — BIAN v14 Semantic API. Verb-in-URL convention; Retrieve operations are GET, mutations (Initiate/Control) and Request are POST. JSON request bodies are strict (extra fields rejected) and use ISO 4217 currency codes with money encoded as JSON numbers. Body keys use mongo collection alias (camelCase) field names; the BIAN v14 canonical name for each field is documented in the data-model tab.",
   "conventions": {
     "method": "POST",
     "verbInUrl": true,
@@ -81,13 +81,13 @@ export const LEAFY_BANK_API_CATALOG = {
       "name": "Party Reference Data Directory",
       "serviceDomains": [
         {
-          "key": "PartyReferenceDataDirectoryEntry",
-          "name": "PartyReferenceDataDirectoryEntry — Customer Master",
+          "key": "PartyReferenceDataDirectory",
+          "name": "PartyReferenceDataDirectory — Customer Master",
           "operations": [
             {
               "id": "party_request",
               "method": "POST",
-              "path": "/PartyReferenceDataDirectoryEntry/Request",
+              "path": "/PartyReferenceDataDirectory/Request",
               "summary": "Register a new customer (party). Returns the materialised customer reference and KYC scaffolding.",
               "bianAction": "register",
               "bianBehaviorQualifier": "PartyIdentification",
@@ -185,8 +185,8 @@ export const LEAFY_BANK_API_CATALOG = {
             },
             {
               "id": "party_retrieve",
-              "method": "POST",
-              "path": "/PartyReferenceDataDirectoryEntry/Retrieve",
+              "method": "GET",
+              "path": "/PartyReferenceDataDirectory/{partyreferencedatadirectoryid}/Retrieve",
               "summary": "Retrieve the full party reference record by CustomerReference.",
               "bianAction": "retrieve",
               "bianBehaviorQualifier": "PartyIdentification",
@@ -250,8 +250,8 @@ export const LEAFY_BANK_API_CATALOG = {
             },
             {
               "id": "party_kyc_retrieve",
-              "method": "POST",
-              "path": "/PartyReferenceDataDirectoryEntry/CustomerKYCRecord/Retrieve",
+              "method": "GET",
+              "path": "/PartyReferenceDataDirectory/{partyreferencedatadirectoryid}/CustomerKYCRecord/Retrieve",
               "summary": "Retrieve only the KYC sub-record for a party — verification status, risk rating, supporting documents.",
               "bianAction": "retrieve",
               "bianBehaviorQualifier": "CustomerKYCRecord",
@@ -326,13 +326,13 @@ export const LEAFY_BANK_API_CATALOG = {
       "name": "Current Account",
       "serviceDomains": [
         {
-          "key": "CurrentAccountFulfillmentArrangement",
-          "name": "CurrentAccountFulfillmentArrangement — Account Lifecycle",
+          "key": "CurrentAccount",
+          "name": "CurrentAccount — Account Lifecycle",
           "operations": [
             {
               "id": "account_initiate",
               "method": "POST",
-              "path": "/CurrentAccountFulfillmentArrangement/Initiate",
+              "path": "/CurrentAccount/Initiate",
               "summary": "Open a new current account for a registered customer.",
               "bianAction": "initiate",
               "bianBehaviorQualifier": "AccountAdministration",
@@ -419,8 +419,8 @@ export const LEAFY_BANK_API_CATALOG = {
             },
             {
               "id": "account_retrieve",
-              "method": "POST",
-              "path": "/CurrentAccountFulfillmentArrangement/Retrieve",
+              "method": "GET",
+              "path": "/CurrentAccount/{currentaccountid}/Retrieve",
               "summary": "Retrieve the full current-account record.",
               "bianAction": "retrieve",
               "bianBehaviorQualifier": "AccountAdministration",
@@ -482,7 +482,7 @@ export const LEAFY_BANK_API_CATALOG = {
             {
               "id": "account_request",
               "method": "POST",
-              "path": "/CurrentAccountFulfillmentArrangement/Request",
+              "path": "/CurrentAccount/Request",
               "summary": "Request a non-control mutation on an account (update interest schedule, statement frequency, signatory).",
               "bianAction": "update",
               "bianBehaviorQualifier": "AccountAdministration",
@@ -545,7 +545,7 @@ export const LEAFY_BANK_API_CATALOG = {
             {
               "id": "account_control",
               "method": "POST",
-              "path": "/CurrentAccountFulfillmentArrangement/Control",
+              "path": "/CurrentAccount/Control",
               "summary": "Apply or release a control on an account — block, freeze, or restrict.",
               "bianAction": "execute",
               "bianBehaviorQualifier": "AccountRestriction",
@@ -629,8 +629,8 @@ export const LEAFY_BANK_API_CATALOG = {
             },
             {
               "id": "account_balance_retrieve",
-              "method": "POST",
-              "path": "/CurrentAccountFulfillmentArrangement/CurrentAccountBalanceRecord/Retrieve",
+              "method": "GET",
+              "path": "/CurrentAccount/{currentaccountid}/CurrentAccountBalanceRecord/Retrieve",
               "summary": "Retrieve the projected balance record only — fast O(1) lookup against the ASP-maintained accountBalances projection.",
               "bianAction": "retrieve",
               "bianBehaviorQualifier": "CurrentAccountBalanceRecord",
