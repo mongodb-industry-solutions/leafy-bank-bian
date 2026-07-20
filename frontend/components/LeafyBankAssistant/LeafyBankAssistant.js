@@ -5,7 +5,7 @@ import { TALK_TRACK } from "@/lib/const/talkTrack";
 import Button from "@leafygreen-ui/button";
 import { Tab, Tabs } from "@leafygreen-ui/tabs";
 import { Body, H2, H3 } from "@leafygreen-ui/typography";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./LeafyBankAssistant.module.css";
 
@@ -75,10 +75,12 @@ export default function LeafyBankAssistant({ isOpen, onClose, initialPrompt }) {
     }
   }, [isOpen, initialPrompt]);
 
-  const askedTexts = new Set(
-    messages.filter((msg) => msg.type === "user").map((msg) => msg.text),
-  );
-  const remainingSuggestions = SUGGESTIONS.filter((text) => !askedTexts.has(text));
+  const remainingSuggestions = useMemo(() => {
+    const askedTexts = new Set(
+      messages.filter((msg) => msg.type === "user").map((msg) => msg.text),
+    );
+    return SUGGESTIONS.filter((text) => !askedTexts.has(text));
+  }, [messages]);
   const showSuggestions = !sending && remainingSuggestions.length > 0;
 
   return (
@@ -150,9 +152,9 @@ export default function LeafyBankAssistant({ isOpen, onClose, initialPrompt }) {
 
                         {showSuggestions && (
                           <div className={styles.suggestions}>
-                            {remainingSuggestions.map((text, i) => (
+                            {remainingSuggestions.map((text) => (
                               <button
-                                key={i}
+                                key={text}
                                 className={styles.suggestionChip}
                                 onClick={() => handleSend(text)}
                               >
