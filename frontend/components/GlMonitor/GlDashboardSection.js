@@ -3,6 +3,11 @@
 import styles from "./GlDashboardSection.module.css";
 import { useGlDashboard } from "@/lib/api/hooks";
 import { fmt } from "@/lib/glMonitor/format";
+import { chartIds } from "@/lib/config/charts";
+
+// Same Charts project across environments; only the chart ID differs per env.
+const CHARTS_BASE_URL = "https://charts.mongodb.com/charts-jeffn-zsdtj";
+const glChartSrc = `${CHARTS_BASE_URL}/embed/charts?id=${chartIds.glMonitor}&maxDataAge=60&theme=light&autoRefresh=true`;
 
 // "2026-05".."2026-07" → "May – Jul 2026"; single month → "Jul 2026".
 function periodRangeLabel(periods) {
@@ -64,7 +69,7 @@ export default function GlDashboardSection({ refreshKey }) {
       <div className={styles.chartPane}>
         <iframe
           style={{ background: "#FFFFFF", border: "none", borderRadius: 2, boxShadow: "0 2px 10px 0 rgba(70, 76, 79, .2)", width: "100%", height: "100%" }}
-          src="https://charts.mongodb.com/charts-jeffn-zsdtj/embed/charts?id=9efe5dfd-d969-406d-a03f-35b2ca6f65e7&maxDataAge=60&theme=light&autoRefresh=true"
+          src={glChartSrc}
         />
       </div>
 
