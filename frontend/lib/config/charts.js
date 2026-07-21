@@ -7,6 +7,8 @@
 // drone build_args); defaults to staging for local docker-compose.
 const CHART_IDS = {
   staging: {
+    // GL pipeline monitor dashboard chart (reads from the staging cluster).
+    glMonitor: "9efe5dfd-d969-406d-a03f-35b2ca6f65e7",
     fridaklo: {
       top: "8867e720-081f-4b5a-9302-fb9b2b3622db", // pie
       lower: "fdc4b222-d67f-44d1-8809-767eae9e4f8a", // bar
@@ -17,6 +19,8 @@ const CHART_IDS = {
     },
   },
   prod: {
+    // GL pipeline monitor dashboard chart (reads from the prod cluster).
+    glMonitor: "e34f1c66-6eb3-476a-b583-0a8ece101c2f",
     fridaklo: {
       top: "e73a1d94-1843-40c9-a9f6-343fb8e4ce10", // pie
       lower: "a60d07ad-a60d-4ace-9acd-8f0a3ec34e02", // bar
