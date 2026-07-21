@@ -24,16 +24,6 @@ services:
       TRANSACTIONS_BACKEND_URL: http://transactions:8080
     restart: always
 
-  bian-model:
-    build:
-      context: .
-      dockerfile: Dockerfile.bian-model
-    image: leafy-core-bian-model:latest
-    container_name: leafy-core-bian-model
-    ports:
-      - "8004:8080"
-    restart: always
-
   accounts:
     build:
       context: .
