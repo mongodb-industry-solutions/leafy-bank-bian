@@ -6,7 +6,6 @@
 #
 # Path filtering rules (per service):
 #   frontend     → frontend/**  Dockerfile.frontend
-#   bian-model   → bian-model/**  Dockerfile.bian-model
 #   accounts     → backend/accounts/**  Dockerfile.accounts
 #   transactions → backend/transactions/**  Dockerfile.transactions
 #   ledger       → backend/ledger/**  Dockerfile.ledger
@@ -74,21 +73,6 @@ steps:
         include:
           - "frontend/**"
           - "Dockerfile.frontend"
-
-  - name: build-check-bian-model
-    image: plugins/kaniko-ecr
-    settings:
-      no_push: true
-      registry: 795250896452.dkr.ecr.us-east-1.amazonaws.com
-      repo: industrysolutions/leafy-bank-bian-model
-      dockerfile: Dockerfile.bian-model
-    when:
-      event:
-        - pull_request
-      paths:
-        include:
-          - "bian-model/**"
-          - "Dockerfile.bian-model"
 
   - name: build-check-accounts
     image: plugins/kaniko-ecr
@@ -175,29 +159,6 @@ steps:
         include:
           - "frontend/**"
           - "Dockerfile.frontend"
-          - "environment/staging.yaml"
-
-  - name: publish-bian-model
-    image: plugins/kaniko-ecr
-    settings:
-      create_repository: true
-      registry: 795250896452.dkr.ecr.us-east-1.amazonaws.com
-      repo: industrysolutions/leafy-bank-bian-model
-      tags:
-        - git-${DRONE_COMMIT_SHA:0:7}
-        - latest
-      dockerfile: Dockerfile.bian-model
-      access_key:
-        from_secret: ecr_access_key
-      secret_key:
-        from_secret: ecr_secret_key
-    when:
-      event:
-        - push
-      paths:
-        include:
-          - "bian-model/**"
-          - "Dockerfile.bian-model"
           - "environment/staging.yaml"
 
   - name: publish-accounts
@@ -299,37 +260,6 @@ steps:
         include:
           - "frontend/**"
           - "Dockerfile.frontend"
-          - "environment/staging.yaml"
-
-  - name: deploy-bian-model-staging
-    image: public.ecr.aws/kanopy/drone-helm:v3
-    settings:
-      chart: mongodb/web-app
-      chart_version: 4.30.0
-      add_repos: [mongodb=https://10gen.github.io/helm-charts]
-      namespace: industrysolutions
-      release: leafy-bank-bian-model
-      values:
-        - "image.tag=git-${DRONE_COMMIT_SHA:0:7}"
-        - "image.repository=795250896452.dkr.ecr.us-east-1.amazonaws.com/industrysolutions/leafy-bank-bian-model"
-        - "ingress.enabled=true"
-        - "ingress.hosts[0]=leafy-bank-bian-model.industrysolutions.staging.corp.mongodb.com"
-        - "mesh.enabled=true"
-        - "resources.limits.cpu=500m"
-        - "resources.limits.memory=512Mi"
-        - "resources.requests.cpu=100m"
-        - "resources.requests.memory=256Mi"
-      api_server: https://api.staging.corp.mongodb.com
-      kubernetes_token:
-        from_secret: staging_kubernetes_token
-      values_files: ["environment/staging.yaml"]
-    when:
-      event:
-        - push
-      paths:
-        include:
-          - "bian-model/**"
-          - "Dockerfile.bian-model"
           - "environment/staging.yaml"
 
   - name: deploy-accounts-staging
@@ -470,29 +400,6 @@ steps:
           - "Dockerfile.frontend"
           - "environment/production.yaml"
 
-  - name: publish-bian-model-prod
-    image: plugins/kaniko-ecr
-    settings:
-      create_repository: true
-      registry: 795250896452.dkr.ecr.us-east-1.amazonaws.com
-      repo: industrysolutions/leafy-bank-bian-model
-      tags:
-        - git-${DRONE_COMMIT_SHA:0:7}-prod
-        - prod-latest
-      dockerfile: Dockerfile.bian-model
-      access_key:
-        from_secret: ecr_access_key
-      secret_key:
-        from_secret: ecr_secret_key
-    when:
-      event:
-        - push
-      paths:
-        include:
-          - "bian-model/**"
-          - "Dockerfile.bian-model"
-          - "environment/production.yaml"
-
   - name: publish-accounts-prod
     image: plugins/kaniko-ecr
     settings:
@@ -592,37 +499,6 @@ steps:
         include:
           - "frontend/**"
           - "Dockerfile.frontend"
-          - "environment/production.yaml"
-
-  - name: deploy-bian-model-production
-    image: public.ecr.aws/kanopy/drone-helm:v3
-    settings:
-      chart: mongodb/web-app
-      chart_version: 4.30.0
-      add_repos: [mongodb=https://10gen.github.io/helm-charts]
-      namespace: industrysolutions
-      release: leafy-bank-bian-model
-      values:
-        - "image.tag=git-${DRONE_COMMIT_SHA:0:7}-prod"
-        - "image.repository=795250896452.dkr.ecr.us-east-1.amazonaws.com/industrysolutions/leafy-bank-bian-model"
-        - "ingress.enabled=true"
-        - "ingress.hosts[0]=leafy-bank-bian-model.industrysolutions.prod.corp.mongodb.com"
-        - "mesh.enabled=true"
-        - "resources.limits.cpu=500m"
-        - "resources.limits.memory=512Mi"
-        - "resources.requests.cpu=150m"
-        - "resources.requests.memory=256Mi"
-      api_server: https://api.prod.corp.mongodb.com
-      kubernetes_token:
-        from_secret: prod_kubernetes_token
-      values_files: ["environment/production.yaml"]
-    when:
-      event:
-        - push
-      paths:
-        include:
-          - "bian-model/**"
-          - "Dockerfile.bian-model"
           - "environment/production.yaml"
 
   - name: deploy-accounts-prod
