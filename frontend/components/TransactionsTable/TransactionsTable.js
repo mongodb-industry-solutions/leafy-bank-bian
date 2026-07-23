@@ -79,10 +79,13 @@ function TransactionDetail({ t }) {
   const status = (t.transactionStatus || t.status || "").toUpperCase();
   const steps = TIMELINE_STEPS[status] || ["Initiated"];
   const txId = t.paymentId || t.transactionId || t.id || null;
-  const rawDate = t.createdAt || t._rawDate || t.date || null;
 
   // Build per-step timestamps from available fields on the raw document.
   const raw = t._rawDocument || t;
+  // Prefer the full ISO instant (createdAt) so Date & Time matches the timeline's
+  // "Initiated" value; _rawDate/date are date-only strings that new Date() parses
+  // as UTC midnight and misrender a day early west of UTC.
+  const rawDate = raw.createdAt || t.createdAt || t._rawDate || t.date || null;
   const fmtTs = (val) => {
     if (!val) return null;
     const d = new Date(val);

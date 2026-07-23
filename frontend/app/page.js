@@ -19,6 +19,7 @@ import SendMoneyModal from "@/components/SendMoneyModal/SendMoneyModal";
 import TransactionsTable from "@/components/TransactionsTable/TransactionsTable";
 import BottomNav from "@/components/BottomNav/BottomNav";
 import { useUser } from "@/lib/context/UserContext";
+import { USER_LIST } from "@/lib/constants";
 import { useHomeData, useAccountsPageData } from "@/lib/api/hooks";
 import { formatCurrency } from "@/lib/api/format";
 import MobileActions from "@/components/MobileActions/MobileActions";
@@ -328,7 +329,7 @@ const HomeContent = () => {
 };
 
 export default function Home() {
-  const { selectedUser, clearUser, isFreshBrowserLoad } = useUser();
+  const { selectedUser, clearUser, selectUser, isFreshBrowserLoad } = useUser();
   const [loginDone, setLoginDone] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -336,14 +337,33 @@ export default function Home() {
     setMounted(true);
   }, []);
 
-  // Genuine fresh browser load (refresh/new tab) → clear user so Login shows.
-  // Client-side navigation (logo click) and intentional in-app full-page
-  // navigations (backoffice personas) are preserved — see isFreshBrowserLoad.
+  // Deep-link auto-select: another demo (e.g. payments) hands off a persona via
+  // `?user=<bankUsername|name>`. Different origins can't share storage, so the
+  // param carries the choice. When it matches, select that user and skip Login
+  // (winning over the fresh-load clear below). Strip the param so a later manual
+  // refresh behaves like a normal fresh load.
+  // Otherwise: genuine fresh browser load (refresh/new tab) → clear user so
+  // Login shows. Client-side navigation (logo click) and intentional in-app
+  // full-page navigations (backoffice personas) are preserved — see
+  // isFreshBrowserLoad.
   useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("user");
+    if (requested) {
+      const match = USER_LIST.find(
+        (u) =>
+          u.bankUsername?.toLowerCase() === requested.toLowerCase() ||
+          u.name.toLowerCase() === requested.toLowerCase()
+      );
+      if (match) {
+        selectUser(match);
+        window.history.replaceState({}, "", window.location.pathname);
+        return;
+      }
+    }
     if (isFreshBrowserLoad()) {
       clearUser();
     }
-  }, [isFreshBrowserLoad, clearUser]);
+  }, [isFreshBrowserLoad, clearUser, selectUser]);
 
   // Sync loginDone with user selection state in both directions
   useEffect(() => {
