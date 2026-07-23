@@ -353,7 +353,9 @@ export default function TransactionsTable({
                           <tr className={styles.expandedRow}>
                             <td colSpan={6}>
                               <div className={styles.expandedContent}>
-                                <Code language="json">{JSON.stringify(t._rawDocument || t, null, 2)}</Code>
+                                <div className={styles.jsonWrap}>
+                                  <Code language="json" copyButtonAppearance="none">{JSON.stringify(t._rawDocument || t, null, 2)}</Code>
+                                </div>
                               </div>
                             </td>
                           </tr>

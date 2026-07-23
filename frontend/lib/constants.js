@@ -77,7 +77,7 @@ export const USER_MAP = {
         IncomeAmount: null,
         Currency: "USD",
         IncomeFrequency: null,
-        Url: "https://fsi-payments-processing.industrysolutions.prod.corp.mongodb.com/",
+        Url: "https://fsi-payments-processing-bian.industrysolutions.prod.corp.mongodb.com/",
         Features: ["Agentic Payments System"],
     },
     "67a1000000000000000000006": {
@@ -90,7 +90,7 @@ export const USER_MAP = {
         IncomeAmount: null,
         Currency: "USD",
         IncomeFrequency: null,
-        Url: "https://document-intelligence-ui.industrysolutions.prod.corp.mongodb.com/use-case",
+        Url: "https://document-intelligence-ui-bian.industrysolutions.prod.corp.mongodb.com/",
         Features: ["Document Intelligence"],
     },
 };
