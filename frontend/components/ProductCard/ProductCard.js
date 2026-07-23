@@ -16,7 +16,7 @@ import styles from "./ProductCard.module.css";
  *   children  - any additional content to render below the header
  *   locked    - when true, the card does not navigate to `href`; it renders a
  *               lock cue and calls `onLockedClick` instead (used to gate
- *               consent-protected panels behind an active Open Finance consent)
+ *               consent-protected panels behind an active Open Banking consent)
  *   onLockedClick - handler invoked when a locked card is activated
  */
 export default function ProductCard({

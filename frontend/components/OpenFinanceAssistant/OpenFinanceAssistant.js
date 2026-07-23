@@ -127,7 +127,7 @@ export default function OpenFinanceAssistant({ isOpen, onClose }) {
             <div className={styles.chatHeaderContent}>
               <img src="/agent.png" alt="Agent" className={styles.agentImage} />
               <div className={styles.headerTitleWrapper}>
-                <H2 className={styles.chatTitle}>Open Finance Advisor</H2>
+                <H2 className={styles.chatTitle}>Open Banking Advisor</H2>
                 <div className={styles.status}>
                   <span className={styles.pulseDot} />
                   Available
@@ -138,7 +138,7 @@ export default function OpenFinanceAssistant({ isOpen, onClose }) {
 
           <div className={styles.tabsWrapper}>
             <Tabs
-              aria-label="Open Finance chat tabs"
+              aria-label="Open Banking chat tabs"
               selected={activeTab}
               setSelected={setActiveTab}
             >

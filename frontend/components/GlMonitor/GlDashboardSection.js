@@ -117,10 +117,10 @@ export default function GlDashboardSection({ refreshKey }) {
                   ))}
                   <tr className={styles.totalRow}>
                     <td colSpan={2}>Total</td>
-                    <td className={styles.num}>{fmt(totalDebit, true)}</td>
-                    <td className={styles.num}>{fmt(totalCredit, true)}</td>
+                    <td className={styles.num}>${fmt(totalDebit, true)}</td>
+                    <td className={styles.num}>${fmt(totalCredit, true)}</td>
                     <td className={`${styles.num} ${totalBalance === 0 ? styles.positive : styles.negative}`}>
-                      {balanceCell(totalBalance)}
+                      ${balanceCell(totalBalance)}
                     </td>
                   </tr>
                 </>

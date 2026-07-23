@@ -8,7 +8,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 marked.setOptions({ breaks: true, gfm: true });
 
 const WELCOME_MESSAGE =
-  "Hello! 👋 Welcome to Leafy Bank's Open Finance platform.\n\n" +
+  "Hello! 👋 Welcome to Leafy Bank's Open Banking platform.\n\n" +
   "I'm here to help you connect your external bank or fintech accounts securely and " +
   "understand exactly what data you're sharing and why.\n\n" +
   "What would you like to do today?";
@@ -22,7 +22,7 @@ const WELCOME_SUGGESTIONS = [
 const OpenFinanceChatContext = createContext(null);
 
 /**
- * Holds the Open Finance advisor conversation above the route tree so it
+ * Holds the Open Banking advisor conversation above the route tree so it
  * survives panel close AND navigation between pages. The backend keeps the
  * agent thread (LangGraph thread_id); persisting that id here is what lets the
  * conversation resume instead of restarting from the welcome message.

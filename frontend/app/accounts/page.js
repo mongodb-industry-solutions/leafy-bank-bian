@@ -22,7 +22,7 @@ export default function AccountsPage() {
   const { hasActiveConsent } = useUser();
   const router = useRouter();
 
-  // Consent gate: the accounts panel is only reachable while an Open Finance
+  // Consent gate: the accounts panel is only reachable while an Open Banking
   // consent is active. Without one (direct URL, or consent expired/revoked
   // while viewing) send the user back to the dashboard to grant consent.
   useEffect(() => {

@@ -130,9 +130,9 @@ export async function chatStream(path, body) {
 }
 
 /**
- * Open Finance react-agent chatbot streaming — returns the raw Response for SSE.
+ * Open Banking react-agent chatbot streaming — returns the raw Response for SSE.
  * Use this (not chatStream) for the consent flow: the consent thread lives on the
- * Open Finance chatbot, so its /chat/stream/resume must hit the same backend.
+ * Open Banking chatbot, so its /chat/stream/resume must hit the same backend.
  * @param {string} path - e.g. "chat/stream/resume"
  * @param {object} body - request body
  * @returns {Promise<Response>}
@@ -152,7 +152,7 @@ export async function openFinanceChatStream(path, body) {
 }
 
 /**
- * Open Finance react-agent chatbot client (non-streaming).
+ * Open Banking react-agent chatbot client (non-streaming).
  * @param {string} path - e.g. "chat"
  * @param {object} [options]
  * @param {object} [options.body]
