@@ -32,6 +32,18 @@
 .expandedContent {
   padding: 12px 0;
 }
+.jsonWrap {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border, #e8edeb);
+  border-radius: 6px;
+}
+/* Code renders each line as a table row; stop the outer .table td styles
+   (padding + border-top) from bleeding in and spacing/dividing the lines. */
+.jsonWrap td {
+  padding: 0;
+  border-top: none;
+}
 .iconButton {
   padding: 4px;
 }
