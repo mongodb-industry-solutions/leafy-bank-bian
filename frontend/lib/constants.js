@@ -64,7 +64,7 @@ export const USER_MAP = {
         IncomeAmount: null,
         Currency: "USD",
         IncomeFrequency: null,
-        Url: "https://leafy-bank-ui.industrysolutions.prod.corp.mongodb.com/asset-portfolio",
+        Url: "https://capital-markets-ui.industrysolutions.prod.corp.mongodb.com/",
         Features: ["Asset and Crypto Portfolio Management"],
     },
     "67a1000000000000000000003": {
