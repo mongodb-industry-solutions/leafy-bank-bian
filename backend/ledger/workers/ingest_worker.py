@@ -32,6 +32,10 @@ WORKER_ID = "ingest_worker"
 _SOURCE_SYSTEM = "LEDGER_PIPELINE"
 _SOURCE_TYPE_PAYMENT = "PAYMENT"
 
+# `leafy_bank_bian.transactions` is shared with the ThreatSight 360 demo. Every doc it
+# writes is stamped with this `sourceSystem`; the change stream filters them out.
+_FOREIGN_SOURCE_SYSTEM = "threatsight360"
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -182,7 +186,21 @@ def process_transaction(
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:
     logger.info("ingest_worker starting — watching transactions on %s", db_name)
     transactions = connection.get_collection(db_name, "transactions")
-    pipeline = [{"$match": {"operationType": "insert"}}]
+    pipeline = [
+        {
+            "$match": {
+                "operationType": "insert",
+                # `transactions` is shared with the ThreatSight 360 demo, which loads
+                # ~21k rows carrying payer.accountId = "CUST-…" (a customer ref, not an
+                # account) and payee.accountId = null. Those are not payments and have
+                # no ledger meaning; without this filter process_transaction raises
+                # ValueError and the loop below exits on it, taking the worker down.
+                # Filtering by provenance rather than by shape so a malformed *payment*
+                # still fails loudly instead of being skipped.
+                "fullDocument.sourceSystem": {"$ne": _FOREIGN_SOURCE_SYSTEM},
+            }
+        }
+    ]
 
     # Loops (rather than watching once) because NonResumableChangeStreamError can be
     # raised by a getMore on an already-open cursor, not just by the initial watch()
