@@ -13,6 +13,16 @@ from typing import Optional
 from database.connection import MongoDBConnection
 from services import reconciliation_service
 
+# `transactions` is shared with the ThreatSight 360 demo (~21k docs stamped sourceSystem
+# "threatsight360"), which the GL pipeline deliberately ignores — ingest_worker's change
+# stream already filters them out, so they never reach the pipeline stages this dashboard
+# monitors. Reads here must exclude them too, or the monitor lists and counts rows that
+# have no ledgerEvent by design. Positive $in rather than {$ne: "threatsight360"}: it is
+# selective and index-usable (idx_source_system_created) where $ne is neither. Both
+# values are live — "leafy-bank-legacy-migration" on seeded rows,
+# "leafy-bank-payments-service" on runtime writes.
+LEAFY_BANK_SOURCE_SYSTEMS = ["leafy-bank-legacy-migration", "leafy-bank-payments-service"]
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -119,7 +129,7 @@ def list_transactions(
     coll = connection.get_collection(db_name, "transactions")
     le_coll = connection.get_collection(db_name, "ledgerEvents")
 
-    match: dict = {}
+    match: dict = {"sourceSystem": {"$in": LEAFY_BANK_SOURCE_SYSTEMS}}
     if period_code:
         match["createdAt"] = {
             "$gte": _month_start(period_code),

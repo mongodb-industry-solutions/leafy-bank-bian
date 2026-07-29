@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -8,6 +9,28 @@ from database.connection import MongoDBConnection
 from shared.refs import derive_ref
 
 logger = logging.getLogger(__name__)
+
+# `transactions` is shared with the ThreatSight 360 demo (~21k docs stamped sourceSystem
+# "threatsight360"). Scope every read of it to Leafy Bank's own writers. Stated as a
+# positive $in rather than {$ne: "threatsight360"} because equality is selective and
+# index-usable while $ne is neither. Both values are live: "leafy-bank-legacy-migration"
+# on the seeded demo rows, "leafy-bank-payments-service" on rows the payments service
+# writes at runtime — filtering on only the latter hides all seed data.
+LEAFY_BANK_SOURCE_SYSTEMS = ["leafy-bank-legacy-migration", "leafy-bank-payments-service"]
+
+# get_recent_activity's customer fan-out needs the customer's accountIds before it can
+# query transactions — two sequential round trips. Measured against this demo's Atlas
+# cluster, one round trip costs ~267ms while server-side executionTimeMillis is 0, so
+# the request is pure latency and dropping a round trip halves it (~565ms → ~285ms).
+#
+# Only account *ownership* is cached, never balances — balances mutate on every payment,
+# but the set of accounts a customer owns changes only in create_account (and, in
+# principle, control_close), both of which invalidate the entry synchronously. The TTL is
+# therefore only a backstop for the multi-process case: with >1 uvicorn worker or Kanopy
+# replica, an account created in one process is invisible to another's cache until it
+# expires. Worst case is a newly-opened account's transactions missing from the activity
+# list for up to the TTL — never a wrong balance or a stale transaction.
+OWNED_ACCOUNTS_CACHE_TTL_SECONDS = 30
 
 
 class AccountsService:
@@ -35,6 +58,36 @@ class AccountsService:
         self.accounts = db["accounts"]
         self.customers = db["customers"]
         self.transactions = db["transactions"]
+        # customerId -> (expires_at_monotonic, [accountId]). See
+        # OWNED_ACCOUNTS_CACHE_TTL_SECONDS for why only ownership is cacheable.
+        self._owned_accounts_cache: dict[str, tuple[float, list[str]]] = {}
+
+    def _owned_account_ids(self, customer_ref: str) -> list[str]:
+        """Return the customer's accountIds, served from the TTL cache when warm.
+
+        Deliberately unfiltered by status: a CLOSED account's historical transactions
+        still belong in the activity list. If a status filter is ever added here,
+        control_close's invalidation stops being a no-op and starts being required.
+        """
+        now = time.monotonic()
+        cached = self._owned_accounts_cache.get(customer_ref)
+        if cached and cached[0] > now:
+            return cached[1]
+
+        owned = self.accounts.find(
+            {"customerSnapshot.customerId": customer_ref}, {"accountId": 1, "_id": 0}
+        )
+        account_ids = [a["accountId"] for a in owned]
+        self._owned_accounts_cache[customer_ref] = (
+            now + OWNED_ACCOUNTS_CACHE_TTL_SECONDS,
+            account_ids,
+        )
+        return account_ids
+
+    def _invalidate_owned_accounts(self, customer_ref: Optional[str]) -> None:
+        """Drop a customer's cached ownership set after an account is opened or closed."""
+        if customer_ref:
+            self._owned_accounts_cache.pop(customer_ref, None)
 
     def get_account(self, account_ref: str) -> Optional[dict]:
         return self.accounts.find_one({"accountId": account_ref})
@@ -80,21 +133,20 @@ class AccountsService:
 
         if account_ref:
             owned_ids = [account_ref]
-            query = {"$or": [{"payer.accountId": account_ref}, {"payee.accountId": account_ref}]}
+            query = {
+                "sourceSystem": {"$in": LEAFY_BANK_SOURCE_SYSTEMS},
+                "$or": [{"payer.accountId": account_ref}, {"payee.accountId": account_ref}],
+            }
         else:
-            owned = list(
-                self.accounts.find(
-                    {"customerSnapshot.customerId": customer_ref}, {"accountId": 1, "_id": 0}
-                )
-            )
-            owned_ids = [a["accountId"] for a in owned]
+            owned_ids = self._owned_account_ids(customer_ref)
             if not owned_ids:
                 return []
             query = {
+                "sourceSystem": {"$in": LEAFY_BANK_SOURCE_SYSTEMS},
                 "$or": [
                     {"payer.accountId": {"$in": owned_ids}},
                     {"payee.accountId": {"$in": owned_ids}},
-                ]
+                ],
             }
 
         # bookingDate is a date-only string, so same-day transactions tie; break the
@@ -216,6 +268,7 @@ class AccountsService:
             "sourceSystem": "leafy-bank-accounts-service",
         }
         self.accounts.insert_one(doc)
+        self._invalidate_owned_accounts(customer_ref)
         return doc
 
     def control_close(self, account_ref: str, reason: Optional[str] = None) -> dict:
@@ -244,6 +297,12 @@ class AccountsService:
                     "appliedAt": now,
                 }
             }
-        return self.accounts.find_one_and_update(
+        closed = self.accounts.find_one_and_update(
             {"accountId": account_ref}, update, return_document=True
         )
+        # A no-op today (_owned_account_ids ignores status, so the set is unchanged by a
+        # close) — kept so adding a status filter there can't silently go stale.
+        self._invalidate_owned_accounts(
+            (account.get("customerSnapshot") or {}).get("customerId")
+        )
+        return closed
