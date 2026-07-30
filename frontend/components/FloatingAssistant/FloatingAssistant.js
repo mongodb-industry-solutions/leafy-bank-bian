@@ -7,7 +7,10 @@ import LeafyBankAssistant from "../LeafyBankAssistant/LeafyBankAssistant";
 import styles from "./FloatingAssistant.module.css";
 
 export default function FloatingAssistant() {
-  const { selectedUser } = useUser();
+  // selectedUser is set as soon as a login flow starts (to prefetch dashboard data in
+  // the background) — loginInProgress excludes that window so this bubble doesn't
+  // appear while the login modal/overlay is still on screen.
+  const { selectedUser, loginInProgress } = useUser();
   const [modalOpen, setModalOpen] = useState(false);
 
   const [showBubble, setShowBubble] = useState(true);
@@ -26,7 +29,7 @@ export default function FloatingAssistant() {
     return () => clearTimeout(timer);
   }, []);
 
-  if (!selectedUser) return null;
+  if (!selectedUser || loginInProgress) return null;
 
   return (
     <>

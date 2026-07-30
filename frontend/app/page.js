@@ -32,13 +32,21 @@ const isExternalBank = (bank) =>
 
 const bankBadgeVariant = (bank) => (isExternalBank(bank) ? "blue" : "green");
 
-const HomeContent = () => {
+// `hidden`/`onReady` let this mount (and start fetching) while Login's "Logging in
+// as ..." overlay is still up, instead of only after the modal closes — see page.js's
+// default export for why: without this, the overlay's timing has no relationship to
+// when the data it's meant to mask actually arrives.
+const HomeContent = ({ hidden = false, onReady = null }) => {
   const [modalOpen, setModalOpen] = useState(false);
   const { selectedUser, authorizedConsents } = useUser();
   const hasExternalBank = authorizedConsents.length > 0;
   const { totalBalance, totalDebt, bankAccounts, creditCards, creditScore, loans, loading: homeLoading } = useHomeData();
   const { recentTxns, txLoading } = useAccountsPageData();
   const [pendingPrompt, setPendingPrompt] = useState(null);
+
+  useEffect(() => {
+    if (!homeLoading && !txLoading) onReady?.();
+  }, [homeLoading, txLoading, onReady]);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountBalance, setAccountBalance] = useState("");
   const [accountType, setAccountType] = useState("");
@@ -144,7 +152,15 @@ const HomeContent = () => {
   );
 
   return (
-    <main className={styles.container}>
+    // visibility (not display:none): keeping a layout box lets Next/Image's
+    // IntersectionObserver-based lazy loading fire while hidden, so thumbnails
+    // (balance/debt/bank/card icons) prefetch during the overlay instead of only
+    // starting to load once unhidden — which was the actual source of the
+    // "data populates a moment later" effect data itself was already ready.
+    <main
+      className={styles.container}
+      style={hidden ? { visibility: "hidden", pointerEvents: "none" } : undefined}
+    >
       {/* Top 40% — only visible once an external bank is connected */}
       {hasExternalBank && <section className={styles.topSection}>
         <div className={styles.productsHeader}>
@@ -329,9 +345,12 @@ const HomeContent = () => {
 };
 
 export default function Home() {
-  const { selectedUser, clearUser, selectUser, isFreshBrowserLoad } = useUser();
+  const { selectedUser, clearUser, selectUser, isFreshBrowserLoad, loginInProgress } = useUser();
   const [loginDone, setLoginDone] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Flips once HomeContent's initial fetches (accounts/transactions) resolve. Login's
+  // retail ("Bank Customer") flow waits on this before closing its overlay.
+  const [dataReady, setDataReady] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -365,17 +384,32 @@ export default function Home() {
     }
   }, [isFreshBrowserLoad, clearUser, selectUser]);
 
-  // Sync loginDone with user selection state in both directions
+  // Sync loginDone with user selection state in both directions — except while the
+  // retail data-synced login is in flight (loginInProgress, set by Login itself),
+  // which finalizes via its own onDone once dataReady catches up. Without this guard,
+  // this effect would close Login the instant selectedUser is set — before the
+  // dashboard has anything to show — defeating the wait entirely.
   useEffect(() => {
+    if (loginInProgress) return;
     setLoginDone(!!selectedUser);
-  }, [selectedUser]);
+  }, [selectedUser, loginInProgress]);
 
   if (!mounted) return null;
 
   return (
     <>
-      {!loginDone && <Login onDone={() => setLoginDone(true)} />}
-      {selectedUser && loginDone && <HomeContent />}
+      {/* Mounted (hidden) as soon as a user is selected, not only once Login closes,
+          so its fetches start immediately and Login can wait on real data instead of
+          a fixed timer. */}
+      {selectedUser && (
+        <HomeContent hidden={!loginDone} onReady={() => setDataReady(true)} />
+      )}
+      {!loginDone && (
+        <Login
+          onDone={() => setLoginDone(true)}
+          dataReady={dataReady}
+        />
+      )}
     </>
   );
 }

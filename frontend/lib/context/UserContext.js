@@ -17,6 +17,13 @@ const INTENTIONAL_NAV_KEY = "leafy_intentional_nav";
 
 export function UserProvider({ children }) {
   const [selectedUser, setSelectedUser] = useState(null);
+  // True from the moment a login flow calls selectUser() to start prefetching data
+  // until it visually finishes (modal closed / overlay dismissed). selectedUser is
+  // set early (deliberately) so the destination page can start fetching in the
+  // background; anything that renders a "you are logged in as X" UI (NavBar) should
+  // gate on `!loginInProgress` too, or it flashes that state while the login modal
+  // is still on screen.
+  const [loginInProgress, setLoginInProgress] = useState(false);
   // Multi-bank: Map<consentId, { status, institution }>
   const [consents, setConsents] = useState(new Map());
   const [consentRefreshKey, setConsentRefreshKey] = useState(0);
@@ -226,6 +233,8 @@ export function UserProvider({ children }) {
     selectedUser,
     selectUser,
     clearUser,
+    loginInProgress,
+    setLoginInProgress,
     markIntentionalNavigation,
     isFreshBrowserLoad,
     updateBearerToken,
