@@ -17,7 +17,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from pymongo import ASCENDING
+from pymongo import ASCENDING, DESCENDING
 
 from database.connection import MongoDBConnection
 
@@ -30,8 +30,32 @@ PAYMENTS_INDEXES = [
     {"name": "idx_payment_id", "keys": [("paymentId", ASCENDING)]},
 ]
 
+# `transactions` is shared with the ThreatSight 360 demo, which adds ~21k docs stamped
+# sourceSystem "threatsight360". The three indexes below keep Leafy Bank's own reads
+# independent of that volume; without them each read COLLSCANned the whole collection
+# and blocking-sorted it just to return `limit` rows.
+#
+# Deliberately NOT partial indexes on sourceSystem: an equality seek on an account id
+# already bounds the scan to matching entries (T360 docs carry their own account ids and
+# are never visited), so a partialFilterExpression would only save index bytes while
+# adding a filter/query coupling that fails silently if the two drift apart.
 TRANSACTIONS_INDEXES = [
     {"name": "idx_payment_id", "keys": [("paymentId", ASCENDING)]},
+    # accounts_service.get_recent_activity matches ownership with an $or over both
+    # sides, so each branch needs its own index; the sort keys trail the seek key so
+    # the planner can SORT_MERGE the branches and honour `limit` with no blocking sort.
+    {"name": "idx_payer_account_booking", "keys": [
+        ("payer.accountId", ASCENDING), ("bookingDate", DESCENDING), ("_id", DESCENDING),
+    ]},
+    {"name": "idx_payee_account_booking", "keys": [
+        ("payee.accountId", ASCENDING), ("bookingDate", DESCENDING), ("_id", DESCENDING),
+    ]},
+    # pipeline_read_service.list_transactions has no account to seek on — sourceSystem
+    # is its only filter, so it leads here, with createdAt trailing to serve the sort
+    # and the accompanying count_documents straight from the index.
+    {"name": "idx_source_system_created", "keys": [
+        ("sourceSystem", ASCENDING), ("createdAt", DESCENDING),
+    ]},
 ]
 
 

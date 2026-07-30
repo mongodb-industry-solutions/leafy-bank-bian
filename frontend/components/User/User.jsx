@@ -8,9 +8,17 @@ import Card from '@leafygreen-ui/card';
 import { useUser } from '@/lib/context/UserContext';
 import styles from './User.module.css';
 
-const User = ({ user = null, isSelectedUser = false, setOpen, setLocalSelectedUser = null }) => {
+const User = ({
+    user = null,
+    isSelectedUser = false,
+    setOpen,
+    setLocalSelectedUser = null,
+    onBeforeSelect = null,
+    onExternalOpen = null,
+}) => {
     const { markIntentionalNavigation } = useUser();
-    const handleClick = () => {
+    const handleClick = async () => {
+        if (onBeforeSelect) await onBeforeSelect(user);
         if (user.url) {
             // Internal routes (relative paths) navigate in the same tab;
             // external demo links open in a new tab.
@@ -23,7 +31,12 @@ const User = ({ user = null, isSelectedUser = false, setOpen, setLocalSelectedUs
                 setLocalSelectedUser?.(user);
                 window.location.href = user.url;
             } else {
+                // Unlike the same-tab branches above, nothing here closes the modal
+                // or navigates it away — this tab stays put, so whatever onBeforeSelect
+                // showed (e.g. a "Logging in..." overlay) must be dismissed explicitly
+                // or it hangs on screen after the new tab opens.
                 window.open(user.url, '_blank');
+                onExternalOpen?.();
             }
             return;
         }
