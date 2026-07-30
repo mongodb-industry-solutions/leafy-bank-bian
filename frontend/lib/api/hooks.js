@@ -489,7 +489,12 @@ export function useAccountsPageData() {
     allAccounts,
     recentTxns,
     accountsLoading,
-    txLoading: txLoading || extTxLoading,
+    // Gate on internal transactions only: open-finance (external) is a separate,
+    // slower network call, and recentTxns already merges external rows in reactively
+    // once useCachedExternalData resolves. Waiting on extTxLoading here means the
+    // whole table sits blank until the slower of the two calls finishes, even though
+    // Leafy Bank's own transactions are usually ready first.
+    txLoading,
   };
 }
 

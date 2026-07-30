@@ -63,6 +63,44 @@
     height: 100%;
     display: flex;
     flex-direction: column;
+    position: relative;
+}
+
+.loginTransitionOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 24px;
+}
+
+.loginTransitionText {
+    /* Matches .categoryTitle's sans styling rather than LG's H3 (which defaults to
+       the brand serif family) — H2's "Welcome to Leafy Bank" is the one place in
+       this modal serif is intentional; everything else here is sans. */
+    font-size: 17px;
+    font-weight: 700;
+    color: #1a1a1a;
+}
+
+.loginTransitionSpinner {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 3px solid #e8edeb;
+    border-top-color: #00684a;
+    animation: loginTransitionSpin 0.6s linear infinite;
+}
+
+@keyframes loginTransitionSpin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* Widen the modal dialog on medium+ screens to fit user cards without horizontal scroll */
