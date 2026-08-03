@@ -101,7 +101,7 @@ export const OPEN_FINANCE_TALK_TRACK = [
       },
       {
         image: {
-          src: "/behind-the-scenes.png",
+          src: "/open_banking_assistant.png",
           alt: "Architecture overview",
         },
       },
