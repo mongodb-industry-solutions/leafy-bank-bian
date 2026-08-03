@@ -8,13 +8,13 @@
 
 **Leafy Bank is a BIAN v14-aligned core-banking reference**, showcasing the integration of MongoDB's powerful features tailored specifically for [Financial Services](https://www.mongodb.com/solutions/industries/financial-services). It's built as three FastAPI microservices over a single MongoDB Atlas database (`leafy_bank_bian`), fronted by a Next.js + LeafyGreen UI. Every backend endpoint follows BIAN Service Domain naming and a verb-in-URL contract; the UI talks to them through a path-segment-routed proxy.
 
-The defining story is the **two-phase money flow**: a payment settles synchronously as one MongoDB ACID transaction, then an asynchronous, change-stream-driven pipeline posts it through the general ledger — no polling, debits always equal credits.
+The defining story is the **two-phase money flow**: a payment executes synchronously as one MongoDB ACID transaction, then an asynchronous, change-stream-driven pipeline posts it through the general ledger — no polling, debits always equal credits.
 
-Where MongoDB shines: **flexible schema** for evolving account/customer data (accounts), **multi-document ACID transactions** for consistent settlement (transactions), and **change streams + aggregation pipelines** for real-time, event-driven double-entry accounting (ledger) — all in one database, no separate message bus.
+Where MongoDB shines: **flexible schema** for evolving account/customer data (accounts), **multi-document ACID transactions** for consistent execution (transactions), and **change streams + aggregation pipelines** for real-time, event-driven double-entry accounting (ledger) — all in one database, no separate message bus.
 
 ## Why MongoDB
 
-Legacy cores lock accounting behind COBOL batch cycles: the general ledger reconciles overnight, so balances and books drift apart intraday. The scale of the debt is well documented — 90% of US banking core software is considered legacy, and 43% of US core systems still run on COBOL. A legacy core also typically splits the problem across three systems: a relational database for balances, a CDC connector (Debezium, Kafka Connect) to move settled transactions downstream, and a separate ledger or event-store product for the accounting entries. MongoDB collapses all three into one platform:
+Legacy cores lock accounting behind COBOL batch cycles: the general ledger reconciles overnight, so balances and books drift apart intraday. The scale of the debt is well documented — 90% of US banking core software is considered legacy, and 43% of US core systems still run on COBOL. A legacy core also typically splits the problem across three systems: a relational database for balances, a CDC connector (Debezium, Kafka Connect) to move executed transactions downstream, and a separate ledger or event-store product for the accounting entries. MongoDB collapses all three into one platform:
 
 - **Multi-document ACID transactions replace two-phase commit orchestration.** Debit, credit, transaction fact, notification, and status flip are one `session.with_transaction` call — no saga, no compensating-transaction logic.
 - **Change streams replace the CDC connector.** The ledger service tails `transactions` natively, with resume tokens for exactly-once-effective delivery across restarts — no Debezium, no Kafka topic to operate.
@@ -29,14 +29,14 @@ Legacy cores lock accounting behind COBOL batch cycles: the general ledger recon
 | Service                 | BIAN Service Domain                                  | Responsibility                                               |
 | ------------------------- | ------------------------------------------------------ | -------------------------------------------------------------- |
 | **accounts** (8001)     | `PartyReferenceDataDirectoryEntry`, `CurrentAccount` | Customers + KYC, account lifecycle, source-of-truth balances |
-| **transactions** (8002) | `PaymentOrderInitiation`                             | Payments/transfers as one multi-doc ACID settlement          |
+| **transactions** (8002) | `PaymentOrderInitiation`                             | Payments/transfers as one multi-doc ACID execution          |
 | **ledger** (8003)       | `FinancialAccounting` / `FinancialBookingLog`        | Async double-entry general-ledger pipeline                   |
 
 ### The two-phase money flow
 
-1. **Synchronous settlement** — a payment is one MongoDB **ACID transaction**: `$inc` debtor down, `$inc` creditor up, insert the transaction, flip the payment to SETTLED, write the sender notification. Idempotent via an `Idempotency-Key` header.
+1. **Synchronous execution** — a payment is one MongoDB **ACID transaction**: `$inc` debtor down, `$inc` creditor up, insert the transaction, flip the payment to SETTLED, write the sender notification. Idempotent via an `Idempotency-Key` header.
 2. **Asynchronous general ledger** — **change-stream** wor
-3. kers react to settled transactions with no polling: `transactions → ledgerEvents → subLedgerEntries`, then a periodic batch rolls them into balanced `journalEntries` (debits == credits enforced at the DB level). The UI traces a payment through all stages live via `/pipeline/trace/{paymentId}`.
+3. kers react to executed transactions with no polling: `transactions → ledgerEvents → subLedgerEntries`, then a periodic batch rolls them into balanced `journalEntries` (debits == credits enforced at the DB level). The UI traces a payment through all stages live via `/pipeline/trace/{paymentId}`.
 
 ## Where Does MongoDB Shine?
 
@@ -65,27 +65,11 @@ Responsible for handling digital payments and account-to-account transfers, this
 ### 3. **Ledger Service**
 
 **[Ledger Service](backend/ledger/)**
-Powers the asynchronous general-ledger pipeline behind every payment — this is the demo's centerpiece. MongoDB **change streams** let this service react to settled transactions in real time — without polling — feeding a three-stage, event-driven flow that derives ledger events, projects double-entry sub-ledger entries, and rolls them up into journal entries. Combined with **multi-document ACID transactions** to keep debits and credits balanced and **aggregation pipelines** for periodic batch posting, MongoDB delivers the consistency and event-driven processing that core accounting systems demand.
+Powers the asynchronous general-ledger pipeline behind every payment — this is the demo's centerpiece. MongoDB **change streams** let this service react to executed transactions in real time — without polling — feeding a three-stage, event-driven flow that derives ledger events, projects double-entry sub-ledger entries, and rolls them up into journal entries. Combined with **multi-document ACID transactions** to keep debits and credits balanced and **aggregation pipelines** for periodic batch posting, MongoDB delivers the consistency and event-driven processing that core accounting systems demand.
 
-```mermaid
-flowchart TD
-    T["transactions"]
-    T -->|change stream| IW["Stage 1: ingest_worker"]
-    IW --> LE["ledgerEvents<br/>1 / payment"]
-    LE -->|change stream| PW["Stage 2: projection_worker"]
-    PW --> SLE["subLedgerEntries<br/>2 / event · DR + CR"]
-    SLE -->|sweep · every 600s| GB["Stage 3: gl_batch"]
-    GB --> RC{"ΣDR == ΣCR?"}
-    RC -->|no| SKIP["skip cycle"]
-    RC -->|yes| JE["journalEntries<br/>1 / period + account"]
+![ledger service diagram](diagrams/ledger_service.png)
 
-    JE -.->|stamp journalEntryId| SLE & LE
-
-    classDef coll fill:#e3fcf7,stroke:#00684a,color:#023430;
-    class T,LE,SLE,JE coll;
-```
-
-*Per settled payment: 1 `ledgerEvent`, 2 `subLedgerEntries` (debit + credit). Per batch cycle: 1 `journalEntry` per reconciled `(periodCode, controlAccountCode)` group, aggregating however many sub-ledger entries fell in it. `REALTIME`-mode events skip the batch and post their journal inline from `projection_worker` instead.*
+*Per executed payment: 1 `ledgerEvent`, 2 `subLedgerEntries` (debit + credit). Per batch cycle: 1 `journalEntry` per reconciled `(periodCode, controlAccountCode)` group, aggregating however many sub-ledger entries fell in it. `REALTIME`-mode events skip the batch and post their journal inline from `projection_worker` instead.*
 
 **Stage 1 — Change-stream CDC ingest with resume tokens.** The ledger service watches the `transactions` collection with a change stream. Each inserted transaction fires the ingest worker, which derives the debit and credit legs from posting rules and writes one `ledgerEvent`. The worker persists the change stream's resume token after every processed event, so a restart replays nothing and misses nothing. The insert is idempotent on `paymentId` — a duplicate event hits the unique index and is skipped, never double-posted.
 
@@ -123,11 +107,11 @@ See [Indexing and validators (ledger service)](#indexing-and-validators-ledger-s
 
 ---
 
-Put together, the three services form one high-level flow around a single MongoDB Atlas cluster: the accounts and transactions services settle payments and expose balances synchronously, while the ledger service reacts asynchronously to a change stream on `transactions` and posts the GL collections without the other two ever writing to them directly.
+Put together, the three services form one high-level flow around a single MongoDB Atlas cluster: the accounts and transactions services execute payments and expose balances synchronously, while the ledger service reacts asynchronously to a change stream on `transactions` and posts the GL collections without the other two ever writing to them directly.
 
-![High level architecture](diagrams/high_level_architecture.png)
+![High level architecture](diagrams/core_banking_hld.png)
 
-*Accounts and transactions settle synchronously against MongoDB Atlas; the ledger service consumes a change stream on `transactions` and posts the GL collections asynchronously.*
+*Accounts and transactions execute synchronously against MongoDB Atlas; the ledger service consumes a change stream on `transactions` and posts the GL collections asynchronously.*
 
 ### MongoDB collections
 
@@ -137,7 +121,7 @@ Put together, the three services form one high-level flow around a single MongoD
 | `customers`        | PartyReferenceDataDirectoryEntry | Customer master + nested KYC                                                       |
 | `accounts`         | CurrentAccountFacility           | Source-of-truth balances                                                           |
 | `payments`         | PaymentOrderInitiation           | Payment orders, status PENDING → SETTLED                                          |
-| `transactions`     | CurrentAccountFacility           | Settled payment legs; listed via`CurrentAccountTransaction/Request` (accounts svc) |
+| `transactions`     | CurrentAccountFacility           | Executed payment legs; listed via`CurrentAccountTransaction/Request` (accounts svc) |
 | `glAccounts`       | FinancialAccounting              | Chart of accounts, consulted by every GL stage below                               |
 | `ledgerEvents`     | FinancialBookingLog              | Stage ①: debit + credit legs, postingStatus PENDING → POSTED                     |
 | `subLedgerEntries` | FinancialAccounting              | Stage ②: two entries per event (DR + CR)                                          |
@@ -256,7 +240,7 @@ CORE_BACKEND_URL="http://localhost:8000"
 | Service      | Port | Notes                                                      |
 | -------------- | ------ | ------------------------------------------------------------ |
 | accounts     | 8001 | BIAN`PartyReferenceDataDirectoryEntry` + `CurrentAccount`  |
-| transactions | 8002 | BIAN`PaymentOrderInitiation` (synchronous ACID settlement) |
+| transactions | 8002 | BIAN`PaymentOrderInitiation` (synchronous ACID execution) |
 | ledger       | 8003 | BIAN`FinancialAccounting` + `/pipeline` monitor routes     |
 | bian-model   | 8004 | BIAN data-model explorer (Next.js), linked from the NavBar |
 | frontend     | 3000 | Next.js UI                                                 |
@@ -270,7 +254,7 @@ Once `make dev` is running and you've seeded data, open [http://localhost:3000](
 - **Home / Accounts** (`/`, `/accounts`) — balances, recent transactions, send-money flow.
 - **Credit Cards / Loans / Portfolio** (`/credit-cards`, `/loans`, `/portfolio`) — other product surfaces backed by the same accounts service.
 - **Send a payment** — from the home or accounts view, send money between two Leafy Bank accounts. Each payment click drives the two-phase flow end to end.
-- **Pipeline trace** — in the transactions table, click a settled payment to watch it move live through `transaction → ledgerEvent → subLedgerEntries → journalEntry` (polled every 2s via `/pipeline/trace/{paymentId}`).
+- **Pipeline trace** — in the transactions table, click an executed payment to watch it move live through `transaction → ledgerEvent → subLedgerEntries → journalEntry` (polled every 2s via `/pipeline/trace/{paymentId}`).
 - **GL Pipeline Monitor** (`/gl-pipeline-monitor`) — batch cadence, last-run time, and posting-status counts across the ledger pipeline.
 - **Leafy Bank Assistant** — the floating chat bubble (bottom-right) answers questions about your accounts and transactions via the chatbot backend.
 
@@ -290,7 +274,7 @@ Other lifecycle targets: `make up`, `make start`, `make stop`, `make down`.
 
 - [MongoDB for Financial Services](https://www.mongodb.com/solutions/industries/financial-services)
 - [Change Streams](https://www.mongodb.com/docs/manual/changeStreams/) — the engine behind the async GL pipeline
-- [Transactions](https://www.mongodb.com/docs/manual/core/transactions/) — multi-document ACID settlement
+- [Transactions](https://www.mongodb.com/docs/manual/core/transactions/) — multi-document ACID execution
 - [Aggregation Pipelines](https://www.mongodb.com/docs/manual/aggregation/) — GL batch posting
 - [BIAN](https://bian.org/) — the banking service-domain reference model this demo aligns to
 - [FastAPI](https://fastapi.tiangolo.com/) · [Next.js 15](https://nextjs.org/) · [LeafyGreen UI](https://github.com/mongodb/leafygreen-ui)
