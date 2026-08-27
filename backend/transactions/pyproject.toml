@@ -12,6 +12,14 @@ python-dotenv = "^1.0.1"
 fastapi = "^0.115.4"
 uvicorn = "^0.32.0"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+
+[tool.pytest.ini_options]
+# Put backend/transactions (the rootdir) on sys.path so tests can import services/, shared/, etc.
+# Mirrors backend/ledger/pyproject.toml.
+pythonpath = ["."]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["poetry-core"]

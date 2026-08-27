@@ -183,9 +183,20 @@ class PaymentsService:
         try:
             self.payments.insert_one(payment_doc)
         except DuplicateKeyError:
-            raise ValueError(
-                f"Idempotency-Key {end_to_end_id} already exists with a different payment."
+            # Lost a race against a concurrent identical request. The find_one pre-check
+            # above cannot serialise these — the unique index on endToEndId is what
+            # actually enforces idempotency, and this is the path that honours it.
+            # Return the winner's document so both callers see the same payment rather
+            # than failing the loser with a spurious 400.
+            existing = self.payments.find_one({"endToEndId": end_to_end_id})
+            if existing is None:
+                raise
+            logger.info(
+                "Concurrent idempotent replay for endToEndId=%s — returning existing paymentId=%s",
+                end_to_end_id,
+                existing["paymentId"],
             )
+            return existing
 
         def callback(session: ClientSession) -> dict:
             debtor_after = self.accounts.find_one_and_update(

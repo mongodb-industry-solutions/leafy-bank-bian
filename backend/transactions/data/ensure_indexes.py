@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 # index is non-unique.
 PAYMENTS_INDEXES = [
     {"name": "idx_payment_id", "keys": [("paymentId", ASCENDING)]},
+    # endToEndId is the idempotency key. UNIQUE is load-bearing, not an optimisation:
+    # initiate_payment's find_one pre-check cannot serialise concurrent identical
+    # requests on its own, so without this constraint two racing callers both pass the
+    # check and both move money. The DuplicateKeyError handler in payments_service is
+    # what makes the second caller an idempotent replay — and it can only fire if this
+    # index exists.
+    {"name": "idx_end_to_end_id_unique", "keys": [("endToEndId", ASCENDING)], "unique": True},
 ]
 
 # `transactions` is shared with the ThreatSight 360 demo, which adds ~21k docs stamped
