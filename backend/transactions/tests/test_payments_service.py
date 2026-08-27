@@ -107,6 +107,13 @@ class FakeCollection:
             self._set(doc, field, (self._get(doc, field) or 0) + delta)
         for field, val in update.get("$set", {}).items():
             self._set(doc, field, val)
+        # $push backs lifecycle.events — append-only, so no $each / $slice needed.
+        for field, val in update.get("$push", {}).items():
+            existing = self._get(doc, field)
+            if existing is None:
+                existing = []
+                self._set(doc, field, existing)
+            existing.append(val)
 
 
 class FakeSession:
@@ -206,15 +213,44 @@ def _initiate(svc, **over):
     return svc.initiate_payment(**kwargs)
 
 
+def _assert_rejected(db, *, reason_match, at_state=None):
+    """A business rejection must leave a traceable payment, not nothing.
+
+    Decision §11 (doc 11): the instruction is persisted at DRAFT before validation, so a
+    rejected payment is a REJECTED document with an append-only event trail explaining where
+    it died. This is what Doina's Stage 9 exception queue and the trace view read.
+    """
+    assert len(db["payments"].inserted) == 1, "the instruction must be recorded"
+    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+
+    assert payment["lifecycle"]["currentState"] == "REJECTED"
+    assert payment["status"] == "REJECTED", "top-level status mirrors currentState"
+
+    events = payment["lifecycle"]["events"]
+    assert [e["state"] for e in events][0] == "DRAFT", "the trail starts at DRAFT"
+    assert events[-1]["state"] == "REJECTED"
+    assert reason_match in events[-1]["reason"], events[-1]["reason"]
+    assert events[-1]["actor"], "every event names an actor"
+    if at_state is not None:
+        # the state the payment reached before being refused
+        assert [e["state"] for e in events][-2] == at_state
+
+    assert db["transactions"].inserted == [], "no money may move on a rejected payment"
+    return payment
+
+
 # --- 1. insufficient funds ----------------------------------------------------
 
 def test_insufficient_funds_rejected_and_no_money_moves(service, db):
-    """The pre-flight balance.available floor. Nothing may be written when it trips."""
+    """The stage 3 balance.available floor. No money moves; the refusal is traceable.
+
+    This is Doina's own candidate Stage 9 demo failure ("invalid beneficiary or insufficient
+    funds"), so the rejected payment must be inspectable — an exception queue needs a row.
+    """
     with pytest.raises(ValueError, match="Insufficient available balance"):
         _initiate(service, instructed_amount=10_000.01)
 
-    assert db["payments"].inserted == [], "no payment order may be recorded"
-    assert db["transactions"].inserted == [], "no ledger leg may be recorded"
+    _assert_rejected(db, reason_match="Insufficient available balance", at_state="INITIATED")
     for acc in db["accounts"].docs:
         assert acc["balance"]["available"] == 10_000.0, "balances must be untouched"
 
@@ -248,14 +284,14 @@ def test_currency_mismatch_rejected(db, debtor_ccy, creditor_ccy, instructed):
     with pytest.raises(ValueError, match="Currency mismatch"):
         _initiate(svc, instructed_currency=instructed)
 
-    assert db["payments"].inserted == []
+    _assert_rejected(db, reason_match="Currency mismatch", at_state="INITIATED")
 
 
 # --- 3. closed account --------------------------------------------------------
 
 @pytest.mark.parametrize("side", ["debtor", "creditor"])
 def test_closed_account_rejected(db, side):
-    """A CLOSED account on either side stops the payment before anything is written."""
+    """A CLOSED account on either side refuses the payment, traceably."""
     accounts = [_account(DEBTOR, CUST_D), _account(CREDITOR, CUST_C)]
     accounts[0 if side == "debtor" else 1]["status"] = "CLOSED"
     db["accounts"] = FakeCollection(accounts)
@@ -265,7 +301,7 @@ def test_closed_account_rejected(db, side):
     with pytest.raises(ValueError, match="CLOSED"):
         _initiate(svc)
 
-    assert db["payments"].inserted == []
+    _assert_rejected(db, reason_match="CLOSED", at_state="INITIATED")
     for acc in db["accounts"].docs:
         assert acc["balance"]["available"] == 10_000.0
 
@@ -346,16 +382,23 @@ def test_happy_path_moves_money_once_and_settles(service, db):
 def test_self_transfer_rejected(service, db):
     with pytest.raises(ValueError, match="must differ"):
         _initiate(service, creditor_account_ref=DEBTOR)
-    assert db["payments"].inserted == []
+    _assert_rejected(db, reason_match="must differ", at_state="INITIATED")
 
 
 def test_debtor_account_not_owned_by_customer_rejected(service, db):
+    """Stage 2 entitlement. Refused before validation, so the trail stops at INITIATED."""
     with pytest.raises(ValueError, match="not owned by"):
         _initiate(service, customer_ref=CUST_C)
-    assert db["payments"].inserted == []
+    payment = _assert_rejected(db, reason_match="not owned by", at_state="INITIATED")
+    assert "stage 2 authenticate" in payment["lifecycle"]["events"][-1]["reason"]
 
 
 def test_amount_over_limit_rejected(service, db):
+    """Basic-field validation is Doina's stage 1, so no instruction is ever created.
+
+    Contrast with the account/funds rejections above, which DO leave a REJECTED document —
+    those are stage 3 checks on an instruction that already exists (doc 11 §11).
+    """
     with pytest.raises(ValueError, match="exceeds the limit"):
         _initiate(service, instructed_amount=50_000.01)
     assert db["payments"].inserted == []
@@ -366,3 +409,100 @@ def test_non_positive_amount_rejected(service, db, amount):
     with pytest.raises(ValueError, match="greater than 0"):
         _initiate(service, instructed_amount=amount)
     assert db["payments"].inserted == []
+
+
+# --- 9. the lifecycle state machine (doc 11 §11) -------------------------------
+
+# Doina's happy path, with ROUTED inserted after FINAL_VALIDATED per decision D1.
+# POSTED is absent by design: the ledger service stamps it asynchronously via CDC, on its
+# own axis, and never through this saga.
+EXPECTED_TRAIL = [
+    "DRAFT",
+    "INITIATED",
+    "VALIDATED",
+    "ENRICHED",
+    "FINAL_VALIDATED",
+    "ROUTED",
+    "AUTHORISED",
+    "APPROVED",
+    "SUBMITTED",
+    "IN_PROGRESS",
+    "SETTLED",
+]
+
+
+def test_happy_path_walks_the_full_state_machine(service, db):
+    """The nine stages must produce nine stages' worth of observable state.
+
+    Before the state machine a payment went PENDING -> SETTLED: two data points for nine
+    stages. This is the assertion that the stages are visible in the data, not just in the
+    folder layout.
+    """
+    payment = _initiate(service, instructed_amount=250.0)
+
+    assert [e["state"] for e in payment["lifecycle"]["events"]] == EXPECTED_TRAIL
+    assert payment["lifecycle"]["currentState"] == "SETTLED"
+    assert payment["status"] == "SETTLED", "top-level status mirrors currentState"
+    assert payment["lifecycle"]["stateEnteredAt"] == payment["lifecycle"]["events"][-1]["at"]
+
+
+def test_every_event_is_attributed_and_chronological(service, db):
+    """Append-only, chronological, and every transition names who did it and why."""
+    payment = _initiate(service, instructed_amount=250.0)
+    events = payment["lifecycle"]["events"]
+
+    for e in events:
+        assert e["actor"], f"{e['state']} has no actor"
+        assert e["actorType"] in ("SERVICE", "USER", "SYSTEM"), e["actorType"]
+        assert e["reason"], f"{e['state']} has no reason"
+
+    times = [e["at"] for e in events]
+    assert times == sorted(times), "events must be chronological"
+
+    # Attribution must be real, not a single hardcoded string.
+    assert {e["actor"] for e in events} >= {"transactions-service", "fraud-service"}
+
+
+def test_fraud_block_is_written_with_the_authorised_transition(service, db):
+    """Stage 4b $sets the score at the same moment it advances — one write, not two."""
+    payment = _initiate(service, instructed_amount=250.0)
+    assert payment["fraud"] == {"score": 5, "decision": "APPROVED"}
+
+    authorised = next(e for e in payment["lifecycle"]["events"] if e["state"] == "AUTHORISED")
+    assert "Fraud score 5" in authorised["reason"]
+    assert authorised["actor"] == "fraud-service"
+
+
+def test_settled_is_atomic_with_the_money_move(service, db):
+    """SETTLED fires inside stage 5's ACID transaction, alongside clearing.settledAt."""
+    payment = _initiate(service, instructed_amount=250.0)
+    assert payment["clearing"]["settledAt"] is not None
+    assert payment["lifecycle"]["currentState"] == "SETTLED"
+    assert len(db["transactions"].inserted) == 1
+
+
+def test_illegal_transition_is_refused():
+    """The transition table is a guard, not documentation."""
+    from contexts.payment_order_initiation.domain import lifecycle as L
+
+    assert L.INITIATED in L.TRANSITIONS[L.DRAFT]
+    assert L.SETTLED not in L.TRANSITIONS[L.DRAFT], "cannot settle straight from DRAFT"
+    assert L.TRANSITIONS[L.REJECTED] == frozenset(), "terminals are terminal"
+
+    # Money has moved by SUBMITTED, so an outright refusal is no longer available —
+    # a correction must be a compensating outcome instead.
+    assert L.REJECTED in L.TRANSITIONS[L.VALIDATED]
+    assert L.REJECTED not in L.TRANSITIONS[L.SETTLED]
+    assert L.REVERSED in L.TRANSITIONS[L.SETTLED]
+
+
+def test_advance_rejects_a_state_it_cannot_reach(service, db):
+    """A wrong from_state must fail loudly, so a lost race cannot double-transition."""
+    from contexts.payment_order_initiation.domain import lifecycle as L
+
+    payment = _initiate(service, instructed_amount=250.0)
+    with pytest.raises(L.IllegalTransition):
+        L.advance(
+            db["payments"], payment["_id"], L.VALIDATED,
+            actor="test", reason="going backwards", from_state=L.SETTLED,
+        )

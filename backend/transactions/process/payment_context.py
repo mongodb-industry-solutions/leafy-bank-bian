@@ -1,0 +1,83 @@
+"""The object threaded through every stage of the payment saga.
+
+One `PaymentContext` per payment attempt. Stages read what earlier stages put here and
+add their own results. Nothing else crosses stage boundaries — see `payment_lifecycle.py`
+for the invariants.
+
+Field groups, in the order they get populated:
+
+- **request**        set by the caller, never mutated by a stage
+- **infrastructure** collections + config, injected by `PaymentsService`
+- **resolved**       parties and identifiers, populated by stage 1a (capture)
+- **produced**       documents written by later stages
+- **control**        `halt` / `result` let a stage end the saga early (idempotent replay)
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Optional
+
+from bson import ObjectId
+
+
+@dataclass
+class PaymentCollections:
+    """The Mongo handles a stage may touch. Injected so stages stay testable with fakes."""
+
+    db: Any
+    customers: Any
+    accounts: Any
+    payments: Any
+    transactions: Any
+    notifications: Any
+
+
+@dataclass
+class PaymentContext:
+    # --- request -------------------------------------------------------------
+    customer_ref: str
+    debtor_account_ref: str
+    creditor_account_ref: str
+    instructed_amount: float
+    instructed_currency: str
+    payment_type: str
+    payment_rail: str
+    remittance_unstructured: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+    # --- infrastructure ------------------------------------------------------
+    collections: Optional[PaymentCollections] = None
+    payment_limit_usd: float = 0.0
+
+    # --- resolved (stage 1a) -------------------------------------------------
+    now: Optional[datetime] = None
+    payment_oid: Optional[ObjectId] = None
+    payment_id: Optional[str] = None
+    end_to_end_id: Optional[str] = None
+    txn_code: Optional[str] = None
+    is_internal: bool = False
+    debtor_account: Optional[dict] = None
+    creditor_account: Optional[dict] = None
+    debtor_customer: Optional[dict] = None
+    creditor_customer: Optional[dict] = None
+    debtor_customer_id: Optional[str] = None
+    creditor_customer_id: Optional[str] = None
+
+    # --- produced ------------------------------------------------------------
+    payment_doc: Optional[dict] = None
+    # The lifecycle state as this context last saw it. `lifecycle.advance_ctx` keeps it
+    # in sync and uses it as the `from_state` guard, so a lost race fails loudly.
+    current_state: Optional[str] = None
+    fraud: Optional[dict] = None
+    checkpoints: list = field(default_factory=list)
+
+    # --- control -------------------------------------------------------------
+    halt: bool = False
+    result: Optional[dict] = None
+
+    def stop(self, result: dict) -> None:
+        """End the saga here and return `result`. Used for idempotent replay."""
+        self.halt = True
+        self.result = result
