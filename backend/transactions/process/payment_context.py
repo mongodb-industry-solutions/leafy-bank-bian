@@ -16,7 +16,7 @@ Field groups, in the order they get populated:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 from bson import ObjectId
@@ -39,13 +39,29 @@ class PaymentContext:
     # --- request -------------------------------------------------------------
     customer_ref: str
     debtor_account_ref: str
-    creditor_account_ref: str
     instructed_amount: float
     instructed_currency: str
     payment_type: str
     payment_rail: str
+    # None for an external beneficiary — the spec makes creditor.accountId nullable and
+    # Doina's flagship `wire_domestic` scenario has no Leafy Bank creditor account.
+    # `creditor_party` then carries the snapshot straight off the request.
+    creditor_account_ref: Optional[str] = None
+    creditor_party: Optional[dict] = None
     remittance_unstructured: Optional[str] = None
+    remittance_reference: Optional[str] = None
+    remittance_invoice_no: Optional[str] = None
+    priority: str = "NORMAL"
+    charge_bearer: str = "SLEV"
+    category_purpose: Optional[str] = None
+    requested_execution_date: Optional[date] = None
+    channel: str = "API"
     idempotency_key: Optional[str] = None
+    # Rail-specific initiation envelopes as supplied by the caller, at most one non-None
+    # (enforced by `PaymentOrderInitiateRequest`). See `domain/initiation_envelope.py`.
+    wire_details: Optional[dict] = None
+    ach_details: Optional[dict] = None
+    internal_details: Optional[dict] = None
 
     # --- infrastructure ------------------------------------------------------
     collections: Optional[PaymentCollections] = None
@@ -59,11 +75,13 @@ class PaymentContext:
     txn_code: Optional[str] = None
     is_internal: bool = False
     debtor_account: Optional[dict] = None
+    # None for an external beneficiary. Every consumer must treat it as optional.
     creditor_account: Optional[dict] = None
     debtor_customer: Optional[dict] = None
     creditor_customer: Optional[dict] = None
     debtor_customer_id: Optional[str] = None
     creditor_customer_id: Optional[str] = None
+    is_external_creditor: bool = False
 
     # --- produced ------------------------------------------------------------
     payment_doc: Optional[dict] = None

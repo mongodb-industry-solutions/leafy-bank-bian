@@ -9,8 +9,12 @@ import { useUser } from "@/lib/context/UserContext";
 import { useAccounts, useBeneficiaryAccounts } from "@/lib/api/hooks";
 import { coreApi } from "@/lib/api/client";
 
-// Drives the payment's rail, which in turn drives ledger postingMode routing
-// (BATCH / NEAR_REALTIME / REALTIME — see backend/ledger/workers/ingest_worker.py).
+// Drives the payment's `rail`. Note the rail does NOT drive ledger postingMode —
+// ingest_worker.py hardcodes BATCH and only copies `rail` through.
+//
+// Venmo and PayPal are UI labels only: in this demo they settle on Leafy Bank's own
+// ledger, which is exactly what rail INTERNAL means, and neither is in the spec's rail
+// enum. The label stays, the wire value changes (doc 13 §2 B3).
 const PAYMENT_METHODS = [
   { id: "debit", label: "Debit Card" },
   { id: "bank_transfer", label: "Bank Transfer" },
@@ -22,8 +26,8 @@ const RAIL_BY_PAYMENT_METHOD = {
   debit: "INTERNAL",
   bank_transfer: "ACH",
   wire: "WIRE",
-  venmo: "VENMO",
-  paypal: "PAYPAL",
+  venmo: "INTERNAL",
+  paypal: "INTERNAL",
 };
 
 const TRANSFER_METHODS = [
@@ -52,6 +56,12 @@ export default function SendMoneyModal({
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentOriginator, setPaymentOriginator] = useState("");
   const [paymentBeneficiary, setPaymentBeneficiary] = useState("");
+
+  // R8 — "Requested execution date: Today" is an entry-screen field for every rail.
+  // ISO YYYY-MM-DD, which is what the API expects.
+  const today = new Date().toISOString().slice(0, 10);
+  const [paymentExecutionDate, setPaymentExecutionDate] = useState(today);
+  const [transferExecutionDate, setTransferExecutionDate] = useState(today);
 
   const [transferAmount, setTransferAmount] = useState("");
   const [transferMethod, setTransferMethod] = useState("internal");
@@ -111,9 +121,12 @@ export default function SendMoneyModal({
       method: "POST",
       body: {
         customerId,
-        // type is validated but cosmetic; the rail is what matters for posting mode.
-        type: isTransfer ? "INTRABANK_TRANSFER" : "CREDIT_TRANSFER",
+        // An intrabank transfer IS a credit transfer — "intrabank" describes the rail,
+        // not the ISO 20022 payment type. The old INTRABANK_TRANSFER is not in the
+        // spec's type enum (doc 13 §2 B2).
+        type: "CREDIT_TRANSFER",
         rail,
+        requestedExecutionDate: isTransfer ? transferExecutionDate : paymentExecutionDate,
         debtor: { accountId: originator },
         creditor: { accountId: beneficiary },
         instructedAmount: amount,
@@ -223,6 +236,17 @@ export default function SendMoneyModal({
                 />
               </div>
               <div className={styles.formGroup}>
+                <label className={styles.formLabel} htmlFor="payment-execution-date">Requested execution date</label>
+                <input
+                  id="payment-execution-date"
+                  className={styles.formInput}
+                  type="date"
+                  min={today}
+                  value={paymentExecutionDate}
+                  onChange={(e) => setPaymentExecutionDate(e.target.value)}
+                />
+              </div>
+              <div className={styles.formGroup}>
                 <label className={styles.formLabel} htmlFor="payment-method">Payment method</label>
                 <select
                   id="payment-method"
@@ -275,6 +299,17 @@ export default function SendMoneyModal({
                   value={transferAmount}
                   onChange={(e) => setTransferAmount(e.target.value)}
                   placeholder="Enter amount"
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel} htmlFor="transfer-execution-date">Requested execution date</label>
+                <input
+                  id="transfer-execution-date"
+                  className={styles.formInput}
+                  type="date"
+                  min={today}
+                  value={transferExecutionDate}
+                  onChange={(e) => setTransferExecutionDate(e.target.value)}
                 />
               </div>
               <div className={styles.formGroup}>

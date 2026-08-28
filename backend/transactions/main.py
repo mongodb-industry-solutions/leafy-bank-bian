@@ -66,6 +66,39 @@ def health_check():
     return {"status": "healthy"}
 
 
+def _initiate_kwargs(body) -> dict:
+    """Map a validated request onto `initiate_payment`'s keyword arguments.
+
+    Shared by Initiate and BulkInitiate so the two entry points cannot drift — a field
+    added to the contract but wired into only one of them is the classic way a bulk path
+    starts writing a different document shape than the single path.
+    """
+    creditor = body.creditor
+    remittance = body.remittance
+    return {
+        "customer_ref": body.customerId,
+        "debtor_account_ref": body.debtor.accountId,
+        # None for an external beneficiary; the snapshot then rides on creditor_party.
+        "creditor_account_ref": creditor.accountId,
+        "creditor_party": creditor.model_dump(exclude={"accountId"}),
+        "instructed_amount": body.instructedAmount,
+        "instructed_currency": body.instructedCurrency,
+        "payment_type": body.type,
+        "payment_rail": body.rail,
+        "remittance_unstructured": remittance.unstructured if remittance else None,
+        "remittance_reference": remittance.reference if remittance else None,
+        "remittance_invoice_no": remittance.invoiceNo if remittance else None,
+        "priority": body.priority,
+        "charge_bearer": body.chargeBearer,
+        "category_purpose": body.categoryPurpose,
+        "requested_execution_date": body.requestedExecutionDate,
+        "channel": body.channel,
+        "wire_details": body.wireDetails.model_dump() if body.wireDetails else None,
+        "ach_details": body.achDetails.model_dump() if body.achDetails else None,
+        "internal_details": body.internalDetails.model_dump() if body.internalDetails else None,
+    }
+
+
 @app.post("/PaymentOrderInitiation/Initiate")
 async def payment_order_procedure_initiate(
     body: PaymentOrderInitiateRequest,
@@ -73,15 +106,8 @@ async def payment_order_procedure_initiate(
 ):
     try:
         payment_doc = payments_service.initiate_payment(
-            customer_ref=body.customerId,
-            debtor_account_ref=body.debtor.accountId,
-            creditor_account_ref=body.creditor.accountId,
-            instructed_amount=body.instructedAmount,
-            instructed_currency=body.instructedCurrency,
-            payment_type=body.type,
-            payment_rail=body.rail,
-            remittance_unstructured=(body.remittance.unstructured if body.remittance else None),
-            idempotency_key=idempotency_key,
+            idempotency_key=idempotency_key or body.idempotencyKey,
+            **_initiate_kwargs(body),
         )
         return _bian_response({
             "paymentId": payment_doc["paymentId"],
@@ -107,14 +133,8 @@ async def payment_order_procedure_bulk_initiate(body: PaymentOrderBulkInitiateRe
     for idx, item in enumerate(body.items):
         try:
             payment_doc = payments_service.initiate_payment(
-                customer_ref=item.customerId,
-                debtor_account_ref=item.debtor.accountId,
-                creditor_account_ref=item.creditor.accountId,
-                instructed_amount=item.instructedAmount,
-                instructed_currency=item.instructedCurrency,
-                payment_type=item.type,
-                payment_rail=item.rail,
-                remittance_unstructured=(item.remittance.unstructured if item.remittance else None),
+                idempotency_key=item.idempotencyKey,
+                **_initiate_kwargs(item),
             )
             settled += 1
             results.append({

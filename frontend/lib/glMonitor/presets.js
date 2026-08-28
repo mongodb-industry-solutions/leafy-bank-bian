@@ -1,13 +1,14 @@
 // Quick-preset transactions — ported from .docs/gl-monitor-static-ref/js/initiate.js
 // and backend/ledger/static/gl_monitor.html. `mode` drives the posting path:
-// WIRE/INTERNAL rails post in real time; ACH/VENMO/PAYPAL rails post via the
-// scheduled gl_batch. The UI groups presets by this field.
+// WIRE/INTERNAL rails post in real time; ACH posts via the scheduled gl_batch. The UI
+// groups presets by this field. (VENMO/PAYPAL are gone — not in the spec's rail enum;
+// both now map to INTERNAL, doc 13 §2 B3.)
 export const PRESETS = [
   { mode: "REALTIME", label: "Grace → Monet $50",   customerId: "CUST-00528224", type: "CREDIT_TRANSFER",   rail: "INTERNAL", debtor: "ACC-e0583b3b", creditor: "ACC-e0583b3c", amount: 50,  remittance: "Ledger smoke test 1" },
   { mode: "REALTIME", label: "Monet → Grace $75",   customerId: "CUST-17352703", type: "CREDIT_TRANSFER",   rail: "INTERNAL", debtor: "ACC-e0583b3c", creditor: "ACC-e0583b3b", amount: 75,  remittance: "Ledger smoke test 4" },
   { mode: "REALTIME", label: "Frida → Grace $80",   customerId: "CUST-f88fb89e", type: "CREDIT_TRANSFER",   rail: "INTERNAL", debtor: "ACC-e0583b3a", creditor: "ACC-e0583b3f", amount: 80,  remittance: "Ledger smoke test 6" },
   { mode: "REALTIME", label: "Frida → Monet $110",  customerId: "CUST-f88fb89e", type: "CREDIT_TRANSFER",   rail: "INTERNAL", debtor: "ACC-e0583b3a", creditor: "ACC-e0583b3c", amount: 110, remittance: "Ledger smoke test 7" },
-  { mode: "REALTIME", label: "Frida own-acct $250", customerId: "CUST-f88fb89e", type: "INTRABANK_TRANSFER", rail: "INTERNAL", debtor: "ACC-e0583b3a", creditor: "ACC-e0583b39", amount: 250, remittance: "" },
+  { mode: "REALTIME", label: "Frida own-acct $250", customerId: "CUST-f88fb89e", type: "CREDIT_TRANSFER",   rail: "INTERNAL", debtor: "ACC-e0583b3a", creditor: "ACC-e0583b39", amount: 250, remittance: "" },
   { mode: "BATCH",    label: "Grace → Monet $60",   customerId: "CUST-00528224", type: "CREDIT_TRANSFER",   rail: "ACH",      debtor: "ACC-e0583b3b", creditor: "ACC-e0583b3c", amount: 60,  remittance: "Batch smoke test 1" },
   { mode: "BATCH",    label: "Monet → Grace $45",   customerId: "CUST-17352703", type: "CREDIT_TRANSFER",   rail: "ACH",      debtor: "ACC-e0583b3c", creditor: "ACC-e0583b3b", amount: 45,  remittance: "Batch smoke test 3" },
   { mode: "BATCH",    label: "Frida → Grace $65",   customerId: "CUST-f88fb89e", type: "CREDIT_TRANSFER",   rail: "ACH",      debtor: "ACC-e0583b3a", creditor: "ACC-e0583b3f", amount: 65,  remittance: "Batch smoke test 5" },
@@ -32,20 +33,21 @@ const BULK_ACCOUNTS = [
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // Build a randomized batch of valid payment payloads for BulkInitiate. Each item
-// picks a debtor, a distinct creditor, derives type from same-customer ownership,
-// randomizes the rail (INTERNAL realtime vs ACH batch) so both pipeline paths get
-// exercised, and keeps amounts modest ($5–$50, under PAYMENT_LIMIT_USD).
+// picks a debtor and a distinct creditor, randomizes the rail (INTERNAL realtime vs ACH
+// batch) so both pipeline paths get exercised, and keeps amounts modest ($5–$50, under
+// PAYMENT_LIMIT_USD). Every item is a CREDIT_TRANSFER: an own-account move is still a
+// credit transfer, and "same customer" is carried by internalDetails.transferType, which
+// the backend derives — it is not a payment `type` (doc 13 §2 B2).
 export function generateBulkItems(n = 5) {
   const items = [];
   for (let i = 0; i < n; i++) {
     const debtor = pick(BULK_ACCOUNTS);
     let creditor = pick(BULK_ACCOUNTS);
     while (creditor.accountId === debtor.accountId) creditor = pick(BULK_ACCOUNTS);
-    const isInternal = debtor.customerId === creditor.customerId;
     const amount = Math.round((5 + Math.random() * 45) * 100) / 100;
     items.push({
       customerId: debtor.customerId,
-      type: isInternal ? "INTRABANK_TRANSFER" : "CREDIT_TRANSFER",
+      type: "CREDIT_TRANSFER",
       rail: pick(["INTERNAL", "ACH"]),
       debtor: { accountId: debtor.accountId },
       creditor: { accountId: creditor.accountId },

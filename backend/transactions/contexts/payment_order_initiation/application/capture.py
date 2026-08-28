@@ -9,18 +9,26 @@ The basic-field guards below run **before** the insert. Doina's Stage 1 Key Feat
 *"Perform basic fields validation"* — a malformed amount is refused before an instruction
 exists. Account and funds validation is stage 3's job, on the persisted document.
 
-Reads  ctx: customer_ref, debtor_account_ref, creditor_account_ref, instructed_amount,
-            instructed_currency, payment_rail, idempotency_key, collections
+An **external beneficiary** is captured here, not rejected. The spec makes
+`creditor.accountId` nullable and requires only `accountNo` + `name`; Doina's flagship
+`wire_domestic` scenario is exactly that shape. When no `accountId` is supplied the
+creditor snapshot comes straight off the request and no account lookup runs. Settling such
+a payment is stage 5's problem and is not implemented — `payment_rail/execute.py` halts at
+SUBMITTED (doc 13 §2 B1).
+
+Reads  ctx: customer_ref, debtor_account_ref, creditor_account_ref, creditor_party,
+            instructed_amount, instructed_currency, instructed_currency, payment_rail,
+            requested_execution_date, idempotency_key, collections
 Writes ctx: now, payment_oid, payment_id, end_to_end_id, txn_code, is_internal,
-            debtor_account, creditor_account, debtor_customer, creditor_customer,
-            debtor_customer_id, creditor_customer_id, payment_doc, current_state
-            (or halts on replay)
+            is_external_creditor, debtor_account, creditor_account, debtor_customer,
+            creditor_customer, debtor_customer_id, creditor_customer_id, payment_doc,
+            current_state (or halts on replay)
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
@@ -35,18 +43,22 @@ logger = logging.getLogger(__name__)
 def run(ctx: PaymentContext) -> None:
     c = ctx.collections
 
-    # Intake sanity. Kept ahead of every lookup so a malformed request costs no I/O.
+    # Intake sanity (R2, Doina "perform basic fields validation"). Kept ahead of every
+    # lookup so a malformed request costs no I/O.
     if ctx.instructed_amount <= 0:
         raise ValueError("PaymentInstructedAmount must be greater than 0.")
     if ctx.instructed_amount > ctx.payment_limit_usd:
         raise ValueError(
             f"PaymentInstructedAmount exceeds the limit of {ctx.payment_limit_usd}."
         )
+    _check_currency(ctx.instructed_currency)
+    _check_requested_execution_date(ctx.requested_execution_date)
 
     # Idempotent replay. This pre-check is a courtesy, not the guarantee — the unique
-    # index on `endToEndId` is what enforces idempotency, and `persist.py` honours it.
+    # sparse index on `idempotencyKey` is what enforces idempotency, honoured by the
+    # DuplicateKeyError branch below.
     if ctx.idempotency_key:
-        existing = c.payments.find_one({"endToEndId": ctx.idempotency_key})
+        existing = c.payments.find_one({"idempotencyKey": ctx.idempotency_key})
         if existing:
             logger.info(
                 "Idempotent replay for endToEndId=%s — returning existing paymentId=%s",
@@ -60,25 +72,38 @@ def run(ctx: PaymentContext) -> None:
     ctx.debtor_account = c.accounts.find_one({"accountId": ctx.debtor_account_ref})
     if not ctx.debtor_account:
         raise ValueError(f"Debtor account {ctx.debtor_account_ref} not found.")
-    ctx.creditor_account = c.accounts.find_one({"accountId": ctx.creditor_account_ref})
-    if not ctx.creditor_account:
-        raise ValueError(f"Creditor account {ctx.creditor_account_ref} not found.")
+    # An external beneficiary has no account to resolve — the request IS the snapshot.
+    ctx.is_external_creditor = ctx.creditor_account_ref is None
+    if not ctx.is_external_creditor:
+        ctx.creditor_account = c.accounts.find_one({"accountId": ctx.creditor_account_ref})
+        if not ctx.creditor_account:
+            raise ValueError(f"Creditor account {ctx.creditor_account_ref} not found.")
 
     # v6: the customer FK lives at customerSnapshot.customerId (top-level customerId removed).
     ctx.debtor_customer_id = ctx.debtor_account["customerSnapshot"]["customerId"]
-    ctx.creditor_customer_id = ctx.creditor_account["customerSnapshot"]["customerId"]
-
     ctx.debtor_customer = c.customers.find_one({"customerId": ctx.debtor_customer_id})
-    ctx.creditor_customer = c.customers.find_one({"customerId": ctx.creditor_customer_id})
-    if not ctx.debtor_customer or not ctx.creditor_customer:
-        raise ValueError("Customer reference data missing for debtor or creditor.")
+    if not ctx.debtor_customer:
+        raise ValueError("Customer reference data missing for debtor.")
 
-    ctx.is_internal = ctx.debtor_customer_id == ctx.creditor_customer_id
+    if not ctx.is_external_creditor:
+        ctx.creditor_customer_id = ctx.creditor_account["customerSnapshot"]["customerId"]
+        ctx.creditor_customer = c.customers.find_one({"customerId": ctx.creditor_customer_id})
+        if not ctx.creditor_customer:
+            raise ValueError("Customer reference data missing for creditor.")
+
+    # "Same customer", NOT "same bank" — an external creditor is never own-account.
+    ctx.is_internal = (
+        not ctx.is_external_creditor
+        and ctx.debtor_customer_id == ctx.creditor_customer_id
+    )
 
     # Identifiers. One ObjectId seeds every typed ref so they correlate across collections.
     ctx.payment_oid = ObjectId()
     ctx.payment_id = derive_ref("PAY", ctx.payment_oid)
-    ctx.end_to_end_id = ctx.idempotency_key or derive_ref("E2E", ctx.payment_oid, last_n=12)
+    # R7 — provenance and idempotency are two concerns. `endToEndId` is the ISO 20022
+    # EndToEndIdentification and is always ours; the caller's retry key rides on
+    # `idempotencyKey` and never becomes part of the payment's public identity.
+    ctx.end_to_end_id = derive_ref("E2E", ctx.payment_oid, last_n=12)
     # ISO 20022 BankTransactionCode derived from rail.
     ctx.txn_code = "PMNT-ICDT-BOOK" if ctx.payment_rail == "INTERNAL" else "PMNT-ICDT-ESCT"
 
@@ -97,12 +122,16 @@ def run(ctx: PaymentContext) -> None:
         # cannot serialise these — the unique index on endToEndId is what actually enforces
         # idempotency, and this is the path that honours it. Return the winner's document so
         # both callers see the same payment rather than failing the loser with a spurious 400.
-        existing = c.payments.find_one({"endToEndId": ctx.end_to_end_id})
+        existing = (
+            c.payments.find_one({"idempotencyKey": ctx.idempotency_key})
+            if ctx.idempotency_key
+            else None
+        )
         if existing is None:
             raise
         logger.info(
-            "Concurrent idempotent replay for endToEndId=%s — returning existing paymentId=%s",
-            ctx.end_to_end_id,
+            "Concurrent idempotent replay for idempotencyKey=%s — returning existing paymentId=%s",
+            ctx.idempotency_key,
             existing["paymentId"],
         )
         ctx.stop(existing)
@@ -114,3 +143,31 @@ def run(ctx: PaymentContext) -> None:
         actor="transactions-service",
         reason="Instruction captured",
     )
+
+
+# --- basic field validation (R2) ---------------------------------------------
+
+# A requested execution date far in the future is a data-entry slip, not a warehoused
+# payment; Phase 1 executes same-day. The window is generous on purpose — the point is to
+# catch a mistyped year, not to implement forward-dating rules (that is stage 4's).
+_MAX_FORWARD_DATING_DAYS = 365
+
+
+def _check_currency(currency: str) -> None:
+    if not (currency and len(currency) == 3 and currency.isalpha() and currency.isupper()):
+        raise ValueError(
+            f"PaymentInstructedCurrency {currency!r} is not an ISO-4217 alpha-3 code."
+        )
+
+
+def _check_requested_execution_date(requested) -> None:
+    if requested is None:
+        return
+    today = datetime.now(timezone.utc).date()
+    if requested < today:
+        raise ValueError("PaymentRequestedExecutionDate is in the past.")
+    if requested > today + timedelta(days=_MAX_FORWARD_DATING_DAYS):
+        raise ValueError(
+            "PaymentRequestedExecutionDate is more than "
+            f"{_MAX_FORWARD_DATING_DAYS} days ahead."
+        )

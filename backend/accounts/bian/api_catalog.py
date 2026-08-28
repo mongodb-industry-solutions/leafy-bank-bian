@@ -553,18 +553,19 @@ API_CATALOG = {
                                     "name": "Idempotency-Key",
                                     "required": False,
                                     "notes": (
-                                        "Recommended client-generated UUID. Maps to endToEndId. "
-                                        "Replays with the same key return the original response without "
-                                        "re-running the transaction."
+                                        "Recommended client-generated UUID. Maps to idempotencyKey "
+                                        "(NOT endToEndId, which is the server-derived ISO 20022 "
+                                        "EndToEndIdentification). Replays with the same key return the "
+                                        "original response without re-running the transaction."
                                     ),
                                 }
                             ],
                             "enums": {
                                 "PaymentType": [
                                     "CREDIT_TRANSFER", "DIRECT_DEBIT", "CARD_PAYMENT",
-                                    "CHEQUE", "INTRABANK_TRANSFER",
+                                    "RTP", "STANDING_ORDER",
                                 ],
-                                "PaymentRailType": ["INTERNAL"],
+                                "PaymentRailType": ["INTERNAL", "WIRE", "ACH", "CARD", "RTP"],
                             },
                             "request": {
                                 "required": [
@@ -577,17 +578,22 @@ API_CATALOG = {
                                     "PaymentInstructedCurrencyCode",
                                 ],
                                 "notes": (
-                                    "Phase 1: PaymentRailType is INTERNAL only. "
+                                    "Phase 1 settles INTERNAL only; a WIRE to an external "
+                                    "beneficiary is captured and stops at SUBMITTED. "
                                     "PaymentInstructedAmount must be > 0. "
                                     "PaymentInstructedCurrencyCode must be 3-char ISO-4217. "
+                                    "CreditorAccountReference is null for an external beneficiary, "
+                                    "which then requires CreditorAccountNumber + CreditorPartyName "
+                                    "(and a BIC on the WIRE rail). "
+                                    "PaymentRequestedExecutionDate defaults to today. "
                                     "PaymentRemittanceRecord optional."
                                 ),
                                 "examples": [
                                     {
-                                        "label": "intrabank transfer",
+                                        "label": "internal transfer",
                                         "value": {
                                             "CustomerReference": "CUST-abc123",
-                                            "PaymentType": "INTRABANK_TRANSFER",
+                                            "PaymentType": "CREDIT_TRANSFER",
                                             "PaymentRailType": "INTERNAL",
                                             "PaymentDebtorRecord": {
                                                 "DebtorAccountReference": "ACC-xyz789"
@@ -597,11 +603,36 @@ API_CATALOG = {
                                             },
                                             "PaymentInstructedAmount": 100.0,
                                             "PaymentInstructedCurrencyCode": "USD",
+                                            "PaymentRequestedExecutionDate": "2026-08-28",
                                             "PaymentRemittanceRecord": {
                                                 "RemittanceUnstructuredInformationText": "Lunch payback"
                                             },
                                         },
-                                    }
+                                    },
+                                    {
+                                        "label": "domestic wire to an external beneficiary",
+                                        "value": {
+                                            "CustomerReference": "CUST-abc123",
+                                            "PaymentType": "CREDIT_TRANSFER",
+                                            "PaymentRailType": "WIRE",
+                                            "PaymentDebtorRecord": {
+                                                "DebtorAccountReference": "ACC-xyz789"
+                                            },
+                                            "PaymentCreditorRecord": {
+                                                "CreditorAccountNumber": "9876543210",
+                                                "CreditorPartyName": "Acme Corp",
+                                                "CreditorBankIdentifierCode": "CHASUS33",
+                                                "CreditorBankName": "JPMorgan Chase",
+                                                "CreditorBankCountryCode": "US",
+                                            },
+                                            "PaymentInstructedAmount": 2500.0,
+                                            "PaymentInstructedCurrencyCode": "USD",
+                                            "PaymentRequestedExecutionDate": "2026-08-28",
+                                            "PaymentWireInitiationRecord": {
+                                                "WireTransferType": "DOMESTIC"
+                                            },
+                                        },
+                                    },
                                 ],
                             },
                             "response": {
@@ -617,7 +648,7 @@ API_CATALOG = {
                                     "PaymentOrderRecord": {
                                         "PaymentOrderReference": "PAY-abc",
                                         "CustomerReference": "CUST-abc123",
-                                        "PaymentType": "INTRABANK_TRANSFER",
+                                        "PaymentType": "CREDIT_TRANSFER",
                                         "PaymentRailType": "INTERNAL",
                                         "PaymentApexStatus": "COMPLETED",
                                         "PaymentDebtorRecord": {"DebtorAccountReference": "ACC-xyz789"},

@@ -28,13 +28,25 @@ logger = logging.getLogger(__name__)
 # index is non-unique.
 PAYMENTS_INDEXES = [
     {"name": "idx_payment_id", "keys": [("paymentId", ASCENDING)]},
-    # endToEndId is the idempotency key. UNIQUE is load-bearing, not an optimisation:
-    # initiate_payment's find_one pre-check cannot serialise concurrent identical
+    # idempotencyKey is the caller's retry key, and UNIQUE here is load-bearing, not an
+    # optimisation: capture's find_one pre-check cannot serialise concurrent identical
     # requests on its own, so without this constraint two racing callers both pass the
-    # check and both move money. The DuplicateKeyError handler in payments_service is
-    # what makes the second caller an idempotent replay — and it can only fire if this
-    # index exists.
-    {"name": "idx_end_to_end_id_unique", "keys": [("endToEndId", ASCENDING)], "unique": True},
+    # check and both move money. The DuplicateKeyError handler in capture.py is what
+    # makes the second caller an idempotent replay — and it can only fire if this index
+    # exists. SPARSE because the field is legitimately null for any payment initiated
+    # without a retry key; a plain unique index would let exactly one such payment exist.
+    #
+    # Stage 1 (R7) moved this off `endToEndId`, which now carries the ISO 20022
+    # EndToEndIdentification and nothing else. NOTE for the Atlas run: `create_index` does
+    # not drop anything, so the old `idx_end_to_end_id_unique` survives until dropped by
+    # hand. It is harmless (endToEndId is server-derived and unique per payment) but it is
+    # dead weight — drop it once this ships.
+    {
+        "name": "idx_idempotency_key_unique",
+        "keys": [("idempotencyKey", ASCENDING)],
+        "unique": True,
+        "sparse": True,
+    },
 ]
 
 # `transactions` is shared with the ThreatSight 360 demo, which adds ~21k docs stamped

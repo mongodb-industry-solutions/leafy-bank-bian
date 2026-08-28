@@ -36,15 +36,21 @@ from process.payment_context import PaymentContext
 def run(ctx: PaymentContext) -> None:
     if ctx.debtor_account["status"] == "CLOSED":
         raise ValueError("Debtor account is CLOSED.")
-    if ctx.creditor_account["status"] == "CLOSED":
-        raise ValueError("Creditor account is CLOSED.")
-    if ctx.debtor_account_ref == ctx.creditor_account_ref:
-        raise ValueError("Debtor and creditor accounts must differ.")
 
     debtor_currency = ctx.debtor_account.get("currency")
-    creditor_currency = ctx.creditor_account.get("currency")
-    if debtor_currency != creditor_currency or debtor_currency != ctx.instructed_currency:
+    if debtor_currency != ctx.instructed_currency:
         raise ValueError("Currency mismatch — FX is out of scope for Phase 1.")
+
+    # An external beneficiary has no account here to inspect. Its status and currency are
+    # the receiving bank's to police, and reachability on the rail is a stage-3 TODO
+    # below. Only the two-sided rules are skipped; every debtor-side rule still runs.
+    if not ctx.is_external_creditor:
+        if ctx.creditor_account["status"] == "CLOSED":
+            raise ValueError("Creditor account is CLOSED.")
+        if ctx.debtor_account_ref == ctx.creditor_account_ref:
+            raise ValueError("Debtor and creditor accounts must differ.")
+        if ctx.creditor_account.get("currency") != debtor_currency:
+            raise ValueError("Currency mismatch — FX is out of scope for Phase 1.")
 
     # Pre-flight funds floor. Re-checked inside the ACID transaction in stage 5, which is
     # the check that actually holds — this one gives a clean 400 instead of a rollback.

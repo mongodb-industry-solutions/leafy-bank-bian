@@ -20,6 +20,7 @@ Where the stages are:
 """
 
 import logging
+from datetime import date
 from typing import Optional
 
 from database.connection import MongoDBConnection
@@ -61,15 +62,31 @@ class PaymentsService:
         self,
         customer_ref: str,
         debtor_account_ref: str,
-        creditor_account_ref: str,
+        creditor_account_ref: Optional[str],
         instructed_amount: float,
         instructed_currency: str,
         payment_type: str,
         payment_rail: str,
         remittance_unstructured: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        *,
+        creditor_party: Optional[dict] = None,
+        remittance_reference: Optional[str] = None,
+        remittance_invoice_no: Optional[str] = None,
+        priority: str = "NORMAL",
+        charge_bearer: str = "SLEV",
+        category_purpose: Optional[str] = None,
+        requested_execution_date: Optional[date] = None,
+        channel: str = "API",
+        wire_details: Optional[dict] = None,
+        ach_details: Optional[dict] = None,
+        internal_details: Optional[dict] = None,
     ) -> dict:
         """Initiate a payment order. Returns the persisted payment document.
+
+        `creditor_account_ref` is None for an external beneficiary; `creditor_party` then
+        carries the snapshot off the request. Everything after the `*` is keyword-only and
+        defaulted, so the stage-1 fields are additive for existing callers.
 
         Raises ValueError on validation failures; caller maps to HTTP 400.
         """
@@ -77,12 +94,23 @@ class PaymentsService:
             customer_ref=customer_ref,
             debtor_account_ref=debtor_account_ref,
             creditor_account_ref=creditor_account_ref,
+            creditor_party=creditor_party,
             instructed_amount=instructed_amount,
             instructed_currency=instructed_currency,
             payment_type=payment_type,
             payment_rail=payment_rail,
             remittance_unstructured=remittance_unstructured,
+            remittance_reference=remittance_reference,
+            remittance_invoice_no=remittance_invoice_no,
+            priority=priority,
+            charge_bearer=charge_bearer,
+            category_purpose=category_purpose,
+            requested_execution_date=requested_execution_date,
+            channel=channel,
             idempotency_key=idempotency_key,
+            wire_details=wire_details,
+            ach_details=ach_details,
+            internal_details=internal_details,
             collections=self._collections(),
             payment_limit_usd=self.payment_limit_usd,
         )

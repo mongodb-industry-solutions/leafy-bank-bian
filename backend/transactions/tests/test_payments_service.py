@@ -47,7 +47,8 @@ class FakeCollection:
     def insert_one(self, doc, *a, **kw):
         if self.unique_on:
             val = doc.get(self.unique_on)
-            if any(d.get(self.unique_on) == val for d in self.docs):
+            # SPARSE: a null carries no uniqueness, matching idx_idempotency_key_unique.
+            if val is not None and any(d.get(self.unique_on) == val for d in self.docs):
                 raise DuplicateKeyError(f"dup {self.unique_on}={val}")
         self.docs.append(copy.deepcopy(doc))
         self.inserted.append(copy.deepcopy(doc))
@@ -165,7 +166,9 @@ def _account(account_id, customer_id, *, currency="USD", available=10_000.0,
         "accountNumber": "8282993" + account_id[-2:],
         "status": status,
         "currency": currency,
-        "accountType": account_type,
+        # `type`, not `accountType` — payment_document.party_snapshot reads account["type"].
+        # The fixture used the wrong key, so every snapshot silently got accountType: None.
+        "type": account_type,
         "customerSnapshot": {"customerId": customer_id, "name": f"Holder {customer_id}"},
         "balance": {"current": available, "available": available, "ledger": available,
                     "updatedAt": datetime.now(timezone.utc)},
@@ -194,7 +197,7 @@ def db():
 
 @pytest.fixture
 def service(db):
-    db["payments"].unique_on = "endToEndId"      # mirrors idx_end_to_end_id_unique
+    db["payments"].unique_on = "idempotencyKey"  # mirrors idx_idempotency_key_unique
     return PaymentsService(FakeConnection(db), "leafy_bank_bian", payment_limit_usd=50_000.0)
 
 
@@ -206,7 +209,10 @@ def _initiate(svc, **over):
         instructed_amount=250.0,
         instructed_currency="USD",
         payment_type="CREDIT_TRANSFER",
-        payment_rail="WIRE",
+        # INTERNAL, not WIRE: both fixture accounts are Leafy Bank accounts, and since
+        # stage 1 the rail<->envelope rules make that distinction real (a WIRE here would
+        # be an internally-settled wire, which is not a thing).
+        payment_rail="INTERNAL",
         remittance_unstructured="INV-48392",
     )
     kwargs.update(over)
@@ -306,9 +312,13 @@ def test_closed_account_rejected(db, side):
         assert acc["balance"]["available"] == 10_000.0
 
 
-# --- 4. duplicate endToEndId (idempotency) ------------------------------------
+# --- 4. duplicate idempotencyKey (idempotency) --------------------------------
+#
+# Stage 1 R7 split the two identifiers: `endToEndId` is the ISO 20022
+# EndToEndIdentification and is always server-derived, while the caller's retry key now
+# rides on `idempotencyKey`, where the unique sparse index lives.
 
-def test_duplicate_end_to_end_id_returns_first_payment_once(service, db):
+def test_duplicate_idempotency_key_returns_first_payment_once(service, db):
     """Two identical requests produce ONE payment and move money ONCE.
 
     The pre-check short-circuits the second call. The unique index is the real enforcement —
@@ -332,7 +342,7 @@ def test_concurrent_duplicate_loses_race_and_returns_the_winner(service, db, mon
     bypassing the pre-check, so `insert_one` raises DuplicateKeyError.
     """
     winner = {"_id": "oid-winner", "paymentId": "PAY-winner1",
-              "endToEndId": "E2E-raced", "status": "SETTLED"}
+              "idempotencyKey": "E2E-raced", "status": "SETTLED"}
 
     real_find_one = db["payments"].find_one
     calls = {"n": 0}
@@ -506,3 +516,91 @@ def test_advance_rejects_a_state_it_cannot_reach(service, db):
             db["payments"], payment["_id"], L.VALIDATED,
             actor="test", reason="going backwards", from_state=L.SETTLED,
         )
+
+
+# --- 5. external beneficiary (doc 13 §2 B1) -----------------------------------
+#
+# Doina's flagship `wire_domestic` scenario: a creditor Leafy Bank does not hold. Stage 1
+# captures it; stage 5 stops before the money move because settling it needs the
+# chart-of-accounts extension that has not been decided. These tests pin BOTH halves —
+# that the payment is created and traceable, and that not one cent moved.
+
+EXTERNAL_CREDITOR = {
+    "accountNo": "9876543210",
+    "name": "Acme Corp",
+    "bic": "CHASUS33",
+    "bankName": "JPMorgan Chase",
+    "bankCountry": "US",
+}
+
+
+def _initiate_external(svc, **over):
+    return _initiate(
+        svc,
+        creditor_account_ref=None,
+        creditor_party=EXTERNAL_CREDITOR,
+        payment_rail="WIRE",
+        **over,
+    )
+
+
+def test_external_wire_halts_at_submitted_and_moves_no_money(service, db):
+    payment = _initiate_external(service)
+
+    assert payment["lifecycle"]["currentState"] == "SUBMITTED"
+    assert payment["status"] == "SUBMITTED"
+    assert "external settlement pending" in payment["lifecycle"]["events"][-1]["reason"]
+
+    assert db["transactions"].inserted == [], "no transactions doc — the ledger must not see it"
+    assert db["notifications"].inserted == []
+    for acc in db["accounts"].docs:
+        assert acc["balance"]["available"] == 10_000.0, "no balance moved"
+
+
+def test_external_wire_is_still_a_real_traceable_payment(service, db):
+    """The halt is not a silent drop: the instruction exists, with its full event trail."""
+    payment = _initiate_external(service)
+
+    assert len(db["payments"].inserted) == 1
+    states = [e["state"] for e in payment["lifecycle"]["events"]]
+    assert states[0] == "DRAFT" and states[-1] == "SUBMITTED"
+    assert "REJECTED" not in states, "the bank did not refuse this payment"
+    assert payment["creditor"]["accountId"] is None
+    assert payment["creditor"]["name"] == "Acme Corp"
+    assert payment["clearing"]["submittedAt"] is not None
+    assert payment["clearing"]["settledAt"] is None
+
+
+def test_internal_payment_still_settles_alongside_the_guard(service, db):
+    """The guard must be scoped to external creditors only — the regression it could
+    plausibly cause is halting everything."""
+    payment = _initiate(service, instructed_amount=100.0)
+
+    assert payment["status"] == "SETTLED"
+    assert len(db["transactions"].inserted) == 1
+    assert db["accounts"].find_one({"accountId": DEBTOR})["balance"]["available"] == 9_900.0
+    assert db["accounts"].find_one({"accountId": CREDITOR})["balance"]["available"] == 10_100.0
+
+
+def test_missing_creditor_rolls_the_money_move_back(service, db, monkeypatch):
+    """The defensive assertion inside the ACID block. The external guard makes this
+    unreachable in practice; this test proves the block aborts rather than destroying money
+    if it ever becomes reachable again.
+
+    The creditor has to vanish BETWEEN capture (which resolves it) and the money move —
+    that is the only way this branch is reached — so the credit update is stubbed to
+    no-match rather than the account being deleted up front.
+    """
+    real = db["accounts"].find_one_and_update
+
+    def credit_matches_nothing(flt, update, *a, **kw):
+        if flt.get("accountId") == CREDITOR:
+            return None
+        return real(flt, update, *a, **kw)
+
+    monkeypatch.setattr(db["accounts"], "find_one_and_update", credit_matches_nothing)
+
+    with pytest.raises(ValueError, match="did not match at settlement time"):
+        _initiate(service)
+
+    assert db["transactions"].inserted == [], "no transaction on a failed money move"

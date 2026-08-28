@@ -158,7 +158,7 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
               </div>
 
               <div className={styles["field-label"]} style={{ marginBottom: 8 }}>
-                Batch presets <span style={{ textTransform: "none", fontWeight: 400, color: "var(--text-xs)" }}>— rail ACH/VENMO/PAYPAL</span>
+                Batch presets <span style={{ textTransform: "none", fontWeight: 400, color: "var(--text-xs)" }}>— rail ACH</span>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {PRESETS.map((p, i) => [p, i]).filter(([p]) => p.mode === "BATCH").map(([p, i]) => (
@@ -219,7 +219,10 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
                     <div className={styles["field-label"]}>Type</div>
                     <select className={styles["form-input"]} value={custom.type} onChange={(e) => setField("type", e.target.value)}>
                       <option value="CREDIT_TRANSFER">CREDIT_TRANSFER</option>
-                      <option value="INTRABANK_TRANSFER">INTRABANK_TRANSFER</option>
+                      <option value="DIRECT_DEBIT">DIRECT_DEBIT</option>
+                      <option value="CARD_PAYMENT">CARD_PAYMENT</option>
+                      <option value="RTP">RTP</option>
+                      <option value="STANDING_ORDER">STANDING_ORDER</option>
                     </select>
                   </div>
                   <div style={{ minWidth: 100, flex: 0.8 }}>
@@ -228,6 +231,8 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
                       <option value="INTERNAL">INTERNAL</option>
                       <option value="ACH">ACH</option>
                       <option value="WIRE">WIRE</option>
+                      <option value="CARD">CARD</option>
+                      <option value="RTP">RTP</option>
                     </select>
                   </div>
                 </div>

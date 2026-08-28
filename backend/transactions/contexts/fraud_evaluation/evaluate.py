@@ -43,7 +43,9 @@ def run(ctx: PaymentContext) -> None:
         ctx, lifecycle.AUTHORISED,
         actor="fraud-service",
         reason=f"Fraud score {ctx.fraud['score']} within threshold; sanctions clear",
-        extra={"fraud": ctx.fraud},
+        # `clearing.authorisedAt` is stage 4's to stamp. It used to be written at creation
+        # alongside the other three, which made the demo's timeline a fiction.
+        extra={"fraud": ctx.fraud, "clearing.authorisedAt": ctx.now},
     )
     lifecycle.advance_ctx(
         ctx, lifecycle.APPROVED,
