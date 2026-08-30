@@ -82,6 +82,44 @@ export async function pipelineApi(path, params = null, { method = "GET", body = 
 }
 
 /**
+ * Back-office payments workflow client (transactions service via the proxy).
+ *
+ * Mirrors pipelineApi. The two are deliberately separate clients rather than one
+ * parameterised helper: they hit different services, and the UI composing both halves of
+ * a payment's trace should read as two reads, not one.
+ *
+ * @param {string} path - path after the prefix, e.g. "payments" or "payments/PAY-123"
+ * @param {object} [params] - query params as key-value pairs
+ * @returns {Promise<{data: any, error: string|null}>}
+ */
+export async function workflowApi(path, params = null) {
+  let url = `${CORE_BASE}/workflow/${path}`;
+  if (params) {
+    const clean = Object.fromEntries(
+      Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== "")
+    );
+    const qs = new URLSearchParams(clean).toString();
+    if (qs) url += (url.includes("?") ? "&" : "?") + qs;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { data: null, error: `${res.status}: ${errText}` };
+    }
+
+    return { data: await res.json(), error: null };
+  } catch (e) {
+    return { data: null, error: e.message };
+  }
+}
+
+/**
  * Chatbot backend API client (non-streaming).
  * @param {string} path - path after root, e.g. "chat"
  * @param {object} options

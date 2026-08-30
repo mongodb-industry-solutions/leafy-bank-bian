@@ -9,7 +9,9 @@
  * segment (the BIAN service-domain name):
  *   - CurrentAccount/*, PartyReferenceDataDirectory/*
  *       → ACCOUNTS_BACKEND_URL     (accounts service)
- *   - PaymentOrderInitiation/*       → TRANSACTIONS_BACKEND_URL (transactions service)
+ *   - PaymentOrderInitiation/*, workflow/*
+ *       → TRANSACTIONS_BACKEND_URL (transactions service)
+ *   - pipeline/*                     → LEDGER_BACKEND_URL      (ledger service)
  *   - everything else (openfinance/*, encryption-demo/*, …)
  *       → CONSENT_BACKEND_URL        (open-finance monolith — fallback)
  */
@@ -31,6 +33,10 @@ const BACKEND_BY_PREFIX = {
   PaymentOrderInitiation: TRANSACTIONS_BACKEND,
   // GL pipeline monitor routes (read-only) live on the ledger service.
   pipeline: LEDGER_BACKEND,
+  // Back-office payments workflow routes (read-only) live on the transactions service —
+  // it owns `payments`. Deliberately NOT the ledger: /pipeline and /workflow are the two
+  // halves of the trace, and neither service reads the other's collections.
+  workflow: TRANSACTIONS_BACKEND,
 };
 
 async function proxy(request, { params }) {

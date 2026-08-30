@@ -14,6 +14,7 @@ from fastapi.responses import Response
 from api_models import PaymentOrderBulkInitiateRequest, PaymentOrderInitiateRequest
 from database.connection import MongoDBConnection
 from encoder.json_encoder import MyJSONEncoder
+from routers.workflow import router as workflow_router
 from services.payments_service import PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
@@ -38,6 +39,13 @@ app.add_middleware(
 connection = MongoDBConnection(MONGODB_URI)
 payments_service = PaymentsService(connection, DB_NAME, PAYMENT_LIMIT_USD)
 transactions_service = TransactionsService(connection, DB_NAME)
+
+# The /workflow routers resolve their dependencies from app.state rather than closing over
+# the module globals, matching the ledger service's router convention.
+app.state.connection = connection
+app.state.db_name = DB_NAME
+
+app.include_router(workflow_router)
 
 
 def _bian_response(envelope: dict) -> Response:

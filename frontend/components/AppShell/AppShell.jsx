@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import NavBar from "@/components/NavBar/NavBar";
 import FloatingAssistant from "@/components/FloatingAssistant/FloatingAssistant";
 
-const HIDE_ASSISTANT_ROUTES = ["/gl-pipeline-monitor"];
+const HIDE_ASSISTANT_ROUTES = ["/gl-pipeline-monitor", "/payments-workflow"];
 
 export default function AppShell({ children, bianModelUrl }) {
   const pathname = usePathname();

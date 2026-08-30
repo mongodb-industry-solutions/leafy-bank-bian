@@ -27,6 +27,27 @@ export const USER_MAP = {
     IncomeFrequency: "Monthly",
     SpendingProfile: "Saver",
   },
+  // Payments Analyst — the back-office payments workflow surface. One persona, three
+  // lenses behind it (Initiate / Payments / Operations); see doc 16 B3. Luke's entry is
+  // deliberately untouched: he still opens the separately-owned fsi-payments-processing
+  // demo in a new tab.
+  "67a1000000000000000000009": {
+    UserName: "Nadia",
+    Role: "Payments Analyst",
+    Section: "backoffice",
+    Employer: "Leafy Bank",
+    EmploymentType: "FullTime",
+    JobTitle: "Payments Analyst",
+    IncomeAmount: null,
+    Currency: "USD",
+    IncomeFrequency: null,
+    Url: "/payments-workflow",
+    Features: [
+      "Bank-Assisted Payment Initiation",
+      "Payment Lifecycle Traceability",
+      "Exception Monitoring",
+    ],
+  },
   "67a1000000000000000000001": {
     UserName: "Marc",
     Role: "Finance Operator",

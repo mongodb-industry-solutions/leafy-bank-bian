@@ -1,0 +1,514 @@
+/* Payments Workflow — back-office surface for the Payments Analyst persona.
+   Tokens and the reset are scoped under .pwRoot with :where() so this route's styling
+   cannot leak into the rest of the app, and so LeafyGreen's own component styles win
+   over ours (a :where() selector has zero specificity). Same approach as GlMonitor.module.css.
+
+   Every length below comes from LeafyGreen's spacing scale
+   (0 1 2 4 6 8 12 16 20 24 32 36 40 48 56 64 72) — `kg spacing -s leafygreen`.
+   Breakpoint 1024 is LG's Desktop — `kg breakpoints -s leafygreen`. */
+
+.pwRoot {
+  --pw-bg: #ffffff;
+  --pw-border: #e2e8f0;
+  --pw-border-light: #f1f5f9;
+  --pw-text: #0f172a;
+  --pw-muted: #64748b;
+  --pw-faint: #94a3b8;
+  --pw-accent: #00684a;
+  --pw-accent-light: #e3fcf7;
+  --pw-surface: #f9fafb;
+  --pw-shadow: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--pw-text);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+:where(.pwRoot, .pwRoot *, .pwRoot *::before, .pwRoot *::after) {
+  box-sizing: border-box;
+}
+
+/* ── header ── */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subtitle {
+  color: var(--pw-muted);
+}
+
+.tabs {
+  margin-top: 8px;
+}
+
+/* The lens wrapper exists to give the SegmentedControl an aria-controls target. It carries
+   the column gap itself because .pwRoot's gap only reaches its own direct children. */
+.lensPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── generic panel ── */
+
+.panel {
+  background: var(--pw-bg);
+  border: 1px solid var(--pw-border);
+  border-radius: 8px;
+  box-shadow: var(--pw-shadow);
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--pw-border-light);
+  background: var(--pw-surface);
+}
+
+.panelTitle {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.panelBody {
+  padding: 16px;
+}
+
+/* Separates the drill-out control from the title it sits beside. */
+.backButton {
+  margin-right: 4px;
+}
+
+.muted {
+  color: var(--pw-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.emptyState {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--pw-muted);
+  font-size: 13px;
+}
+
+/* ── stacked full-width layout ──
+   The list and the lifecycle each get the whole width. An earlier side-by-side split gave
+   each half ~50% and made both congested: the table lost its columns to horizontal scroll
+   and the lifecycle lost the room a horizontal rail needs. */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── filters ── */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.filterField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.filterLabel {
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-muted);
+}
+
+.filterInput {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--pw-bg);
+  color: var(--pw-text);
+}
+
+.filterInput:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+/* ── table ──
+   Hand-rolled: there is no @leafygreen-ui/table in this app's dependencies. */
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--pw-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--pw-border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--pw-border-light);
+  white-space: nowrap;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--pw-surface);
+}
+
+.rowActive {
+  background: var(--pw-accent-light);
+}
+
+.rowActive:hover {
+  background: var(--pw-accent-light);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--pw-border-light);
+}
+
+/* ── horizontal lifecycle rail ──
+   Doina's design is a horizontal stage rail (the comment at the top of PaymentTrace.js
+   says so). Stages read left-to-right in saga order; selecting one opens its detail
+   underneath, so the rail stays one line tall no matter how much detail a stage carries.
+
+   Overflow scrolls rather than wraps: a wrapped rail breaks the left-to-right reading of
+   the saga, which is the entire point of the shape. */
+
+.railScroll {
+  overflow-x: auto;
+  padding: 8px 4px 16px;
+}
+
+.railTrack {
+  display: flex;
+  align-items: flex-start;
+  min-width: min-content;
+}
+
+.stageNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  min-width: 104px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.stageNode:hover:not(:disabled) {
+  background: var(--pw-surface);
+}
+
+.stageNode:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.stageNode:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+.stageNodeActive {
+  background: var(--pw-accent-light);
+}
+
+.stageNodeActive:hover {
+  background: var(--pw-accent-light);
+}
+
+.stageCircle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pw-accent);
+  color: #ffffff;
+  flex: none;
+}
+
+.stageCircleEmpty {
+  background: var(--pw-bg);
+  border: 2px dashed var(--pw-border);
+  color: var(--pw-faint);
+}
+
+.stageLabel {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  max-width: 104px;
+}
+
+.stageMeta {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pw-faint);
+}
+
+/* Sits level with the 36px circle's centre (8px node padding + 18px). */
+.stageConnector {
+  flex: 1 1 16px;
+  min-width: 16px;
+  height: 2px;
+  background: var(--pw-border);
+  margin-top: 26px;
+}
+
+.stageConnectorDone {
+  background: var(--pw-accent);
+}
+
+.stageDetail {
+  border-top: 1px solid var(--pw-border-light);
+  padding-top: 16px;
+}
+
+.stageDetailHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Detail bodies sit in columns so a stage with several small blocks (key/values + legs +
+   JSON) uses the width the rail just bought us instead of stacking into a tall strip. */
+.detailColumns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.detailBlock {
+  min-width: 0;
+}
+
+.detailBlockTitle {
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 8px;
+}
+
+/* ── double-entry legs ── */
+
+.legs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.legsHead {
+  font-weight: 600;
+  color: var(--pw-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--pw-border);
+}
+
+.legRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.legAmount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.legsFoot {
+  border-top: 1px solid var(--pw-border);
+  margin-top: 4px;
+  padding-top: 4px;
+  font-weight: 600;
+}
+
+.balanced {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
+/* ── key/value ── */
+
+.kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.kv td {
+  padding: 4px 0;
+  vertical-align: top;
+}
+
+.kv td:first-child {
+  color: var(--pw-muted);
+  width: 40%;
+  padding-right: 12px;
+}
+
+/* ── events ── */
+
+.event {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pw-border-light);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.event:last-child {
+  border-bottom: none;
+}
+
+.eventReason {
+  color: var(--pw-muted);
+  font-size: 12px;
+}
+
+.eventWhen {
+  color: var(--pw-faint);
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* ── checks ── */
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.checkLabel {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── wizard ── */
+
+.wizard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .wizard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.stepperWrap {
+  margin-bottom: 24px;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.formGridFull {
+  grid-column: 1 / -1;
+}
+
+.formActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--pw-border-light);
+}
+
+.formActionsRight {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.railStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}

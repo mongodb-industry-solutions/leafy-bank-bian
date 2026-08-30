@@ -28,6 +28,15 @@ logger = logging.getLogger(__name__)
 # index is non-unique.
 PAYMENTS_INDEXES = [
     {"name": "idx_payment_id", "keys": [("paymentId", ASCENDING)]},
+    # The back-office workflow list sorts newest-first and filters by status, so createdAt
+    # leads and status follows: this serves both the unfiltered list (sort alone) and the
+    # status-filtered one. Doc 16 B2 asserted `idx_payments_customerId_createdAt` and
+    # `idx_payments_debtorAccount_status` already existed — neither ever did; this is the
+    # index that claim needed. Without it the list COLLSCANs and blocking-sorts `payments`.
+    {
+        "name": "idx_payments_createdAt_status",
+        "keys": [("createdAt", DESCENDING), ("status", ASCENDING)],
+    },
     # idempotencyKey is the caller's retry key, and UNIQUE here is load-bearing, not an
     # optimisation: capture's find_one pre-check cannot serialise concurrent identical
     # requests on its own, so without this constraint two racing callers both pass the
