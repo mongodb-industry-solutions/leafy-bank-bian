@@ -37,10 +37,22 @@ PAYMENTS_INDEXES = [
     # without a retry key; a plain unique index would let exactly one such payment exist.
     #
     # Stage 1 (R7) moved this off `endToEndId`, which now carries the ISO 20022
-    # EndToEndIdentification and nothing else. NOTE for the Atlas run: `create_index` does
-    # not drop anything, so the old `idx_end_to_end_id_unique` survives until dropped by
-    # hand. It is harmless (endToEndId is server-derived and unique per payment) but it is
-    # dead weight — drop it once this ships.
+    # EndToEndIdentification and nothing else.
+    #
+    # ⚠️ NOT YET APPLIED ON ATLAS — deferred to the end of the stage sequence by decision
+    # (2026-08-30, doc 13 §6). Safe only because the index is INERT today: no caller sends
+    # an `Idempotency-Key` header or an `idempotencyKey` field, so the value is always
+    # null, both idempotency paths in capture.py are gated on it, and a sparse index
+    # constrains nothing.
+    #
+    # **Precondition — do not make any caller send an idempotency key before running this.**
+    # capture.py's find_one pre-check would then dedupe sequential retries and look correct
+    # while two concurrent requests with the same key both moved money. If you add a retry
+    # wrapper, a load test, or the header, apply this index in the same change.
+    #
+    # Also for the Atlas run: `create_index` never drops, so the old
+    # `idx_end_to_end_id_unique` survives until dropped by hand. Harmless (endToEndId is
+    # server-derived and unique per payment) but dead weight — drop it then.
     {
         "name": "idx_idempotency_key_unique",
         "keys": [("idempotencyKey", ASCENDING)],
