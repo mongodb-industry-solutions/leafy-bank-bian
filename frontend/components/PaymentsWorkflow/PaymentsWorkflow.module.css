@@ -462,33 +462,155 @@
   min-width: 0;
 }
 
-/* ── wizard ── */
+/* ── create-payment form ──
+   One comprehensive "Enter details" screen rather than a four-step drip: numbered sections,
+   canonical fields beside the rail-specific envelope. The section split mirrors the request
+   contract — section 2 is the common layer, section 3 is `wireDetails`/`internalDetails`. */
 
-.wizard {
+.createHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.headerActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.stepperBar {
+  margin-bottom: 24px;
+  max-width: 640px;
+}
+
+/* Canonical details get twice the room of the rail envelope, matching their field count.
+   Below LG's Desktop breakpoint the envelope drops beneath rather than being squeezed. */
+.createGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
 }
 
 @media (max-width: 1024px) {
-  .wizard {
+  .createGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
-.stepperWrap {
-  margin-bottom: 24px;
-}
-
-.formGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-}
-
-.formGridFull {
+.fullSpan {
   grid-column: 1 / -1;
+}
+
+.sectionCard {
+  background: var(--pw-bg);
+  border: 1px solid var(--pw-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 20px;
+  margin-bottom: 4px;
+}
+
+.sectionSub {
+  color: var(--pw-muted);
+  font-size: 12px;
+  line-height: 20px;
+  margin-bottom: 16px;
+}
+
+/* Two columns inside the canonical section: debit side left, beneficiary side right. */
+.twoCol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.fieldStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.colHeading {
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.balanceHint {
+  color: var(--pw-accent);
+  font-size: 12px;
+  line-height: 20px;
+  margin-top: -8px;
+}
+
+/* Boxed asides in the rail envelope column. */
+.infoBox {
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+  padding: 12px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.infoBoxTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.subPanel {
+  border: 1px solid var(--pw-accent-light);
+  background: var(--pw-accent-light);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.subPanelTitle {
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 20px;
+  margin-bottom: 12px;
+}
+
+/* Payment-type option: label left, availability right. */
+.optionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.disclosure {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  color: var(--pw-accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .formActions {
@@ -507,8 +629,20 @@
   align-items: center;
 }
 
-.railStack {
+/* ── confirmation ── */
+
+.confirmBox {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.confirmId {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 24px;
 }

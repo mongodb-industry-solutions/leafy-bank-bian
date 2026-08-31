@@ -34,9 +34,10 @@ from process.payment_context import PaymentContext
 
 
 def run(ctx: PaymentContext) -> None:
-    if ctx.debtor_account["status"] == "CLOSED":
-        raise ValueError("Debtor account is CLOSED.")
-
+    # The DEBTOR account-status check moved to stage 2 (doc 15 B6) and broadened there to
+    # CLOSED / DORMANT / FROZEN plus `restrictions[]`: entitlement to use the account is
+    # stage 2's question. The CREDITOR check below stays — a payee's account state is
+    # payment validity, not the payer's entitlement.
     debtor_currency = ctx.debtor_account.get("currency")
     if debtor_currency != ctx.instructed_currency:
         raise ValueError("Currency mismatch — FX is out of scope for Phase 1.")

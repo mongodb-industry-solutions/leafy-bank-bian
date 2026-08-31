@@ -45,13 +45,17 @@ export const statusBadgeVariant = (status) => {
   }
 };
 
-/** Check outcome → Badge variant. PASS/FAIL/SKIP is the stage-2 `checks[]` vocabulary. */
+/** `checks[].result` → Badge variant. PASS/FAIL/SKIP/PENDING is the vocabulary in
+ * `domain/checks.py`. PENDING belongs to an ASYNC check whose answer has not arrived —
+ * unused by stage 2, whose six checks are all SYNC. */
 export const checkBadgeVariant = (outcome) => {
   switch ((outcome || "").toUpperCase()) {
     case "PASS":
       return "green";
     case "FAIL":
       return "red";
+    case "PENDING":
+      return "yellow";
     case "SKIP":
       return "lightgray";
     default:

@@ -57,6 +57,9 @@ class PaymentContext:
     requested_execution_date: Optional[date] = None
     channel: str = "API"
     idempotency_key: Optional[str] = None
+    # The channel's authentication assertion, as supplied. Optional — stage 2 records
+    # `method: NONE` and a SKIP when it is absent, and never a PASS (doc 15 B1).
+    authentication: Optional[dict] = None
     # Rail-specific initiation envelopes as supplied by the caller, at most one non-None
     # (enforced by `PaymentOrderInitiateRequest`). See `domain/initiation_envelope.py`.
     wire_details: Optional[dict] = None

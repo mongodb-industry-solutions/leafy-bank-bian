@@ -605,4 +605,154 @@
     "$date": "2026-05-08T07:11:06.450Z"
   },
   "version": 1
+},
+{
+  "_id": {
+    "$oid": "68b0000000000000acc10001"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-acc10001",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "310028841",
+  "balance": {
+    "current": 250000,
+    "available": 250000,
+    "ledger": 250000,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-08-31T00:00:00.000Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2023-03-14T09:00:00.000Z",
+  "createdBy": "SYSTEM-SEED-2026-08",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-abc10001"
+  },
+  "description": "Operating account for ABC Manufacturing Inc.",
+  "gl": {
+    "accountCode": "2111",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.005,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-acc10001"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2023-03-14",
+  "productId": "PROD-COMM-CA-USD",
+  "restrictions": [],
+  "signatories": [
+    {
+      "customerId": "CUST-abc10001",
+      "type": "PRIMARY",
+      "signingRule": "JOINT",
+      "addedAt": "2023-03-14"
+    },
+    {
+      "customerId": "CUST-abc10002",
+      "type": "JOINT",
+      "signingRule": "JOINT",
+      "addedAt": "2023-03-14"
+    }
+  ],
+  "sourceSystem": "leafy-bank-payments-seed",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "CURRENT",
+  "updatedAt": {
+    "$date": "2026-08-31T00:00:00.000Z"
+  },
+  "version": 1
+},
+{
+  "_id": {
+    "$oid": "68b0000000000000acc10002"
+  },
+  "accountBank": "Leafy Bank",
+  "accountId": "ACC-acc10002",
+  "accountIdentificationType": "AccountNumber",
+  "accountNumber": "212100477",
+  "balance": {
+    "current": 4200,
+    "available": 4200,
+    "ledger": 4200,
+    "hold": 0,
+    "overdraftLimit": 0,
+    "updatedAt": {
+      "$date": "2026-08-31T00:00:00.000Z"
+    }
+  },
+  "branchId": "BRANCH-DEFAULT-001",
+  "closedAt": null,
+  "createdAt": "2024-12-07T17:54:37.776Z",
+  "createdBy": "SYSTEM-SEED-2026-08",
+  "currency": "USD",
+  "customerSnapshot": {
+    "customerId": "CUST-00528224"
+  },
+  "description": "Current account for gracehop - under an active debit block",
+  "gl": {
+    "accountCode": "2111",
+    "costCenter": "CC-RETAIL-DEFAULT",
+    "profitCenter": "PC-RETAIL-DEFAULT"
+  },
+  "interest": {
+    "rate": 0.005,
+    "accrualMethod": "ACT_365",
+    "accrued": 0,
+    "lastAccrualAt": "2024-12-07",
+    "nextPaymentAt": "2025-01-01",
+    "paymentAccountId": "ACC-acc10002"
+  },
+  "linkedCardIds": [],
+  "linkedMandateIds": [],
+  "maturesAt": null,
+  "openedAt": "2024-12-07",
+  "productId": "PROD-STD-CA-USD",
+  "restrictions": [
+    {
+      "type": "DEBIT_BLOCK",
+      "reason": "Disputed direct-debit mandate under investigation",
+      "appliedAt": "2026-08-20",
+      "appliedBy": "OPS-FRAUD-DESK",
+      "expiresAt": null
+    }
+  ],
+  "signatories": [
+    {
+      "customerId": "CUST-00528224",
+      "type": "PRIMARY",
+      "signingRule": "SOLE",
+      "addedAt": "2024-12-07"
+    }
+  ],
+  "sourceSystem": "leafy-bank-payments-seed",
+  "statement": {
+    "frequency": "MONTHLY",
+    "deliveryChannel": "EMAIL",
+    "lastGeneratedAt": "2024-12-01",
+    "nextScheduledAt": "2025-01-01"
+  },
+  "status": "ACTIVE",
+  "type": "CURRENT",
+  "updatedAt": {
+    "$date": "2026-08-31T00:00:00.000Z"
+  },
+  "version": 1
 }]

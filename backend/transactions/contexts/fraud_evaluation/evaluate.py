@@ -47,8 +47,27 @@ def run(ctx: PaymentContext) -> None:
         # alongside the other three, which made the demo's timeline a fiction.
         extra={"fraud": ctx.fraud, "clearing.authorisedAt": ctx.now},
     )
+    # The dual-approval DECISION is stage 2's (doc 15 B4); the APPROVED state is this
+    # stage's. Read it rather than assert it — this reason used to be the hardcoded string
+    # "No dual-approval threshold breached", which claimed a verdict no check produced.
     lifecycle.advance_ctx(
         ctx, lifecycle.APPROVED,
         actor="transactions-service",
-        reason="No dual-approval threshold breached",
+        reason=_approval_reason(ctx),
+    )
+
+
+def _approval_reason(ctx) -> str:
+    entitlement = (ctx.payment_doc or {}).get("entitlement") or {}
+    if not entitlement:
+        return "Dual-approval requirement not assessed"
+    if not entitlement.get("dualApprovalRequired"):
+        return (
+            "Below the "
+            f"{entitlement.get('segment') or 'default'} dual-approval threshold of "
+            f"{entitlement.get('dualApprovalThreshold')}"
+        )
+    return (
+        f"Dual approval obtained from {entitlement.get('dualApprovalBy')}"
+        + (" (SIMULATED)" if entitlement.get("dualApprovalSimulated") else "")
     )

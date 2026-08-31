@@ -150,26 +150,34 @@ function StateEvents({ events }) {
   );
 }
 
+// `payments.checks[]`, written from stage 2 on: {stage, name, result, mode, detail, at,
+// actor}. `outcome`/`reason` are read as fallbacks because this panel was built before the
+// array existed and guessed those two names — a document written by the code carries
+// `result`/`detail`.
 function Checks({ checks }) {
   if (!checks?.length) {
     return (
       <Body className={styles.muted}>
-        No checks recorded — entitlement checks arrive with stage 2.
+        No checks recorded for this payment.
       </Body>
     );
   }
   return (
     <div>
-      {checks.map((c, i) => (
-        <div className={styles.check} key={`${c.name || c.checkId}-${i}`}>
-          <Badge variant={checkBadgeVariant(c.outcome)}>{c.outcome || "—"}</Badge>
-          <span className={styles.checkLabel}>
-            {c.label || c.name || c.checkId || "check"}
-            {c.reason ? <span className={styles.eventReason}> · {c.reason}</span> : null}
-          </span>
-          {c.mode && <span className={styles.stageMeta}>{c.mode}</span>}
-        </div>
-      ))}
+      {checks.map((c, i) => {
+        const result = c.result || c.outcome;
+        const detail = c.detail || c.reason;
+        return (
+          <div className={styles.check} key={`${c.name || c.checkId}-${i}`}>
+            <Badge variant={checkBadgeVariant(result)}>{result || "—"}</Badge>
+            <span className={styles.checkLabel}>
+              {c.label || c.name || c.checkId || "check"}
+              {detail ? <span className={styles.eventReason}> · {detail}</span> : null}
+            </span>
+            {c.mode && <span className={styles.stageMeta}>{c.mode}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -191,6 +199,23 @@ function summaryRows(stage, payment) {
         ["Requested execution", d?.requestedExecutionDate],
         ["Initiated", fmtWhen(d?.initiatedAt)],
       ];
+    case "checks": {
+      // Stage 2's two summary blocks. The authentication assessment says what the CHANNEL
+      // asserted — `NONE` means nothing was asserted, which is why the check beneath reads
+      // SKIP rather than PASS.
+      const auth = payment?.authentication;
+      const ent = payment?.entitlement;
+      return [
+        ["Checks recorded", d?.length],
+        ["Authentication", auth ? `${auth.method}${auth.factorCount ? ` · ${auth.factorCount} factor(s)` : ""}` : null],
+        ["Session", auth?.sessionRef],
+        ["Segment", ent?.segment],
+        ["Signing rule", ent?.signingRule],
+        ["Per-payment entitlement", ent?.perPaymentLimit != null ? fmtAmount(ent.perPaymentLimit, payment?.currency) : null],
+        ["Dual approval", ent ? (ent.dualApprovalRequired ? `Required · ${ent.dualApprovalBy}${ent.dualApprovalSimulated ? " (simulated)" : ""}` : "Not required") : null],
+        ["Assessed", fmtWhen(ent?.assessedAt)],
+      ];
+    }
     case "transaction":
       return [
         ["Bank ref", d?.bankRef],
@@ -278,7 +303,9 @@ function StageDetail({ stage, payment }) {
           </div>
         )}
 
-        {!showChecks && !showStates && (
+        {/* Stage 2 shows both: the six check results, and the assessment blocks
+            (`authentication{}` / `entitlement{}`) that say what they were judged against. */}
+        {!showStates && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Summary</div>
             <KeyValues rows={summaryRows(stage, payment)} />

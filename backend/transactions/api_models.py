@@ -33,6 +33,14 @@ SecCodeLiteral = Literal["PPD", "CCD", "WEB", "TEL"]
 AchDirectionLiteral = Literal["CREDIT", "DEBIT"]
 InternalTransferTypeLiteral = Literal["OWN_ACCOUNT", "THIRD_PARTY"]
 
+# Stage 2 (BIAN PartyAuthentication, SD 38917). NOT from the `payments` spec — no
+# authentication field exists there. This is the channel's assertion about an
+# authentication IT performed; the payments hub only verifies and records it
+# (doc 15 B1). Widening it is a contract change, so keep the list closed.
+AuthenticationMethodLiteral = Literal[
+    "PASSWORD", "OTP", "BIOMETRIC", "MTLS", "API_KEY", "NONE"
+]
+
 # Which rail each initiation envelope belongs to. Used by the cross-field rule
 # that rejects an envelope supplied for the wrong rail.
 _ENVELOPE_RAIL = {
@@ -74,6 +82,29 @@ class PaymentRemittanceBody(BaseModel):
     unstructured: Optional[str] = None
     reference: Optional[str] = None
     invoiceNo: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+
+class AuthenticationAssertionBody(BaseModel):
+    """The channel's assertion that it authenticated the caller (doc 15 B1).
+
+    The payments hub performs no authentication of its own — this is what an upstream
+    channel says it already did, and stage 2 records the verified outcome as a
+    `PartyAuthenticationAssessment`-shaped block on the payment.
+
+    Optional in its entirety. When absent, stage 2 records `method: NONE` and the
+    `customer_authenticated` check as **SKIP**, never PASS: the demo must not claim an
+    authentication that did not happen.
+
+    Named with the `Body` suffix and deliberately unlike its field name `authentication`
+    — an inner class sharing a field's name collapses to `None`-only under
+    `Optional[...]` (umbrella defects.md 2026-04-28, `pydantic-shadow`).
+    """
+
+    method: AuthenticationMethodLiteral
+    authenticatedAt: Optional[datetime] = None
+    sessionRef: Optional[str] = None
+    factorCount: int = Field(default=0, ge=0)
     model_config = ConfigDict(extra="forbid")
 
 
@@ -154,6 +185,10 @@ class PaymentOrderInitiateRequest(BaseModel):
     requestedExecutionDate: Optional[date] = None
     channel: ChannelLiteral = "API"
     idempotencyKey: Optional[str] = None
+
+    # Stage 2. Optional, so every existing caller keeps validating unchanged — with
+    # `extra="forbid"` adding an optional field is safe, removing one is not.
+    authentication: Optional[AuthenticationAssertionBody] = None
 
     # Rail-specific envelopes. At most one, and it must match `rail`.
     wireDetails: Optional[WireDetailsBody] = None

@@ -30,6 +30,25 @@ const RAIL_BY_PAYMENT_METHOD = {
   paypal: "INTERNAL",
 };
 
+// Stage 2 (doc 15 B1). This surface has no authentication to assert either: the persona
+// is a `localStorage` value picked on the login page, so "the customer is signed in" is a
+// SIMULATION, and the label below says so. Sent rather than omitted, because an omitted
+// assertion records `method: NONE` and stage 2's `customer_authenticated` check reads
+// SKIP — which is the honest reading of no session at all, not of this one.
+const channelAuthentication = () => ({
+  method: "PASSWORD",
+  factorCount: 1,
+  sessionRef: "SIMULATED-PORTAL-SESSION",
+  authenticatedAt: new Date().toISOString(),
+});
+
+// The per-payment cap is decided server-side by the debtor customer's segment
+// (`entitlement_policy.py`), so this screen can no longer state a number: it used to read
+// "Transaction limit 500", which was `PAYMENT_LIMIT_USD` — a bound that has moved and was
+// never this customer's entitlement anyway. Showing the real figure needs an endpoint that
+// returns the caller's entitlement; until then, say what is true.
+const TRANSACTION_LIMIT_LABEL = "Subject to your account's payment entitlement";
+
 const TRANSFER_METHODS = [
   { id: "internal", label: "Internal Transfer" },
   { id: "ach", label: "ACH Transfer" },
@@ -131,6 +150,8 @@ export default function SendMoneyModal({
         creditor: { accountId: beneficiary },
         instructedAmount: amount,
         instructedCurrency: currency,
+        channel: "WEB",
+        authentication: channelAuthentication(),
       },
     });
     setSubmitting(false);
@@ -222,7 +243,7 @@ export default function SendMoneyModal({
 
         {view === "digital-payment" && (
           <>
-            <Body className={styles.modalSubtext}>Transaction limit 500</Body>
+            <Body className={styles.modalSubtext}>{TRANSACTION_LIMIT_LABEL}</Body>
             <div className={styles.modalBody}>
               <div className={styles.formGroup}>
                 <label className={styles.formLabel} htmlFor="payment-amount">Transaction amount</label>
@@ -288,7 +309,7 @@ export default function SendMoneyModal({
 
         {view === "transfer" && (
           <>
-            <Body className={styles.modalSubtext}>Transaction limit 500</Body>
+            <Body className={styles.modalSubtext}>{TRANSACTION_LIMIT_LABEL}</Body>
             <div className={styles.modalBody}>
               <div className={styles.formGroup}>
                 <label className={styles.formLabel} htmlFor="transfer-amount">Transaction amount</label>

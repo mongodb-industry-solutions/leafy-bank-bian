@@ -99,12 +99,35 @@ def test_every_required_field_is_written(schema, rail):
     assert not missing, f"required fields absent from the built document: {missing}"
 
 
+# Fields written that the canonical spec does not declare. All legal — the spec sets no
+# `additionalProperties: false` — and all deliberate:
+#   isInternal / createdBy   pre-existing, unrelated to any stage
+#   checks / authentication / entitlement
+#       stage 2 (doc 15 B3/B1). `payments` has no field for any check, authentication or
+#       approval outcome: `approvals[]` was prototyped and reverted
+#       (`propose_payments.json:26`) and never restored when D2/D3 restored `lifecycle{}`
+#       and `refs{}`. Added the same way those were — nullable, not `required` — and sent
+#       to Doina as Q12 to ratify. This set is the tripwire: a SIXTH extra must be argued
+#       for, not appear.
+_KNOWN_EXTRAS = {"isInternal", "createdBy", "checks", "authentication", "entitlement"}
+
+
 def test_no_field_is_written_that_the_spec_does_not_declare(schema):
-    """`isInternal` / `createdBy` are the two known extras and are legal (the spec sets no
-    `additionalProperties: false`). Pinned so a THIRD one can't appear unnoticed."""
     doc = payment_document.build(_ctx())
     extras = set(doc) - set(schema["properties"])
-    assert extras == {"isInternal", "createdBy"}
+    assert extras == _KNOWN_EXTRAS
+
+
+def test_stage_two_slots_are_empty_at_creation():
+    """Stage 2 fills these; stage 1 only opens the slot, exactly as it does for `fraud`.
+
+    `checks` is `[]` rather than absent so a reader needs no `$exists` branch — but
+    `append_checks` uses `$push`/`$each`, which creates the array either way, so documents
+    written before this change stay readable."""
+    doc = payment_document.build(_ctx())
+    assert doc["checks"] == []
+    assert doc["authentication"] is None
+    assert doc["entitlement"] is None
 
 
 def _enum_fields(schema):

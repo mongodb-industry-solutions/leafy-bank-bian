@@ -121,7 +121,11 @@ API_CATALOG = {
                             "bianAction": "Request",
                             "method": "POST",
                             "path": "/PartyReferenceDataDirectory/Request",
-                            "summary": "List/query customers. All filters optional; empty body returns all.",
+                            "summary": (
+                                "List/query customers. All filters optional; empty body returns all. "
+                                "Returns directory summaries (customerId, identification, status, "
+                                "segment, type) — use /{id}/Retrieve for the full party record."
+                            ),
                             "headers": [],
                             "enums": {
                                 "PartyApexStatus": [
@@ -666,7 +670,8 @@ API_CATALOG = {
                                 {"code": 400, "case": "Debtor and creditor are the same account"},
                                 {"code": 400, "case": "Debtor account not active"},
                                 {"code": 400, "case": "Currency mismatch between request and account(s)"},
-                                {"code": 400, "case": "Amount over PAYMENT_LIMIT_USD (default 500)"},
+                                {"code": 400, "case": "Amount over PAYMENT_LIMIT_USD (default 1000000) — a malformed-input bound"},
+                                {"code": 400, "case": "Amount over the customer segment's per-payment entitlement (stage 2)"},
                                 {"code": 400, "case": "Insufficient funds"},
                                 {"code": 404, "case": "Debtor or creditor account not found"},
                                 {"code": 422, "case": "Validation error"},

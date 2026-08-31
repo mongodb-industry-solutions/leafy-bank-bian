@@ -108,13 +108,17 @@ class FakeCollection:
             self._set(doc, field, (self._get(doc, field) or 0) + delta)
         for field, val in update.get("$set", {}).items():
             self._set(doc, field, val)
-        # $push backs lifecycle.events — append-only, so no $each / $slice needed.
+        # $push backs lifecycle.events (one at a time) and payments.checks[] (a whole
+        # stage's worth via $each). No $slice — both arrays are append-only.
         for field, val in update.get("$push", {}).items():
             existing = self._get(doc, field)
             if existing is None:
                 existing = []
                 self._set(doc, field, existing)
-            existing.append(val)
+            if isinstance(val, dict) and "$each" in val:
+                existing.extend(val["$each"])
+            else:
+                existing.append(val)
 
 
 class FakeSession:
@@ -160,7 +164,14 @@ class FakeConnection:
 # --- fixtures -----------------------------------------------------------------
 
 def _account(account_id, customer_id, *, currency="USD", available=10_000.0,
-             status="ACTIVE", account_type="CHECKING"):
+             status="ACTIVE", account_type="CHECKING", signing_rule="SOLE",
+             signatories=None, restrictions=None):
+    """One account, shaped as production writes it.
+
+    `signatories[]` and `restrictions[]` are here because stage 2 reads both, and a fixture
+    that omits a field the code reads tests a shape production never produces — the same
+    fidelity failure as the `accountType` vs `type` slip noted below (doc 15 B7).
+    """
     return {
         "accountId": account_id,
         "accountNumber": "8282993" + account_id[-2:],
@@ -172,11 +183,31 @@ def _account(account_id, customer_id, *, currency="USD", available=10_000.0,
         "customerSnapshot": {"customerId": customer_id, "name": f"Holder {customer_id}"},
         "balance": {"current": available, "available": available, "ledger": available,
                     "updatedAt": datetime.now(timezone.utc)},
+        # Enum values from the canonical spec: AccountSignatoryType /
+        # AccountSignatorySigningRuleType / AccountRestrictionType.
+        "signatories": signatories if signatories is not None else [
+            {"customerId": customer_id, "type": "PRIMARY",
+             "signingRule": signing_rule, "addedAt": "2024-12-07"},
+        ],
+        "restrictions": restrictions if restrictions is not None else [],
     }
 
 
-def _customer(customer_id):
-    return {"customerId": customer_id, "name": f"Holder {customer_id}"}
+def _customer(customer_id, *, status="ACTIVE", segment="RETAIL",
+              customer_type="INDIVIDUAL", kyc_status="VERIFIED"):
+    """Stage 2 reads `status`, `segment` and `kyc.status`; earlier stages read none of them.
+
+    Enum values from the canonical spec: PartyApexStatus / CustomerSegmentType / PartyType /
+    CustomerKYCProcedureStatus.
+    """
+    return {
+        "customerId": customer_id,
+        "name": f"Holder {customer_id}",
+        "status": status,
+        "segment": segment,
+        "type": customer_type,
+        "kyc": {"status": kyc_status, "level": "STANDARD", "riskRating": "LOW"},
+    }
 
 
 DEBTOR, CREDITOR = "ACC-debtor01", "ACC-credit01"
@@ -604,3 +635,259 @@ def test_missing_creditor_rolls_the_money_move_back(service, db, monkeypatch):
         _initiate(service)
 
     assert db["transactions"].inserted == [], "no transaction on a failed money move"
+
+
+# --- 12. stage 2 — party authentication & entitlement (doc 15) -----------------
+#
+# Stage 2 is a GATE: it records six `checks[]` entries and moves the payment nowhere
+# (doc 15 B5 — Doina's sequence goes INITIATED -> VALIDATED with nothing between). So the
+# assertions below are about the check trail and the refusals, never about a new state.
+#
+# One test per doc-15 requirement row that changes runtime behaviour: R1, R4, R5, R6, R7,
+# R8/R9. R3 (the tick display) is doc 16's; R11 (sync/async) is asserted on every entry.
+
+STAGE_2 = "2 authenticate"
+
+
+def _checks(db, *, name=None):
+    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    entries = payment.get("checks", [])
+    return [c for c in entries if name is None or c["name"] == name]
+
+
+def _one(db, name):
+    found = _checks(db, name=name)
+    assert len(found) == 1, f"expected exactly one {name} check, got {len(found)}"
+    return found[0]
+
+
+def _service_for(db, **over):
+    db["payments"].unique_on = "idempotencyKey"
+    return PaymentsService(FakeConnection(db), "leafy_bank_bian",
+                           payment_limit_usd=over.get("payment_limit_usd", 50_000.0))
+
+
+_ASSERTION = {"method": "OTP", "factorCount": 2, "sessionRef": "SESS-7781",
+              "authenticatedAt": datetime.now(timezone.utc)}
+
+
+# --- the trail ----------------------------------------------------------------
+
+def test_stage_two_records_its_six_checks_in_order(service, db):
+    _initiate(service)
+    recorded = _checks(db)
+    assert [c["name"] for c in recorded] == [
+        "customer_authenticated", "account_active", "account_unrestricted",
+        "customer_entitled", "payment_limit_available", "dual_approval",
+    ]
+    assert all(c["stage"] == STAGE_2 for c in recorded)
+    assert all(c["mode"] == "SYNC" for c in recorded), "R11 — every entry declares its mode"
+    assert all(c["actor"] and c["at"] and c["detail"] for c in recorded)
+
+
+def test_stage_two_adds_no_lifecycle_state(service, db):
+    """B5. Its visibility comes from `checks[]`, not from the state machine."""
+    _initiate(service)
+    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    states = [e["state"] for e in payment["lifecycle"]["events"]]
+    assert states[states.index("INITIATED") + 1] == "VALIDATED", "nothing in between"
+
+
+def test_the_failing_check_is_recorded_before_the_rejection(service, db):
+    """A refusal's whole value to the demo is knowing WHICH check refused it, so the trail
+    has to be flushed before the ValueError the saga turns into REJECTED."""
+    with pytest.raises(ValueError, match="not owned by"):
+        _initiate(service, customer_ref=CUST_C)
+    failed = [c for c in _checks(db) if c["result"] == "FAIL"]
+    assert [c["name"] for c in failed] == ["customer_entitled"]
+    assert "not owned by" in failed[0]["detail"]
+
+
+# --- R1: the channel's authentication assertion -------------------------------
+
+def test_no_assertion_is_recorded_as_skip_never_pass(service, db):
+    """B1 — the demo must never claim an authentication that did not happen."""
+    _initiate(service)
+    check = _one(db, "customer_authenticated")
+    assert check["result"] == "SKIP"
+    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    assert payment["authentication"]["method"] == "NONE"
+    assert payment["authentication"]["sufficient"] is False
+
+
+def test_an_asserted_authentication_passes_and_is_recorded(service, db):
+    _initiate(service, authentication=_ASSERTION)
+    assert _one(db, "customer_authenticated")["result"] == "PASS"
+    assessment = db["payments"].find_one(
+        {"paymentId": db["payments"].inserted[0]["paymentId"]})["authentication"]
+    assert assessment["method"] == "OTP"
+    assert assessment["factorCount"] == 2
+    assert assessment["sessionRef"] == "SESS-7781"
+    assert assessment["assessedBy"] == "transactions-service"
+
+
+def test_a_weak_factor_is_refused_above_the_step_up_threshold(service, db):
+    """RETAIL steps up above 2,500; one password does not carry 5,000."""
+    weak = {"method": "PASSWORD", "factorCount": 1}
+    with pytest.raises(ValueError, match="step-up authentication required"):
+        _initiate(service, instructed_amount=5_000.0, authentication=weak)
+    assert _one(db, "customer_authenticated")["result"] == "FAIL"
+    _assert_rejected(db, reason_match="step-up", at_state="INITIATED")
+
+
+# --- R4: account_active -------------------------------------------------------
+
+@pytest.mark.parametrize("status", ["DORMANT", "FROZEN", "CLOSED"])
+def test_an_unusable_debtor_account_is_refused_at_stage_two(db, status):
+    """DORMANT and FROZEN are canonical `CurrentAccountApexStatus` values that no code
+    checked before — a frozen account could be debited. CLOSED moved here from stage 3."""
+    db["accounts"] = FakeCollection([_account(DEBTOR, CUST_D, status=status),
+                                     _account(CREDITOR, CUST_C)])
+    svc = _service_for(db)
+    with pytest.raises(ValueError, match=status):
+        _initiate(svc)
+    assert _one(db, "account_active")["result"] == "FAIL"
+    _assert_rejected(db, reason_match=f"stage {STAGE_2}", at_state="INITIATED")
+    for acc in db["accounts"].docs:
+        assert acc["balance"]["available"] == 10_000.0
+
+
+# --- R6: account_unrestricted (BIAN CustomerAccessEntitlement/Restrictions/Evaluate) ---
+
+@pytest.mark.parametrize("kind", ["DEBIT_BLOCK", "FULL_BLOCK", "LEGAL_HOLD"])
+def test_a_restricted_debtor_account_is_refused(db, kind):
+    restriction = [{"type": kind, "reason": "Under investigation",
+                    "appliedAt": "2026-08-20", "appliedBy": "OPS", "expiresAt": None}]
+    db["accounts"] = FakeCollection([_account(DEBTOR, CUST_D, restrictions=restriction),
+                                     _account(CREDITOR, CUST_C)])
+    svc = _service_for(db)
+    with pytest.raises(ValueError, match=kind):
+        _initiate(svc)
+    assert _one(db, "account_unrestricted")["result"] == "FAIL"
+    assert db["transactions"].inserted == []
+
+
+def test_a_lapsed_restriction_does_not_refuse(db):
+    lapsed = [{"type": "DEBIT_BLOCK", "reason": "Resolved", "appliedAt": "2026-01-01",
+               "appliedBy": "OPS", "expiresAt": "2026-02-01"}]
+    db["accounts"] = FakeCollection([_account(DEBTOR, CUST_D, restrictions=lapsed),
+                                     _account(CREDITOR, CUST_C)])
+    svc = _service_for(db)
+    _initiate(svc)
+    assert _one(db, "account_unrestricted")["result"] == "PASS"
+
+
+# --- R5: customer_entitled ----------------------------------------------------
+
+def test_a_party_who_is_not_a_signatory_cannot_debit_the_account(db):
+    """`signatories[]` was never read by any live code before this stage."""
+    someone_else = [{"customerId": "CUST-0000000099", "type": "PRIMARY",
+                     "signingRule": "SOLE", "addedAt": "2024-12-07"}]
+    db["accounts"] = FakeCollection([_account(DEBTOR, CUST_D, signatories=someone_else),
+                                     _account(CREDITOR, CUST_C)])
+    svc = _service_for(db)
+    with pytest.raises(ValueError, match="not a signatory"):
+        _initiate(svc)
+    assert _one(db, "customer_entitled")["result"] == "FAIL"
+
+
+@pytest.mark.parametrize("over,match", [
+    ({"status": "SUSPENDED"}, "SUSPENDED"),
+    ({"kyc_status": "PENDING"}, "KYC status is PENDING"),
+])
+def test_an_ineligible_customer_cannot_debit_the_account(db, over, match):
+    db["customers"] = FakeCollection([_customer(CUST_D, **over), _customer(CUST_C)],
+                                     key="customerId")
+    svc = _service_for(db)
+    with pytest.raises(ValueError, match=match):
+        _initiate(svc)
+    assert _one(db, "customer_entitled")["result"] == "FAIL"
+
+
+# --- R7: payment_limit_available ----------------------------------------------
+
+def test_an_amount_within_the_global_bound_can_still_exceed_the_entitlement(db):
+    """The point of B2. The global `PAYMENT_LIMIT_USD` is a malformed-input bound; the
+    entitlement decision is per segment, and this payment passes the first and fails the
+    second — which one global scalar could never express."""
+    svc = _service_for(db)                      # global bound 50,000
+    with pytest.raises(ValueError, match="exceeds the RETAIL per-payment entitlement"):
+        _initiate(svc, instructed_amount=30_000.0)   # RETAIL entitlement 25,000
+    assert _one(db, "payment_limit_available")["result"] == "FAIL"
+    assert db["transactions"].inserted == []
+
+
+# --- R8/R9: dual approval -----------------------------------------------------
+
+def test_a_small_retail_payment_needs_no_second_approver(service, db):
+    _initiate(service)
+    check = _one(db, "dual_approval")
+    assert check["result"] == "SKIP"
+    assert "no second approver required" in check["detail"]
+
+
+def _corporate_db():
+    """Doina's scenario: a COMMERCIAL customer on a JOINT-mandate account (doc 15 B7).
+
+    Mirrors the seed fixture added in `backend/data/sample`: the initiator is the account
+    holder — stage 2's ownership assertion requires that — and the second signatory exists
+    so `signingRule: JOINT` describes a real two-signer mandate.
+    """
+    signatories = [
+        {"customerId": CUST_D, "type": "PRIMARY", "signingRule": "JOINT", "addedAt": "2023-03-14"},
+        {"customerId": "CUST-abc10002", "type": "JOINT", "signingRule": "JOINT", "addedAt": "2023-03-14"},
+    ]
+    return FakeDb({
+        "accounts": FakeCollection([
+            _account(DEBTOR, CUST_D, available=250_000.0, signatories=signatories),
+            _account(CREDITOR, CUST_C),
+        ]),
+        "customers": FakeCollection(
+            [_customer(CUST_D, segment="COMMERCIAL", customer_type="CORPORATE"),
+             _customer(CUST_C)], key="customerId"),
+        "payments": FakeCollection(key="paymentId"),
+        "transactions": FakeCollection(key="transactionId"),
+        "notifications": FakeCollection(key="notificationId"),
+    })
+
+
+def test_the_flagship_corporate_payment_settles_with_a_labelled_simulated_approver():
+    """R9 end to end: $25,000 from a COMMERCIAL customer trips her own $10,000 threshold,
+    shows dual approval, and still settles — B4's whole point. The simulation is labelled,
+    because an unlabelled tick on a banker's screen would be a lie.
+    """
+    db = _corporate_db()
+    svc = _service_for(db, payment_limit_usd=1_000_000.0)
+    _initiate(svc, instructed_amount=25_000.0, authentication=_ASSERTION)
+
+    check = _one(db, "dual_approval")
+    assert check["result"] == "PASS"
+    assert check["actor"] == "SIMULATED-APPROVER-OPS"
+    assert "SIMULATED" in check["detail"]
+
+    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    assert payment["entitlement"]["dualApprovalRequired"] is True
+    assert payment["entitlement"]["segment"] == "COMMERCIAL"
+    assert payment["entitlement"]["signingRule"] == "JOINT"
+    assert payment["lifecycle"]["currentState"] == "SETTLED", "the demo still runs end to end"
+    assert len(db["transactions"].inserted) == 1
+
+
+def test_stage_four_reports_the_stage_two_decision_instead_of_a_hardcoded_string():
+    """`evaluate.py` used to assert "No dual-approval threshold breached" with no check
+    behind it. The APPROVED event now quotes stage 2 (doc 15 B4)."""
+    db = _corporate_db()
+    svc = _service_for(db, payment_limit_usd=1_000_000.0)
+    _initiate(svc, instructed_amount=25_000.0)
+
+    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    approved = [e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED"]
+    assert len(approved) == 1
+    assert "SIMULATED-APPROVER-OPS" in approved[0]["reason"]
+
+
+def test_a_sole_mandate_below_the_threshold_reports_it_as_such(service, db):
+    _initiate(service)
+    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    approved = [e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED"]
+    assert "Below the RETAIL dual-approval threshold" in approved[0]["reason"]

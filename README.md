@@ -217,7 +217,12 @@ MONGODB_URI=                       # required — your replica-set / Atlas conne
 LEAFYBANK_DB_NAME=leafy_bank_bian  # optional, this is the default
 
 # transactions only:
-PAYMENT_LIMIT_USD=500              # optional, per-payment ceiling (default 500)
+PAYMENT_LIMIT_USD=1000000          # optional, malformed-input bound (default 1000000).
+                                   # NOT the entitlement limit — stage 2 decides that per
+                                   # customer segment (entitlement_policy.py). Overridable
+                                   # per segment via ENTITLEMENT_PER_PAYMENT_LIMIT_<SEGMENT>,
+                                   # ENTITLEMENT_DUAL_APPROVAL_THRESHOLD_<SEGMENT>,
+                                   # ENTITLEMENT_STEP_UP_THRESHOLD_<SEGMENT>.
 
 # ledger only:
 GL_BATCH_INTERVAL_SECONDS=600      # optional, GL batch cadence (default 600)

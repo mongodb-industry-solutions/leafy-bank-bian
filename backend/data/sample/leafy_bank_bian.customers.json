@@ -514,4 +514,224 @@
   "createdBy": "SYSTEM-MIGRATION-2026-04",
   "version": 2,
   "sourceSystem": "leafy-bank-legacy-migration"
+},
+{
+  "_id": {
+    "$oid": "68b0000000000000abc10001"
+  },
+  "customerId": "CUST-abc10001",
+  "status": "ACTIVE",
+  "type": "CORPORATE",
+  "segment": "COMMERCIAL",
+  "since": "2023-03-14",
+  "rmId": "RM-COMM-001",
+  "identification": {
+    "userName": "abcmfg",
+    "legalName": "ABC Manufacturing Inc.",
+    "firstName": null,
+    "lastName": null,
+    "namePrefix": null,
+    "tradingName": "ABC Manufacturing",
+    "dateOfBirth": null,
+    "countryOfBirth": null,
+    "nationality": null,
+    "nationalId": null,
+    "nationalIdType": null,
+    "taxId": "vault:enc:TAX-abcmfg-001",
+    "civilStatus": null,
+    "jobTitle": null
+  },
+  "employment": null,
+  "contact": {
+    "email": "treasury@abcmanufacturing.example.com",
+    "phone": "+12125550188",
+    "preferredLanguage": "en",
+    "preferredChannel": "WEB",
+    "addresses": [
+      {
+        "type": "BUSINESS",
+        "isPrimary": true,
+        "residentialStatus": null,
+        "line1": "1400 Industrial Parkway",
+        "line2": "Suite 300",
+        "city": "Detroit",
+        "state": "MI",
+        "postcode": "48226",
+        "country": "US",
+        "validFrom": "2023-03-14",
+        "validTo": null
+      }
+    ]
+  },
+  "kyc": {
+    "status": "VERIFIED",
+    "level": "ENHANCED",
+    "riskRating": "MEDIUM",
+    "verifiedAt": "2023-03-14",
+    "nextReviewAt": "2027-03-14",
+    "documents": [
+      {
+        "docType": "CERTIFICATE_OF_INCORPORATION",
+        "docRef": "vault:doc:ABCMFG-INC-SYNTH-001",
+        "issuedBy": "Michigan Dept of Licensing",
+        "issuedAt": "2011-05-02",
+        "expiresAt": null,
+        "verifiedAt": "2023-03-14",
+        "verifiedBy": "SYSTEM-SEED-2026-08"
+      }
+    ]
+  },
+  "gender": null,
+  "residency": "US",
+  "identifiers": [
+    {
+      "type": "lei",
+      "value": "5493001KJTIIGC8Y1R12",
+      "country": "US",
+      "issueDate": {
+        "$date": "2011-05-02T00:00:00.000Z"
+      },
+      "expiryDate": null,
+      "verified": true,
+      "verificationMethod": "registry_lookup",
+      "verificationDate": {
+        "$date": "2023-03-14T09:00:00.000Z"
+      }
+    }
+  ],
+  "bankRelations": {
+    "customerInfo": {
+      "customerSince": "2023-03-14",
+      "segments": [
+        "commercial_banking"
+      ],
+      "products": [],
+      "notes": "Seeded for the stage-2 corporate dual-approval scenario."
+    }
+  },
+  "consents": [],
+  "createdAt": "2023-03-14T09:00:00Z",
+  "updatedAt": "2026-08-31T00:00:00Z",
+  "createdBy": "SYSTEM-SEED-2026-08",
+  "version": 1,
+  "sourceSystem": "leafy-bank-payments-seed"
+},
+{
+  "_id": {
+    "$oid": "68b0000000000000abc10002"
+  },
+  "customerId": "CUST-abc10002",
+  "status": "ACTIVE",
+  "type": "INDIVIDUAL",
+  "segment": "COMMERCIAL",
+  "since": "2023-03-14",
+  "rmId": "RM-COMM-001",
+  "identification": {
+    "userName": "mokonkwo",
+    "legalName": "Marcus Okonkwo",
+    "firstName": "Marcus",
+    "lastName": "Okonkwo",
+    "namePrefix": "Mr",
+    "tradingName": null,
+    "dateOfBirth": "1979-04-22",
+    "countryOfBirth": "US",
+    "nationality": "US",
+    "nationalId": "vault:enc:IDPERSONA07",
+    "nationalIdType": "NATIONAL_ID",
+    "taxId": "vault:enc:TAX-mokonkwo-001",
+    "civilStatus": "Married",
+    "jobTitle": "Finance Director"
+  },
+  "employment": {
+    "employer": {
+      "name": "ABC Manufacturing Inc.",
+      "payrollId": "EMP-2023-00007",
+      "startDate": "2023-03-14"
+    },
+    "jobTitle": "Finance Director",
+    "employmentType": "fullTime",
+    "income": {
+      "amount": 14000,
+      "currency": "USD",
+      "frequency": "Monthly"
+    }
+  },
+  "contact": {
+    "email": "m.okonkwo@abcmanufacturing.example.com",
+    "phone": "+12125550188",
+    "preferredLanguage": "en",
+    "preferredChannel": "WEB",
+    "addresses": [
+      {
+        "type": "BUSINESS",
+        "isPrimary": true,
+        "residentialStatus": null,
+        "line1": "1400 Industrial Parkway",
+        "line2": "Suite 300",
+        "city": "Detroit",
+        "state": "MI",
+        "postcode": "48226",
+        "country": "US",
+        "validFrom": "2023-03-14",
+        "validTo": null
+      }
+    ]
+  },
+  "kyc": {
+    "status": "VERIFIED",
+    "level": "STANDARD",
+    "riskRating": "LOW",
+    "verifiedAt": "2023-03-14",
+    "nextReviewAt": "2027-03-14",
+    "documents": [
+      {
+        "docType": "PASSPORT",
+        "docRef": "vault:doc:MOKONKWO-PASS-SYNTH-001",
+        "issuedBy": "HM Passport Office",
+        "issuedAt": "2020-06-10",
+        "expiresAt": "2030-06-10",
+        "verifiedAt": "2023-03-14",
+        "verifiedBy": "SYSTEM-SEED-2026-08"
+      }
+    ]
+  },
+  "gender": "male",
+  "residency": "US",
+  "identifiers": [
+    {
+      "passportNumber": null,
+      "lei": null,
+      "incorporationNumber": null,
+      "incorporationDate": null,
+      "incorporationCountry": null,
+      "type": "nationalId",
+      "value": "vault:enc:IDPERSONA07",
+      "country": "US",
+      "issueDate": {
+        "$date": "2020-06-10T00:00:00.000Z"
+      },
+      "expiryDate": null,
+      "verified": true,
+      "verificationMethod": "document_scan",
+      "verificationDate": {
+        "$date": "2024-12-07T15:15:06.000Z"
+      }
+    }
+  ],
+  "bankRelations": {
+    "customerInfo": {
+      "customerSince": "2023-03-14",
+      "segments": [
+        "commercial_banking"
+      ],
+      "products": [],
+      "notes": "Second signatory on ACC-acc10001."
+    }
+  },
+  "consents": [],
+  "createdAt": "2023-03-14T09:00:00Z",
+  "updatedAt": "2026-08-31T00:00:00Z",
+  "createdBy": "SYSTEM-SEED-2026-08",
+  "version": 1,
+  "sourceSystem": "leafy-bank-payments-seed"
 }]

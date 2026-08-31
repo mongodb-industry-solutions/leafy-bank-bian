@@ -235,6 +235,13 @@ def build(ctx) -> dict:
         },
         # Written by stage 4b, after the instruction exists (decision §11).
         "fraud": None,
+        # Stage 2's two slots, present-but-empty for the same reason as every other block
+        # here: a later stage fills them without an `$exists`-branching read. `checks[]`
+        # is append-only and shared with stage 3 onward (`domain/checks.py`); both are
+        # additive and not `required` in the spec, pending Doina Q12.
+        "checks": [],
+        "authentication": None,
+        "entitlement": None,
         "initiation": {
             "initiatedAt": now,
             "initiatedBy": ctx.debtor_customer_id,

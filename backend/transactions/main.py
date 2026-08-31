@@ -24,7 +24,11 @@ logging.basicConfig(level=logging.INFO,
 
 MONGODB_URI = os.getenv("MONGODB_URI")
 DB_NAME = os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")
-PAYMENT_LIMIT_USD = float(os.getenv("PAYMENT_LIMIT_USD", "500"))
+# Stage-1 sanity bound on a malformed amount, not an entitlement limit — stage 2 owns
+# the real per-payment decision, keyed on `customers.segment`
+# (`contexts/party_authentication/domain/entitlement_policy.py`). Kept above every
+# segment limit so it never vetoes a payment entitlement would have allowed.
+PAYMENT_LIMIT_USD = float(os.getenv("PAYMENT_LIMIT_USD", "1000000"))
 
 app = FastAPI(title="Leafy Bank — Payments (BIAN PaymentOrderInitiation)")
 
@@ -101,6 +105,9 @@ def _initiate_kwargs(body) -> dict:
         "category_purpose": body.categoryPurpose,
         "requested_execution_date": body.requestedExecutionDate,
         "channel": body.channel,
+        # Stage 2 (doc 15 B1). None when the caller asserts nothing, which stage 2
+        # records as `method: NONE` / SKIP rather than treating as a pass.
+        "authentication": body.authentication.model_dump() if body.authentication else None,
         "wire_details": body.wireDetails.model_dump() if body.wireDetails else None,
         "ach_details": body.achDetails.model_dump() if body.achDetails else None,
         "internal_details": body.internalDetails.model_dump() if body.internalDetails else None,
