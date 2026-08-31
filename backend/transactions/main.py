@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from api_models import PaymentOrderBulkInitiateRequest, PaymentOrderInitiateRequest
+from shared import party_authentication_token as party_auth
 from database.connection import MongoDBConnection
 from encoder.json_encoder import MyJSONEncoder
 from routers.workflow import router as workflow_router
@@ -78,6 +79,19 @@ def health_check():
     return {"status": "healthy"}
 
 
+def _resolve_identity(body, authorization: Optional[str]) -> dict:
+    """Who is this, per the token — or per the body if there is no token and none is required.
+
+    Raises HTTP 401 rather than letting the AuthenticationError surface as a 500. Kept out
+    of `_initiate_kwargs` so the single and bulk paths resolve identity once each, visibly,
+    rather than inside a mapper that looks like pure field shuffling.
+    """
+    try:
+        return party_auth.resolve_identity(authorization, body.customerId)
+    except party_auth.AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
 def _initiate_kwargs(body) -> dict:
     """Map a validated request onto `initiate_payment`'s keyword arguments.
 
@@ -105,8 +119,12 @@ def _initiate_kwargs(body) -> dict:
         "category_purpose": body.categoryPurpose,
         "requested_execution_date": body.requestedExecutionDate,
         "channel": body.channel,
-        # Stage 2 (doc 15 B1). None when the caller asserts nothing, which stage 2
-        # records as `method: NONE` / SKIP rather than treating as a pass.
+        # Stage 2 (doc 15 B1). The body's assertion is the pre-token fallback and is
+        # OVERRIDDEN by `_resolve_identity` whenever a valid token is presented — a claim
+        # the caller made about itself must never outrank one the bank signed. Left on the
+        # contract until every caller sends a token (`REQUIRE_AUTHENTICATION`), then
+        # removed. None here means nothing was asserted: stage 2 records `method: NONE`
+        # and a SKIP, never a PASS.
         "authentication": body.authentication.model_dump() if body.authentication else None,
         "wire_details": body.wireDetails.model_dump() if body.wireDetails else None,
         "ach_details": body.achDetails.model_dump() if body.achDetails else None,
@@ -118,11 +136,13 @@ def _initiate_kwargs(body) -> dict:
 async def payment_order_procedure_initiate(
     body: PaymentOrderInitiateRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
+    identity = _resolve_identity(body, authorization)
     try:
         payment_doc = payments_service.initiate_payment(
             idempotency_key=idempotency_key or body.idempotencyKey,
-            **_initiate_kwargs(body),
+            **{**_initiate_kwargs(body), **identity},
         )
         return _bian_response({
             "paymentId": payment_doc["paymentId"],
@@ -139,7 +159,10 @@ async def payment_order_procedure_initiate(
 
 
 @app.post("/PaymentOrderInitiation/BulkInitiate")
-async def payment_order_procedure_bulk_initiate(body: PaymentOrderBulkInitiateRequest):
+async def payment_order_procedure_bulk_initiate(
+    body: PaymentOrderBulkInitiateRequest,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     """Initiate a batch of payment orders sequentially. Each item reuses the single
     initiate path; per-item validation failures are captured in the response so a
     bad item can't abort the batch. Returns settled/failed counts plus per-item results."""
@@ -147,9 +170,13 @@ async def payment_order_procedure_bulk_initiate(body: PaymentOrderBulkInitiateRe
     settled = 0
     for idx, item in enumerate(body.items):
         try:
+            # Per item: a batch may legitimately name several customers, and an operator
+            # token authorises that. A customer token does not, and each item is checked
+            # against it — one bad item is a per-item error, not a failed batch.
+            identity = party_auth.resolve_identity(authorization, item.customerId)
             payment_doc = payments_service.initiate_payment(
                 idempotency_key=item.idempotencyKey,
-                **_initiate_kwargs(item),
+                **{**_initiate_kwargs(item), **identity},
             )
             settled += 1
             results.append({
@@ -158,6 +185,8 @@ async def payment_order_procedure_bulk_initiate(body: PaymentOrderBulkInitiateRe
                 "paymentId": payment_doc["paymentId"],
                 "status": payment_doc["status"],
             })
+        except party_auth.AuthenticationError as e:
+            results.append({"index": idx, "ok": False, "error": str(e)})
         except ValueError as e:
             results.append({"index": idx, "ok": False, "error": str(e)})
         except Exception as e:

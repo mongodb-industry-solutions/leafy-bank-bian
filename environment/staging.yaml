@@ -18,6 +18,19 @@ env:
   # It was "500", which rejected Doina's flagship $25,000 wire at stage 1 before
   # entitlement was ever evaluated. Keep it above every segment limit.
   PAYMENT_LIMIT_USD: "1000000"
+  # BIAN PartyAuthentication (SD 38917). The accounts service signs an assessment token,
+  # the transactions service verifies it, and the payment's caller identity comes from the
+  # token rather than from the request body.
+  #
+  # ⚠️ `PARTY_AUTH_SECRET` is NOT set here on purpose — HS256 is a shared secret, so
+  # anyone holding it can mint a token for any customer. Add it as an `envSecrets:` entry
+  # (same value for BOTH services) before this is worth anything. Until then both services
+  # fall back to a built-in demo secret and log a warning at first use.
+  PARTY_AUTH_TOKEN_TTL_SECONDS: "3600"
+  # false = a request with no token still works, using the body's `customerId` (stage 2
+  # records the authentication check as SKIP). Flip to "true" once every caller sends a
+  # token; an unauthenticated initiate then gets a 401.
+  REQUIRE_AUTHENTICATION: "false"
   TRANSACTIONS_BASE_URL: http://leafy-bank-bian-transactions-web-app:80
   CONSENT_BACKEND_URL: http://open-finance-next-gen-web-app:80
   ACCOUNTS_BACKEND_URL: http://leafy-bank-bian-accounts-web-app:80

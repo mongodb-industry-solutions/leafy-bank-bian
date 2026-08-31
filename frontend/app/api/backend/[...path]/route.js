@@ -7,7 +7,7 @@
  *
  * The BIAN backend is split across services. We route by the first path
  * segment (the BIAN service-domain name):
- *   - CurrentAccount/*, PartyReferenceDataDirectory/*
+ *   - CurrentAccount/*, PartyReferenceDataDirectory/*, PartyAuthentication/*
  *       → ACCOUNTS_BACKEND_URL     (accounts service)
  *   - PaymentOrderInitiation/*, workflow/*
  *       → TRANSACTIONS_BACKEND_URL (transactions service)
@@ -29,6 +29,10 @@ const LEDGER_BACKEND =
 // Unmapped prefixes fall through to CONSENT_BACKEND.
 const BACKEND_BY_PREFIX = {
   PartyReferenceDataDirectory: ACCOUNTS_BACKEND,
+  // BIAN PartyAuthentication (SD 38917). On accounts because accounts owns `customers` —
+  // authentication is Party-domain work, not payments. The transactions service verifies
+  // the token it issues; it never mints one.
+  PartyAuthentication: ACCOUNTS_BACKEND,
   CurrentAccount: ACCOUNTS_BACKEND,
   PaymentOrderInitiation: TRANSACTIONS_BACKEND,
   // GL pipeline monitor routes (read-only) live on the ledger service.

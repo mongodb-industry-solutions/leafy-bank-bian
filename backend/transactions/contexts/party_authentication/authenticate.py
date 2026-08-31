@@ -201,6 +201,16 @@ def run(ctx: PaymentContext) -> None:
                 "authenticatedAt": assertion.get("authenticatedAt"),
                 "sessionRef": assertion.get("sessionRef"),
                 "factorCount": factor_count,
+                # CUSTOMER / OPERATOR / API when the assertion came from a verified
+                # token, absent when it came from a request body. This is the distinction
+                # Doina's requirement 1 asks for — "the authenticated customer, corporate
+                # user, or API" — and only a token can answer it honestly.
+                "callerType": assertion.get("callerType"),
+                # True when the session was raised by PartyAuthentication Question/Evaluate
+                # because this amount was over the segment's step-up threshold. The audit
+                # question "why did a second factor appear on this payment?" is answerable
+                # from the payment alone, without correlating logs.
+                "stepUp": bool(assertion.get("stepUp")),
                 "assessedAt": now,
                 "assessedBy": "transactions-service",
                 "sufficient": method != "NONE",

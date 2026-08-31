@@ -891,3 +891,47 @@ def test_a_sole_mandate_below_the_threshold_reports_it_as_such(service, db):
     payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
     approved = [e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED"]
     assert "Below the RETAIL dual-approval threshold" in approved[0]["reason"]
+
+
+# --- 13. the token-derived assertion (Level 1 authentication) -----------------
+#
+# `main.py` resolves identity from the `Authorization` header and overrides the body's
+# `customer_ref` / `authentication` with it. These tests take the resolver's OUTPUT and
+# feed it to the service the way the route does, so the two halves are pinned together —
+# a change to the resolver's shape fails here rather than at runtime.
+
+def test_a_token_derived_assertion_reaches_the_payment(service, db):
+    """The assertion stage 2 grades now comes from a signature, not from the request."""
+    from datetime import timedelta
+
+    import jwt
+
+    from shared import party_authentication_token as party_auth
+
+    now = datetime.now(timezone.utc)
+    token = jwt.encode({
+        "sub": CUST_D, "callerType": "CUSTOMER", "method": "OTP", "factorCount": 2,
+        "sessionRef": "SESS-REAL01", "authenticatedAt": now.isoformat(),
+        "iss": party_auth.ISSUER, "aud": party_auth.AUDIENCE,
+        "iat": int(now.timestamp()), "exp": int((now + timedelta(hours=1)).timestamp()),
+    }, party_auth._DEV_SECRET, algorithm=party_auth.ALGORITHM)
+
+    identity = party_auth.resolve_identity(f"Bearer {token}", CUST_D)
+    _initiate(service, **identity)
+
+    assert _one(db, "customer_authenticated")["result"] == "PASS"
+    assessment = db["payments"].find_one(
+        {"paymentId": db["payments"].inserted[0]["paymentId"]})["authentication"]
+    assert assessment["method"] == "OTP"
+    assert assessment["factorCount"] == 2
+    assert assessment["sessionRef"] == "SESS-REAL01"
+    assert assessment["callerType"] == "CUSTOMER", "who held the token, not just what they used"
+
+
+def test_without_a_token_the_stage_still_records_a_skip(service, db):
+    """`REQUIRE_AUTHENTICATION` off: the payment goes through and the check reads SKIP.
+    The rollout must not silently upgrade an absent assertion to a pass."""
+    from shared import party_authentication_token as party_auth
+
+    _initiate(service, **party_auth.resolve_identity(None, CUST_D))
+    assert _one(db, "customer_authenticated")["result"] == "SKIP"

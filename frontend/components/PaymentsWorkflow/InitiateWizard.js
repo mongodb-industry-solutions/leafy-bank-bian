@@ -27,7 +27,9 @@ import Stepper, { Step } from "@leafygreen-ui/stepper";
 import { Body, H2 } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
+import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { coreApi } from "@/lib/api/client";
+import { isStepUpRequired } from "@/lib/api/partyAuthentication";
 import { useBankAssistedParties } from "@/lib/api/hooks";
 import { fmtAmount } from "@/lib/paymentsWorkflow/status";
 
@@ -112,18 +114,10 @@ function buildPayload(form) {
     chargeBearer: form.chargeBearer,
     // The defining difference between this surface and the customer portal.
     channel: "BRANCH",
-    // Stage 2 (doc 15 B1). The payments hub authenticates nobody — this is the CHANNEL
-    // asserting what it already did, and stage 2 verifies and records it as a
-    // `PartyAuthenticationAssessment`. Here the channel is a branch terminal an operator
-    // is signed into, so the assertion is single-factor and SIMULATED: there is no
-    // identity provider behind this screen. Sent anyway rather than omitted, because an
-    // omitted assertion is recorded as `NONE`/SKIP and the operator did do something.
-    authentication: {
-      method: "PASSWORD",
-      factorCount: 1,
-      sessionRef: "SIMULATED-BRANCH-TERMINAL",
-      authenticatedAt: new Date().toISOString(),
-    },
+    // No `authentication` object. The operator's OPERATOR token, issued at login and
+    // attached by `client.js`, is the assertion — and being an operator token it is what
+    // permits initiating for a customer other than itself, which a customer token cannot
+    // do. Stage 2 records `callerType: OPERATOR` on the payment.
   };
 
   if (form.valueDate) payload.requestedExecutionDate = form.valueDate;
@@ -331,6 +325,9 @@ export default function InitiateWizard({ onInitiated }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  // Non-null while the step-up challenge is on screen; holds the backend's refusal text so
+  // the modal can quote the reason it opened rather than paraphrasing it.
+  const [stepUpReason, setStepUpReason] = useState(null);
   const [createdId, setCreatedId] = useState(null);
 
   const { customers, accountsByCustomer, allAccounts, loading } = useBankAssistedParties();
@@ -384,6 +381,13 @@ export default function InitiateWizard({ onInitiated }) {
     });
     setSubmitting(false);
     if (error) {
+      // Stage 2 refused the factor, not the payment: the amount is over the segment's
+      // step-up threshold. Collect a second factor and retry rather than surfacing a dead
+      // end — the refusal is the trigger for the step-up, which is the point of it.
+      if (isStepUpRequired(error)) {
+        setStepUpReason(error);
+        return;
+      }
       setSubmitError(error);
       return;
     }
@@ -453,6 +457,19 @@ export default function InitiateWizard({ onInitiated }) {
     ];
     return (
       <div className={styles.panel}>
+        {/* Renders in a portal, so its position in the tree does not matter. It lives on
+            the review step because that is the only step that submits. */}
+        <StepUpModal
+          open={stepUpReason !== null}
+          reason={stepUpReason}
+          onCancel={() => setStepUpReason(null)}
+          onSuccess={() => {
+            // The session is now two-factor. Retry the same payload: the amount and the
+            // entitlement are unchanged, only the strength of the assertion moved.
+            setStepUpReason(null);
+            submit();
+          }}
+        />
         <div className={styles.panelBody}>
           <div className={styles.createHeader}>
             <div>

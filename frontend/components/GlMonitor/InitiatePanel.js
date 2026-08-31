@@ -57,17 +57,6 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
     setResult({ ok: true, pid, syncing: false });
   }
 
-  // Stage 2 (doc 15 B1). An operator-driven panel, so the assertion names the operator's
-  // terminal session and is SIMULATED — there is no identity provider behind this screen.
-  // The bulk path deliberately sends nothing: those payments are synthetic load, and
-  // stage 2 records them as `method: NONE` / SKIP, which is the truth about them.
-  const operatorAssertion = () => ({
-    method: "PASSWORD",
-    factorCount: 1,
-    sessionRef: "SIMULATED-OPS-TERMINAL",
-    authenticatedAt: new Date().toISOString(),
-  });
-
   async function firePreset(idx) {
     const p = PRESETS[idx];
     setBusy(idx);
@@ -75,7 +64,6 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
       customerId: p.customerId, type: p.type, rail: p.rail,
       debtor: { accountId: p.debtor }, creditor: { accountId: p.creditor },
       instructedAmount: p.amount, instructedCurrency: "USD",
-      authentication: operatorAssertion(),
     };
     if (p.remittance) payload.remittance = { unstructured: p.remittance };
     await fireTransaction(payload);
@@ -115,7 +103,6 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
       debtor: { accountId: custom.debtor.trim() },
       creditor: { accountId: custom.creditor.trim() },
       instructedAmount: amount, instructedCurrency: "USD",
-      authentication: operatorAssertion(),
     };
     if (custom.remittance.trim()) payload.remittance = { unstructured: custom.remittance.trim() };
     setBusy("custom");

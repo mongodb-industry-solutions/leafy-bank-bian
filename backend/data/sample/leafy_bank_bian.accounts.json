@@ -615,9 +615,9 @@
   "accountIdentificationType": "AccountNumber",
   "accountNumber": "310028841",
   "balance": {
-    "current": 250000,
-    "available": 250000,
-    "ledger": 250000,
+    "current": 2500000,
+    "available": 2500000,
+    "ledger": 2500000,
     "hold": 0,
     "overdraftLimit": 0,
     "updatedAt": {

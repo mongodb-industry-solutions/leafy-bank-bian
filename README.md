@@ -224,6 +224,20 @@ PAYMENT_LIMIT_USD=1000000          # optional, malformed-input bound (default 10
                                    # ENTITLEMENT_DUAL_APPROVAL_THRESHOLD_<SEGMENT>,
                                    # ENTITLEMENT_STEP_UP_THRESHOLD_<SEGMENT>.
 
+# accounts AND transactions — BIAN PartyAuthentication (SD 38917).
+# accounts SIGNS the assessment token, transactions VERIFIES it, so the value must be
+# IDENTICAL in both .env files or every payment is 401.
+PARTY_AUTH_SECRET=                 # optional; both services fall back to a built-in demo
+                                   # secret and log a warning. HS256 is symmetric: anyone
+                                   # holding this can mint a token for any customer.
+PARTY_AUTH_TOKEN_TTL_SECONDS=3600  # optional, accounts only (default 3600)
+
+# transactions only:
+REQUIRE_AUTHENTICATION=false       # optional (default false). false = a request with no
+                                   # token still works off the body's customerId, and
+                                   # stage 2 records the authentication check as SKIP.
+                                   # true = an initiate without a valid token is 401.
+
 # ledger only:
 GL_BATCH_INTERVAL_SECONDS=600      # optional, GL batch cadence (default 600)
 ENABLE_CHANGE_STREAMS=true         # optional (default true)

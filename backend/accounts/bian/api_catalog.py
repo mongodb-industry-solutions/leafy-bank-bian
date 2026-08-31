@@ -4,6 +4,7 @@ This is the single source of truth for the "BIAN API" tab in the frontend
 explorer modal. The catalog spans two backend services:
 
   - leafy-bank-backend-accounts (this service, :8080)
+      * PartyAuthentication
       * PartyReferenceDataDirectory
       * CurrentAccount
   - leafy-bank-backend-transactions (:8001)
@@ -65,6 +66,170 @@ API_CATALOG = {
             "host": "http://localhost",
             "port": 8080,
             "serviceDomains": [
+                {
+                    "key": "PartyAuthentication",
+                    "label": "Party Authentication",
+                    "description": (
+                        "Authenticates a party and returns a signed, expiring assessment token "
+                        "(BIAN SD 38917, Sales and Service / Cross Channel). The transactions "
+                        "service verifies this token and derives the payment's caller identity "
+                        "from it rather than from the request body. LEVEL 1: no credential is "
+                        "verified — selecting a persona IS the credential, and the assessment "
+                        "says so via credentialVerified: false."
+                    ),
+                    "operations": [
+                        {
+                            "id": "evaluatePartyAuthentication",
+                            "bianBehaviorQualifier": None,
+                            "bianAction": "Evaluate",
+                            "method": "POST",
+                            "path": "/PartyAuthentication/Evaluate",
+                            "summary": "Authenticate a party; returns the assessment and a bearer token.",
+                            "headers": [],
+                            "enums": {"callerType": ["CUSTOMER", "OPERATOR", "API"]},
+                            "request": {
+                                "required": ["partyReference"],
+                                "notes": (
+                                    "partyReference is a customerId for CUSTOMER, and a staff "
+                                    "identifier for OPERATOR/API (who have no customers document). "
+                                    "An OPERATOR token may initiate a payment FOR a customer; a "
+                                    "CUSTOMER token may only initiate for itself."
+                                ),
+                                "examples": [
+                                    {"label": "Customer", "value": {
+                                        "partyReference": "CUST-f88fb89e",
+                                        "callerType": "CUSTOMER",
+                                    }},
+                                    {"label": "Back-office operator", "value": {
+                                        "partyReference": "OPS-nadia",
+                                        "callerType": "OPERATOR",
+                                    }},
+                                ],
+                            },
+                            "response": {
+                                "successCodes": [200],
+                                "envelopeKeys": [
+                                    "partyAuthenticationId", "assessment", "accessToken",
+                                    "tokenType", "expiresAt",
+                                ],
+                                "example": {
+                                    "partyAuthenticationId": "SESS-9F2C1A4B7D01",
+                                    "assessment": {
+                                        "partyReference": "CUST-f88fb89e",
+                                        "callerType": "CUSTOMER",
+                                        "method": "PASSWORD",
+                                        "factorCount": 1,
+                                        "credentialVerified": False,
+                                    },
+                                    "accessToken": "eyJhbGciOiJIUzI1NiIs…",
+                                    "tokenType": "Bearer",
+                                },
+                            },
+                            "errors": [
+                                {"code": 401, "case": "Party does not exist, or is not ACTIVE — one refusal for both, so the endpoint cannot be used to probe which customer ids exist"},
+                                {"code": 422, "case": "Validation error (missing partyReference, unknown callerType)"},
+                            ],
+                        },
+                        {
+                            "id": "retrievePartyAuthenticationQuestion",
+                            "bianBehaviorQualifier": "Question",
+                            "bianAction": "Retrieve",
+                            "method": "GET",
+                            "path": "/PartyAuthentication/{partyauthenticationid}/Question/{questionid}/Retrieve",
+                            "summary": "The step-up challenge for a live session. SIMULATED — returns the code itself.",
+                            "headers": [
+                                {"name": "Authorization",
+                                 "notes": "Bearer token from POST /PartyAuthentication/Evaluate. Required — the "
+                                          "token must name the session in the path."},
+                            ],
+                            "enums": {"questionId": ["otp"]},
+                            "request": {
+                                "required": [],
+                                "notes": (
+                                    "A real deployment would never return the code — it goes to a "
+                                    "registered device out of band. deliveryChannel is "
+                                    "ON_SCREEN_SIMULATION and simulated is true to say so."
+                                ),
+                                "examples": [],
+                            },
+                            "response": {
+                                "successCodes": [200],
+                                "envelopeKeys": [
+                                    "partyAuthenticationId", "questionId", "questionText",
+                                    "challengeCode", "deliveryChannel", "simulated",
+                                ],
+                                "example": {
+                                    "partyAuthenticationId": "SESS-9F2C1A4B7D01",
+                                    "questionId": "otp",
+                                    "challengeCode": "482067",
+                                    "deliveryChannel": "ON_SCREEN_SIMULATION",
+                                    "simulated": True,
+                                },
+                            },
+                            "errors": [
+                                {"code": 401, "case": "Missing/expired/invalid token, or a token naming a different session"},
+                                {"code": 404, "case": "No such questionId on this assessment"},
+                            ],
+                        },
+                        {
+                            "id": "evaluatePartyAuthenticationQuestion",
+                            "bianBehaviorQualifier": "Question",
+                            "bianAction": "Evaluate",
+                            "method": "POST",
+                            "path": "/PartyAuthentication/{partyauthenticationid}/Question/Evaluate",
+                            "summary": "Grade the step-up challenge; re-issues the session at OTP / 2 factors.",
+                            "headers": [
+                                {"name": "Authorization",
+                                 "notes": "Bearer token from POST /PartyAuthentication/Evaluate. Required — a "
+                                          "step-up strengthens an existing session and must name it."},
+                            ],
+                            "enums": {"questionId": ["otp"]},
+                            "request": {
+                                "required": ["challengeResponse"],
+                                "notes": (
+                                    "No partyReference: who is stepping up comes from the token, never "
+                                    "the body. This is what makes the entitlement policy's step-up "
+                                    "threshold satisfiable — above it, stage 2 refuses PASSWORD/1 with "
+                                    "'step-up authentication required', and this answers that refusal. "
+                                    "The code is an HMAC over the session ref, so a wrong code is "
+                                    "genuinely refused; credentialVerified stays false because the code "
+                                    "is delivered to the same screen that answers it."
+                                ),
+                                "examples": [
+                                    {"label": "Step-up", "value": {
+                                        "challengeResponse": "482067",
+                                        "questionId": "otp",
+                                    }},
+                                ],
+                            },
+                            "response": {
+                                "successCodes": [200],
+                                "envelopeKeys": [
+                                    "partyAuthenticationId", "assessment", "accessToken",
+                                    "tokenType", "expiresAt",
+                                ],
+                                "example": {
+                                    "partyAuthenticationId": "SESS-42C2D9DFE8E9",
+                                    "assessment": {
+                                        "partyReference": "CUST-abc10001",
+                                        "callerType": "CUSTOMER",
+                                        "method": "OTP",
+                                        "factorCount": 2,
+                                        "stepUp": True,
+                                        "credentialVerified": False,
+                                        "simulated": True,
+                                    },
+                                    "accessToken": "eyJhbGciOiJIUzI1NiIs…",
+                                    "tokenType": "Bearer",
+                                },
+                            },
+                            "errors": [
+                                {"code": 401, "case": "Bad token, a token naming a different session, or a wrong challenge code — one message for all three"},
+                                {"code": 422, "case": "Validation error (missing challengeResponse)"},
+                            ],
+                        },
+                    ],
+                },
                 {
                     "key": "PartyReferenceDataDirectory",
                     "label": "Party Reference Data Directory",
@@ -562,7 +727,20 @@ API_CATALOG = {
                                         "EndToEndIdentification). Replays with the same key return the "
                                         "original response without re-running the transaction."
                                     ),
-                                }
+                                },
+                                {
+                                    "name": "Authorization",
+                                    "required": False,
+                                    "notes": (
+                                        "Bearer token from POST /PartyAuthentication/Evaluate. When "
+                                        "present it OVERRIDES the body: a CUSTOMER token must match "
+                                        "the body's customerId or the request is 401, while an "
+                                        "OPERATOR token may initiate for any customer. When absent, "
+                                        "the body's customerId is used and stage 2 records the "
+                                        "authentication check as SKIP. Set REQUIRE_AUTHENTICATION=true "
+                                        "to make the token mandatory (401 without one)."
+                                    ),
+                                },
                             ],
                             "enums": {
                                 "PaymentType": [

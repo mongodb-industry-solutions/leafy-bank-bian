@@ -1,4 +1,52 @@
 const CORE_BASE = "/api/backend";
+
+// --- the PartyAuthentication session token (BIAN SD 38917) ------------------
+//
+// Set once by UserContext when a persona authenticates, then attached automatically to
+// the BIAN services' calls. It replaces the arrangement where `customerId` was a body
+// field the browser chose freely: the transactions service now derives the caller's
+// identity from this signature instead.
+//
+// Module scope, not React state, so every caller gets it without threading a token
+// through a dozen hooks. It dies on a full page load, which is the right lifetime —
+// UserContext re-issues on hydrate.
+let sessionToken = null;
+
+// The assessment id (`SESS-…`) the current token belongs to. BIAN addresses a step-up as a
+// sub-resource of its assessment — `/PartyAuthentication/{id}/Question/Evaluate` — so the
+// channel has to know which session it is strengthening. Kept beside the token rather than
+// decoded from it on demand: the two always change together, and a client that parses a JWT
+// it cannot verify invites treating other claims as trustworthy.
+let sessionRef = null;
+
+export function setSessionToken(token, ref = null) {
+  sessionToken = token || null;
+  sessionRef = token ? ref : null;
+}
+
+export function currentSessionRef() {
+  return sessionRef;
+}
+
+// Attached ONLY to the BIAN services. Mirrors `BACKEND_BY_PREFIX` in
+// app/api/backend/[...path]/route.js — deliberately a list and not "every request",
+// because the fallback backend is the open-finance monolith whose `/secure/*` routes
+// expect their OWN bearer token. Blanket-attaching here would send the wrong credential
+// to routes that check one, which is how the 2026-07-06 proxy regression happened: a
+// convention needed by one backend applied globally.
+const AUTHENTICATED_PREFIXES = new Set([
+  "PartyAuthentication",
+  "PartyReferenceDataDirectory",
+  "CurrentAccount",
+  "PaymentOrderInitiation",
+  "workflow",
+  "pipeline",
+]);
+
+function sessionTokenFor(path) {
+  const prefix = String(path || "").split("/")[0];
+  return AUTHENTICATED_PREFIXES.has(prefix) ? sessionToken : null;
+}
 const CHATBOT_BASE = "/api/chatbot";
 const OPENFINANCE_CHAT_BASE = "/api/openfinance-chat";
 
@@ -14,8 +62,11 @@ const OPENFINANCE_CHAT_BASE = "/api/openfinance-chat";
  */
 export async function coreApi(path, { method = "GET", body = null, bearerToken = null, params = null } = {}) {
   const headers = { "Content-Type": "application/json" };
-  if (bearerToken) {
-    headers["Authorization"] = `Bearer ${bearerToken}`;
+  // An explicit token wins: the open-finance consent flow passes its own, and that is a
+  // different credential for a different backend.
+  const token = bearerToken || sessionTokenFor(path);
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   let url = `${CORE_BASE}/${path}`;

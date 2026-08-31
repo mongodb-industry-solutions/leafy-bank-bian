@@ -4,12 +4,13 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -18,6 +19,8 @@ from api_models import (
     AccountControlRequest,
     AccountInitiateRequest,
     AccountRequestRequest,
+    PartyAuthenticationEvaluateRequest,
+    PartyAuthenticationQuestionEvaluateRequest,
     PartyReferenceRequestRequest,
 )
 from bian.api_catalog import API_CATALOG
@@ -26,6 +29,7 @@ from encoder.json_encoder import MyJSONEncoder
 from services.accounts_service import AccountsService
 from services.bian_service import BianService
 from services.customers_service import CustomersService
+from services.party_authentication_service import PartyAuthenticationService
 from shared import registry
 from workers import eod_topup_worker
 
@@ -85,6 +89,7 @@ app.add_middleware(
 accounts_service = AccountsService(connection, DB_NAME)
 customers_service = CustomersService(connection, DB_NAME)
 bian_service = BianService(connection, DB_NAME, "bian-mapping")
+party_authentication_service = PartyAuthenticationService(connection, DB_NAME)
 
 
 def _bian_response(envelope: dict) -> Response:
@@ -107,6 +112,7 @@ async def read_root():
         "service": "leafy-bank-accounts",
         "bian": [
             "PartyReferenceDataDirectory",
+            "PartyAuthentication",
             "CurrentAccount",
         ],
         "bianVersion": registry.bian_version,
@@ -125,6 +131,105 @@ async def topup_run():
     accounts = connection.get_collection(DB_NAME, "accounts")
     credited = eod_topup_worker.run_once(accounts, threshold, amount)
     return {"credited": credited, "threshold": threshold, "amount": amount}
+
+
+# ---------- PartyAuthentication ----------
+
+@app.post("/PartyAuthentication/Evaluate")
+async def party_authentication_evaluate(body: PartyAuthenticationEvaluateRequest):
+    """Authenticate a party and return a signed, expiring assessment token.
+
+    This is the seam that stops `customerId` being a body field a browser can type
+    anything into. The transactions service verifies this token and derives the caller's
+    identity from it, so the ownership check in stage 2 stops comparing a client-supplied
+    string against the account it names.
+
+    401, never 404 or 422, for a party that cannot be authenticated — a caller must not be
+    able to probe which customer ids exist.
+    """
+    try:
+        issued = party_authentication_service.evaluate(
+            party_reference=body.partyReference,
+            caller_type=body.callerType,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    return _bian_response({
+        "partyAuthenticationId": issued["assessment"]["partyAuthenticationId"],
+        "assessment": issued["assessment"],
+        "accessToken": issued["token"],
+        "tokenType": "Bearer",
+        "expiresAt": issued["expiresAt"],
+    })
+
+
+def _bearer(authorization: Optional[str]) -> str:
+    """The token out of `Authorization: Bearer …`, or 401. Step-up requires a session."""
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401,
+                            detail="Authentication token is missing, expired or invalid.")
+    return token.strip()
+
+
+@app.get("/PartyAuthentication/{partyauthenticationid}/Question/{questionid}/Retrieve")
+async def party_authentication_question_retrieve(
+    partyauthenticationid: str,
+    questionid: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    """The step-up challenge for a live session.
+
+    Returns the code itself, which a real bank would never do — it would go to a registered
+    device out of band. `deliveryChannel: ON_SCREEN_SIMULATION` and `simulated: true` say so
+    on the response, so this cannot be screenshotted as a real OTP flow.
+    """
+    try:
+        question = party_authentication_service.retrieve_question(
+            token=_bearer(authorization),
+            party_authentication_id=partyauthenticationid,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    if questionid != question["questionId"]:
+        raise HTTPException(status_code=404, detail=f"No question {questionid!r} on this assessment.")
+    return _bian_response(question)
+
+
+@app.post("/PartyAuthentication/{partyauthenticationid}/Question/Evaluate")
+async def party_authentication_question_evaluate(
+    partyauthenticationid: str,
+    body: PartyAuthenticationQuestionEvaluateRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Grade the step-up challenge and re-issue the session at two factors.
+
+    This is what makes stage 2's step-up threshold satisfiable rather than merely
+    enforceable: above a segment's threshold `authentication_sufficient` refuses
+    `PASSWORD`/1, and this is the operation that answers it. The new token replaces the old
+    one on the channel; the payment records whichever session it was initiated under.
+
+    401 for a bad token, a token naming a different session, or a wrong code — one message
+    for all three.
+    """
+    try:
+        issued = party_authentication_service.evaluate_question(
+            token=_bearer(authorization),
+            party_authentication_id=partyauthenticationid,
+            challenge_response=body.challengeResponse,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    return _bian_response({
+        "partyAuthenticationId": issued["assessment"]["partyAuthenticationId"],
+        "assessment": issued["assessment"],
+        "accessToken": issued["token"],
+        "tokenType": "Bearer",
+        "expiresAt": issued["expiresAt"],
+    })
 
 
 # ---------- PartyReferenceDataDirectory ----------
