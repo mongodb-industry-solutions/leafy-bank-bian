@@ -19,6 +19,7 @@ from api_models import (
 )
 from shared import party_authentication_token as party_auth
 from database.connection import MongoDBConnection
+from contexts.payment_rail.domain import pacs008
 from encoder.json_encoder import MyJSONEncoder
 from routers.workflow import router as workflow_router
 from services.payments_service import PaymentsService
@@ -312,6 +313,90 @@ async def transaction_authorization_retrieve(transactionauthorizationid: str):
         raise
     except Exception as e:
         logging.error("TransactionAuthorization/Retrieve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+# --- Stage 5: PaymentRail (SD 47741) ---------------------------------------
+#
+# ⚠️ These URLs are the **published v14 ones**, taken from the KG rather than invented:
+# `kg PaymentRail -s bian` lists `GET /PaymentRail/{paymentrailid}/Retrieve`
+# (`PaymentRailOperatingSession/Retrieve`) and
+# `GET /PaymentRail/{paymentrailid}/OutboundTransaction/{outboundtransactionid}/Retrieve`.
+# Doc 19 §3 step 7 planned a `/CanonicalJson/Retrieve` of our own; the real API has a proper
+# behaviour qualifier for it, so the plan's version is dropped. Verifying an SD's URLs against
+# the KG before writing them is the standing rule from defect 2026-07-06.
+#
+# `paymentrailid` is the `paymentId`: in this model the rail's operating session is scoped to
+# the payment being executed, and `outboundtransactionid` is the `paymentExecutionId` — one
+# outbound transaction per execution attempt, which is exactly her L854 grain.
+#
+# Both are GET retrieves. The saga owns the write path (stage 4's same deviation): a payment is
+# executed by `POST /PaymentOrderInitiation/Initiate` running the lifecycle, never by calling
+# the rail directly.
+
+@app.get("/PaymentRail/{paymentrailid}/Retrieve")
+async def payment_rail_retrieve(paymentrailid: str):
+    """The rail operating session for one payment: every execution attempt, in order."""
+    try:
+        payment = payments_service.retrieve_payment(paymentrailid)
+        if not payment:
+            raise HTTPException(status_code=404, detail="paymentId not found.")
+        executions = payments_service.list_payment_executions(paymentrailid)
+        return _bian_response({
+            "paymentId": payment["paymentId"],
+            "state": (payment.get("lifecycle") or {}).get("currentState"),
+            "rail": payment.get("rail"),
+            "clearingNetwork": (payment.get("wireDetails") or {}).get("network"),
+            "clearing": payment.get("clearing"),
+            "attempts": [_strip(e) for e in executions],
+            "checks": [
+                c for c in (payment.get("checks") or [])
+                if str(c.get("stage", "")).startswith("5 execute")
+            ],
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("PaymentRail/Retrieve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+@app.get("/PaymentRail/{paymentrailid}/OutboundTransaction/{outboundtransactionid}/Retrieve")
+async def payment_rail_outbound_transaction_retrieve(
+    paymentrailid: str, outboundtransactionid: str
+):
+    """One execution attempt: the pacs.008 as sent, plus the stored message record.
+
+    This is what the demo's ISO VIEW reads — the business half comes from
+    `paymentMessages.payload`, the ISO half from `paymentExecutions.message`.
+    """
+    try:
+        execution = payments_service.get_payment_execution(outboundtransactionid)
+        if not execution or execution.get("paymentId") != paymentrailid:
+            raise HTTPException(status_code=404, detail="paymentExecutionId not found.")
+        message = payments_service.get_payment_message(execution.get("paymentMessageId"))
+        return _bian_response({
+            "paymentId": execution["paymentId"],
+            "paymentExecutionId": execution["paymentExecutionId"],
+            "attempt": execution.get("attempt"),
+            "messageStandard": execution.get("messageStandard"),
+            "messageFormat": execution.get("messageFormat"),
+            "message": execution.get("message"),
+            # Derived, not stored — see `workflow_read_service._with_xml`.
+            "messageXml": (
+                pacs008.to_xml(execution["message"]) if execution.get("message") else None
+            ),
+            "status": execution.get("status"),
+            "railStatus": execution.get("railStatus"),
+            "simulated": execution.get("simulated"),
+            "canonicalPayload": (message or {}).get("payload"),
+            "mappingVersion": (message or {}).get("mappingVersion"),
+            "transformationAudit": (message or {}).get("transformationAudit"),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("PaymentRail/OutboundTransaction/Retrieve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal retrieve error.")
 
 

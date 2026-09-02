@@ -6,6 +6,7 @@ Moved verbatim from `services/payments_service.py`. BIAN PaymentRail (SD 47741).
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from bson import ObjectId
 
@@ -31,6 +32,7 @@ def transaction_doc(
     txn_code: str,
     is_internal: bool,
     now: datetime,
+    payment_execution_id: Optional[str] = None,
 ) -> dict:
     """One v4_21 transactions doc: the confirmed payer->payee movement. NOT an accounting record
     (no legs, no gl) — the ledger service derives DR/CR ledgerEvents from this via CDC."""
@@ -82,7 +84,20 @@ def transaction_doc(
         "createdAt": now,
         "createdBy": "SERVICE-PAYMENTS",
         "sourceSystem": "leafy-bank-payments-service",
-        # TODO (plan §8 item 4): paymentExecutionId, once paymentExecutions exists.
+        # Stage 5 (doc 19 B6). Her L868 lists `paymentExecutionId` on this record; the
+        # canonical spec's `transactions` collection does **not** declare it (0 matches
+        # spec-wide), so it is a non-spec field pending ratification — Q37.
+        #
+        # ⚠️ **This is the stage's only boundary change, and it is additive only.** The
+        # ledger's `ingest_worker` reads `amount, paymentId, currency, payer{accountId},
+        # payee{accountId}, paymentType, rail, settledAt, updatedAt, sourceSystem` (doc 12
+        # §1) and ignores everything else. Nothing above is renamed, retyped or removed.
+        #
+        # Null on a book transfer, which writes no execution artifact (doc 19 B4) — so today
+        # it is null in practice and non-null the moment a rail-bound payment can also settle
+        # (stage 7). Written now because the boundary document is the one place where a later
+        # edit is expensive.
+        "paymentExecutionId": payment_execution_id,
     }
 
 

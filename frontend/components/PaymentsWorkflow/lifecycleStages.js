@@ -48,6 +48,18 @@ function stageFourMeta(payment, reached) {
   return "stage 4";
 }
 
+function stageFiveMeta(payment, reached, execution, tx) {
+  // A book transfer reaches no rail, so "no message" is the honest summary rather than an
+  // omission — that is Doina's own "only at the rail boundary" (L542), visible in the rail.
+  if (execution) {
+    const network = execution.clearingNetwork || payment?.wireDetails?.network;
+    return network ? `${execution.messageFormat} · ${network}` : execution.messageFormat;
+  }
+  if (tx) return `${tx.rail || payment?.rail} · book transfer`;
+  if (reached("SUBMITTED")) return "submitted";
+  return "stage 5";
+}
+
 export function buildLifecycleStages(payment, trace) {
   const tx = trace?.transaction ?? null;
   const le = trace?.ledgerEvent ?? null;
@@ -59,6 +71,15 @@ export function buildLifecycleStages(payment, trace) {
 
   const reached = (...states) => events.some((e) => states.includes(e.state));
   const eventsFor = (...states) => events.filter((e) => states.includes(e.state));
+
+  // Stage 5's artifacts live in their own collections, so `/workflow/payments/{id}` joins
+  // them on (doc 19 §3 step 8). The LAST attempt is the current one — the array is
+  // append-only, so its order is the history.
+  const executions = payment?.executions ?? [];
+  const execution = executions.length ? executions[executions.length - 1] : null;
+  const message = (payment?.messages ?? []).find(
+    (m) => m.paymentMessageId === execution?.paymentMessageId
+  ) ?? (payment?.messages ?? [])[0] ?? null;
 
   return [
     {
@@ -137,15 +158,45 @@ export function buildLifecycleStages(payment, trace) {
       },
     },
     {
+      // Stage 5 owns two states (SUBMITTED -> IN_PROGRESS) and two artifacts: the pacs.008
+      // on `paymentExecutions` and the canonical payload on `paymentMessages`.
+      // `kind: "railExecution"` renders her L548-565 BUSINESS VIEW / ISO VIEW pair — doc 16
+      // §5 calls it the highest-value screen in the demo.
+      //
+      // ⚠️ `reached` used to be `!!tx` — the ledger trace's transaction. That made an
+      // external wire show stage 5 as never reached even though it had been submitted and
+      // acknowledged, because an external creditor produces no `transactions` doc by design
+      // (doc 19 B1). Read the lifecycle first and fall back to the transaction, so both a
+      // book transfer (no artifacts, has a tx) and an external wire (artifacts, no tx)
+      // register.
       key: "execution",
       label: "Rail execution",
       icon: "Beaker",
       stage: 5,
-      reached: !!tx,
-      status: tx?.transactionStatus,
-      meta: tx?.rail || payment?.rail,
-      kind: "transaction",
-      data: tx,
+      reached: reached("SUBMITTED", "IN_PROGRESS") || !!tx,
+      status: execution?.status ?? tx?.transactionStatus,
+      meta: stageFiveMeta(payment, reached, execution, tx),
+      kind: "railExecution",
+      data: {
+        events: eventsFor("SUBMITTED", "IN_PROGRESS"),
+        execution,
+        attempts: executions,
+        // BUSINESS VIEW (her L550-553) and ISO VIEW (L555-563) — the two tabs, from the two
+        // documents. `business` falls back to the payment itself so a pre-stage-5 payment
+        // still renders something rather than an empty tab.
+        business: message?.payload ?? null,
+        iso: execution?.message ?? null,
+        // Derived server-side (stdlib ElementTree) and returned by the same route — the UI
+        // never serialises XML itself.
+        xml: execution?.messageXml ?? null,
+        transformationAudit: message?.transformationAudit ?? [],
+        mappingVersion: message?.mappingVersion ?? null,
+        clearing: payment?.clearing ?? null,
+        railStatus: execution?.railStatus ?? null,
+        simulated: execution?.simulated ?? false,
+        transaction: tx,
+        checks: checks.filter((c) => String(c?.stage || "").startsWith("5 ")),
+      },
     },
     {
       key: "ledgerEvent",

@@ -25,6 +25,7 @@ from contexts.payment_order_initiation.ports.reference_data import (
     NullReferenceData,
     ReferenceData,
 )
+from contexts.payment_rail.ports.rail import NullRailGateway, RailGateway
 
 
 @dataclass
@@ -41,6 +42,13 @@ class PaymentCollections:
     # stage existed — or a test that does not reach stage 4 — still constructs.
     payment_orders: Any = None
     routing_snapshots: Any = None
+    # Stage 5's two new collections (doc 19 B2, B3). Optional for the same reason as stage
+    # 4's: a context built before this stage existed, or a test that never reaches a rail,
+    # still constructs. `paymentMessages` is Doina's own rename of the row her target-model
+    # table calls `canonicalJsonStorage/paymentMessages (renamed)` (L780) —
+    # ⚠️ NOT the live `canonicalJsonStorage`, which is another demo's (doc 19 B2).
+    payment_executions: Any = None
+    payment_messages: Any = None
 
 
 @dataclass
@@ -83,6 +91,11 @@ class PaymentContext:
     # enrichment records WARN checks and the payment proceeds. That keeps the
     # reference-data store off the money path's list of hard dependencies.
     reference_data: ReferenceData = field(default_factory=NullReferenceData)
+    # Stage 5's outbound rail (doc 19 §3 step 3). Defaults to a gateway that refuses every
+    # submission and says so, mirroring `NullReferenceData`: a context built without one
+    # still runs an internal transfer end to end, and a rail-bound payment records a FAILED
+    # attempt rather than raising an AttributeError inside the stage.
+    rail_gateway: RailGateway = field(default_factory=NullRailGateway)
 
     # --- resolved (stage 1a) -------------------------------------------------
     now: Optional[datetime] = None
@@ -111,6 +124,10 @@ class PaymentContext:
     # stage 4b, but the strategy it commits to was decided in stage 4a.
     execution_strategy: Optional[Any] = None
     routing_snapshot_id: Optional[str] = None
+    # Stage 5's outputs, so a later stage (or a test) can read what was executed without a
+    # second query.
+    payment_execution_id: Optional[str] = None
+    payment_message_id: Optional[str] = None
     # True when `requestedExecutionDate` is in the future: the payment is warehoused for
     # release and stage 4a halts it at ROUTED (doc 18 B9).
     warehoused: bool = False

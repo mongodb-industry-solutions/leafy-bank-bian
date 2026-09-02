@@ -54,7 +54,7 @@ STAGES = [
     ("2 authenticate", authenticate.run),   # PartyAuthentication     (gate, no state)
     ("3 validate",     validation.run),     # PaymentOrderInitiation  -> VALIDATED
     ("3 enrich",       enrichment.run),     # PaymentOrderInitiation  -> ENRICHED -> FINAL_VALIDATED
-    ("4 orchestrate",  orchestrate.run),    # PaymentOrchestration    -> ROUTED           [stub]
+    ("4 orchestrate",  orchestrate.run),    # PaymentOrchestration    -> ROUTED
     ("4 authorize",    evaluate.run),       # FraudEvaluation         -> AUTHORISED -> APPROVED
     ("5 execute",      execute.run),        # PaymentRail             -> SUBMITTED -> IN_PROGRESS -> SETTLED
     ("6 account",      None),               # FinancialAccounting     -> POSTED, by the ledger via CDC

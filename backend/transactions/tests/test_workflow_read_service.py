@@ -102,11 +102,33 @@ class FakePayments:
         return [{"_id": k, "n": v} for k, v in buckets.items()]
 
 
+class FakeArtifacts:
+    """Stands in for `paymentExecutions` / `paymentMessages` — stage 5's two collections.
+
+    Empty by default: every test in this module predates stage 5, and the point of the
+    fixture is that `get_payment` still returns a document when a payment has no execution
+    artifacts (an internal transfer never has any — doc 19 B4).
+    """
+
+    def __init__(self, docs=None):
+        self.docs = docs or []
+
+    def find(self, query, projection=None):
+        payment_id = query.get("paymentId")
+        return FakeCursor([d for d in self.docs if d.get("paymentId") == payment_id])
+
+
 class FakeConnection:
-    def __init__(self, coll):
+    def __init__(self, coll, executions=None, messages=None):
         self.coll = coll
+        self.artifacts = {
+            "paymentExecutions": FakeArtifacts(executions),
+            "paymentMessages": FakeArtifacts(messages),
+        }
 
     def get_collection(self, db_name, name):
+        if name in self.artifacts:
+            return self.artifacts[name]
         assert name == "payments"
         return self.coll
 

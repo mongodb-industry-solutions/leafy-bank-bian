@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from contexts.payment_order_initiation.domain import lifecycle
+from contexts.payment_rail.domain import pacs008
 from database.connection import MongoDBConnection
 
 # A payment needing attention is one that stopped somewhere it will never leave. The set is
@@ -131,16 +132,59 @@ def list_payments(
 
 
 def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) -> Optional[dict]:
-    """The whole payment document — `lifecycle.events[]`, `checks[]`, envelopes.
+    """The whole payment document — `lifecycle.events[]`, `checks[]`, envelopes — plus
+    stage 5's execution artifacts joined on.
 
     Returned in full on purpose: this is the deep dive, and every later stage adds fields
     here that its own timeline panel will want. A projection would have to be edited once
     per stage.
 
+    **Stage 5 is the first stage whose output is not on the payment document.** Its pacs.008
+    lives on `paymentExecutions` and its canonical payload on `paymentMessages`, so the two
+    are attached here as `executions[]` and `messages[]`. Doc 16 §5 rule 2 — *extend the
+    existing route, do not add a new one per stage* — is why this is a join rather than a
+    second endpoint the UI would have to fetch and correlate. Stage 4 got away with exposing
+    ref ids only; her BUSINESS VIEW / ISO VIEW pair cannot be rendered from an id.
+
     `_id` is excluded rather than stringified — the paymentId is the identifier the UI uses,
     and echoing a raw ObjectId into a response is the 2026-06-11 defect.
     """
-    return _payments(connection, db_name).find_one({"paymentId": payment_id}, {"_id": 0})
+    payment = _payments(connection, db_name).find_one({"paymentId": payment_id}, {"_id": 0})
+    if payment is None:
+        return None
+    # Empty lists, not absent keys: a payment written before stage 5 existed, or an internal
+    # transfer that legitimately has no artifacts (doc 19 B4), must read as "none" rather
+    # than making the UI branch on `undefined`.
+    payment["executions"] = [
+        _with_xml(e)
+        for e in connection.get_collection(db_name, "paymentExecutions")
+        .find({"paymentId": payment_id}, {"_id": 0})
+        .sort("attempt", 1)
+    ]
+    payment["messages"] = list(
+        connection.get_collection(db_name, "paymentMessages")
+        .find({"paymentId": payment_id}, {"_id": 0})
+        .sort("createdAt", 1)
+    )
+    return payment
+
+
+def _with_xml(execution: dict) -> dict:
+    """Attach the ISO 20022 XML rendering of the stored message.
+
+    **Derived at read time, never persisted.** The XML is a *rendering* of
+    `paymentExecutions.message`, so storing it would keep the same fact in two places and
+    invite exactly the drift the mirror-drift entries in defects.md are about — the same
+    reasoning that kept the pacs.008 off `payments.wireDetails` (doc 19 B5).
+
+    Honest about what it is not: the rail here is simulated and sends no bytes, so there is no
+    "message as transmitted" to preserve. The stored JSON is the artifact; this is a view of
+    it. The day a real gateway exists, the bytes it actually sent become the thing to persist.
+    """
+    message = execution.get("message")
+    if message:
+        execution["messageXml"] = pacs008.to_xml(message)
+    return execution
 
 
 def list_exceptions(

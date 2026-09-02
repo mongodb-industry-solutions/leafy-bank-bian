@@ -354,6 +354,61 @@
   margin-bottom: 8px;
 }
 
+/* ── stage 5: BUSINESS VIEW / ISO VIEW (her L548-565) ── */
+
+/* The two-tab pair spans the whole detail grid rather than sharing a 280px column with the
+   summary: an ISO element list in a narrow column wraps every row, which is exactly what
+   made the first deep-dive layout congested (Kiran, 2026-08-30). */
+.detailBlockWide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.tabBody {
+  padding-top: 16px;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* One row per produced ISO element, element name beside the value it was mapped to. Her
+   L565 — "demonstrates the relationship between business-domain data and payment messaging"
+   — is the reason this is a two-column pairing and not a JSON dump. The dump is below it,
+   for the reader who wants the whole message. */
+.isoRows {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.isoRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  align-items: baseline;
+}
+
+.isoRow:nth-child(odd) {
+  background: rgba(0, 0, 0, .02);
+}
+
+.isoElement {
+  font-family: "Source Code Pro", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pw-accent);
+  overflow-wrap: anywhere;
+}
+
+.isoValue {
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
 /* ── double-entry legs ── */
 
 .legs {

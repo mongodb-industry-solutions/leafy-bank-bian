@@ -29,6 +29,7 @@ from contexts.payment_order_initiation.adapters.mongo_reference_data import (
     MongoReferenceData,
 )
 from contexts.fraud_evaluation.domain import fraud_rules, sanctions
+from contexts.payment_rail.adapters.simulated_wire_rail import SimulatedWireRail
 from contexts.payment_order_initiation.domain import checks
 from process.payment_context import PaymentCollections, PaymentContext
 
@@ -55,10 +56,42 @@ class PaymentsService:
         # named exactly as `payments.refs` declares their FK targets.
         self.payment_orders = self.db["paymentOrders"]
         self.routing_snapshots = self.db["routingSnapshots"]
+        # Stage 5's two (doc 19 B2, B3). `paymentMessages` is Doina's rename (L780); the live
+        # `canonicalJsonStorage` belongs to fsi-payments-processing and is never touched here.
+        self.payment_executions = self.db["paymentExecutions"]
+        self.payment_messages = self.db["paymentMessages"]
         self.payment_limit_usd = payment_limit_usd
         # Stage 3's reference-data store (doc 17 §3 step 1). Read-only: seeding is
         # `backend/data/load_reference_seed.py`, run by hand, never by the service.
         self.reference_data = MongoReferenceData(self.db)
+        # Stage 5's outbound rail (doc 19 §3 step 3). Simulated by design — *"the demo will
+        # not connect to a real payment network"* — and every document it produces says so.
+        self.rail_gateway = SimulatedWireRail()
+
+    # --- stage 5 read paths (doc 19 §3 step 7) -------------------------------
+    # Projections drop `_id` at the source: echoing a raw ObjectId into a response is the
+    # 2026-06-11 defect, and these documents embed a full ISO message, so the read is heavy
+    # enough to be worth shaping deliberately.
+
+    def list_payment_executions(self, payment_id: str) -> list:
+        """Every execution attempt for a payment, oldest first — append-only, so the order
+        is the history."""
+        return list(
+            self.payment_executions.find({"paymentId": payment_id}, {"_id": 0})
+            .sort("attempt", 1)
+        )
+
+    def get_payment_execution(self, payment_execution_id: str):
+        return self.payment_executions.find_one(
+            {"paymentExecutionId": payment_execution_id}, {"_id": 0}
+        )
+
+    def get_payment_message(self, payment_message_id):
+        if not payment_message_id:
+            return None
+        return self.payment_messages.find_one(
+            {"paymentMessageId": payment_message_id}, {"_id": 0}
+        )
 
     def _collections(self) -> PaymentCollections:
         return PaymentCollections(
@@ -70,6 +103,8 @@ class PaymentsService:
             notifications=self.notifications,
             payment_orders=self.payment_orders,
             routing_snapshots=self.routing_snapshots,
+            payment_executions=self.payment_executions,
+            payment_messages=self.payment_messages,
         )
 
     def initiate_payment(
@@ -130,6 +165,7 @@ class PaymentsService:
             collections=self._collections(),
             payment_limit_usd=self.payment_limit_usd,
             reference_data=self.reference_data,
+            rail_gateway=self.rail_gateway,
         )
         return payment_lifecycle.run(ctx)
 

@@ -627,9 +627,10 @@ def test_advance_rejects_a_state_it_cannot_reach(service, db):
 # --- 5. external beneficiary (doc 13 §2 B1) -----------------------------------
 #
 # Doina's flagship `wire_domestic` scenario: a creditor Leafy Bank does not hold. Stage 1
-# captures it; stage 5 stops before the money move because settling it needs the
-# chart-of-accounts extension that has not been decided. These tests pin BOTH halves —
-# that the payment is created and traceable, and that not one cent moved.
+# captures it; stage 5 runs in full — mapping, submission, acknowledgement, both artifacts —
+# and stops before the money move, because settling it needs the chart-of-accounts extension
+# that has not been decided (doc 19 B1). These tests pin BOTH halves — that the payment is
+# executed and traceable, and that not one cent moved.
 
 EXTERNAL_CREDITOR = {
     "accountNo": "9876543210",
@@ -650,12 +651,19 @@ def _initiate_external(svc, **over):
     )
 
 
-def test_external_wire_halts_at_submitted_and_moves_no_money(service, db):
+def test_external_wire_halts_at_in_progress_and_moves_no_money(service, db):
+    """Stage 5 halts at IN_PROGRESS, not SUBMITTED (doc 19 B1, R12).
+
+    The rail has accepted the message, so "submitted, outcome unknown" is no longer true —
+    the payment is in flight awaiting settlement, which is what IN_PROGRESS means. The state
+    is also still inside `_POST_EXECUTION_TERMINALS`, so the payment can never become
+    REJECTED from here, which is correct once a message has left the bank.
+    """
     payment = _initiate_external(service)
 
-    assert payment["lifecycle"]["currentState"] == "SUBMITTED"
-    assert payment["status"] == "SUBMITTED"
-    assert "external settlement pending" in payment["lifecycle"]["events"][-1]["reason"]
+    assert payment["lifecycle"]["currentState"] == "IN_PROGRESS"
+    assert payment["status"] == "IN_PROGRESS"
+    assert "settlement pending" in payment["lifecycle"]["events"][-1]["reason"]
 
     assert db["transactions"].inserted == [], "no transactions doc — the ledger must not see it"
     assert db["notifications"].inserted == []
@@ -669,12 +677,16 @@ def test_external_wire_is_still_a_real_traceable_payment(service, db):
 
     assert len(db["payments"].inserted) == 1
     states = [e["state"] for e in payment["lifecycle"]["events"]]
-    assert states[0] == "DRAFT" and states[-1] == "SUBMITTED"
+    assert states[0] == "DRAFT" and states[-1] == "IN_PROGRESS"
+    assert states[-2] == "SUBMITTED", "both of stage 5's transitions fired, in order"
     assert "REJECTED" not in states, "the bank did not refuse this payment"
     assert payment["creditor"]["accountId"] is None
     assert payment["creditor"]["name"] == "Acme Corp"
     assert payment["clearing"]["submittedAt"] is not None
     assert payment["clearing"]["settledAt"] is None
+    # The rail acknowledged it, and the acknowledgement is on the payment (R10, R11).
+    assert payment["clearing"]["statusCode"] == "ACSP"
+    assert payment["clearing"]["networkRef"], "the rail's own reference is recorded"
 
 
 def test_internal_payment_still_settles_alongside_the_guard(service, db):
