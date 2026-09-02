@@ -23,7 +23,9 @@ from datetime import date, datetime, timezone
 import pytest
 from bson import ObjectId
 
-from contexts.payment_order_initiation.domain import payment_document
+from contexts.fraud_evaluation.domain import fraud_rules, sanctions
+from contexts.payment_order_initiation.domain import enrichment_plan, payment_document
+from contexts.payment_orchestration.domain import routing
 from process.payment_context import PaymentContext
 
 _SPEC_PATH = (
@@ -31,10 +33,16 @@ _SPEC_PATH = (
 )
 
 
-@pytest.fixture(scope="module")
-def schema():
+def _schema():
+    """The canonical `payments` schema. A plain function as well as a fixture, so the
+    non-parametrised tests below can call it directly."""
     spec = json.loads(_SPEC_PATH.read_text())
     return spec["collections"]["payments"]["validator"]["$and"][0]["$jsonSchema"]
+
+
+@pytest.fixture(scope="module")
+def schema():
+    return _schema()
 
 
 def _ctx(**over):
@@ -109,7 +117,13 @@ def test_every_required_field_is_written(schema, rail):
 #       and `refs{}`. Added the same way those were — nullable, not `required` — and sent
 #       to Doina as Q12 to ratify. This set is the tripwire: a SIXTH extra must be argued
 #       for, not appear.
-_KNOWN_EXTRAS = {"isInternal", "createdBy", "checks", "authentication", "entitlement"}
+_KNOWN_EXTRAS = {
+    "isInternal", "createdBy", "checks", "authentication", "entitlement",
+    # Stage 3 (doc 17 B1/B5). The sixth, and the argument for it is in B5: her
+    # L459-460 before/after screen cannot be drawn from a document that holds one
+    # value per field. A SEVENTH must be argued for in the same way.
+    "enrichment",
+}
 
 
 def test_no_field_is_written_that_the_spec_does_not_declare(schema):
@@ -128,35 +142,141 @@ def test_stage_two_slots_are_empty_at_creation():
     assert doc["checks"] == []
     assert doc["authentication"] is None
     assert doc["entitlement"] is None
+    assert doc["enrichment"] is None
 
 
-def _enum_fields(schema):
-    """Every (dotted path, allowed values) pair the spec declares, one level deep."""
-    for name, prop in schema["properties"].items():
+def _enum_fields(schema, prefix=""):
+    """Every (dotted path, allowed values) pair the spec declares, at ANY depth.
+
+    ⚠️ This used to walk `properties` and exactly ONE level of nested `properties`, and it
+    never descended into `items.properties` — so **no array-element enum was checked at
+    all**. Stage 3 shipped `fees[].type = "WIRE_TRANSFER_FEE"` straight past it, and
+    `lifecycle.events[].state` / `.actorType` were unguarded too (defect 2026-09-01
+    `guard-gap`). The recursion is the fix, and it is the whole point of the test: this
+    file exists to discharge the 2026-04-28 enum-drift prevention rule, and a guard with a
+    hole in it discharges nothing.
+
+    An array is marked with a `[]` segment so a path reads `fees[].type` — `_dig` then knows
+    to fan out over the elements rather than treating the array as a dict.
+    """
+    for name, prop in (schema.get("properties") or {}).items():
+        path = f"{prefix}{name}"
         if "enum" in prop:
-            yield name, prop["enum"]
-        for sub, subprop in (prop.get("properties") or {}).items():
-            if "enum" in subprop:
-                yield f"{name}.{sub}", subprop["enum"]
+            yield path, prop["enum"]
+        yield from _enum_fields(prop, prefix=f"{path}.")
+        items = prop.get("items")
+        if isinstance(items, dict):
+            yield from _enum_fields(items, prefix=f"{path}[].")
 
 
 def _dig(doc, dotted):
+    """Resolve a dotted path, fanning out over `[]` segments.
+
+    Returns a single value for a scalar path, or a list of the element values for a path
+    that crosses an array. `_check_enum_values` treats both uniformly.
+    """
     cur = doc
     for part in dotted.split("."):
+        if part.endswith("[]"):
+            cur = (cur or {}).get(part[:-2]) if isinstance(cur, dict) else None
+            if not isinstance(cur, list):
+                return []
+            return [_dig(item, ".".join(_rest(dotted, part))) for item in cur]
         if not isinstance(cur, dict):
             return None
         cur = cur.get(part)
     return cur
 
 
+def _rest(dotted, after):
+    parts = dotted.split(".")
+    return parts[parts.index(after) + 1:]
+
+
+def _assert_enum_values_legal(schema, doc, where):
+    """Shared by the built-document and post-stage-4 variants below."""
+    for path, allowed in _enum_fields(schema):
+        value = _dig(doc, path)
+        values = value if isinstance(value, list) else [value]
+        for one in values:
+            if one is None and None not in allowed:
+                continue  # absent/unwritten is a required-field concern, tested above
+            assert one in allowed, (
+                f"{where}: {path}={one!r} is not in the spec enum {allowed}"
+            )
+
+
 @pytest.mark.parametrize("rail", ["INTERNAL", "WIRE", "ACH", "CARD", "RTP"])
 def test_every_written_enum_value_is_legal(schema, rail):
     doc = payment_document.build(_ctx(payment_rail=rail))
-    for path, allowed in _enum_fields(schema):
-        value = _dig(doc, path)
-        if value is None and None not in allowed:
-            continue  # absent/unwritten is a required-field concern, tested above
-        assert value in allowed, f"{path}={value!r} is not in the spec enum {allowed}"
+    _assert_enum_values_legal(schema, doc, f"as built ({rail})")
+
+
+def test_the_enum_walk_reaches_inside_arrays():
+    """The guard's own guard.
+
+    `fees[].type` was illegal for the whole of stage 3 and this file did not notice, because
+    the walk stopped at `properties` and never entered `items.properties`. Assert the walk
+    now REACHES those paths — without this, a future refactor could quietly restore the
+    one-level version and every enum test would still pass.
+    """
+    schema = _schema()
+    paths = {path for path, _ in _enum_fields(schema)}
+    assert "fees[].type" in paths
+    assert "fees[].chargedTo" in paths
+    assert "lifecycle.events[].state" in paths
+    assert "lifecycle.events[].actorType" in paths
+
+
+def test_enum_values_are_legal_after_every_stage_that_writes_them():
+    """The document is written by five stages; the built document is only the first.
+
+    `fees` is `[]` at build, so even a fully recursive walk over `payment_document.build`
+    cannot see `fees[].type` — the value arrives at stage 3 enrichment. That is the second
+    half of defect 2026-09-01: a spec-walking test must run over the document at every stage
+    that writes it, or fields populated later are structurally invisible to it.
+    """
+    schema = _schema()
+    doc = payment_document.build(_ctx(payment_rail="WIRE"))
+
+    # Stage 3's enrichment output, applied the way `enrichment.py` applies it.
+    doc["fees"] = [{
+        "type": enrichment_plan.WIRE_FEE_TYPE,
+        "amount": enrichment_plan.WIRE_FEE,
+        "currency": "USD",
+        "chargedTo": "DEBTOR",
+    }]
+    # Stage 4b's output.
+    doc["fraud"] = {
+        "alertId": "FRAUD-0000abcd",
+        "score": 41,
+        "decision": fraud_rules.APPROVED,
+        "rulesFired": ["AMOUNT_TIER"],
+        "checkedAt": doc["createdAt"],
+    }
+    doc["correspondent"]["sanctionsCheck"]["status"] = sanctions.CLEAR
+    doc["wireDetails"]["network"] = routing.SWIFT
+
+    _assert_enum_values_legal(schema, doc, "after stages 3 and 4")
+
+
+def test_the_fee_type_the_code_writes_is_in_the_spec_enum():
+    """Named directly, because this is the value that actually drifted."""
+    schema = _schema()
+    allowed = schema["properties"]["fees"]["items"]["properties"]["type"]["enum"]
+    assert enrichment_plan.WIRE_FEE_TYPE in allowed
+
+
+def test_every_fraud_decision_and_network_the_code_can_emit_is_legal():
+    """Enum parity for the two enums stage 4 introduces, asserted against the spec file
+    rather than transcribed into a comment."""
+    schema = _schema()
+    assert set(fraud_rules.DECISIONS) <= set(
+        schema["properties"]["fraud"]["properties"]["decision"]["enum"]
+    )
+    assert routing.networks_emitted() <= set(
+        schema["properties"]["wireDetails"]["properties"]["network"]["enum"]
+    )
 
 
 @pytest.mark.parametrize(

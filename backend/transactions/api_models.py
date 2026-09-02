@@ -241,3 +241,21 @@ class PaymentOrderBulkInitiateRequest(BaseModel):
     not abort the batch."""
     items: List[PaymentOrderInitiateRequest] = Field(min_length=1, max_length=50)
     model_config = ConfigDict(extra="forbid")
+
+
+class FraudEvaluationRequest(BaseModel):
+    """BIAN `POST /FraudEvaluation/Evaluate`.
+
+    Only the payment reference: every scoring input is read from the stored, fully
+    orchestrated payment. Accepting an amount or a party here would let a caller score a
+    payment that does not exist — and Doina's R9 is explicit that evaluation runs *"against
+    the fully orchestrated payment, not the raw initiation."*
+    """
+    paymentId: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
+class PaymentConfirmationRequest(BaseModel):
+    """BIAN `POST /PaymentConfirmation/Execute` (D8 — the SD has no published API)."""
+    paymentId: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")

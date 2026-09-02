@@ -1,0 +1,100 @@
+{
+  "_notes": {
+    "source": "All 15 codes are exactly the `code` enum of collections.purposeCodes.validator.$jsonSchema in Consolidated_Banking_DataModel_BIAN_v34_Aug17.json (v4_34), in spec order. Sourced from the spec's enum array, never hand-rolled - defect 2026-04-28, where three Literals drifted because they were written from memory. If the enum changes, regenerate; do not edit a code by hand.",
+    "scope": "Doc 17 B3. The collection is declared in the canonical spec but absent from this repo - no seed file, no code reference - so the reference-data port had no data source. `SUPP` is the code in Doina's own wire_domestic sample (categoryPurpose: \"SUPP\") and in her stage-3 demo script.",
+    "embedding": "Deliberately omitted, along with `examples` and `embeddingText`. All three exist in the spec to support semantic purpose-code matching over Atlas Vector Search, which doc 17 §6 defers: it needs an embedding model inside the synchronous payment path and 1024-dim vectors this repo does not have. Stage 3 resolves by exact code match. Adding embeddings later is additive - a new field on these rows and one method on the port.",
+    "descriptions": "ISO 20022 ExternalPurpose1Code definitions, paraphrased. `category` is marked demo-specific in the spec and is used only for grouping in the UI."
+  },
+  "records": [
+    {
+      "code": "SALA",
+      "name": "Salary Payment",
+      "description": "Payment of salaries or wages to an employee.",
+      "category": "Payroll"
+    },
+    {
+      "code": "PENS",
+      "name": "Pension Payment",
+      "description": "Payment of pension benefits to a beneficiary.",
+      "category": "Payroll"
+    },
+    {
+      "code": "TAXS",
+      "name": "Tax Payment",
+      "description": "Payment of taxes to a government or tax authority.",
+      "category": "Government"
+    },
+    {
+      "code": "SUPP",
+      "name": "Supplier Payment",
+      "description": "Payment to a supplier against an invoice for goods or services.",
+      "category": "Trade"
+    },
+    {
+      "code": "GDDS",
+      "name": "Purchase of Goods",
+      "description": "Payment for the purchase of physical goods.",
+      "category": "Trade"
+    },
+    {
+      "code": "SCVE",
+      "name": "Purchase of Services",
+      "description": "Payment for the purchase of services.",
+      "category": "Trade"
+    },
+    {
+      "code": "INTC",
+      "name": "Intra-Company Payment",
+      "description": "Transfer between two entities belonging to the same group.",
+      "category": "Treasury"
+    },
+    {
+      "code": "TREA",
+      "name": "Treasury Payment",
+      "description": "Treasury operation, such as a liquidity or cash-management transfer.",
+      "category": "Treasury"
+    },
+    {
+      "code": "DIVI",
+      "name": "Dividend Payment",
+      "description": "Payment of a dividend to a shareholder.",
+      "category": "Securities"
+    },
+    {
+      "code": "COMM",
+      "name": "Commission Payment",
+      "description": "Payment of a commission or brokerage fee.",
+      "category": "Fees"
+    },
+    {
+      "code": "LOAN",
+      "name": "Loan Disbursement or Repayment",
+      "description": "Drawdown of, or repayment against, a loan facility.",
+      "category": "Lending"
+    },
+    {
+      "code": "SECU",
+      "name": "Securities Settlement",
+      "description": "Payment settling a securities transaction.",
+      "category": "Securities"
+    },
+    {
+      "code": "TRAD",
+      "name": "Trade Settlement Payment",
+      "description": "Settlement of a trade-finance or commercial-trade transaction.",
+      "category": "Trade"
+    },
+    {
+      "code": "HEDG",
+      "name": "Hedging Payment",
+      "description": "Payment relating to a hedging or derivative contract.",
+      "category": "Securities"
+    },
+    {
+      "code": "GOVT",
+      "name": "Government Payment",
+      "description": "Payment to or from a government department or agency.",
+      "category": "Government"
+    }
+  ]
+}

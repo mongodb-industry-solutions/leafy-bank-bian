@@ -27,12 +27,18 @@ from datetime import date
 from typing import Optional
 
 from contexts.payment_order_initiation.domain import initiation_envelope, lifecycle
+from contexts.payment_order_initiation.domain.bank_identity import (
+    OUR_BANK_COUNTRY,
+    OUR_BANK_NAME,
+    OUR_BIC,
+)
 from shared.refs import derive_ref
 
-# The bank's own agent identity, stamped on whichever side of the payment we hold.
-OUR_BIC = "LEAFUS33"
-OUR_BANK_NAME = "Leafy Bank"
-OUR_BANK_COUNTRY = "US"
+# The bank's own agent identity lives in `bank_identity.py` — one definition, because
+# stage 3 needs OUR_BANK_COUNTRY for the domestic/cross-border comparison and OUR_ABA for
+# the debtor's clearing member id (doc 17 B6). Re-exported here: this module's callers and
+# tests already import these names from it.
+__all__ = ["OUR_BIC", "OUR_BANK_NAME", "OUR_BANK_COUNTRY"]
 
 SCHEMA_VERSION = 1
 
@@ -186,11 +192,16 @@ def build(ctx) -> dict:
             "intermediaryBic": None,
             # Spec-required array. Empty at initiation; stage 3/4 append.
             "regulatoryReports": [],
-            # TODO (stage 3 enrichment): hardcoded CLEAR — no screening runs.
+            # PENDING, because at initiation no screening has run — and PENDING is a legal
+            # value of the spec's own enum (`CLEAR | HIT | PENDING | BLOCKED`). This used to
+            # be a hardcoded `CLEAR`, so every payment asserted a screening result from the
+            # moment it was created; stage 4b now produces the real outcome (doc 18 B6).
+            # The TODO here previously blamed stage 3, which never owned it — her L512 puts
+            # screening in stage 4.
             "sanctionsCheck": {
-                "status": "CLEAR",
+                "status": "PENDING",
                 "checkedAt": now,
-                "provider": "PROV-SYNTH",
+                "provider": "PENDING-SCREENING",
             },
         },
         # Required objects, not nullable. All-null bodies until a CARD / RTP rail
@@ -242,6 +253,10 @@ def build(ctx) -> dict:
         "checks": [],
         "authentication": None,
         "entitlement": None,
+        # Stage 3's as-captured/diff record (doc 17 B1, Doina Q21). The SIXTH field written
+        # that the spec does not declare — argued for in B5 rather than slipped in, because
+        # `test_no_field_is_written_that_the_spec_does_not_declare` pins the set.
+        "enrichment": None,
         "initiation": {
             "initiatedAt": now,
             "initiatedBy": ctx.debtor_customer_id,

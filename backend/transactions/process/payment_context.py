@@ -21,6 +21,11 @@ from typing import Any, Optional
 
 from bson import ObjectId
 
+from contexts.payment_order_initiation.ports.reference_data import (
+    NullReferenceData,
+    ReferenceData,
+)
+
 
 @dataclass
 class PaymentCollections:
@@ -32,6 +37,10 @@ class PaymentCollections:
     payments: Any
     transactions: Any
     notifications: Any
+    # Stage 4's two new collections (doc 18 B1). Optional so a context built before this
+    # stage existed — or a test that does not reach stage 4 — still constructs.
+    payment_orders: Any = None
+    routing_snapshots: Any = None
 
 
 @dataclass
@@ -69,6 +78,11 @@ class PaymentContext:
     # --- infrastructure ------------------------------------------------------
     collections: Optional[PaymentCollections] = None
     payment_limit_usd: float = 0.0
+    # Stage 3's reference-data lookups (doc 17 §3 step 1). Defaults to a store that
+    # resolves nothing, so a context built without one still runs the whole saga —
+    # enrichment records WARN checks and the payment proceeds. That keeps the
+    # reference-data store off the money path's list of hard dependencies.
+    reference_data: ReferenceData = field(default_factory=NullReferenceData)
 
     # --- resolved (stage 1a) -------------------------------------------------
     now: Optional[datetime] = None
@@ -92,6 +106,14 @@ class PaymentContext:
     # in sync and uses it as the `from_state` guard, so a lost race fails loudly.
     current_state: Optional[str] = None
     fraud: Optional[dict] = None
+    # Stage 4a's output, read by stage 4b. The saga's own mechanism for crossing a stage
+    # boundary (see this module's docstring): `paymentOrders` is written at APPROVED, in
+    # stage 4b, but the strategy it commits to was decided in stage 4a.
+    execution_strategy: Optional[Any] = None
+    routing_snapshot_id: Optional[str] = None
+    # True when `requestedExecutionDate` is in the future: the payment is warehoused for
+    # release and stage 4a halts it at ROUTED (doc 18 B9).
+    warehoused: bool = False
     checkpoints: list = field(default_factory=list)
 
     # --- control -------------------------------------------------------------

@@ -35,8 +35,15 @@ PASS = "PASS"
 FAIL = "FAIL"
 SKIP = "SKIP"
 PENDING = "PENDING"
+# WARN — the check ran, found something worth surfacing, and did NOT stop the payment.
+# Added in stage 3 (doc 17 B4/B7) for the two outcomes that are neither a pass nor a
+# refusal: a content-duplicate (suspicious, not invalid) and a reference-data miss (our
+# directory is thin, not the caller's error). Distinct from SKIP, which means the check did
+# not run at all — collapsing the two would make an unresolved beneficiary indistinguishable
+# from one nobody looked at.
+WARN = "WARN"
 
-RESULTS = (PASS, FAIL, SKIP, PENDING)
+RESULTS = (PASS, FAIL, SKIP, PENDING, WARN)
 
 # Doina asks that every check declare whether it is synchronous or asynchronous (R11), from
 # stage 2 onward — it is what tells a reader whether a missing answer is a failure or a wait.

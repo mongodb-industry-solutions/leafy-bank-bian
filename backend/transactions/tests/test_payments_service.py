@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 import pytest
 from pymongo.errors import DuplicateKeyError
 
+from contexts.fraud_evaluation.domain import fraud_rules
 from services.payments_service import PaymentsService
 
 
@@ -42,6 +43,16 @@ class FakeCollection:
             if self._matches(d, flt):
                 return copy.deepcopy(d)
         return None
+
+    def find(self, flt=None, *a, **kw):
+        """Added for stage 4: `fraud_rules` counts prior payments, and a fake that cannot
+        answer a multi-document read would make every velocity and beneficiary-novelty
+        assertion vacuous — the 2026-08-31 lesson about grading a consumer against a
+        fixture no producer could produce."""
+        return [copy.deepcopy(d) for d in self.docs if self._matches(d, flt or {})]
+
+    def count_documents(self, flt=None, *a, **kw):
+        return len(self.find(flt))
 
     # -- writes
     def insert_one(self, doc, *a, **kw):
@@ -81,6 +92,8 @@ class FakeCollection:
                 if "$gte" in v and not (actual is not None and actual >= v["$gte"]):
                     return False
                 if "$ne" in v and actual == v["$ne"]:
+                    return False
+                if "$nin" in v and actual in v["$nin"]:
                     return False
             elif actual != v:
                 return False
@@ -146,11 +159,22 @@ class FakeClient:
 
 
 class FakeDb(dict):
-    """Dict of collections, plus the `.client` the service reaches through for sessions."""
+    """Dict of collections, plus the `.client` the service reaches through for sessions.
+
+    `__missing__` mirrors pymongo: `db["anything"]` always yields a handle and never
+    raises, so a collection no test seeds reads as empty rather than as a KeyError. Without
+    it, adding any new collection to the service (stage 3's reference data was the first)
+    breaks every test here for a reason that has nothing to do with the test.
+    """
 
     def __init__(self, mapping):
         super().__init__(mapping)
         self.client = FakeClient()
+
+    def __missing__(self, name):
+        collection = FakeCollection([])
+        self[name] = collection
+        return collection
 
 
 class FakeConnection:
@@ -162,6 +186,18 @@ class FakeConnection:
 
 
 # --- fixtures -----------------------------------------------------------------
+
+# mod-97-valid IBANs, one per fixture account. Keyed on the full account id: DEBTOR and
+# CREDITOR both END in "01", so keying on a suffix would hand two accounts the same IBAN.
+# Every value is asserted valid by `test_fixture_ibans_are_mod97_valid` in
+# test_stage_three_validation.py — a fixture identifier that fails the rule under test would
+# make the whole suite meaningless.
+_IBANS = {
+    "ACC-debtor01": "GB33BUKB20201555555555",
+    "ACC-credit01": "DE75512108001245126199",
+}
+_DEFAULT_IBAN = "GB82WEST12345698765432"
+
 
 def _account(account_id, customer_id, *, currency="USD", available=10_000.0,
              status="ACTIVE", account_type="CHECKING", signing_rule="SOLE",
@@ -175,6 +211,11 @@ def _account(account_id, customer_id, *, currency="USD", available=10_000.0,
     return {
         "accountId": account_id,
         "accountNumber": "8282993" + account_id[-2:],
+        # `party_snapshot` copies this onto the payment, and stage 3 validates its mod-97
+        # check digits (R8). The fixture omitted it, so every snapshot got `iban: None` and
+        # the enrichment/format paths were never exercised — doc 17 §4's fixture-fidelity
+        # item. A REAL mod-97-valid IBAN, so a test asserting acceptance means something.
+        "iban": _IBANS.get(account_id, _DEFAULT_IBAN),
         "status": status,
         "currency": currency,
         # `type`, not `accountType` — payment_document.party_snapshot reads account["type"].
@@ -203,6 +244,17 @@ def _customer(customer_id, *, status="ACTIVE", segment="RETAIL",
     return {
         "customerId": customer_id,
         "name": f"Holder {customer_id}",
+        # `party_snapshot` reads `identification.legalName`, and `_address_text` reads
+        # `contact.addresses[]`. Both were absent, so every snapshot came out with
+        # `name: None` / `address: None` — doc 17 §4's fixture-fidelity item, and the reason
+        # stage 3's enrichment tests would otherwise assert against nulls.
+        "identification": {"legalName": f"Holder {customer_id} Ltd."},
+        "contact": {
+            "addresses": [
+                {"line1": "1 Test Street", "city": "New York", "state": "NY",
+                 "postalCode": "10001", "country": "US"},
+            ],
+        },
         "status": status,
         "segment": segment,
         "type": customer_type,
@@ -318,10 +370,16 @@ def test_currency_mismatch_rejected(db, debtor_ccy, creditor_ccy, instructed):
     db["payments"].unique_on = "endToEndId"
     svc = PaymentsService(FakeConnection(db), "leafy_bank_bian", payment_limit_usd=50_000.0)
 
-    with pytest.raises(ValueError, match="Currency mismatch"):
+    # The message now names both sides and the reason, and arrives as the
+    # `currency_consistent` check's detail (stage 3 records outcomes, doc 17 R2/R12).
+    with pytest.raises(ValueError, match="FX is out of scope"):
         _initiate(svc, instructed_currency=instructed)
 
-    _assert_rejected(db, reason_match="Currency mismatch", at_state="INITIATED")
+    _assert_rejected(db, reason_match="FX is out of scope", at_state="INITIATED")
+
+    failed = _one(db, "currency_consistent")
+    assert failed["result"] == "FAIL"
+    assert failed["stage"] == "3 validate"
 
 
 # --- 3. closed account --------------------------------------------------------
@@ -505,12 +563,29 @@ def test_every_event_is_attributed_and_chronological(service, db):
 
 
 def test_fraud_block_is_written_with_the_authorised_transition(service, db):
-    """Stage 4b $sets the score at the same moment it advances — one write, not two."""
+    """Stage 4b $sets the score at the same moment it advances — one write, not two.
+
+    This used to assert `{"score": 5, "decision": "APPROVED"}` verbatim, which was the whole
+    of stage 4b: a literal. It now asserts the SHAPE the spec requires — all five of
+    `fraud`'s required sub-fields — and that the score is *derived* rather than constant,
+    which is what R10/R22 actually asked for.
+    """
     payment = _initiate(service, instructed_amount=250.0)
-    assert payment["fraud"] == {"score": 5, "decision": "APPROVED"}
+    fraud = payment["fraud"]
+
+    assert set(fraud) == {"alertId", "score", "decision", "rulesFired", "checkedAt"}
+    assert fraud["decision"] == "APPROVED"
+    assert fraud["alertId"].startswith("FRAUD-")
+    assert 0 <= fraud["score"] <= 100
+    # A $250 domestic internal transfer trips no rule, so the score is the labelled model
+    # baseline and nothing more — read from the module rather than duplicated here, so the
+    # test cannot claim a number the code does not produce.
+    assert fraud["score"] == fraud_rules.MODEL_BASELINE_SCORE
+    assert fraud["rulesFired"] == []
 
     authorised = next(e for e in payment["lifecycle"]["events"] if e["state"] == "AUTHORISED")
-    assert "Fraud score 5" in authorised["reason"]
+    assert f"Fraud score {fraud['score']}" in authorised["reason"]
+    assert "sanctions CLEAR" in authorised["reason"]
     assert authorised["actor"] == "fraud-service"
 
 
@@ -649,10 +724,19 @@ def test_missing_creditor_rolls_the_money_move_back(service, db, monkeypatch):
 STAGE_2 = "2 authenticate"
 
 
-def _checks(db, *, name=None):
+def _checks(db, *, name=None, stage=None):
+    """`payments.checks[]`, optionally filtered.
+
+    `stage` matters from stage 3 on: every stage appends to ONE array (doc 15 B3) and a
+    consumer filters by `stage`, so a test that asserts an exact name list must say which
+    stage it means or it breaks every time a later stage lands.
+    """
     payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
     entries = payment.get("checks", [])
-    return [c for c in entries if name is None or c["name"] == name]
+    return [
+        c for c in entries
+        if (name is None or c["name"] == name) and (stage is None or c["stage"] == stage)
+    ]
 
 
 def _one(db, name):
@@ -675,7 +759,7 @@ _ASSERTION = {"method": "OTP", "factorCount": 2, "sessionRef": "SESS-7781",
 
 def test_stage_two_records_its_six_checks_in_order(service, db):
     _initiate(service)
-    recorded = _checks(db)
+    recorded = _checks(db, stage="2 authenticate")
     assert [c["name"] for c in recorded] == [
         "customer_authenticated", "account_active", "account_unrestricted",
         "customer_entitled", "payment_limit_available", "dual_approval",

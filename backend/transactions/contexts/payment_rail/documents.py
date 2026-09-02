@@ -9,6 +9,10 @@ from datetime import datetime
 
 from bson import ObjectId
 
+from contexts.payment_order_initiation.domain.bank_identity import (
+    OUR_BANK_COUNTRY,
+    OUR_BIC,
+)
 from shared.refs import derive_ref
 
 
@@ -53,16 +57,16 @@ def transaction_doc(
             "accountId": debtor_account["accountId"],
             "accountNo": debtor_account.get("accountNumber"),
             "name": debtor_name,
-            "bic": "LEAFUS33",
-            "country": "US",
+            "bic": OUR_BIC,
+            "country": OUR_BANK_COUNTRY,
             "isInternal": True,
         },
         "payee": {
             "accountId": creditor_account["accountId"],
             "accountNo": creditor_account.get("accountNumber"),
             "name": creditor_name,
-            "bic": "LEAFUS33",
-            "country": "US",
+            "bic": OUR_BIC,
+            "country": OUR_BANK_COUNTRY,
             "isInternal": is_internal,
         },
         "transactionCategory": "AccountTransfer",

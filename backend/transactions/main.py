@@ -11,7 +11,12 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from api_models import PaymentOrderBulkInitiateRequest, PaymentOrderInitiateRequest
+from api_models import (
+    FraudEvaluationRequest,
+    PaymentConfirmationRequest,
+    PaymentOrderBulkInitiateRequest,
+    PaymentOrderInitiateRequest,
+)
 from shared import party_authentication_token as party_auth
 from database.connection import MongoDBConnection
 from encoder.json_encoder import MyJSONEncoder
@@ -219,3 +224,137 @@ async def payment_order_initiation_retrieve(paymentorderinitiationid: str):
     except Exception as e:
         logging.error("PaymentOrderInitiation/Retrieve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+# --- Stage 4 — orchestration & authorization ---------------------------------
+#
+# ⚠️ **These routes do not run stage 4.** Orchestration and authorization execute inside the
+# payment saga (`process/payment_lifecycle.py`), between validation and rail execution — a
+# payment cannot be routed or authorised out of band, and re-running either against a settled
+# payment would produce a second routing decision for a payment already in flight. So the
+# two Retrieve operations read what the saga recorded, and the two Evaluate operations score
+# **without persisting** — which is exactly what BIAN's `Evaluate` behaviour qualifier means,
+# and what makes them useful to an operator asking "what would this score?".
+#
+# URL convention: `PaymentOrchestration` (48782) and `PaymentConfirmation` (47766) carry NO
+# published semantic API in v14, so D8 governs their URLs. `FraudEvaluation` (44625) and
+# `TransactionAuthorization` (43343) DO have published operations, and these match them.
+#
+# ⚠️ Doina's stage table names `PaymentAuthorization`. That SD does not exist in v14 (zero
+# rows across the 341-SD landscape); `TransactionAuthorization` is the real name, and her own
+# demo-display heading at L509 already reads "TRANSACTION AUTHORIZATION" (doc 18 B3, D7).
+
+def _stage_four_artifacts(payment_id: str) -> dict:
+    payment = payments_service.retrieve_payment(payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="paymentId not found.")
+    payment.pop("_txn", None)
+    refs = payment.get("refs") or {}
+    return {
+        "payment": payment,
+        "routingSnapshot": payments_service.routing_snapshots.find_one(
+            {"routingSnapshotId": refs.get("routingSnapshotId")}
+        ) if refs.get("routingSnapshotId") else None,
+        "paymentOrder": payments_service.payment_orders.find_one(
+            {"paymentOrderId": refs.get("paymentOrderId")}
+        ) if refs.get("paymentOrderId") else None,
+    }
+
+
+@app.get("/PaymentOrchestration/{paymentorchestrationid}/Retrieve")
+async def payment_orchestration_retrieve(paymentorchestrationid: str):
+    """The routing decision as taken, plus the payment order it led to.
+
+    `paymentorchestrationid` is the `paymentId` — orchestration has no identity of its own in
+    this model; the routing snapshot and the payment order are its control records.
+    """
+    try:
+        found = _stage_four_artifacts(paymentorchestrationid)
+        payment = found["payment"]
+        return _bian_response({
+            "paymentId": payment["paymentId"],
+            "state": (payment.get("lifecycle") or {}).get("currentState"),
+            "clearingNetwork": (payment.get("wireDetails") or {}).get("network"),
+            "routingSnapshot": _strip(found["routingSnapshot"]) if found["routingSnapshot"] else None,
+            "paymentOrder": _strip(found["paymentOrder"]) if found["paymentOrder"] else None,
+            "checks": [
+                c for c in (payment.get("checks") or [])
+                if str(c.get("stage", "")).startswith("4 orchestrate")
+            ],
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("PaymentOrchestration/Retrieve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+@app.get("/TransactionAuthorization/{transactionauthorizationid}/Retrieve")
+async def transaction_authorization_retrieve(transactionauthorizationid: str):
+    """The authorization decision, the fraud assessment, and the screening result."""
+    try:
+        found = _stage_four_artifacts(transactionauthorizationid)
+        payment = found["payment"]
+        order = found["paymentOrder"] or {}
+        return _bian_response({
+            "paymentId": payment["paymentId"],
+            "state": (payment.get("lifecycle") or {}).get("currentState"),
+            "fraud": payment.get("fraud"),
+            "sanctionsCheck": (payment.get("correspondent") or {}).get("sanctionsCheck"),
+            "authorisedAt": (payment.get("clearing") or {}).get("authorisedAt"),
+            "authorization": order.get("authorization"),
+            "checks": [
+                c for c in (payment.get("checks") or [])
+                if str(c.get("stage", "")).startswith("4 authorize")
+            ],
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("TransactionAuthorization/Retrieve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+@app.post("/FraudEvaluation/Evaluate")
+async def fraud_evaluation_evaluate(body: FraudEvaluationRequest):
+    """Score a payment's rules WITHOUT persisting anything.
+
+    Reads the stored payment and re-runs the rule set over it, so an operator can see which
+    rules fired and why. Non-mutating on purpose: the score that counts is the one stage 4b
+    wrote at the AUTHORISED transition, and a second, later score would invite the question
+    of which one authorised the payment.
+    """
+    try:
+        result = payments_service.evaluate_fraud(body.paymentId)
+        if result is None:
+            raise HTTPException(status_code=404, detail="paymentId not found.")
+        return _bian_response(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("FraudEvaluation/Evaluate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal evaluation error.")
+
+
+@app.post("/PaymentConfirmation/Execute")
+async def payment_confirmation_execute(body: PaymentConfirmationRequest):
+    """Re-send the originator confirmation for a payment that has an execution path.
+
+    Her L502 places this *"once orchestration has committed to an execution path, independent
+    of the final settlement confirmation much later."* Stage 4b records it automatically; this
+    operation exists for an operator re-sending it, and refuses when there is nothing to
+    confirm — a confirmation for an uncommitted payment would be a false statement to the
+    customer.
+    """
+    try:
+        result = payments_service.confirm_to_originator(body.paymentId)
+        if result is None:
+            raise HTTPException(status_code=404, detail="paymentId not found.")
+        return _bian_response(result)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("PaymentConfirmation/Execute failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal confirmation error.")

@@ -99,6 +99,36 @@ TRANSACTIONS_INDEXES = [
 ]
 
 
+# Stage 4's two collections (doc 18 B1). Neither is in the canonical spec, so neither has a
+# spec-declared index list either — these follow the same shape as `payments`: the natural
+# key unique, plus `paymentId` for the trace read path.
+#
+# ⚠️ NOT YET APPLIED ON ATLAS. Same deferral as `idx_idempotency_key_unique` above
+# (2026-08-30): the whole Atlas index run waits until the stage sequence is built. Safe,
+# because neither collection is read by anything yet — the forward pointers on `payments`
+# are what the trace uses — and `insert_one` needs no index to be correct.
+PAYMENT_ORDERS_INDEXES = [
+    {
+        "name": "idx_payment_order_id_unique",
+        "keys": [("paymentOrderId", ASCENDING)],
+        "unique": True,
+    },
+    {"name": "idx_payment_orders_payment_id", "keys": [("paymentId", ASCENDING)]},
+]
+
+# `routingSnapshots` is insert-only by design (Doina L500: immutable routing evidence). A
+# unique index on the natural key is still right — a duplicate snapshot id would mean two
+# routing decisions claiming to be the same one.
+ROUTING_SNAPSHOTS_INDEXES = [
+    {
+        "name": "idx_routing_snapshot_id_unique",
+        "keys": [("routingSnapshotId", ASCENDING)],
+        "unique": True,
+    },
+    {"name": "idx_routing_snapshots_payment_id", "keys": [("paymentId", ASCENDING)]},
+]
+
+
 def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs: list[dict]) -> list[str]:
     coll = connection.get_collection(db_name, collection)
     ensured = []
@@ -114,6 +144,12 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
     return {
         "payments": _ensure(connection, db_name, "payments", PAYMENTS_INDEXES),
         "transactions": _ensure(connection, db_name, "transactions", TRANSACTIONS_INDEXES),
+        "paymentOrders": _ensure(
+            connection, db_name, "paymentOrders", PAYMENT_ORDERS_INDEXES
+        ),
+        "routingSnapshots": _ensure(
+            connection, db_name, "routingSnapshots", ROUTING_SNAPSHOTS_INDEXES
+        ),
     }
 
 

@@ -84,6 +84,70 @@ function KeyValues({ rows }) {
   );
 }
 
+/**
+ * Stage 3's before/after — Doina's L459-460 acceptance, verbatim:
+ *
+ *   "For an ISO 20022 wire, show the original business instruction progressively enriched:
+ *    Supplier XYZ Account 123456 ↓ enrichment Supplier XYZ Ltd. 123 Business Street New York
+ *    NY Account US123456… BIC ABCDUS33 Purpose: SUPP Remittance: INV-48392"
+ *
+ * Reuses the `.legs` grid built for ledger DR/CR. It is the same shape — two columns, one row
+ * per line, a header over each — so a second grid would be a copy with different words in it.
+ *
+ * Reads `payments.enrichment.resolved[]`, which exists precisely because the document holds
+ * one value per field: without that record the "before" column has no source at all (doc 17
+ * B1). `source` is shown because "where did this value come from" is the question an operator
+ * asks first.
+ */
+function EnrichmentDiff({ enrichment }) {
+  const resolved = enrichment?.resolved || [];
+
+  if (!enrichment) {
+    return <Body className={styles.muted}>No enrichment record on this payment.</Body>;
+  }
+  if (!resolved.length) {
+    return (
+      <Body className={styles.muted}>
+        Nothing required enrichment — every field was already resolved at initiation.
+      </Body>
+    );
+  }
+
+  return (
+    <div className={styles.legs}>
+      <div className={styles.legsHead}>As captured</div>
+      <div className={styles.legsHead}>After enrichment</div>
+      {resolved.map((r) => (
+        <Fragment key={r.field}>
+          <div className={styles.legRow}>
+            <span>{r.field}</span>
+            <span className={styles.legAmount}>{fmtEnriched(r.from)}</span>
+          </div>
+          <div className={styles.legRow}>
+            <span className={styles.legAmount}>{fmtEnriched(r.to)}</span>
+            <Badge variant="lightgray">{r.source}</Badge>
+          </div>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/** A resolved value as one line. Objects (an initiating party, a fee) are summarised. */
+function fmtEnriched(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (Array.isArray(value)) {
+    return value.map((v) => fmtEnriched(v)).join("; ");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .filter(([, v]) => v !== null && v !== undefined && v !== "")
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ");
+  }
+  return String(value);
+}
+
 /** Debits left, credits right, totals and a balanced verdict — DR == CR read spatially. */
 function Legs({ legs }) {
   const { debit, credit, balanced } = legTotals(legs);
@@ -216,6 +280,52 @@ function summaryRows(stage, payment) {
         ["Assessed", fmtWhen(ent?.assessedAt)],
       ];
     }
+    case "enrichment": {
+      // What the stage concluded, above the field-level diff. `checks` spans all three of
+      // stage 3's halves (`3 validate`, `3 enrich`, `3 final-validate`).
+      const e = d?.enrichment;
+      const checks = d?.checks || [];
+      const warned = checks.filter((c) => c.result === "WARN").length;
+      const failed = checks.filter((c) => c.result === "FAIL").length;
+      return [
+        ["Checks recorded", checks.length || null],
+        ["Warnings", warned || null],
+        ["Refusals", failed || null],
+        ["Fields enriched", e?.resolved?.length ?? null],
+        ["Corridor", payment?.wireDetails?.wireType],
+        ["Purpose", payment?.categoryPurpose],
+        ["Charges", payment?.fees?.length
+          ? payment.fees.map((f) => `${fmtAmount(f.amount, f.currency)} ${f.type} (${f.chargedTo})`).join(", ")
+          : null],
+        ["Enriched at", fmtWhen(e?.resolvedAt)],
+      ];
+    }
+    case "authorization": {
+      // Doina's L508-515 display, as a summary: the routing decision above, the risk
+      // decision below. `checks` carries her four display lines verbatim (the backend names
+      // them to match), so this block deliberately does NOT restate them — it gives the
+      // numbers and identifiers the checks refer to.
+      const f = d?.fraud;
+      const s = d?.sanctions;
+      const checks = d?.checks || [];
+      const warned = checks.filter((c) => c.result === "WARN").length;
+      const failed = checks.filter((c) => c.result === "FAIL").length;
+      return [
+        ["Checks recorded", checks.length || null],
+        ["Warnings", warned || null],
+        ["Refusals", failed || null],
+        ["Clearing network", d?.network],
+        ["Fraud score", f?.score != null ? `${f.score}/100` : null],
+        ["Decision", f?.decision],
+        ["Rules fired", f?.rulesFired?.length ? f.rulesFired.join(", ") : (f ? "none" : null)],
+        ["Sanctions", s?.status ? `${s.status} · ${s.provider || "—"}` : null],
+        ["Alert ID", f?.alertId],
+        ["Routing snapshot", d?.refs?.routingSnapshotId],
+        ["Payment order", d?.refs?.paymentOrderId],
+        ["Authorised", fmtWhen(payment?.clearing?.authorisedAt)],
+        ["Assessed", fmtWhen(f?.checkedAt)],
+      ];
+    }
     case "transaction":
       return [
         ["Bank ref", d?.bankRef],
@@ -273,8 +383,14 @@ function StageDetail({ stage, payment }) {
   }
 
   const showLegs = !!stage.legs;
-  const showChecks = stage.kind === "checks";
+  const showEnrichment = stage.kind === "enrichment";
+  const showAuthorization = stage.kind === "authorization";
+  // Stages 3 and 4 render checks too, but their `data` is an object rather than the bare
+  // array stage 2 passes, so the shapes are resolved separately.
+  const showChecks = stage.kind === "checks" || showEnrichment || showAuthorization;
   const showStates = stage.kind === "states";
+  const checkList =
+    showEnrichment || showAuthorization ? stage.data?.checks : stage.data;
 
   return (
     <div className={styles.stageDetail}>
@@ -292,7 +408,7 @@ function StageDetail({ stage, payment }) {
         {showChecks && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Checks</div>
-            <Checks checks={stage.data} />
+            <Checks checks={checkList} />
           </div>
         )}
 
@@ -312,6 +428,20 @@ function StageDetail({ stage, payment }) {
           </div>
         )}
 
+        {showEnrichment && (
+          <div className={styles.detailBlock}>
+            <div className={styles.detailBlockTitle}>Progressive enrichment</div>
+            <EnrichmentDiff enrichment={stage.data?.enrichment} />
+          </div>
+        )}
+
+        {(showEnrichment || showAuthorization) && !!stage.data?.events?.length && (
+          <div className={styles.detailBlock}>
+            <div className={styles.detailBlockTitle}>State transitions</div>
+            <StateEvents events={stage.data.events} />
+          </div>
+        )}
+
         {showLegs && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Double-entry</div>
@@ -319,7 +449,7 @@ function StageDetail({ stage, payment }) {
           </div>
         )}
 
-        {stage.data && !showChecks && !showStates && (
+        {stage.data && !showChecks && !showStates && !showEnrichment && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Raw document</div>
             <Code language="json" copyButtonAppearance="hover">

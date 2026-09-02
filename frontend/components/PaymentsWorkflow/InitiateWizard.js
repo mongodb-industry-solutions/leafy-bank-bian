@@ -207,13 +207,26 @@ function validate(form) {
 const AUTOFILL_MIN = 10;
 const AUTOFILL_MAX = 20000;
 
+// Autofill's beneficiary-bank pool. Every row here MUST match a `BIC_DIRECTORY` row in
+// backend/data/seed/leafy_bank_bian.correspondentBanks.json — `clearingSystemMemberId`
+// included.
+//
+// Why the member id matters (fixed 2026-08-31): autofill used to generate a random 9-digit
+// number here, so stage-3 enrichment resolved the directory row and *corrected* it. Every
+// autopopulated wire then showed a spurious `from -> to` row in the progressive-enrichment
+// panel, which is the one screen the audience is meant to trust. A demo cannot distinguish a
+// real enrichment from a fabricated correction, so the pool carries the real values and the
+// diff only shows fields that genuinely started empty.
+//
+// `test_autofill_pool_matches_the_bank_directory` (backend, test_reference_data.py) parses
+// this array and asserts it against the seed. Add a bank in one place, add it in both.
 const EXTERNAL_BANKS = [
-  { bankName: "JPMorgan Chase Bank, N.A.", bic: "CHASUS33", country: "US", clearingSystemCode: "USABA" },
-  { bankName: "Citibank, N.A.", bic: "CITIUS33", country: "US", clearingSystemCode: "USABA" },
-  { bankName: "Barclays Bank PLC", bic: "BARCGB22", country: "GB", clearingSystemCode: "GBDSC" },
-  { bankName: "Deutsche Bank AG", bic: "DEUTDEFF", country: "DE", clearingSystemCode: "DEBLZ" },
-  { bankName: "UBS Switzerland AG", bic: "UBSWCHZH", country: "CH", clearingSystemCode: "CHBCC" },
-  { bankName: "Royal Bank of Canada", bic: "ROYCCAT2", country: "CA", clearingSystemCode: "CACPA" },
+  { bankName: "JPMorgan Chase Bank, N.A.", bic: "CHASUS33", country: "US", clearingSystemCode: "USABA", clearingSystemMemberId: "121000248" },
+  { bankName: "Citibank, N.A.", bic: "CITIUS33", country: "US", clearingSystemCode: "USABA", clearingSystemMemberId: "021000089" },
+  { bankName: "Barclays Bank PLC", bic: "BARCGB22", country: "GB", clearingSystemCode: "GBDSC", clearingSystemMemberId: "202053" },
+  { bankName: "Deutsche Bank AG", bic: "DEUTDEFF", country: "DE", clearingSystemCode: "DEBLZ", clearingSystemMemberId: "50070010" },
+  { bankName: "UBS Switzerland AG", bic: "UBSWCHZH", country: "CH", clearingSystemCode: "CHBCC", clearingSystemMemberId: "230" },
+  { bankName: "Royal Bank of Canada", bic: "ROYCCAT2", country: "CA", clearingSystemCode: "CACPA", clearingSystemMemberId: "000300002" },
 ];
 
 const EXTERNAL_PAYEES = [
@@ -288,7 +301,8 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
       beneficiaryBankName: bank.bankName,
       bic: bank.bic,
       clearingSystemCode: bank.clearingSystemCode,
-      clearingSystemMemberId: digits(9),
+      // The directory's real value, NOT `digits(9)` — see the note on EXTERNAL_BANKS.
+      clearingSystemMemberId: bank.clearingSystemMemberId,
       accountNumberType: pick(ACCOUNT_TYPES),
     };
   }

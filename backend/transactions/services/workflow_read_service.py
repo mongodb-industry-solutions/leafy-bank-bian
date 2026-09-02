@@ -47,6 +47,18 @@ _LIST_PROJECTION = {
     "debtor.accountId": 1,
     "creditor.name": 1,
     "creditor.accountId": 1,
+    # Stage 4. The list is the Analyst's lens, and a payment's risk decision is exactly the
+    # sort of thing they scan a list for — so `fraud.decision`/`score` and the selected
+    # clearing network are projected, while the routing snapshot and payment order stay in
+    # the deep dive where they are readable.
+    #
+    # ⚠️ An INCLUSION allowlist, never an exclusion (defect 2026-08-31 `performance`): these
+    # documents live in a database shared across demos, so an exclusion list stops working
+    # the moment another demo attaches a fat field. That also means a later stage's field is
+    # invisible here until it is named — deliberate, and the reason this comment exists.
+    "fraud.decision": 1,
+    "fraud.score": 1,
+    "wireDetails.network": 1,
 }
 
 
