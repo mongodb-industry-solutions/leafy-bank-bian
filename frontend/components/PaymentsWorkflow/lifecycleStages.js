@@ -2,9 +2,18 @@
  * The nine-stage lifecycle, as presentation stages for the horizontal rail.
  *
  * Composes the two halves of a payment's trace into ONE left-to-right saga:
- *   * stages 1-4 from /workflow/payments/{id}   (transactions service — payments doc)
- *   * stages 5-8 from /pipeline/trace/{id}      (ledger service)
- * Neither service reads the other's collections; the join happens here.
+ *   * stages 1-5 from /workflow/payments/{id}   (transactions service — payments doc)
+ *   * stage 6 + 8 from /pipeline/trace/{id}     (ledger service)
+ * Neither service reads the other's collections for accounting purposes; the join is here.
+ *
+ * ⚠️ **`stage:` is Doina's stage number, and stage 6 has THREE panels.** Her lifecycle is
+ * 6 = Accounting/Posting, 7 = Clearing & Settlement, 8 = Reconciliation, 9 = Exceptions.
+ * Until stage 6 this file numbered `ledgerEvent`/`subLedger`/`generalLedger` as 6/7/8 and
+ * `reconciliation` as 9 — three presentation panels occupying three of her stage numbers,
+ * which left **no slot for her stage 7 or 9** (doc 20 B4). All three accounting panels now
+ * carry `stage: 6`; reconciliation is `stage: 8`. Stages 7 and 9 are deliberately empty and
+ * belong to the plans that own them. Renumbering is a one-time correction — a later stage
+ * still adds itself by appending, per doc 16 §5.
  *
  * Kept as a pure function (data in, plain objects out) so the rail and the detail pane both
  * read one stage model, and so a later stage adds itself by appending an entry rather than
@@ -22,6 +31,27 @@ const sum = (rows) => rows.reduce((t, r) => t + (Number(r.amount) || 0), 0);
 const minor = (v) => (v == null ? null : Number(v) / 100);
 
 const leg = (code, name, amount) => ({ code, name, amount: minor(amount) });
+
+/**
+ * Stage 6's one-line summary. The posting axis advances independently of `currentState`
+ * (spec: *"POSTED is an accounting fact, not a pipeline position"*), so this reads
+ * `lifecycle.postingStatus` — written by the LEDGER service (doc 20 B1) — rather than
+ * inferring posting from the pipeline state.
+ */
+function accountingMeta(payment, jn) {
+  const posting = payment?.lifecycle?.postingStatus;
+  const journalRef = payment?.refs?.journalEntryId;
+  if (posting === "POSTED" && journalRef) return journalRef;
+  if (posting) return posting.toLowerCase();
+  if (jn) return jn.periodCode;
+  // An external wire halts at IN_PROGRESS and writes no `transactions` doc, so it reaches
+  // no ledgerEvent at all (execute.py:351). Say that, rather than rendering an empty panel
+  // that reads like a bug.
+  if (payment?.creditor?.accountId == null && payment?.rail && payment.rail !== "INTERNAL") {
+    return "not yet posted — settlement pending (stage 7)";
+  }
+  return "awaiting the GL batch";
+}
 
 /** Stage 3's one-line summary: what enrichment actually did, or how far the stage got. */
 function stageThreeMeta(payment, reached) {
@@ -203,9 +233,12 @@ export function buildLifecycleStages(payment, trace) {
       label: "Ledger event",
       icon: "Copy",
       stage: 6,
+      group: "Accounting & posting",
       reached: !!le,
       status: le?.postingStatus,
-      meta: le?.postingMode?.type,
+      // The payment's own posting fact, not the event's postingMode (which was always
+      // "BATCH" — a constant, so it told the reader nothing).
+      meta: accountingMeta(payment, jn),
       kind: "ledgerEvent",
       data: le,
       legs: le
@@ -224,7 +257,8 @@ export function buildLifecycleStages(payment, trace) {
       key: "subLedger",
       label: "Sub-ledger",
       icon: "List",
-      stage: 7,
+      stage: 6,
+      group: "Accounting & posting",
       reached: sls.length > 0,
       status: sls.length ? (sls.every((e) => e.journalEntryId) ? "POSTED" : "PENDING") : null,
       meta: sls.length ? `${sls.length} entries` : null,
@@ -244,7 +278,8 @@ export function buildLifecycleStages(payment, trace) {
       key: "generalLedger",
       label: "General ledger",
       icon: "Building",
-      stage: 8,
+      stage: 6,
+      group: "Accounting & posting",
       reached: !!jn,
       status: jn?.status,
       meta: jn?.periodCode,
@@ -264,9 +299,9 @@ export function buildLifecycleStages(payment, trace) {
       key: "reconciliation",
       label: "Reconciliation",
       icon: "Checkmark",
-      stage: 9,
+      stage: 8,
       reached: reached("RECONCILED"),
-      meta: reached("RECONCILED") ? "reconciled" : "stage 9",
+      meta: reached("RECONCILED") ? "reconciled" : "stage 8",
       kind: "states",
       data: eventsFor("RECONCILED"),
     },

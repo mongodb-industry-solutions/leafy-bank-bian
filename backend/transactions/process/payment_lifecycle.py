@@ -57,6 +57,10 @@ STAGES = [
     ("4 orchestrate",  orchestrate.run),    # PaymentOrchestration    -> ROUTED
     ("4 authorize",    evaluate.run),       # FraudEvaluation         -> AUTHORISED -> APPROVED
     ("5 execute",      execute.run),        # PaymentRail             -> SUBMITTED -> IN_PROGRESS -> SETTLED
+    # No handler by design: stage 6 runs in the LEDGER service, asynchronously. `gl_batch`
+    # posts the journal and then writes `POSTED` + `refs.journalEntryId` back onto the
+    # payment (doc 20 B1). Built as of stage 6 — the `None` means "not this service", not
+    # "not implemented".
     ("6 account",      None),               # FinancialAccounting     -> POSTED, by the ledger via CDC
     ("7 settle",       settle.run),         # PaymentSettlement       (SETTLED fires in stage 5)
     ("8 reconcile",    reconcile.run),      # AccountReconciliation   -> RECONCILED        [stub]

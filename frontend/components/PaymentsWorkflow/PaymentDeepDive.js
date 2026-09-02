@@ -552,7 +552,10 @@ function StageDetail({ stage, payment }) {
       <div className={styles.stageDetailHead}>
         <Icon glyph={stage.icon} size={16} />
         <span className={styles.panelTitle}>
-          Stage {stage.stage} · {stage.label}
+          {/* Doina's stage 6 (Accounting/Posting) has three panels — ledger event,
+              sub-ledger, general ledger — so the group name disambiguates them without
+              inventing stage numbers she does not have (doc 20 B4). */}
+          Stage {stage.stage} · {stage.group ? `${stage.group} — ${stage.label}` : stage.label}
         </span>
         {stage.status && (
           <Badge variant={statusBadgeVariant(stage.status)}>{stage.status}</Badge>

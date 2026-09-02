@@ -60,6 +60,12 @@ _LIST_PROJECTION = {
     "fraud.decision": 1,
     "fraud.score": 1,
     "wireDetails.network": 1,
+    # Stage 6. The posting axis advances independently of `status` (spec: "POSTED is an
+    # accounting fact, not a pipeline position"), so a payment can read SETTLED here and
+    # still be unposted — which is exactly what a finance operator scans this list for.
+    # Written by the LEDGER service (doc 20 B1), not by anything in this service.
+    "lifecycle.postingStatus": 1,
+    "refs.journalEntryId": 1,
 }
 
 

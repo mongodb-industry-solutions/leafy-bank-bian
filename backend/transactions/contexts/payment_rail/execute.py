@@ -84,6 +84,7 @@ TODO (Phase 2, and unreachable until then — `rail_viability.PHASE_1_RAILS`):
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -95,6 +96,8 @@ from contexts.payment_rail import documents
 from contexts.payment_rail.domain import execution_documents, pacs008
 from shared.refs import derive_ref
 from process.payment_context import PaymentContext
+
+logger = logging.getLogger(__name__)
 
 STAGE = "5 execute"
 
@@ -416,6 +419,34 @@ def _flush(ctx: PaymentContext, recorded: list) -> None:
     recorded.clear()
 
 
+def _debtor_borne_fee(ctx: PaymentContext) -> float:
+    """The charge the debtor bears, for the ledger's fee leg (stage 6, doc 20 B3).
+
+    Only `chargedTo == "DEBTOR"` is carried. `_FEE_PAYER_BY_CHARGE_BEARER` can produce a
+    creditor-borne fee from an ISO `CRED`/`SHAR` charge bearer, and which account such a fee
+    debits is Doina's call (Q44) — so it is skipped here rather than posted to the wrong
+    account. Skipping is visible in the log, not silent.
+
+    Returns 0.0 when there is no fee, which is every internal transfer: stage 3 levies a
+    charge on `rail == "WIRE"` only.
+    """
+    total = 0.0
+    skipped = []
+    for fee in (ctx.payment_doc or {}).get("fees") or []:
+        charged_to = fee.get("chargedTo")
+        if charged_to == "DEBTOR":
+            total += float(fee.get("amount") or 0.0)
+        else:
+            skipped.append(f"{fee.get('type')} chargedTo={charged_to}")
+    if skipped:
+        logger.info(
+            "payment %s: %d fee(s) not carried to the ledger (%s) — only debtor-borne "
+            "charges post in phase 1 (Q44)",
+            ctx.payment_id, len(skipped), "; ".join(skipped),
+        )
+    return total
+
+
 def _money_move(ctx: PaymentContext) -> dict:
     c = ctx.collections
     now = ctx.now
@@ -477,6 +508,8 @@ def _money_move(ctx: PaymentContext) -> dict:
             txn_code=ctx.txn_code,
             is_internal=ctx.is_internal,
             payment_execution_id=ctx.payment_execution_id,
+            fee_amount=_debtor_borne_fee(ctx),
+            fee_currency=ctx.instructed_currency,
             now=now,
         )
         c.transactions.insert_one(txn_doc, session=session)

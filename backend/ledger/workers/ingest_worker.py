@@ -21,7 +21,13 @@ from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from database.connection import MongoDBConnection
 from shared.coa_cache import ChartOfAccounts
-from shared.posting_rules import MAPPING_VERSION, SIDE_CREDIT, SIDE_DEBIT, decompose_principal_payment
+from shared.posting_rules import (
+    MAPPING_VERSION,
+    SIDE_CREDIT,
+    SIDE_DEBIT,
+    decompose_fee,
+    decompose_principal_payment,
+)
 from shared.refs import PREFIX_GROUP, PREFIX_LEDGER_EVENT, derive_ref
 
 logger = logging.getLogger(__name__)
@@ -55,6 +61,60 @@ def build_ledger_event(
         creditor_account=payee_account,
         coa=coa,
     )
+    return _event_from_legs(txn, legs, coa)
+
+
+def build_fee_event(
+    txn: dict,
+    payer_account: dict,
+    coa: ChartOfAccounts,
+) -> dict | None:
+    """Pure: the SECOND ledgerEvent, for a debtor-borne charge (stage 6, doc 20 B3).
+
+    ## Why a second event rather than two more legs
+
+    `ledgerEvents` carries exactly **one** `debitLeg` and **one** `creditLeg` — not a
+    `legs[]` array (decisions.md 2026-06-18, Payton's document-grain model) — and the
+    collection validator enforces `debitLeg.amount == creditLeg.amount` per document. So a
+    four-leg payment cannot be one event. It is two, which is the better reading anyway:
+    recognising fee income is a distinct accounting event from moving the principal.
+
+    The principal event keeps `idempotencyKey == paymentId` **untouched**, because
+    `pipeline_read_service.trace_payment` looks the event up by exactly that value. The fee
+    event takes `{paymentId}-FEE` — unique, no collision, every existing reader still works.
+
+    Returns None when there is no fee to post, which is the common case.
+    """
+    legs = decompose_fee(
+        fee_amount=txn.get("feeAmount") or 0,
+        currency=txn.get("feeCurrency") or txn.get("currency", "USD"),
+        debtor_account=payer_account,
+        coa=coa,
+    )
+    if not legs:
+        return None
+    return _event_from_legs(
+        txn, legs, coa,
+        idempotency_suffix="-FEE",
+        sub_ledger_type="FEE_INCOME",
+    )
+
+
+def _event_from_legs(
+    txn: dict,
+    legs: list,
+    coa: ChartOfAccounts,
+    *,
+    idempotency_suffix: str = "",
+    sub_ledger_type: str = "CUSTOMER_DEPOSITS",
+) -> dict:
+    """The shared ledgerEvent envelope: one debit leg, one credit leg, per the document grain.
+
+    `sub_ledger_type` is passed rather than hardcoded because `subledger_service` copies it
+    onto every `subLedgerEntries` row (`:33`). Left at `CUSTOMER_DEPOSITS` a fee event would
+    file its revenue credit under customer deposits — a mislabelled sub-ledger, silent, and
+    only visible to someone reading the rows.
+    """
     debit_leg = next(l for l in legs if l.side == SIDE_DEBIT)
     credit_leg = next(l for l in legs if l.side == SIDE_CREDIT)
 
@@ -68,14 +128,14 @@ def build_ledger_event(
     return {
         "_id": oid,
         "eventId": derive_ref(PREFIX_LEDGER_EVENT, oid),
-        "idempotencyKey": payment_id,
+        "idempotencyKey": f"{payment_id}{idempotency_suffix}",
         "groupId": derive_ref(PREFIX_GROUP, oid),
         "occurredAt": occurred_at,
         "valueDate": occurred_at,
         "periodName": occurred_at.strftime("%B %Y"),
         "description": f"{debit_leg.event_type}: {payment_id}",
         "meta": {
-            "subLedgerType": "CUSTOMER_DEPOSITS",
+            "subLedgerType": sub_ledger_type,
             "periodCode": period_code,
             "sourceSystem": _SOURCE_SYSTEM,
         },
@@ -175,12 +235,46 @@ def process_transaction(
     if payee_account is None:
         raise ValueError(f"payee account {payee_account_id!r} not found")
 
+    le_coll = connection.get_collection(db_name, "ledgerEvents")
+
     event = build_ledger_event(txn, payer_account, payee_account, coa)
     try:
-        connection.get_collection(db_name, "ledgerEvents").insert_one(event)
+        le_coll.insert_one(event)
         logger.info("ledgerEvent %s created for paymentId=%s", event["eventId"], payment_id)
     except DuplicateKeyError:
         logger.info("ledgerEvent already exists for paymentId=%s; skipping", payment_id)
+
+    # The fee event is independent and must never stop the principal from posting, so every
+    # failure mode is contained here.
+    #
+    # ⚠️ The broad `except` is deliberate and is the 2026-07-01 prevention rule, not
+    # laziness. The principal is already inserted by the time this runs; a raise would
+    # escape `process_transaction`, the resume token would never be saved, and the change
+    # stream would replay the same event forever — the crash-loop that has fired twice in
+    # this repo. `fee_gl_account` handles the missing/non-leaf `4211` case cleanly, but
+    # `control_account_for` still raises if `4211` has no non-posting ancestor (`4210`) in
+    # the live chart of accounts, and that is a data condition we cannot check from here.
+    # A missing fee leg degrades the demo; a crash-looping worker stops it.
+    try:
+        fee_event = build_fee_event(txn, payer_account, coa)
+    except Exception:  # noqa: BLE001 - see above
+        logger.exception(
+            "could not build the fee event for paymentId=%s — the principal ledgerEvent is "
+            "already created and unaffected. Check that GL 4211 and its control account 4210 "
+            "exist and are ACTIVE.", payment_id,
+        )
+        fee_event = None
+
+    if fee_event is not None:
+        try:
+            le_coll.insert_one(fee_event)
+            logger.info(
+                "fee ledgerEvent %s created for paymentId=%s (%s minor units to %s)",
+                fee_event["eventId"], payment_id,
+                fee_event["creditLeg"]["amount"], fee_event["creditLeg"]["glAccountCode"],
+            )
+        except DuplicateKeyError:
+            logger.info("fee ledgerEvent already exists for paymentId=%s; skipping", payment_id)
 
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:

@@ -24,8 +24,18 @@ must be resolved before it can be fraud-scored. Still on the "tell Doina" list (
 ## The second axis
 
 `postingStatus` and `settlementStatus` advance independently of `currentState` (D1) — the
-ledger service owns posting via change streams and never touches this state machine. Not
-modelled here yet; when it is, it needs its own `advance_*` function, not extra states.
+ledger service owns posting via change streams and never touches this state machine.
+
+**`postingStatus` is modelled as of stage 6, and NOT here.** The ledger service writes it
+directly (`ledger/services/posting_writeback_service.py`), because the canonical spec assigns
+the field to that service in so many words: *"Owned by the ledger service via CDC, never
+written by the payment path."* It also advances `currentState` to `POSTED`, guarded on
+`IN_PROGRESS`, using the same `events[]` shape `_event` produces below — asserted by
+`test_the_written_event_matches_the_state_machines_own_shape` rather than by importing this
+module across a service boundary. So the "nothing writes `payments.lifecycle` except this
+module" rule above now has exactly one documented exception, and it is spec-mandated.
+
+`settlementStatus` is still unmodelled — stage 7 owns it.
 """
 
 from __future__ import annotations

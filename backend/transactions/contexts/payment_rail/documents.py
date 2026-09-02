@@ -33,6 +33,8 @@ def transaction_doc(
     is_internal: bool,
     now: datetime,
     payment_execution_id: Optional[str] = None,
+    fee_amount: float = 0.0,
+    fee_currency: Optional[str] = None,
 ) -> dict:
     """One v4_21 transactions doc: the confirmed payer->payee movement. NOT an accounting record
     (no legs, no gl) — the ledger service derives DR/CR ledgerEvents from this via CDC."""
@@ -98,6 +100,18 @@ def transaction_doc(
         # (stage 7). Written now because the boundary document is the one place where a later
         # edit is expensive.
         "paymentExecutionId": payment_execution_id,
+        # Stage 6 (doc 20 B3(a)). The charge stage 3 recorded on `payments.fees[]`, carried
+        # across the boundary so the ledger can post a fee leg without reading `payments`
+        # (B1 forbids the derivation path from reading it).
+        #
+        # ⚠️ **Additive only, exactly like `paymentExecutionId` above.** In particular
+        # `amount` is untouched: `enrichment_plan.py:264` — *"`amount` must not change. It is
+        # the settlement amount and the ledger's primary input"* — so a fee is an ADDITIONAL
+        # balanced leg pair, never a deduction from the principal.
+        #
+        # 0.0 on an internal transfer: stage 3 levies a charge on `rail == "WIRE"` only.
+        "feeAmount": fee_amount,
+        "feeCurrency": fee_currency or currency,
     }
 
 

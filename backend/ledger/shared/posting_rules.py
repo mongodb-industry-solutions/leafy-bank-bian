@@ -10,16 +10,22 @@ leg type is a new rule here, never a refactor of the callers (resolved #3/#4, Ph
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
+from typing import Optional
 
 from .coa_cache import ChartOfAccounts
 
+logger = logging.getLogger(__name__)
+
 # Bump on any rule change. Stamped on each emitted event as a provenance/version marker.
-MAPPING_VERSION = "1.0.0"
+# 1.1.0 — stage 6 added the fee rule (doc 20 B3).
+MAPPING_VERSION = "1.1.0"
 
 # eventType — subset of the spec's ledgerEvents.eventType enum exercised in Phase 1.
 EVENT_PAYMENT_PRINCIPAL = "PAYMENT_PRINCIPAL"
+EVENT_PAYMENT_FEE = "PAYMENT_FEE"
 
 # Accounting sides.
 SIDE_DEBIT = "DEBIT"
@@ -30,7 +36,13 @@ SIDE_CREDIT = "CREDIT"
 # account (read from account.gl.accountCode), so no account-type table is needed here and
 # account-type enum drift cannot bite. Extend this map when the fee/tax/FX rules land.
 BANK_GL_ACCOUNT_BY_EVENT_TYPE: dict[str, str] = {
-    # "FEE": "4200",   # Fee Income — added with the fee rule (future)
+    # ⚠️ `4211`, NOT `4200`. The code this line carried until stage 6 was `4200 Fee Income`,
+    # which is `isPostingAccount: false, level: 2` — a rollup group that cannot be posted to.
+    # A leg naming it would have failed `require_active_posting_account` and crashed
+    # `projection_worker` on a change-stream event (defect 2026-07-01, fired twice).
+    # `4211 Transaction Fee Income` is the leaf: level 4, normalBalance CREDIT, ACTIVE,
+    # "Payment and transaction processing fees".
+    EVENT_PAYMENT_FEE: "4211",
 }
 
 
@@ -113,6 +125,81 @@ def decompose_principal_payment(
             amount_minor=amount_minor,
             currency=currency,
             account_id=creditor_account["accountId"],
+        ),
+    ]
+    assert_balanced(legs)
+    return legs
+
+
+def fee_gl_account(coa: ChartOfAccounts) -> Optional[str]:
+    """The Fee Income posting leaf, or None when the chart of accounts cannot supply one.
+
+    Returns None rather than raising, and that is the whole point of the function: a demo
+    database whose `glAccounts` lacks `4211` (or has it as a non-leaf) must still post the
+    principal. Raising here would take down `projection_worker` on a change-stream event,
+    which is the 2026-07-01 crash-loop — the one defect in this repo that has fired twice.
+    """
+    code = BANK_GL_ACCOUNT_BY_EVENT_TYPE.get(EVENT_PAYMENT_FEE)
+    if not code:
+        return None
+    try:
+        coa.require_active_posting_account(code)
+    except (ValueError, KeyError):
+        return None
+    return code
+
+
+def decompose_fee(
+    *,
+    fee_amount: float | str | Decimal,
+    currency: str,
+    debtor_account: dict,
+    coa: ChartOfAccounts,
+) -> list[PostingLeg]:
+    """Decompose a debtor-borne charge into its own balanced leg pair (doc 20 B3).
+
+    A fee the bank levies and the customer bears:
+      - debtor  -> DEBIT  its deposit control account (the customer's liability falls again)
+      - bank    -> CREDIT Fee Income (revenue rises)
+
+    Returns `[]` — not an exception — when there is no fee, or when the chart of accounts
+    cannot supply a Fee Income leaf. Both are ordinary outcomes: an internal transfer has no
+    fee (stage 3 levies on `rail == "WIRE"` only), and a CoA without `4211` should degrade
+    the demo, not crash a worker.
+
+    ⚠️ This is an ADDITIONAL pair, never an adjustment to the principal.
+    `enrichment_plan.py:264` — *"`amount` must not change. It is the settlement amount and
+    the ledger's primary input."*
+    """
+    amount_minor = to_minor_units(fee_amount)
+    if amount_minor <= 0:
+        return []
+
+    fee_account = fee_gl_account(coa)
+    if fee_account is None:
+        logger.warning(
+            "fee of %s %s not posted: no active Fee Income posting leaf in the chart of "
+            "accounts (expected %s). The principal legs are unaffected.",
+            fee_amount, currency, BANK_GL_ACCOUNT_BY_EVENT_TYPE.get(EVENT_PAYMENT_FEE),
+        )
+        return []
+
+    legs = [
+        PostingLeg(
+            event_type=EVENT_PAYMENT_FEE,
+            side=SIDE_DEBIT,
+            gl_account_code=_principal_gl_account(debtor_account, coa),
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=debtor_account["accountId"],
+        ),
+        PostingLeg(
+            event_type=EVENT_PAYMENT_FEE,
+            side=SIDE_CREDIT,
+            gl_account_code=fee_account,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=debtor_account["accountId"],
         ),
     ]
     assert_balanced(legs)
