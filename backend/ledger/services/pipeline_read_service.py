@@ -434,8 +434,29 @@ def trace_payment(
     # the transactions service). Not a pipeline stage; the initiation record.
     payment = payment_coll.find_one({"paymentId": payment_id}, {"_id": 0})
 
-    # Stage 2 — ledgerEvent (idempotencyKey == paymentId, set by ingest_worker).
-    ledger_event = le_coll.find_one({"idempotencyKey": payment_id}, {"_id": 0})
+    # Stage 2 — ledgerEvents. A payment can produce up to three:
+    #   - principal: idempotencyKey == paymentId (ingest_worker, from transactions insert)
+    #   - fee:       idempotencyKey == {paymentId}-FEE (ingest_worker, stage 6)
+    #   - settlement: idempotencyKey == {paymentId}-SETTLEMENT (settlement_worker, stage 7)
+    # The principal is the one `trace_payment` always returned; the fee and settlement
+    # events were invisible until this fix (doc 21 step 8, B2's known consequence).
+    all_events = list(le_coll.find(
+        {"idempotencyKey": {"$in": [
+            payment_id,
+            f"{payment_id}-FEE",
+            f"{payment_id}-SETTLEMENT",
+        ]}},
+        {"_id": 0},
+    ))
+    ledger_event = next(
+        (e for e in all_events if e.get("idempotencyKey") == payment_id), None
+    )
+    fee_event = next(
+        (e for e in all_events if e.get("idempotencyKey") == f"{payment_id}-FEE"), None
+    )
+    settlement_event = next(
+        (e for e in all_events if e.get("idempotencyKey") == f"{payment_id}-SETTLEMENT"), None
+    )
 
     # Stage 3 — subLedgerEntries (sourceReference.sourceId == eventId).
     subledger_entries = None
@@ -457,16 +478,14 @@ def trace_payment(
     # Returned as a sibling map (not injected into the stored docs) so the raw
     # "View JSON" still shows the documents exactly as persisted.
     codes: set = set()
-    if ledger_event:
-        for leg in (ledger_event.get("debitLeg"), ledger_event.get("creditLeg")):
-            if leg:
-                codes.add(leg.get("glAccountCode"))
-                codes.add(leg.get("controlAccountCode"))
+    for evt in (ledger_event, fee_event, settlement_event):
+        if evt:
+            for leg in (evt.get("debitLeg"), evt.get("creditLeg")):
+                if leg:
+                    codes.add(leg.get("glAccountCode"))
+                    codes.add(leg.get("controlAccountCode"))
     for row in (subledger_entries or []):
         codes.add(row.get("controlAccountCode"))
-    if journal_entry:
-        for entry in journal_entry.get("entries", []):
-            codes.add(entry.get("accountCode"))
     codes.discard(None)
     codes.discard("")
     account_names: dict = {}
@@ -485,6 +504,12 @@ def trace_payment(
         "ledgerEvent": ledger_event,
         "subLedgerEntries": subledger_entries,
         "journalEntry": journal_entry,
+        # Stage 6's fee event and stage 7's settlement event were invisible until
+        # this fix (doc 21 step 8). Each has its own subledger/journal trace, but
+        # the UI renders them in their own panels, not in the principal's pipeline.
+        "feeEvent": fee_event,
+        "settlementEvent": settlement_event,
+        "allLedgerEvents": all_events,
         "postingMode": posting_mode,
         "accountNames": account_names,
     }

@@ -99,6 +99,12 @@ export function buildLifecycleStages(payment, trace) {
   const events = payment?.lifecycle?.events ?? [];
   const checks = payment?.checks ?? [];
 
+  // Stage 7 — settlement event and position (doc 21 step 8).
+  const se = trace?.settlementEvent ?? null;
+  const positions = payment?.settlementPositions ?? [];
+  const position = positions.length ? positions[0] : null;
+  const clearing = payment?.clearing ?? {};
+
   const reached = (...states) => events.some((e) => states.includes(e.state));
   const eventsFor = (...states) => events.filter((e) => states.includes(e.state));
 
@@ -292,6 +298,24 @@ export function buildLifecycleStages(payment, trace) {
               .map((e) => leg(e.accountCode, names[e.accountCode] || e.accountName || "", e.amount)),
             credits: (jn.entries || []).filter((e) => e.side === "CREDIT")
               .map((e) => leg(e.accountCode, names[e.accountCode] || e.accountName || "", e.amount)),
+          }
+        : null,
+    },
+    {
+      key: "settlement",
+      label: "Clearing & settlement",
+      icon: "ArrowLeftRight",
+      stage: 7,
+      reached: reached("SETTLED", "FAILED", "RETURNED") || !!position,
+      status: payment?.lifecycle?.settlementStatus || undefined,
+      meta: position?.modelLabel || (clearing.settledAt ? "settled" : "pending"),
+      kind: "legs",
+      data: { position, clearing },
+      legs: se
+        ? {
+            currency: se.creditLeg?.currency || "USD",
+            debits: [leg(se.debitLeg?.glAccountCode, names[se.debitLeg?.glAccountCode] || se.debitLeg?.entityReference?.entityId || "", se.debitLeg?.amount)],
+            credits: [leg(se.creditLeg?.glAccountCode, names[se.creditLeg?.glAccountCode] || "Settlement account", se.creditLeg?.amount)],
           }
         : null,
     },

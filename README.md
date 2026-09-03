@@ -194,7 +194,20 @@ make kill-ports        # free the dev ports if they are stuck
 
 ### Seed Data
 
-Sample data ships in `backend/data/sample/`. Import each file into the `leafy_bank_bian` database with [MongoDB Compass](https://www.mongodb.com/products/tools/compass) or `mongoimport`:
+Sample data ships in `backend/data/sample/`. The one-command loader is
+[`backend/data/load_sample_seed.py`](backend/data/load_sample_seed.py) — it upserts all
+four collections by business key (inserts new rows, applies new columns only to the
+demo's own rows, never overwrites runtime balances; dry-run by default):
+
+```bash
+export MONGODB_URI="mongodb+srv://..."          # the service's connection string
+python backend/data/load_sample_seed.py --db fsi-bian-test-db --apply
+```
+
+`--db` is your `LEAFYBANK_DB_NAME`: `fsi-bian-test-db` for local dev, `leafy-bank-bian`
+in the Kanopy `environment/*.yaml`.
+
+(The same files can be imported individually with [MongoDB Compass](https://www.mongodb.com/products/tools/compass) or `mongoimport`, but the script is idempotent and safe to re-run after a stage adds rows.)
 
 
 | File                                | Collection     |

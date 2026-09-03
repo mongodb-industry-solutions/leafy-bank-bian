@@ -295,9 +295,12 @@ def test_decompose_fee_returns_a_balanced_pair():
 
 
 def test_the_mapping_version_was_bumped_for_the_fee_rule():
-    """Stamped on every emitted event, so a rule change must move it (doc 20 step 6)."""
+    """Stamped on every emitted event, so a rule change must move it (doc 20 step 6).
+
+    Stage 7 bumped it again (1.1.0 → 1.2.0) for the settlement rule (doc 21 B2).
+    """
     from shared.posting_rules import MAPPING_VERSION
-    assert MAPPING_VERSION == "1.1.0"
+    assert MAPPING_VERSION == "1.2.0"
 
 
 # --- enum parity for the values the LEDGER writes onto payments ---------------

@@ -63,12 +63,17 @@ def test_an_internal_transfer_carries_no_fee(service, db):  # noqa: F811
     assert _txn(db)["feeAmount"] == 0.0
 
 
-def test_an_external_wire_writes_no_transaction_at_all(service, db):  # noqa: F811
-    """The negative case, and the reason the manual gate cannot be an external wire: it halts
-    at IN_PROGRESS with no boundary document, so nothing in stage 6 is observable on it."""
+def test_an_external_wire_reaches_the_ledger_via_the_clearing_account(service, db):  # noqa: F811
+    """Stage 7 doc 21 B1/B3 — the halt is gone. An external wire now writes a `transactions`
+    doc (payee = the clearing account), so the ledger's CDC path observes it. The payment
+    settles via `settle.py` (default outcome: matched) — the boundary document exists, so
+    stage 6's write-back and the GL pipeline are reachable."""
     _initiate_external(service)
-    assert db["transactions"].docs == []
-    assert _payment(db)["lifecycle"]["currentState"] == "IN_PROGRESS"
+    assert len(db["transactions"].docs) == 1
+    txn = db["transactions"].docs[0]
+    assert txn["payee"]["accountId"] == "ACC-CLEARING-WIRE"
+    assert _payment(db)["lifecycle"]["currentState"] == "SETTLED"
+    assert _payment(db)["lifecycle"]["settlementStatus"] == "SETTLED"
 
 
 def test_the_fee_does_not_change_the_settlement_amount(service, db):  # noqa: F811

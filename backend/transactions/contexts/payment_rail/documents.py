@@ -39,7 +39,10 @@ def transaction_doc(
     """One v4_21 transactions doc: the confirmed payer->payee movement. NOT an accounting record
     (no legs, no gl) — the ledger service derives DR/CR ledgerEvents from this via CDC."""
     debtor_name = (debtor_customer.get("identification") or {}).get("legalName")
-    creditor_name = (creditor_customer.get("identification") or {}).get("legalName")
+    # An external creditor has no customer record — the name lives in the payment's payee
+    # snapshot, not in a `customers` lookup. The clearing account (stage 7 B1) is the
+    # `creditor_account` for an external wire, and `creditor_customer` is None.
+    creditor_name = ((creditor_customer or {}).get("identification") or {}).get("legalName")
     return {
         "_id": ObjectId(),
         "txnId": derive_ref("TXN", payment_oid),

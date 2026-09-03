@@ -172,6 +172,13 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
         .find({"paymentId": payment_id}, {"_id": 0})
         .sort("createdAt", 1)
     )
+    # Stage 7's settlementPositions — one doc per settlement run (doc 21 R12, step 6).
+    # Empty list for internal transfers (no settlement run) and pre-stage-7 payments.
+    payment["settlementPositions"] = list(
+        connection.get_collection(db_name, "settlementPositions")
+        .find({"paymentId": payment_id}, {"_id": 0})
+        .sort("createdAt", 1)
+    )
     return payment
 
 

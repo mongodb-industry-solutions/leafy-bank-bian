@@ -131,6 +131,7 @@ class PaymentsService:
         wire_details: Optional[dict] = None,
         ach_details: Optional[dict] = None,
         internal_details: Optional[dict] = None,
+        settlement_outcome: Optional[str] = None,
     ) -> dict:
         """Initiate a payment order. Returns the persisted payment document.
 
@@ -166,6 +167,7 @@ class PaymentsService:
             payment_limit_usd=self.payment_limit_usd,
             reference_data=self.reference_data,
             rail_gateway=self.rail_gateway,
+            settlement_outcome=settlement_outcome,
         )
         return payment_lifecycle.run(ctx)
 
@@ -278,3 +280,68 @@ class PaymentsService:
             "valueDate": order.get("valueDate"),
             "confirmed": True,
         }
+
+    # --- stage 7 settlement operation -----------------------------------------
+
+    def settle_payment(self, payment_ref: str, outcome: Optional[str] = None) -> Optional[dict]:
+        """Trigger or re-trigger settlement for one payment (doc 21 step 7, B6).
+
+        Loads the payment, reconstructs enough context for `settle.run`, and calls it.
+        Returns the updated payment doc, or None when the payment is not found.
+
+        Refuses when the payment is not at IN_PROGRESS — settling an already-settled
+        or rejected payment would be a false state transition.
+        """
+        from contexts.payment_orchestration.domain.routing import ExecutionStrategy
+        from contexts.payment_settlement import settle
+        from process.payment_context import PaymentContext, PaymentCollections
+
+        payment = self.payments.find_one({"paymentId": payment_ref})
+        if not payment:
+            return None
+
+        state = (payment.get("lifecycle") or {}).get("currentState")
+        if state != "IN_PROGRESS":
+            raise ValueError(
+                f"{payment_ref} is at {state}, not IN_PROGRESS — settlement can only be "
+                f"triggered for a payment awaiting settlement."
+            )
+
+        # Reconstruct the routing strategy from the routing snapshot, for model selection.
+        routing_id = (payment.get("refs") or {}).get("routingSnapshotId")
+        correspondent = {}
+        if routing_id:
+            snap = self.routing_snapshots.find_one({"routingSnapshotId": routing_id}) or {}
+            correspondent = snap.get("correspondent") or {}
+
+        strategy = ExecutionStrategy(
+            strategy="RECONSTRUCTED", network=None,
+            cost_rank="UNKNOWN",
+            requires_correspondent=bool(correspondent.get("required")),
+            correspondent_bic=correspondent.get("bic"),
+            cutoff_hour_et=None, within_cutoff=True,
+            value_date=None, rationale="reconstructed for settlement",
+        )
+
+        ctx = PaymentContext(
+            customer_ref=(payment.get("debtor") or {}).get("customerId", ""),
+            debtor_account_ref=(payment.get("debtor") or {}).get("accountId", ""),
+            creditor_account_ref=(payment.get("creditor") or {}).get("accountId"),
+            creditor_party=None,
+            instructed_amount=payment.get("amount", 0),
+            instructed_currency=payment.get("currency", "USD"),
+            payment_type=payment.get("paymentType", "CREDIT_TRANSFER"),
+            payment_rail=payment.get("rail", "WIRE"),
+            collections=self._collections(),
+            payment_limit_usd=self.payment_limit_usd,
+            execution_strategy=strategy,
+            settlement_outcome=outcome,
+        )
+        ctx.payment_oid = payment["_id"]
+        ctx.payment_id = payment_ref
+        ctx.payment_doc = payment
+        ctx.current_state = state
+        ctx.is_external_creditor = (payment.get("creditor") or {}).get("accountId") is None
+
+        settle.run(ctx)
+        return ctx.payment_doc

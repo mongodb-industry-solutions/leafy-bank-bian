@@ -16,6 +16,7 @@ from api_models import (
     PaymentConfirmationRequest,
     PaymentOrderBulkInitiateRequest,
     PaymentOrderInitiateRequest,
+    PaymentSettlementInitiateRequest,
 )
 from shared import party_authentication_token as party_auth
 from database.connection import MongoDBConnection
@@ -443,3 +444,26 @@ async def payment_confirmation_execute(body: PaymentConfirmationRequest):
     except Exception as e:
         logging.error("PaymentConfirmation/Execute failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal confirmation error.")
+
+
+@app.post("/PaymentSettlement/Initiate")
+async def payment_settlement_initiate(body: PaymentSettlementInitiateRequest):
+    """BIAN `POST /PaymentSettlement/Initiate` (doc 21 B6 — SD 40033, no published API).
+
+    Triggers or re-triggers settlement for one payment at IN_PROGRESS. The `outcome`
+    field drives the simulated settlement response (B4): matched (default), delayed,
+    unmatched, or exception. This is the operator-facing endpoint for demo scenarios
+    that need a specific settlement outcome — the saga's own default is matched.
+    """
+    try:
+        result = payments_service.settle_payment(body.paymentId, body.outcome)
+        if result is None:
+            raise HTTPException(status_code=404, detail="paymentId not found.")
+        return _bian_response(result)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("PaymentSettlement/Initiate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal settlement error.")

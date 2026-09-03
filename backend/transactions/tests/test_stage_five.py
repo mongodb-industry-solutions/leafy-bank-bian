@@ -29,6 +29,7 @@ from tests.test_payments_service import (  # reuse the fixtures, don't fork them
     _initiate,
     db,          # noqa: F401 - pytest fixture
     service,     # noqa: F401 - pytest fixture
+    CREDITOR,    # noqa: F401 - account id constant (ACC-credit01)
 )
 
 _BACKEND = pathlib.Path(__file__).resolve().parents[2]
@@ -266,12 +267,19 @@ def test_an_external_wire_reaches_in_progress_with_both_artifacts(wire_payment, 
     assert wire_payment["refs"]["canonicalJsonId"] == message["paymentMessageId"]
 
 
-def test_an_external_wire_writes_no_transaction_document(wire_payment, db):  # noqa: F811
-    """B1 — the halt's whole purpose. No `transactions` doc means the ledger never observes
-    the payment, which is what keeps `ingest_worker` off a null `payee.accountId` (defect
-    2026-07-01, hit twice)."""
-    assert db["transactions"].docs == []
-    assert db["notifications"].docs == []
+def test_an_external_wire_writes_a_transaction_document_to_the_clearing_account(wire_payment, db):  # noqa: F811
+    """Stage 7 doc 21 B1/B3 — the halt is gone. The external wire now writes a `transactions`
+    doc with the clearing account as payee, so the ledger's `ingest_worker` sees a real
+    `payee.accountId` (not null) and the payment reaches `ledgerEvents` via CDC.
+
+    The payment stays at IN_PROGRESS — settlement is deferred to `settle.py` (B3) — but the
+    money has moved: the debtor is debited and the clearing account is credited.
+    """
+    assert len(db["transactions"].docs) == 1
+    txn = db["transactions"].docs[0]
+    assert txn["payee"]["accountId"] == "ACC-CLEARING-WIRE"
+    assert txn["payee"]["isInternal"] is False
+    assert len(db["notifications"].docs) == 1
 
 
 def test_execution_refuses_a_payment_that_is_not_approved(service, db):  # noqa: F811
@@ -641,3 +649,37 @@ def test_the_xml_walk_knows_nothing_about_pacs008():
                 ]
     for element in ("GrpHdr", "CdtTrfTxInf", "IntrBkSttlmAmt", "Dbtr", "Cdtr", "PmtId"):
         assert element not in literals, f"the serialiser must not know about {element}"
+
+
+# --- Stage 7 step 2 gate: external creditor routed to clearing account --------
+
+def test_an_external_wire_resolves_the_clearing_account(wire_payment, db):
+    """Stage 7 doc 21 B1, step 2 gate.
+
+    An external wire has no Leafy Bank creditor account, but `_money_move` credits by
+    `accountId` and `posting_rules` reads `account.gl.accountCode`. The routing resolves
+    the rail's clearing account (`ACC-CLEARING-WIRE`) before `_money_move` fires, so the
+    credit leg posts to a real account with a real GL mapping (1131).
+    """
+    assert wire_payment["status"] == "IN_PROGRESS"
+
+    # The clearing account was credited — the routing found it and _money_move ran.
+    clearing = db["accounts"].find_one({"accountId": "ACC-CLEARING-WIRE"})
+    assert clearing is not None, "routing must resolve the clearing account"
+    assert clearing["balance"]["available"] == 250.0, "clearing account holds the in-flight credit"
+
+
+def test_an_internal_transfer_does_not_touch_the_clearing_account(service, db):
+    """Stage 7 doc 21 B1, step 2 gate — the routing must not affect internal transfers.
+
+    An internal transfer credits the named creditor account (ACC-credit01), not the
+    clearing account. The routing only fires for `is_external_creditor`, which is False
+    here. Proves the negative: the clearing account is not in the internal path.
+    """
+    payment = _initiate(service)  # INTERNAL rail, creditor = CREDITOR
+
+    assert payment["status"] == "SETTLED"
+    creditor = db["accounts"].find_one({"accountId": CREDITOR})
+    assert creditor["balance"]["available"] == 10_250.0, "the named creditor was credited"
+    clearing = db["accounts"].find_one({"accountId": "ACC-CLEARING-WIRE"})
+    assert clearing["balance"]["available"] == 0, "clearing account untouched by internal transfers"

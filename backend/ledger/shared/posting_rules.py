@@ -21,11 +21,13 @@ logger = logging.getLogger(__name__)
 
 # Bump on any rule change. Stamped on each emitted event as a provenance/version marker.
 # 1.1.0 — stage 6 added the fee rule (doc 20 B3).
-MAPPING_VERSION = "1.1.0"
+# 1.2.0 — stage 7 added the settlement rule (doc 21 B2): Dr clearing / Cr nostro or reserves.
+MAPPING_VERSION = "1.2.0"
 
 # eventType — subset of the spec's ledgerEvents.eventType enum exercised in Phase 1.
 EVENT_PAYMENT_PRINCIPAL = "PAYMENT_PRINCIPAL"
 EVENT_PAYMENT_FEE = "PAYMENT_FEE"
+EVENT_PAYMENT_SETTLEMENT = "PAYMENT_SETTLEMENT"
 
 # Accounting sides.
 SIDE_DEBIT = "DEBIT"
@@ -217,3 +219,66 @@ def assert_balanced(legs: list[PostingLeg]) -> None:
     credit = sum(leg.amount_minor for leg in legs if leg.side == SIDE_CREDIT)
     if debit != credit:
         raise ValueError(f"unbalanced legs: sum(DEBIT)={debit} != sum(CREDIT)={credit}")
+
+
+def decompose_settlement(
+    *,
+    amount: float | str | Decimal,
+    currency: str,
+    clearing_account: dict,
+    settlement_account_code: str,
+    coa: ChartOfAccounts,
+) -> list[PostingLeg]:
+    """Decompose the settlement leg pair (doc 21 B2): Dr clearing / Cr nostro or reserves.
+
+    The second accounting event in a two-event wire. The first event (PAYMENT_PRINCIPAL)
+    moved the customer's deposit to the clearing account — ``Dr customer deposit / Cr 1131``.
+    This event moves the clearing position to the settlement account:
+
+      - Dr 1131 Wire Clearing       (clearing position reduced — the hold is released)
+      - Cr 1111 Nostro Accounts      (model 1: settled via a correspondent)
+        or Cr 1121 Minimum Reserve Requirements (model 2: settled directly at the central bank)
+
+    Both GL codes are validated as active posting leaves. The ``entityReference`` on both
+    legs is the clearing account — it is the operational account this event is about, and
+    it is the one ``accounts`` doc the projection worker can validate. The settlement
+    account (1111/1121) is a GL account, not an ``accounts`` document; differentiating the
+    legs by ``glAccountCode`` rather than ``entityReference`` keeps the projection worker on
+    a code path it already handles.
+
+    ⚠️ Vostro (model 3) is stubbed — Q48 blocks it — so this function is never called with a
+    vostro settlement code. If it ever is, the ``require_active_posting_account`` check will
+    raise on the missing code, which is the correct failure mode for a stubbed model.
+    """
+    amount_minor = to_minor_units(amount)
+    if amount_minor <= 0:
+        raise ValueError(f"settlement amount must be positive, got {amount!r}")
+
+    clearing_code = (clearing_account.get("gl") or {}).get("accountCode")
+    if not clearing_code:
+        raise ValueError(
+            f"clearing account {clearing_account.get('accountId')!r} has no gl.accountCode"
+        )
+    coa.require_active_posting_account(clearing_code)
+    coa.require_active_posting_account(settlement_account_code)
+
+    legs = [
+        PostingLeg(
+            event_type=EVENT_PAYMENT_SETTLEMENT,
+            side=SIDE_DEBIT,
+            gl_account_code=clearing_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=clearing_account["accountId"],
+        ),
+        PostingLeg(
+            event_type=EVENT_PAYMENT_SETTLEMENT,
+            side=SIDE_CREDIT,
+            gl_account_code=settlement_account_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=clearing_account["accountId"],
+        ),
+    ]
+    assert_balanced(legs)
+    return legs

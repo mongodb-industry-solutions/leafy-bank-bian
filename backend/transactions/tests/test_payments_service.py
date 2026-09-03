@@ -234,6 +234,26 @@ def _account(account_id, customer_id, *, currency="USD", available=10_000.0,
     }
 
 
+# Stage 7 (doc 21 B1): the wire clearing account. A bank-internal `accounts` doc — `type:
+# NOSTRO`, `gl.accountCode: 1131`, no `customerSnapshot` (the spec's `required` list omits
+# `customerId`). `_money_move` `$inc`s its balance; `posting_rules._principal_gl_account`
+# reads its `gl.accountCode`. Built here, not via `_account()`, because `_account()` requires
+# a customer and sets `customerSnapshot` — the clearing account has neither.
+_CLEARING_WIRE = {
+    "accountId": "ACC-CLEARING-WIRE",
+    "accountNumber": "1131-WIRE-CLEARING",
+    "type": "NOSTRO",
+    "status": "ACTIVE",
+    "currency": "USD",
+    "gl": {"accountCode": "1131", "costCenter": "CC-RETAIL-DEFAULT",
+           "profitCenter": "PC-RETAIL-DEFAULT"},
+    "balance": {"current": 0, "available": 0, "ledger": 0, "hold": 0, "overdraftLimit": 0,
+                "updatedAt": datetime.now(timezone.utc)},
+    "signatories": [],
+    "restrictions": [],
+}
+
+
 def _customer(customer_id, *, status="ACTIVE", segment="RETAIL",
               customer_type="INDIVIDUAL", kyc_status="VERIFIED"):
     """Stage 2 reads `status`, `segment` and `kyc.status`; earlier stages read none of them.
@@ -270,7 +290,10 @@ CUST_D, CUST_C = "CUST-0000000001", "CUST-0000000002"
 def db():
     """Two open USD accounts with 10,000 each, owned by different customers."""
     return FakeDb({
-        "accounts": FakeCollection([_account(DEBTOR, CUST_D), _account(CREDITOR, CUST_C)]),
+        "accounts": FakeCollection([
+            _account(DEBTOR, CUST_D), _account(CREDITOR, CUST_C),
+            _CLEARING_WIRE,
+        ]),
         "customers": FakeCollection([_customer(CUST_D), _customer(CUST_C)], key="customerId"),
         "payments": FakeCollection(key="paymentId"),
         "transactions": FakeCollection(key="transactionId"),
@@ -341,6 +364,8 @@ def test_insufficient_funds_rejected_and_no_money_moves(service, db):
 
     _assert_rejected(db, reason_match="Insufficient available balance", at_state="INITIATED")
     for acc in db["accounts"].docs:
+        if acc["type"] == "NOSTRO":
+            continue  # clearing account starts at 0 — stage 7 B1
         assert acc["balance"]["available"] == 10_000.0, "balances must be untouched"
 
 
@@ -651,12 +676,15 @@ def _initiate_external(svc, **over):
     )
 
 
-def test_external_wire_halts_at_in_progress_and_moves_no_money(service, db):
-    """Stage 5 halts at IN_PROGRESS, not SUBMITTED (doc 19 B1, R12).
+def test_external_wire_stays_at_in_progress_but_moves_money_to_clearing(service, db):
+    """Stage 7 doc 21 B3 — the halt is gone, but settlement is still deferred.
 
-    The rail has accepted the message, so "submitted, outcome unknown" is no longer true —
-    the payment is in flight awaiting settlement, which is what IN_PROGRESS means. The state
-    is also still inside `_POST_EXECUTION_TERMINALS`, so the payment can never become
+    The rail has accepted the message, so the payment is at IN_PROGRESS (not SUBMITTED).
+    The money has moved — debtor debited, clearing account credited, `transactions` doc
+    written — but `SETTLED` has NOT fired. Settlement is deferred to `settle.py`, which
+    owns the IN_PROGRESS → SETTLED transition once the simulated response arrives.
+
+    The state is still inside `_POST_EXECUTION_TERMINALS`, so the payment can never become
     REJECTED from here, which is correct once a message has left the bank.
     """
     payment = _initiate_external(service)
@@ -664,11 +692,15 @@ def test_external_wire_halts_at_in_progress_and_moves_no_money(service, db):
     assert payment["lifecycle"]["currentState"] == "IN_PROGRESS"
     assert payment["status"] == "IN_PROGRESS"
     assert "settlement pending" in payment["lifecycle"]["events"][-1]["reason"]
+    assert payment["clearing"]["settledAt"] is None, "SETTLED is deferred to settle.py"
 
-    assert db["transactions"].inserted == [], "no transactions doc — the ledger must not see it"
-    assert db["notifications"].inserted == []
-    for acc in db["accounts"].docs:
-        assert acc["balance"]["available"] == 10_000.0, "no balance moved"
+    # Money moved: debtor debited, clearing account credited.
+    assert len(db["transactions"].inserted) == 1, "the ledger now sees this payment"
+    assert len(db["notifications"].inserted) == 1
+    debtor = db["accounts"].find_one({"accountId": DEBTOR})
+    assert debtor["balance"]["available"] == 9_750.0, "debtor was debited"
+    clearing = db["accounts"].find_one({"accountId": "ACC-CLEARING-WIRE"})
+    assert clearing["balance"]["available"] == 250.0, "clearing account holds the in-flight credit"
 
 
 def test_external_wire_is_still_a_real_traceable_payment(service, db):

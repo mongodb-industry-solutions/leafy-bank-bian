@@ -259,3 +259,15 @@ class PaymentConfirmationRequest(BaseModel):
     """BIAN `POST /PaymentConfirmation/Execute` (D8 — the SD has no published API)."""
     paymentId: str = Field(min_length=1)
     model_config = ConfigDict(extra="forbid")
+
+
+class PaymentSettlementInitiateRequest(BaseModel):
+    """BIAN `POST /PaymentSettlement/Initiate` (B6 — SD 40033, no published API).
+
+    Triggers or re-triggers settlement for one payment. The `outcome` field drives
+    the simulated settlement response (doc 21 B4): matched (default), delayed,
+    unmatched, or exception. When omitted, the saga's own default (matched) applies.
+    """
+    paymentId: str = Field(min_length=1)
+    outcome: Optional[str] = Field(default=None)
+    model_config = ConfigDict(extra="forbid")

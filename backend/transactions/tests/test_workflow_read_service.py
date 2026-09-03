@@ -124,6 +124,7 @@ class FakeConnection:
         self.artifacts = {
             "paymentExecutions": FakeArtifacts(executions),
             "paymentMessages": FakeArtifacts(messages),
+            "settlementPositions": FakeArtifacts(None),  # stage 7 — empty by default
         }
 
     def get_collection(self, db_name, name):

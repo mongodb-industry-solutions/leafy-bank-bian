@@ -35,6 +35,10 @@ const BACKEND_BY_PREFIX = {
   PartyAuthentication: ACCOUNTS_BACKEND,
   CurrentAccount: ACCOUNTS_BACKEND,
   PaymentOrderInitiation: TRANSACTIONS_BACKEND,
+  // BIAN PaymentSettlement (SD 40033, doc 21 B6). Settlement trigger lives on transactions
+  // — it owns `payments` and the `settle.run` stage. Scoped to this prefix only (defect
+  // 2026-07-06: blanket-applying a prefix convention broke every BIAN call).
+  PaymentSettlement: TRANSACTIONS_BACKEND,
   // GL pipeline monitor routes (read-only) live on the ledger service.
   pipeline: LEDGER_BACKEND,
   // Back-office payments workflow routes (read-only) live on the transactions service —

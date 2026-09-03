@@ -21,36 +21,38 @@ textbook DDD says to split into a saga. **We keep it.** Multi-document ACID acro
 aggregates *is the MongoDB capability being demoed* (doc 09 §5). Documented here so nobody
 "corrects" it, and so the exception stays one block long instead of spreading.
 
-## Why the SETTLED transition is in here
+## Why the SETTLED transition is conditional (stage 7, doc 21 B3)
 
 For a synchronous internal book transfer, settlement **is** the money move — so the
 `SETTLED` transition belongs inside this transaction, atomic with the two balance updates.
 That is a design choice, not a leftover: a payment can never be observed as settled without
 the balances having moved, or vice versa.
 
-When stage 7 becomes real (nostro/vostro, value dates, rail confirmation), settlement stops
-being simultaneous and this transition moves to `payment_settlement/settle.py`. The state
-machine is what makes that a one-line change.
+For an external wire, settlement is **not** simultaneous — the rail has accepted the message,
+the clearing account holds the in-flight position, and settlement arrives later via a
+simulated confirmation. So `_money_move` is called with `settle_atomically=False`, the money
+moves but the payment stays at `IN_PROGRESS`, and `payment_settlement/settle.py` owns the
+`IN_PROGRESS → SETTLED` transition. The state machine is what makes this a one-parameter
+change rather than a restructure.
 
-## External beneficiaries halt at IN_PROGRESS — and the halt is NOT stage 5's to remove
+## External beneficiaries — the clearing account (stage 7, doc 21 B1)
 
 Stage 1 captures a payment to a beneficiary Leafy Bank does not hold; the spec makes
 `creditor.accountId` nullable and Doina's flagship `wire_domestic` scenario is exactly that
-shape. Such a payment now runs the **whole** of stage 5 — mapping, submission,
-acknowledgement, both artifacts — and then stops before the money move.
+shape. Such a payment runs the **whole** of stage 5 — mapping, submission,
+acknowledgement, both artifacts — and then the money moves.
 
-⚠️ **An earlier version of this docstring said "when stage 5 lands, delete the guard". That
-instruction is retracted** (doc 19 B1): what the guard waits on is the **chart-of-accounts
-extension** (`Dr Customer Deposit Liability / Cr Wire Clearing Account`), which is her stage 7
-and Doina/Payton's call (doc 08, Q8) — stage 5 does not bring it. The blocker *splits*:
-message generation and execution recording are this stage's; crediting anything is not.
+The credit leg posts to the rail's **clearing account** — an `accounts` document
+(`type: NOSTRO`, `gl.accountCode: 1131`) seeded by stage 7. The routing in `run` resolves
+it before `_money_move` fires, so `_money_move` credits a real account with a real GL
+mapping, and the ledger's `ingest_worker` sees a real `payee.accountId` — not null.
 
-Concretely, what would happen without the halt: `_money_move` credits the creditor by
-`accountId`, so with no account the credit matches nothing, the assertion at the end of the
-callback aborts the transaction, and the payment ends FAILED mid-demo. Remove the assertion
-too and it is worse — the debtor is debited, the credit is lost, and
-`transactions.payee.accountId` is null, which makes the ledger's `ingest_worker` raise and
-crash-loop (defect 2026-07-01, hit twice).
+**Settlement is deferred** (doc 21 B3): `_money_move` is called with
+`settle_atomically=False` for an external wire, so the money moves (customer debited,
+clearing account credited, `transactions` doc written) but the payment stays at
+`IN_PROGRESS`. `settle.py` owns the `IN_PROGRESS → SETTLED` transition once the simulated
+settlement response arrives. An internal book transfer still settles inside the ACID block,
+because for a book transfer settlement genuinely *is* simultaneous with the money move.
 
 `IN_PROGRESS`, not a rejection: the rail has accepted the message and settlement is pending,
 which is a real wire's actual state between submission and confirmation. It is also inside
@@ -110,6 +112,15 @@ RAIL_BOUND = frozenset({"WIRE"})
 # Copied rather than invented so that sample stays reproducible end to end (doc 19 B4).
 INTERNAL_NETWORK_REF = "INTERNAL-BOOK-TRANSFER"
 INTERNAL_NETWORK_CODE = "0000"
+
+# Stage 7 (doc 21 B1): each external rail settles through a clearing *accounts* document.
+# The credit leg of an external wire posts to this account (Dr customer deposit / Cr 1131),
+# so `_money_move` and `posting_rules._principal_gl_account` both find a real `accounts` doc
+# with a `gl.accountCode`. Seeded in `backend/data/sample/leafy_bank_bian.{glAccounts,accounts}.json`.
+_CLEARING_ACCOUNT_BY_RAIL: dict[str, str] = {
+    "WIRE": "ACC-CLEARING-WIRE",
+    # "ACH": "ACC-CLEARING-ACH",  # Phase 2 — 1132 seeded now, account doc on first use
+}
 
 
 def run(ctx: PaymentContext) -> None:
@@ -351,14 +362,33 @@ def _execute_rail_bound(ctx: PaymentContext, record, recorded: list,
         },
     )
 
+    # Stage 7 (doc 21 B1): route the external creditor's credit leg to the rail's clearing
+    # account. The creditor has no Leafy Bank account (that is what `is_external_creditor`
+    # means), but `_money_move` credits by `accountId` and `posting_rules` reads
+    # `account.gl.accountCode`, so both need a real `accounts` doc. The clearing account IS
+    # that doc — `type: NOSTRO`, `gl.accountCode: 1131`, no `customerSnapshot` (the spec's
+    # `required` list omits `customerId`, so a bank-internal account is spec-conformant).
     if ctx.is_external_creditor:
-        # Halted here by design — see the module docstring. The rail holds the payment; the
-        # credit leg needs the chart-of-accounts extension (her stage 7, Q8). No
-        # `transactions` doc is written, so the ledger never observes this payment.
-        ctx.stop(payment_doc)
-        return
+        clearing_id = _CLEARING_ACCOUNT_BY_RAIL.get(ctx.payment_rail)
+        if not clearing_id:
+            raise ValueError(
+                f"no clearing account mapped for rail {ctx.payment_rail!r}; "
+                f"cannot settle an external creditor without one"
+            )
+        ctx.creditor_account_ref = clearing_id
+        ctx.creditor_account = ctx.collections.accounts.find_one({"accountId": clearing_id})
+        if not ctx.creditor_account:
+            raise ValueError(
+                f"clearing account {clearing_id!r} not found — seed it before "
+                f"settling external {ctx.payment_rail} wires"
+            )
 
-    ctx.result = _money_move(ctx)
+    # Stage 7 (doc 21 B3): the money moves now — customer debited, clearing account
+    # credited, `transactions` doc written, notification sent. But settlement is deferred:
+    # `settle.py` owns the IN_PROGRESS → SETTLED transition once the simulated settlement
+    # response arrives. The payment stays at IN_PROGRESS, which is a real wire's state
+    # between submission and confirmation.
+    ctx.result = _money_move(ctx, settle_atomically=not ctx.is_external_creditor)
 
 
 def _next_attempt(ctx: PaymentContext) -> int:
@@ -447,7 +477,7 @@ def _debtor_borne_fee(ctx: PaymentContext) -> float:
     return total
 
 
-def _money_move(ctx: PaymentContext) -> dict:
+def _money_move(ctx: PaymentContext, *, settle_atomically: bool = True) -> dict:
     c = ctx.collections
     now = ctx.now
     amount = ctx.instructed_amount
@@ -485,9 +515,11 @@ def _money_move(ctx: PaymentContext) -> dict:
             return_document=True,
         )
         # A no-match here means the debit committed and the credit did not — money
-        # destroyed. The external-beneficiary guard in `run` makes this unreachable, and
-        # this assertion is what keeps it that way: it aborts the transaction instead of
-        # silently succeeding. Never remove it to "handle" a missing creditor.
+        # destroyed. The clearing-account routing in `run` makes this unreachable for
+        # external wires (it resolves the clearing account before this callback), and a
+        # matched creditor makes it unreachable for internal transfers. This assertion is
+        # what keeps it that way: it aborts the transaction instead of silently succeeding.
+        # Never remove it to "handle" a missing creditor.
         if creditor_after is None:
             raise ValueError(
                 f"Creditor account {ctx.creditor_account_ref} did not match at settlement "
@@ -531,14 +563,21 @@ def _money_move(ctx: PaymentContext) -> dict:
         if notif_docs:
             c.notifications.insert_many(notif_docs, session=session)
 
-        # Settlement, atomic with the money move. See the module docstring.
-        return lifecycle.advance_ctx(
-            ctx, lifecycle.SETTLED,
-            actor="transactions-service",
-            reason="Book transfer settled",
-            session=session,
-            extra={"clearing.settledAt": now},
-        )
+        if settle_atomically:
+            # A book transfer settles in the same atomic unit as the money move — the
+            # balances and the SETTLED state can never be observed apart (doc 21 B3).
+            return lifecycle.advance_ctx(
+                ctx, lifecycle.SETTLED,
+                actor="transactions-service",
+                reason="Book transfer settled",
+                session=session,
+                extra={"clearing.settledAt": now},
+            )
+        # An external wire's money has moved (customer debited, clearing account credited)
+        # but settlement is deferred — `settle.py` owns the IN_PROGRESS → SETTLED transition
+        # once the simulated settlement response arrives (doc 21 B3). The payment stays at
+        # IN_PROGRESS, which is a real wire's state between submission and confirmation.
+        return ctx.payment_doc
 
     with c.db.client.start_session() as session:
         return session.with_transaction(callback)

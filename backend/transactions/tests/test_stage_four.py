@@ -33,6 +33,7 @@ from tests.test_payments_service import (  # reuse the fixtures, don't fork them
     FakeConnection,
     FakeDb,
     _account,
+    _CLEARING_WIRE,
     _customer,
     _initiate,
     db,          # noqa: F401 - pytest fixture
@@ -62,6 +63,7 @@ def rich_db():
         "accounts": FakeCollection([
             _account(DEBTOR, CUST_D, available=10_000_000.0),
             _account(CREDITOR, CUST_C, available=10_000.0),
+            _CLEARING_WIRE,
         ]),
         "customers": FakeCollection(
             [_customer(CUST_D, segment="COMMERCIAL"), _customer(CUST_C)],

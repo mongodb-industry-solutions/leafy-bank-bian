@@ -131,6 +131,10 @@ class PaymentContext:
     # True when `requestedExecutionDate` is in the future: the payment is warehoused for
     # release and stage 4a halts it at ROUTED (doc 18 B9).
     warehoused: bool = False
+    # Stage 7's settlement outcome override. The saga defaults to "matched" (SETTLED); the
+    # BIAN route `POST /PaymentSettlement/Initiate` can set this to drive a demo scenario
+    # that needs unmatched/delayed/exception outcomes (doc 21 B4, step 7).
+    settlement_outcome: Optional[str] = None
     checkpoints: list = field(default_factory=list)
 
     # --- control -------------------------------------------------------------
