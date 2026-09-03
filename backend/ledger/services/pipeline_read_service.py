@@ -409,6 +409,18 @@ def get_gl_dashboard(
 # Trace
 # ---------------------------------------------------------------------------
 
+def _reconciliation_block(payment_id: str, connection: MongoDBConnection, db_name: str) -> Optional[dict]:
+    """Stage 8 — the three-way reconciliation result for the trace join (doc 22 step 5).
+
+    Returns the check as a dict, or None if the payment is gone. A payment whose legs are not
+    all checkable yet returns a dict with `overallResult: "PENDING"` — the UI reads that as
+    "awaiting the GL batch" rather than reading null as a crash.
+    """
+    from services.reconciliation_service import compute_reconciliation
+    check = compute_reconciliation(payment_id, connection, db_name)
+    return check.as_dict() if check is not None else None
+
+
 def trace_payment(
     payment_id: str,
     connection: MongoDBConnection,
@@ -512,4 +524,8 @@ def trace_payment(
         "allLedgerEvents": all_events,
         "postingMode": posting_mode,
         "accountNames": account_names,
+        # Stage 8 — the three-way reconciliation result (doc 22 step 5). null for a payment
+        # whose downstream artifacts are not all present yet (PENDING), and for any payment
+        # written before stage 8. The UI panel reads this block to render the L646-653 tie-out.
+        "reconciliation": _reconciliation_block(payment_id, connection, db_name),
     }

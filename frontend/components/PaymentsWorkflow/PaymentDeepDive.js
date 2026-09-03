@@ -194,6 +194,119 @@ function Legs({ legs }) {
   );
 }
 
+/**
+ * Stage 8 — Doina's L646-653 five-row tie-out dashboard. Each row is one leg of the three-way
+ * reconciliation: payment order / rail confirmation / subledger / settlement account / GL, each
+ * with an amount and ✓/✗, then => RECONCILED.
+ *
+ * The rows are derived from `trace.reconciliation.legs` (the ledger's three-leg result) plus the
+ * settlementPosition. Legs 1/2 are NOT_APPLICABLE for a book transfer (no rail, no settlement
+ * run) and render "N/A — book transfer" rather than a tick. A PENDING leg (the settlement
+ * journal has not posted yet) renders "awaiting the GL batch". The whole thing falls back to a
+ * single "not yet checked" line when the reconciliation block is absent (a pre-stage-8 payment).
+ */
+function ReconciliationTieOut({ data, payment }) {
+  const check = data?.check;
+  const position = data?.position;
+
+  if (!check) {
+    return (
+      <Body className={styles.muted}>
+        Reconciliation has not run yet. It fires in the ledger service after the GL batch posts
+        the settlement journal.
+      </Body>
+    );
+  }
+
+  const legByType = (type) => (check.legs || []).find((l) => l.leg === type);
+  const leg1 = legByType("PAYMENT_RAIL");
+  const leg2 = legByType("RAIL_SETTLEMENT");
+  const leg3 = legByType("SETTLEMENT_GL");
+
+  const minors = (v) => (v == null ? null : Number(v) / 100);
+  const currency = payment?.currency || "USD";
+
+  // The five rows Doina drew (L648-652). Each carries the amount that row represents and the
+  // verdict for the leg that proves it.
+  const rows = [
+    {
+      label: "Payment order",
+      amount: payment?.amount,
+      leg: leg1,
+      naText: "N/A — book transfer",
+    },
+    {
+      label: "Rail confirmation",
+      amount: payment?.amount, // leg1 compares instruction == execution; the rail amount equals the instruction when MATCH
+      leg: leg1,
+      naText: "N/A — book transfer",
+    },
+    {
+      label: "Subledger",
+      amount: minors(leg3?.leftAmount ?? leg2?.rightAmount),
+      leg: leg3,
+      naText: "N/A — book transfer",
+    },
+    {
+      label: "Settlement account",
+      amount: position?.grossAmount,
+      leg: leg2,
+      naText: "N/A — book transfer",
+    },
+    {
+      label: "General ledger",
+      amount: minors(leg3?.rightAmount),
+      leg: leg3,
+      naText: "N/A — book transfer",
+    },
+  ];
+
+  const verdictVariant = (result) =>
+    result === "MATCH" ? "green" : result === "MISMATCH" ? "red" : "blue";
+
+  const verdictLabel = (result) =>
+    result === "MATCH" ? "✓" : result === "MISMATCH" ? "✗" : result === "NOT_APPLICABLE" ? "N/A" : "…";
+
+  const overall = check.overallResult;
+
+  return (
+    <div className={styles.reconTieOut}>
+      <div className={styles.reconRows}>
+        {rows.map((r) => {
+          const result = r.leg?.result;
+          const isNA = result === "NOT_APPLICABLE";
+          const isPending = result === "PENDING";
+          return (
+            <div className={styles.reconRow} key={r.label}>
+              <span className={styles.reconLabel}>{r.label}</span>
+              <span className={styles.reconAmount}>
+                {isNA || isPending
+                  ? (isNA ? r.naText : "awaiting the GL batch")
+                  : (r.amount != null ? fmtAmount(r.amount, currency) : "—")}
+              </span>
+              <Badge variant={verdictVariant(result)}>{verdictLabel(result)}</Badge>
+            </div>
+          );
+        })}
+      </div>
+      <div className={styles.reconVerdict}>
+        <Badge variant={overall === "RECONCILED" ? "green" : overall === "DISCREPANT" ? "red" : "blue"}>
+          {overall === "RECONCILED" ? "=> RECONCILED" : overall === "DISCREPANT" ? "DISCREPANT — discrepancy flagged" : "=> pending the GL batch"}
+        </Badge>
+      </div>
+      {leg1?.detail && (
+        <Body className={styles.muted}>{leg1.detail}</Body>
+      )}
+      {leg2?.detail && leg2.result !== "NOT_APPLICABLE" && (
+        <Body className={styles.muted}>{leg2.detail}</Body>
+      )}
+      {leg3?.detail && (
+        <Body className={styles.muted}>{leg3.detail}</Body>
+      )}
+    </div>
+  );
+}
+
 function StateEvents({ events }) {
   if (!events?.length) return <Body className={styles.muted}>No transitions recorded.</Body>;
   return (
@@ -515,6 +628,22 @@ function summaryRows(stage, payment) {
         ["Created by", d?.createdBy],
         ["Created", fmtWhen(d?.createdAt)],
       ];
+    case "reconciliation": {
+      // Stage 8 — the three-way tie-out summary. The five-row dashboard itself renders in
+      // ReconciliationTieOut (below); these rows are the supporting facts: the reconciliation
+      // item, the settlement position, the journal that proved leg 3, and when it ran.
+      const check = d?.check;
+      const pos = d?.position;
+      const overall = check?.overallResult;
+      return [
+        ["Overall", overall ? overall : "not yet checked"],
+        ["Reconciliation item", check?.legs ? payment?.refs?.reconciliationItemId : null],
+        ["Settlement position", pos?.settlementPositionId || payment?.refs?.settlementPositionId],
+        ["Settlement model", pos?.modelLabel],
+        ["Journal (leg 3)", check?.journalEntryId],
+        ["Checked", check?.checkedAt ? fmtWhen(check.checkedAt) : null],
+      ];
+    }
     default:
       return [["Current state", payment?.lifecycle?.currentState]];
   }
@@ -537,6 +666,7 @@ function StageDetail({ stage, payment }) {
   const showEnrichment = stage.kind === "enrichment";
   const showAuthorization = stage.kind === "authorization";
   const showRailExecution = stage.kind === "railExecution";
+  const showReconciliation = stage.kind === "reconciliation";
   // Stages 3 and 4 render checks too, but their `data` is an object rather than the bare
   // array stage 2 passes, so the shapes are resolved separately.
   const showChecks =
@@ -583,6 +713,22 @@ function StageDetail({ stage, payment }) {
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Summary</div>
             <KeyValues rows={summaryRows(stage, payment)} />
+          </div>
+        )}
+
+        {showReconciliation && (
+          <div className={styles.detailBlockWide}>
+            <div className={styles.detailBlockTitle}>
+              Three-way match: payment to rail, rail to settlement account, settlement account to GL
+            </div>
+            <ReconciliationTieOut data={stage.data} payment={payment} />
+          </div>
+        )}
+
+        {showReconciliation && !!stage.data?.events?.length && (
+          <div className={styles.detailBlock}>
+            <div className={styles.detailBlockTitle}>State transitions</div>
+            <StateEvents events={stage.data.events} />
           </div>
         )}
 

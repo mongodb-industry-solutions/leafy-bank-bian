@@ -1,0 +1,57 @@
+{
+  "collection": "reconciliationItems",
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "title": "PaymentReconciliationItem",
+      "description": "Stage 8 — one document per payment per reconciliation run. Records the three-way tie-out (payment↔rail, rail↔settlement, settlement↔GL) Doina's L640-644 asks for, the per-leg match/mismatch result, and the overall outcome. Authored here because the collection is named at L745/L926 and never specified — 0 matches in the canonical spec (verified by count). Ratify via Q56.",
+      "required": ["reconciliationItemId", "paymentId", "legs", "overallResult", "checkedAt"],
+      "properties": {
+        "reconciliationItemId": {
+          "bsonType": "string",
+          "description": "RI-… derive_ref('RI', oid). FK target of payments.refs.reconciliationItemId."
+        },
+        "paymentId": {
+          "bsonType": "string",
+          "description": "Back-reference to payments.paymentId."
+        },
+        "legs": {
+          "bsonType": "array",
+          "description": "Exactly three legs, in Doina's L642-644 order: PAYMENT_RAIL, RAIL_SETTLEMENT, SETTLEMENT_GL.",
+          "items": {
+            "bsonType": "object",
+            "required": ["leg", "result"],
+            "properties": {
+              "leg": {
+                "bsonType": "string",
+                "enum": ["PAYMENT_RAIL", "RAIL_SETTLEMENT", "SETTLEMENT_GL"]
+              },
+              "result": {
+                "bsonType": "string",
+                "enum": ["MATCH", "MISMATCH", "NOT_APPLICABLE", "PENDING"]
+              },
+              "leftAmount": {"bsonType": ["int", "null"]},
+              "rightAmount": {"bsonType": ["int", "null"]},
+              "detail": {"bsonType": ["string", "null"]}
+            }
+          }
+        },
+        "overallResult": {
+          "bsonType": "string",
+          "enum": ["RECONCILED", "DISCREPANT", "PENDING"],
+          "description": "RECONCILED only when every leg is MATCH or NOT_APPLICABLE. DISCREPANT if any leg MISMATCH. PENDING if any leg is not yet checkable (retried next batch)."
+        },
+        "journalEntryId": {
+          "bsonType": ["string", "null"],
+          "description": "The settlement (or principal, for a book transfer) journal that proves leg 3."
+        },
+        "settlementPositionId": {
+          "bsonType": ["string", "null"],
+          "description": "The settlementPositions doc that proves leg 2. Null for a book transfer."
+        },
+        "checkedAt": {"bsonType": "date"},
+        "sourceSystem": {"bsonType": ["string", "null"]}
+      }
+    }
+  }
+}

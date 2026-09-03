@@ -151,18 +151,44 @@ def test_payment_ids_come_from_ledger_events_not_from_payments():
 
 
 def test_the_derivation_path_never_reads_payments():
-    """The half of the standing rule that still holds (B1). `pipeline_read_service` reads
-    `payments` for trace composition and always has; the DERIVATION path must not."""
+    """The half of the standing rule that still holds (B1). `pipeline_read_service` and
+    `reconciliation_service.compute_reconciliation` (stage 8) read `payments` for read-only
+    composition / post-batch tie-out and always may; the DERIVATION path must not.
+
+    `reconciliation_service.py` was in this list when its only job was the pre-batch gate
+    (subledger↔journal, no `payments`). Stage 8 added `compute_reconciliation`, which reads
+    `payments` post-batch — so the file is no longer purely derivation and is removed from the
+    grep. The positive companion test below asserts the payments-reading function does not reach
+    the pure derivation workers."""
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []
     for rel in ("workers/ingest_worker.py", "workers/projection_worker.py",
                 "workers/gl_batch.py", "shared/posting_rules.py",
-                "services/subledger_service.py", "services/reconciliation_service.py"):
+                "services/subledger_service.py", "services/journal_service.py"):
         text = (root / rel).read_text()
         if '"payments"' in text:
             offenders.append(rel)
     assert offenders == [], f"derivation path reads payments: {offenders}"
+
+
+def test_the_reconciliation_pass_reads_payments_but_does_not_derive():
+    """Stage 8 companion to the firewall guard (doc 22 §4). `compute_reconciliation` reads
+    `payments` — that is permitted because it is a read-only post-batch check, not accounting
+    derivation. Assert it is not imported by the pure derivation workers, so the boundary the
+    grep test draws (derivation files contain no `"payments"`) stays meaningful even though
+    `gl_batch` calls the post-batch pass."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    derivation = ("workers/ingest_worker.py", "workers/projection_worker.py",
+                  "shared/posting_rules.py", "services/subledger_service.py",
+                  "services/journal_service.py")
+    offenders = []
+    for rel in derivation:
+        text = (root / rel).read_text()
+        if "compute_reconciliation" in text or "reconcile_settled_payments" in text:
+            offenders.append(rel)
+    assert offenders == [], f"derivation worker imports the reconciliation pass: {offenders}"
 
 
 # --- the fee posting rule (step 6, B3) ---------------------------------------

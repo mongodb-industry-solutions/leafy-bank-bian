@@ -453,6 +453,48 @@
   margin-top: 8px;
 }
 
+/* ── stage 8: three-way reconciliation tie-out ── */
+
+.reconTieOut {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.reconRows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.reconRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--pw-border);
+}
+
+.reconRow:last-child {
+  border-bottom: none;
+}
+
+.reconLabel {
+  color: var(--pw-muted);
+}
+
+.reconAmount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.reconVerdict {
+  margin-top: 4px;
+}
+
 /* ── key/value ── */
 
 .kv {

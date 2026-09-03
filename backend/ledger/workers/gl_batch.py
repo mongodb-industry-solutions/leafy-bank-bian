@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from database.connection import MongoDBConnection
 from services.journal_service import run_batch
-from services.reconciliation_service import reconcile_all_accounts
+from services.reconciliation_service import reconcile_all_accounts, reconcile_settled_payments
 from shared.coa_cache import ChartOfAccounts
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,18 @@ def run_one_cycle(connection: MongoDBConnection, db_name: str, coa: ChartOfAccou
         return {"skipped": True, "written": 0, "reason": "pre-batch reconciliation break"}
     written = run_batch(connection, db_name, coa=coa)
     logger.info("gl_batch manual trigger: posted %d journal(s)", written)
+    # Stage 8 (doc 22 B5) — post-batch reconciliation pass. Now that journals are posted, the
+    # three-way tie-out can complete for any SETTLED/POSTED payment whose settlement journal
+    # just landed. Runs outside the journal's ACID transaction by design: a failed reconcile
+    # must never roll back a posted journal (same reasoning as posting_writeback_service).
+    try:
+        recon = reconcile_settled_payments(connection, db_name)
+        if recon["eligible"]:
+            logger.info(
+                "post-batch reconciliation: %s", recon,
+            )
+    except Exception:
+        logger.exception("post-batch reconciliation pass failed — journals remain posted")
     return {"skipped": False, "written": written, "reason": None}
 
 

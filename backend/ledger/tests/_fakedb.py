@@ -20,6 +20,8 @@ def _matches(doc: dict, query: dict) -> bool:
         if isinstance(want, dict):
             if "$in" in want and have not in want["$in"]:
                 return False
+            if "$ne" in want and have == want["$ne"]:
+                return False
             if "$gt" in want and not have > want["$gt"]:
                 return False
             if "$exists" in want:

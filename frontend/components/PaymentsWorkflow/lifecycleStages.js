@@ -320,14 +320,30 @@ export function buildLifecycleStages(payment, trace) {
         : null,
     },
     {
+      // Stage 8 — three-way reconciliation (doc 22). The five-row tie-out reads
+      // `trace.reconciliation` (the ledger's three-leg result) plus the settlementPosition the
+      // legs were checked against. `reached` is true once the check has run at all — a PENDING
+      // check still counts as reached, so the panel renders "awaiting the GL batch" rather than
+      // "not reached".
       key: "reconciliation",
       label: "Reconciliation",
       icon: "Checkmark",
       stage: 8,
-      reached: reached("RECONCILED"),
-      meta: reached("RECONCILED") ? "reconciled" : "stage 8",
-      kind: "states",
-      data: eventsFor("RECONCILED"),
+      reached: reached("RECONCILED") || !!trace?.reconciliation,
+      status: trace?.reconciliation?.overallResult || undefined,
+      meta: trace?.reconciliation
+        ? (trace.reconciliation.overallResult === "RECONCILED"
+            ? "reconciled"
+            : trace.reconciliation.overallResult === "DISCREPANT"
+              ? "discrepancy"
+              : "awaiting the GL batch")
+        : (reached("RECONCILED") ? "reconciled" : "stage 8"),
+      kind: "reconciliation",
+      data: {
+        check: trace?.reconciliation ?? null,
+        events: eventsFor("RECONCILED"),
+        position,
+      },
     },
   ];
 }

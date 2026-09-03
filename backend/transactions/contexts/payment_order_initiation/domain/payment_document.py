@@ -274,6 +274,10 @@ def build(ctx) -> dict:
             "ledgerEventId": None,
             "journalEntryId": None,
             "canonicalJsonId": None,
+            # Stage 8 (doc 22 B4) — settlementPositionId (Q50, finally written by the post-batch
+            # pass) and reconciliationItemId (Q57). Additive nullable, like the seven above.
+            "settlementPositionId": None,
+            "reconciliationItemId": None,
         },
         # Not in the spec, and legal (it declares no `additionalProperties: false`).
         # Written today, left alone deliberately — removing them is unrelated to stage 1.
