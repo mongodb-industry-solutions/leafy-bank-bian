@@ -101,7 +101,7 @@ API_CATALOG = {
                                         "callerType": "CUSTOMER",
                                     }},
                                     {"label": "Back-office operator", "value": {
-                                        "partyReference": "OPS-nadia",
+                                        "partyReference": "OPS-Harry",
                                         "callerType": "OPERATOR",
                                     }},
                                 ],

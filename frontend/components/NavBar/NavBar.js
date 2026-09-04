@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { Body } from "@leafygreen-ui/typography";
 import styles from "./NavBar.module.css";
 import { useUser } from "@/lib/context/UserContext";
+import { usePaymentsWorkflow, WORKFLOW_LENS } from "@/lib/context/PaymentsWorkflowContext";
 import Icon from "@leafygreen-ui/icon";
 import UserInfo from "./UserInfo";
 
@@ -42,13 +43,15 @@ const NavBarContent = ({ bianModelUrl }) => {
     const { selectedUser, authorizedConsents, loginInProgress } = useUser();
     const pathname = usePathname();
     const isGlMonitor = pathname?.startsWith("/gl-pipeline-monitor");
+    const isPaymentsWorkflow = pathname?.startsWith("/payments-workflow");
+    const { lens: workflowLens, setLens: setWorkflowLens } = usePaymentsWorkflow();
     // Before a user is chosen (welcome modal), show only the logo — no nav links or user controls.
     // The GL monitor runs as an implicit ops user, so it's always treated as signed in.
     // selectedUser is set as soon as the login flow starts (to prefetch data in the
     // background) — loginInProgress excludes that window so the header doesn't show
     // "Frida" while the login modal/overlay is still on screen.
     const hasUser = isGlMonitor || (!!selectedUser?.id && !loginInProgress);
-    const hideNavLinks = isGlMonitor || !hasUser;
+    const showRetailNav = hasUser && !isGlMonitor && !isPaymentsWorkflow;
 
     return (
         <header className={styles.navBar}>
@@ -59,7 +62,7 @@ const NavBarContent = ({ bianModelUrl }) => {
             </div>
 
             <nav className={styles.center} aria-label="Main navigation">
-                {!hideNavLinks && (
+                {showRetailNav && (
                     <>
                         <Link href="/" className={styles.navLink}>
                             <Body weight="medium" className={pathname === "/" ? styles.navLinkActive : ""}>Personal Banking</Body>
@@ -67,6 +70,26 @@ const NavBarContent = ({ bianModelUrl }) => {
                         <Link href="/portfolio" className={styles.navLink}>
                             <Body weight="medium" className={pathname === "/portfolio" ? styles.navLinkActive : ""}>Investment Accounts</Body>
                         </Link>
+                    </>
+                )}
+                {isPaymentsWorkflow && (
+                    <>
+                        <button
+                            type="button"
+                            className={styles.navLink}
+                            onClick={() => setWorkflowLens(WORKFLOW_LENS.PAYMENTS)}
+                            aria-pressed={workflowLens === WORKFLOW_LENS.PAYMENTS}
+                        >
+                            <Body weight="medium" className={workflowLens === WORKFLOW_LENS.PAYMENTS ? styles.navLinkActive : ""}>Payments</Body>
+                        </button>
+                        <button
+                            type="button"
+                            className={styles.navLink}
+                            onClick={() => setWorkflowLens(WORKFLOW_LENS.ACTIVITY)}
+                            aria-pressed={workflowLens === WORKFLOW_LENS.ACTIVITY}
+                        >
+                            <Body weight="medium" className={workflowLens === WORKFLOW_LENS.ACTIVITY ? styles.navLinkActive : ""}>Activity</Body>
+                        </button>
                     </>
                 )}
             </nav>

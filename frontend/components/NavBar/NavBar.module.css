@@ -43,6 +43,15 @@
   border-radius: 6px;
 }
 
+/* A lens switch rendered as a <button> (no navigation) reuses the link styling — reset the
+   browser's button defaults so it reads as a nav link, not a control. */
+button.navLink {
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+}
+
 .navLink:hover {
   background: rgba(0, 0, 0, 0.03);
 }

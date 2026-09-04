@@ -63,7 +63,7 @@ def test_a_customer_who_is_not_active_or_does_not_exist_is_refused(service, part
 def test_an_operator_needs_no_customer_record(service):
     """Back-office personas are staff, not customers — there is nothing to look up, which
     is exactly why their token is marked OPERATOR rather than passed off as a customer's."""
-    issued = service.evaluate(party_reference="OPS-nadia", caller_type="OPERATOR")
+    issued = service.evaluate(party_reference="OPS-Harry", caller_type="OPERATOR")
     assert _claims(issued["token"])["callerType"] == "OPERATOR"
 
 

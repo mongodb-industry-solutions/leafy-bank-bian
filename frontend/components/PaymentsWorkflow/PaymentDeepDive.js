@@ -1,20 +1,21 @@
 "use client";
 
-// The payment lifecycle deep dive — a HORIZONTAL stage rail reading left-to-right in saga
-// order, with the selected stage's detail underneath.
+// The payment lifecycle deep dive — a thin horizontal mini-stepper (zone 1) over a vertical
+// stepper-timeline (zone 2), per the Payment Analyst UI research (§3.3/§3.4).
 //
-// Horizontal rather than a vertical spine because the saga is a sequence: reading it
-// left-to-right is the point, and a vertical list of nine expandable sections buries the
-// shape in scroll. It is also what Doina drew (PaymentTrace.js's own header comment
-// describes "a horizontal 6-stage rail"). Putting the detail below the rail instead of
-// beside it keeps the rail one line tall no matter how much any stage carries.
+// Why vertical primary, not the horizontal rail this used to be: a single payment is a
+// single-threaded state machine, and each stage carries too much (timestamps, actor,
+// checks, ISO views, double-entry legs) to fit under a node. A vertical spine gives each
+// stage's detail the full width it needs, and the mini-stepper above preserves the
+// left-to-right saga shape and stays the clickable summary. Clicking either scrolls the
+// matching row into view and expands it. A terminal failure auto-expands the failing stage
+// and dims the downstream ones.
 //
 // Two data sources, composed client-side and never server-side:
 //   * /workflow/payments/{id}  (transactions) — stages 1-4
 //   * /pipeline/trace/{id}     (ledger)       — stages 5-8
 // Neither service reads the other's collections (decisions.md 2026-06-18).
-import { Fragment, useEffect, useMemo, useState } from "react";
-import Badge from "@leafygreen-ui/badge";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Banner from "@leafygreen-ui/banner";
 import Code from "@leafygreen-ui/code";
 import { Tab, Tabs } from "@leafygreen-ui/tabs";
@@ -23,49 +24,142 @@ import Icon from "@leafygreen-ui/icon";
 import { Body } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
+import StatusPill from "./StatusPill";
 import { buildLifecycleStages, legTotals } from "./lifecycleStages";
 import { usePaymentWorkflow, usePipelineTrace } from "@/lib/api/hooks";
 import {
-  statusBadgeVariant,
-  checkBadgeVariant,
+  checkPillFamily,
   fmtAmount,
   fmtWhen,
 } from "@/lib/paymentsWorkflow/status";
 
-function StageRail({ stages, selectedKey, onSelect }) {
+const FAILED_STATES = new Set([
+  "REJECTED", "FAILED", "RETURNED", "REVERSED", "REFUNDED", "CANCELLED",
+]);
+const SUCCESS_TERMINAL = new Set(["SETTLED", "RECONCILED", "POSTED", "COMPLETED"]);
+
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+/**
+ * Per-stage node state for the mini-stepper and the vertical timeline, derived from how far
+ * the saga reached and whether it ended in success or failure. Stages before the last
+ * reached one are "completed"; the last reached one is "current" (in flight), "completed"
+ * (terminal success), or "failed" (terminal failure); stages after it are "pending".
+ */
+function nodeStates(stages, paymentStatus) {
+  if (!stages?.length) return [];
+  let lastReached = -1;
+  for (let i = stages.length - 1; i >= 0; i--) {
+    if (stages[i].reached) {
+      lastReached = i;
+      break;
+    }
+  }
+  const status = (paymentStatus || "").toUpperCase();
+  const failed = FAILED_STATES.has(status);
+  const done = SUCCESS_TERMINAL.has(status);
+  return stages.map((_, i) => {
+    if (i < lastReached) return "completed";
+    if (i === lastReached) return failed ? "failed" : done ? "completed" : "current";
+    return "pending";
+  });
+}
+
+/** Zone 1 — thin horizontal clickable summary that preserves the saga's left-to-right shape. */
+function MiniStepper({ stages, states, selectedKey, onSelect }) {
   return (
-    <div className={styles.railScroll}>
-      <div className={styles.railTrack}>
+    <div className={styles.miniStepperScroll}>
+      <div className={styles.miniStepperTrack}>
         {stages.map((s, i) => (
           <Fragment key={s.key}>
             {i > 0 && (
               <span
-                className={`${styles.stageConnector} ${
-                  stages[i - 1].reached && s.reached ? styles.stageConnectorDone : ""
+                className={`${styles.miniConnector} ${
+                  states[i - 1] === "completed" ? styles.miniConnectorDone : ""
                 }`}
               />
             )}
             <button
               type="button"
-              className={`${styles.stageNode} ${
-                selectedKey === s.key ? styles.stageNodeActive : ""
+              className={`${styles.miniNode} ${
+                selectedKey === s.key ? styles.miniNodeActive : ""
               }`}
               onClick={() => onSelect(s.key)}
-              disabled={!s.reached}
               aria-pressed={selectedKey === s.key}
-              title={s.reached ? s.label : `${s.label} — not reached`}
+              title={s.label}
             >
-              <span
-                className={`${styles.stageCircle} ${s.reached ? "" : styles.stageCircleEmpty}`}
-              >
-                <Icon glyph={s.reached ? s.icon : "Minus"} size={18} />
+              <span className={`${styles.miniCircle} ${styles[`mini${cap(states[i])}`]}`}>
+                {states[i] === "completed"
+                  ? "✓"
+                  : states[i] === "failed"
+                  ? "×"
+                  : ""}
               </span>
-              <span className={styles.stageLabel}>{s.label}</span>
-              <span className={styles.stageMeta}>{s.meta || "—"}</span>
+              <span className={styles.miniLabel}>{s.label}</span>
             </button>
           </Fragment>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Zone 2 — vertical spine of expandable rows; the selected row expands to its full detail. */
+function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef }) {
+  const failedIdx = states.indexOf("failed");
+  return (
+    <div className={styles.timeline}>
+      {stages.map((s, i) => {
+        const expanded = selectedKey === s.key;
+        const dimmed = failedIdx >= 0 && i > failedIdx;
+        const nodeState = states[i];
+        return (
+          <div
+            key={s.key}
+            className={`${styles.timelineRow} ${dimmed ? styles.timelineRowDimmed : ""}`}
+            ref={setRowRef(s.key)}
+          >
+            <div className={styles.spine}>
+              <span className={`${styles.timelineNode} ${styles[`node${cap(nodeState)}`]}`}>
+                {nodeState === "completed"
+                  ? "✓"
+                  : nodeState === "failed"
+                  ? "×"
+                  : ""}
+              </span>
+              {i < stages.length - 1 && (
+                <span
+                  className={`${styles.timelineConnector} ${
+                    nodeState === "completed" ? styles.timelineConnectorDone : ""
+                  } ${i === failedIdx ? styles.timelineConnectorDashed : ""}`}
+                />
+              )}
+            </div>
+            <div className={styles.timelineContent}>
+              <button
+                type="button"
+                className={styles.timelineRowHeader}
+                onClick={() => onSelect(s.key)}
+                aria-expanded={expanded}
+              >
+                <span className={styles.timelineStageLabel}>{s.label}</span>
+                <span className={styles.timelineStageMeta}>{s.meta || "—"}</span>
+                {s.status && <StatusPill status={s.status} />}
+              </button>
+              {nodeState === "failed" && expanded && (
+                <div className={styles.failedBanner}>
+                  Payment stopped at {s.label} — status {payment?.status || "unknown"}.
+                </div>
+              )}
+              {expanded && (
+                <div className={styles.timelineRowBody}>
+                  <StageDetailBody stage={s} payment={payment} />
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -126,7 +220,7 @@ function EnrichmentDiff({ enrichment }) {
           </div>
           <div className={styles.legRow}>
             <span className={styles.legAmount}>{fmtEnriched(r.to)}</span>
-            <Badge variant="lightgray">{r.source}</Badge>
+            <StatusPill family="gray">{r.source}</StatusPill>
           </div>
         </Fragment>
       ))}
@@ -186,9 +280,9 @@ function Legs({ legs }) {
         </div>
       </div>
       <div className={styles.balanced}>
-        <Badge variant={balanced ? "green" : "red"}>
+        <StatusPill family={balanced ? "green" : "red"}>
           {balanced ? "Balanced — DR = CR" : "Out of balance"}
-        </Badge>
+        </StatusPill>
       </div>
     </div>
   );
@@ -284,15 +378,15 @@ function ReconciliationTieOut({ data, payment }) {
                   ? (isNA ? r.naText : "awaiting the GL batch")
                   : (r.amount != null ? fmtAmount(r.amount, currency) : "—")}
               </span>
-              <Badge variant={verdictVariant(result)}>{verdictLabel(result)}</Badge>
+              <StatusPill family={verdictVariant(result)}>{verdictLabel(result)}</StatusPill>
             </div>
           );
         })}
       </div>
       <div className={styles.reconVerdict}>
-        <Badge variant={overall === "RECONCILED" ? "green" : overall === "DISCREPANT" ? "red" : "blue"}>
+        <StatusPill family={overall === "RECONCILED" ? "green" : overall === "DISCREPANT" ? "red" : "blue"}>
           {overall === "RECONCILED" ? "=> RECONCILED" : overall === "DISCREPANT" ? "DISCREPANT — discrepancy flagged" : "=> pending the GL batch"}
-        </Badge>
+        </StatusPill>
       </div>
       {leg1?.detail && (
         <Body className={styles.muted}>{leg1.detail}</Body>
@@ -314,7 +408,7 @@ function StateEvents({ events }) {
       {events.map((e, i) => (
         <div className={styles.event} key={`${e.state}-${e.at}-${i}`}>
           <div>
-            <Badge variant={statusBadgeVariant(e.state)}>{e.state}</Badge>{" "}
+            <StatusPill status={e.state} />{" "}
             <span className={styles.eventReason}>
               {e.reason || "—"}
               {e.actor ? ` · ${e.actor}` : ""}
@@ -347,12 +441,12 @@ function Checks({ checks }) {
         const detail = c.detail || c.reason;
         return (
           <div className={styles.check} key={`${c.name || c.checkId}-${i}`}>
-            <Badge variant={checkBadgeVariant(result)}>{result || "—"}</Badge>
+            <StatusPill family={checkPillFamily(result)}>{result || "—"}</StatusPill>
             <span className={styles.checkLabel}>
               {c.label || c.name || c.checkId || "check"}
               {detail ? <span className={styles.eventReason}> · {detail}</span> : null}
             </span>
-            {c.mode && <span className={styles.stageMeta}>{c.mode}</span>}
+            {c.mode && <span className={styles.muted}>{c.mode}</span>}
           </div>
         );
       })}
@@ -455,9 +549,11 @@ function RailViews({ data }) {
             ))}
           </div>
           <div className={styles.detailBlockTitle}>Message as sent</div>
-          <Code language="json" copyButtonAppearance="hover">
-            {JSON.stringify(iso, null, 2)}
-          </Code>
+          <div className={styles.codeScroll}>
+            <Code language="json" copyButtonAppearance="hover">
+              {JSON.stringify(iso, null, 2)}
+            </Code>
+          </div>
         </div>
       </Tab>
       {/* The same message serialised to real pacs.008 XML — stdlib ElementTree on the
@@ -476,9 +572,11 @@ function RailViews({ data }) {
               {data?.execution?.clearingNetwork || "rail"} (SIMULATED). Well-formed and
               namespaced; not schema-validated.
             </Body>
-            <Code language="xml" copyButtonAppearance="hover">
-              {xml}
-            </Code>
+            <div className={styles.codeScroll}>
+              <Code language="xml" copyButtonAppearance="hover">
+                {xml}
+              </Code>
+            </div>
           </div>
         </Tab>
       )}
@@ -649,16 +747,14 @@ function summaryRows(stage, payment) {
   }
 }
 
-function StageDetail({ stage, payment }) {
+function StageDetailBody({ stage, payment }) {
   if (!stage) return null;
 
   if (!stage.reached) {
     return (
-      <div className={styles.stageDetail}>
-        <Body className={styles.muted}>
-          {stage.label} — not reached yet.
-        </Body>
-      </div>
+      <Body className={styles.muted}>
+        {stage.label} — not reached yet.
+      </Body>
     );
   }
 
@@ -678,21 +774,7 @@ function StageDetail({ stage, payment }) {
       : stage.data;
 
   return (
-    <div className={styles.stageDetail}>
-      <div className={styles.stageDetailHead}>
-        <Icon glyph={stage.icon} size={16} />
-        <span className={styles.panelTitle}>
-          {/* Doina's stage 6 (Accounting/Posting) has three panels — ledger event,
-              sub-ledger, general ledger — so the group name disambiguates them without
-              inventing stage numbers she does not have (doc 20 B4). */}
-          Stage {stage.stage} · {stage.group ? `${stage.group} — ${stage.label}` : stage.label}
-        </span>
-        {stage.status && (
-          <Badge variant={statusBadgeVariant(stage.status)}>{stage.status}</Badge>
-        )}
-      </div>
-
-      <div className={styles.detailColumns}>
+    <div className={styles.detailColumns}>
         {showChecks && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Checks</div>
@@ -765,12 +847,40 @@ function StageDetail({ stage, payment }) {
         {stage.data && !showChecks && !showStates && !showEnrichment && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Raw document</div>
-            <Code language="json" copyButtonAppearance="hover">
-              {JSON.stringify(stage.data, null, 2)}
-            </Code>
+            <div className={styles.codeScroll}>
+              <Code language="json" copyButtonAppearance="hover">
+                {JSON.stringify(stage.data, null, 2)}
+              </Code>
+            </div>
           </div>
         )}
       </div>
+  );
+}
+
+/**
+ * The three independent fact axes — posting, settlement, reconciliation — that advance
+ * alongside `currentState` but not in lockstep with it (research §1.4). A journal's legs
+ * can post at different times than the payment settles, so these cannot be folded into the
+ * linear timeline. Surfaced as a first-class row under the header, separate from the rail.
+ * Null = the axis has not started; renders a neutral "not started" pill.
+ */
+function AxesRow({ payment }) {
+  const lc = payment?.lifecycle;
+  const axes = [
+    { label: "Posting", value: lc?.postingStatus },
+    { label: "Settlement", value: lc?.settlementStatus },
+    { label: "Reconciliation", value: lc?.reconciliationStatus },
+  ];
+  return (
+    <div className={styles.axesRow}>
+      <span className={styles.axesHeading}>Independent axes</span>
+      {axes.map((a) => (
+        <div className={styles.axisItem} key={a.label}>
+          <span className={styles.axisLabel}>{a.label}</span>
+          <StatusPill status={a.value} label={a.value || "not started"} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -780,18 +890,50 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
   // Ledger half. Self-terminating poll — stops once the journal entry lands.
   const { trace } = usePipelineTrace(paymentId, !!paymentId);
   const [selectedKey, setSelectedKey] = useState("initiation");
+  const rowRefs = useRef({});
+  const setRowRef = useCallback(
+    (key) => (el) => {
+      rowRefs.current[key] = el;
+    },
+    []
+  );
+  // Per-payment guard so the failed-stage auto-expand fires once, not on every trace re-poll.
+  const autoExpandedFor = useRef(null);
 
   // Reset to the first stage when a different payment is opened — keyed on paymentId, not
   // on the trace, so the 2s re-polls don't clobber the current selection every tick.
   useEffect(() => {
     setSelectedKey("initiation");
+    autoExpandedFor.current = null;
   }, [paymentId]);
 
   const stages = useMemo(
     () => (payment ? buildLifecycleStages(payment, trace) : null),
     [payment, trace]
   );
-  const selected = stages?.find((s) => s.key === selectedKey) || null;
+  const states = useMemo(
+    () => nodeStates(stages, payment?.status),
+    [stages, payment?.status]
+  );
+
+  // Research §3.4: a terminal failure auto-expands the failing stage so the red banner and
+  // reason are visible without a click. Runs once per payment, after stages first arrive.
+  useEffect(() => {
+    if (!stages || autoExpandedFor.current === paymentId) return;
+    const failedIdx = states.indexOf("failed");
+    if (failedIdx >= 0) {
+      setSelectedKey(stages[failedIdx].key);
+      autoExpandedFor.current = paymentId;
+    }
+  }, [stages, states, paymentId]);
+
+  // Clicking the mini-stepper or a row header scrolls the matching row into view.
+  useEffect(() => {
+    rowRefs.current[selectedKey]?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }, [selectedKey]);
 
   if (!paymentId) {
     return (
@@ -820,7 +962,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
         <span className={styles.panelTitle}>Payment lifecycle</span>
         <span className={`${styles.mono} ${styles.muted}`}>{paymentId}</span>
         {payment?.status && (
-          <Badge variant={statusBadgeVariant(payment.status)}>{payment.status}</Badge>
+          <StatusPill status={payment.status} />
         )}
       </div>
 
@@ -833,8 +975,21 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
 
         {stages && (
           <>
-            <StageRail stages={stages} selectedKey={selectedKey} onSelect={setSelectedKey} />
-            <StageDetail stage={selected} payment={payment} />
+            <AxesRow payment={payment} />
+            <MiniStepper
+              stages={stages}
+              states={states}
+              selectedKey={selectedKey}
+              onSelect={setSelectedKey}
+            />
+            <VerticalTimeline
+              stages={stages}
+              states={states}
+              selectedKey={selectedKey}
+              onSelect={setSelectedKey}
+              payment={payment}
+              setRowRef={setRowRef}
+            />
           </>
         )}
       </div>

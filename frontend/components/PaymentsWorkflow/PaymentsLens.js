@@ -4,7 +4,6 @@
 // payment's lifecycle deep dive on the right. Both lenses are this component — Operations
 // is the same surface narrowed to terminal-state payments (doc 16 R4).
 import { useState } from "react";
-import Badge from "@leafygreen-ui/badge";
 import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 import Banner from "@leafygreen-ui/banner";
@@ -12,9 +11,11 @@ import TextInput from "@leafygreen-ui/text-input";
 import { Select, Option } from "@leafygreen-ui/select";
 
 import styles from "./PaymentsWorkflow.module.css";
+import StatusPill from "./StatusPill";
 import PaymentDeepDive from "./PaymentDeepDive";
 import { usePaymentsList, useWorkflowExceptions } from "@/lib/api/hooks";
-import { statusBadgeVariant, fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
+import { workflowApi } from "@/lib/api/client";
+import { fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
 
 const PAGE_SIZE = 25;
 
@@ -89,6 +90,85 @@ function Filters({ value, onChange }) {
   );
 }
 
+/**
+ * Global command-palette search (research §3.1 #2 / §4 top bar).
+ *
+ * One box, prefix-routed on Enter:
+ *   PAY-   → deep-link straight to that payment's lifecycle (onJump).
+ *   CUST-  → drive the existing customerId list filter (onFilterCustomer).
+ *   TXN- / ACC- / NOTIF- → resolve to a parent paymentId via the backend
+ *      `/workflow/resolve/{ref}` route, then deep-link. ACC- may match several payments;
+ *      the service returns the most recent.
+ */
+function CommandSearch({ onJump, onFilterCustomer }) {
+  const [q, setQ] = useState("");
+  const [notice, setNotice] = useState(null);
+  const [resolving, setResolving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const v = q.trim();
+    if (!v) {
+      setNotice(null);
+      onFilterCustomer("");
+      return;
+    }
+    const upper = v.toUpperCase();
+    if (upper.startsWith("PAY-")) {
+      setNotice(null);
+      onJump(v);
+      return;
+    }
+    if (upper.startsWith("CUST-")) {
+      setNotice(null);
+      onFilterCustomer(v);
+      return;
+    }
+    if (
+      upper.startsWith("TXN-") ||
+      upper.startsWith("ACC-") ||
+      upper.startsWith("NOTIF-")
+    ) {
+      setResolving(true);
+      const { data, error } = await workflowApi(
+        `resolve/${encodeURIComponent(v)}`
+      );
+      setResolving(false);
+      if (error) {
+        setNotice(`No payment found for ${v}.`);
+        return;
+      }
+      if (data?.paymentId) {
+        setNotice(null);
+        onJump(data.paymentId);
+        return;
+      }
+      setNotice(`No payment found for ${v}.`);
+      return;
+    }
+    setNotice("Unrecognized — prefix with PAY-, CUST-, TXN-, ACC-, or NOTIF-.");
+  };
+
+  return (
+    <div className={styles.commandSearch}>
+      <form className={styles.commandForm} onSubmit={submit}>
+        <span className={styles.commandIcon}>
+          <Icon glyph="Search" size={16} />
+        </span>
+        <input
+          className={styles.commandInput}
+          placeholder="Search: PAY- · CUST- · TXN- · ACC- · NOTIF-"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          disabled={resolving}
+          aria-label="Global payment search"
+        />
+      </form>
+      {notice && <div className={styles.commandNotice}>{notice}</div>}
+    </div>
+  );
+}
+
 function PaymentsTable({ items, selectedPaymentId, onSelect }) {
   return (
     <div className={styles.tableWrap}>
@@ -129,7 +209,7 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                 <td className={styles.numeric}>{fmtAmount(p.amount, p.currency)}</td>
                 <td>{p.rail || "—"}</td>
                 <td>
-                  <Badge variant={statusBadgeVariant(p.status)}>{p.status || "—"}</Badge>
+                  <StatusPill status={p.status} />
                 </td>
               </tr>
             );
@@ -206,7 +286,15 @@ export default function PaymentsLens({
               Payments that stopped in a terminal state and need intervention.
             </span>
           ) : (
-            <Filters value={filters} onChange={setFilters} />
+            <>
+              <CommandSearch
+                onJump={onSelect}
+                onFilterCustomer={(v) =>
+                  setFilters((f) => ({ ...f, customerId: v, skip: 0 }))
+                }
+              />
+              <Filters value={filters} onChange={setFilters} />
+            </>
           )}
         </div>
 

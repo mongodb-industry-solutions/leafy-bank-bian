@@ -100,7 +100,7 @@ def test_an_operator_may_initiate_for_a_customer():
     """A back-office operator legitimately initiates for someone else, and is recorded as
     having done so — `callerType` lands on `payments.authentication`."""
     identity = party_auth.resolve_identity(
-        _header(_token(sub="OPS-nadia", caller_type="OPERATOR")), "CUST-2")
+        _header(_token(sub="OPS-Harry", caller_type="OPERATOR")), "CUST-2")
     assert identity["customer_ref"] == "CUST-2"
     assert identity["authentication"]["callerType"] == "OPERATOR"
     assert identity["authentication"]["sessionRef"] == "SESS-ABC123"

@@ -22,6 +22,10 @@ from services import workflow_read_service as svc
 
 def _matches(doc, flt):
     for k, cond in flt.items():
+        if k == "$or":
+            if not any(_matches(doc, sub) for sub in cond):
+                return False
+            continue
         val = doc
         for part in k.split("."):
             val = (val or {}).get(part) if isinstance(val, dict) else None
@@ -71,13 +75,16 @@ class FakePayments:
     def find(self, flt, projection=None):
         return FakeCursor([copy.deepcopy(d) for d in self.docs if _matches(d, flt)])
 
-    def find_one(self, flt, projection=None):
-        for d in self.docs:
-            if _matches(d, flt):
-                out = copy.deepcopy(d)
-                out.pop("_id", None)
-                return out
-        return None
+    def find_one(self, flt, projection=None, sort=None):
+        matched = [d for d in self.docs if _matches(d, flt)]
+        if sort:
+            for key, direction in sort:
+                matched.sort(key=lambda d: d.get(key), reverse=direction < 0)
+        if not matched:
+            return None
+        out = copy.deepcopy(matched[0])
+        out.pop("_id", None)
+        return out
 
     def count_documents(self, flt):
         return sum(1 for d in self.docs if _matches(d, flt))
@@ -117,14 +124,23 @@ class FakeArtifacts:
         payment_id = query.get("paymentId")
         return FakeCursor([d for d in self.docs if d.get("paymentId") == payment_id])
 
+    def find_one(self, query, projection=None):
+        for d in self.docs:
+            if all(d.get(k) == v for k, v in query.items()):
+                out = copy.deepcopy(d)
+                out.pop("_id", None)
+                return out
+        return None
+
 
 class FakeConnection:
-    def __init__(self, coll, executions=None, messages=None):
+    def __init__(self, coll, executions=None, messages=None, notifications=None):
         self.coll = coll
         self.artifacts = {
             "paymentExecutions": FakeArtifacts(executions),
             "paymentMessages": FakeArtifacts(messages),
             "settlementPositions": FakeArtifacts(None),  # stage 7 — empty by default
+            "notifications": FakeArtifacts(notifications),
         }
 
     def get_collection(self, db_name, name):
@@ -247,3 +263,65 @@ def test_stats_defaults_to_a_trailing_window(conn):
     """No dates given must not mean 'every payment ever' — the strip would be meaningless."""
     out = svc.get_stats(conn, "db")
     assert out["window"]["from"] is not None
+
+
+# --- resolve_ref (command search) --------------------------------------------
+
+def _payment_with_refs(pid, *, txnId=None, debtor_acc=None, creditor_acc=None, days_ago=0):
+    doc = _payment(pid, days_ago=days_ago)
+    if txnId:
+        doc["txnId"] = txnId
+    if debtor_acc:
+        doc["debtor"] = {"accountId": debtor_acc}
+    if creditor_acc:
+        doc["creditor"] = {"accountId": creditor_acc}
+    return doc
+
+
+@pytest.fixture
+def rconn():
+    """Payments carrying the secondary refs the command search resolves, plus a notification."""
+    return FakeConnection(
+        FakePayments([
+            _payment_with_refs("PAY-old", debtor_acc="ACC-X", txnId="TXN-old", days_ago=5),
+            _payment_with_refs("PAY-new", debtor_acc="ACC-X", txnId="TXN-new", days_ago=0),
+            _payment_with_refs("PAY-3", creditor_acc="ACC-Y", txnId="TXN-3", days_ago=2),
+        ]),
+        notifications=[{"notificationId": "NOTIF-1", "paymentId": "PAY-new"}],
+    )
+
+
+def test_resolve_pay_returns_the_payment_id(rconn):
+    out = svc.resolve_ref(rconn, "db", "PAY-new")
+    assert out == {"paymentId": "PAY-new", "matchedBy": "paymentId", "ref": "PAY-new"}
+
+
+def test_resolve_txn_via_txnId(rconn):
+    out = svc.resolve_ref(rconn, "db", "TXN-3")
+    assert out == {"paymentId": "PAY-3", "matchedBy": "txnId", "ref": "TXN-3"}
+
+
+def test_resolve_acc_picks_the_most_recent_payment(rconn):
+    """ACC-X is on PAY-old and PAY-new — the most recent wins (the analyst wants a way in)."""
+    out = svc.resolve_ref(rconn, "db", "ACC-X")
+    assert out["paymentId"] == "PAY-new"
+    assert out["matchedBy"] == "accountId"
+
+
+def test_resolve_acc_matches_creditor_side(rconn):
+    out = svc.resolve_ref(rconn, "db", "ACC-Y")
+    assert out["paymentId"] == "PAY-3"
+
+
+def test_resolve_notif_via_notifications(rconn):
+    out = svc.resolve_ref(rconn, "db", "NOTIF-1")
+    assert out == {"paymentId": "PAY-new", "matchedBy": "notificationId", "ref": "NOTIF-1"}
+
+
+def test_resolve_miss_returns_none(rconn):
+    assert svc.resolve_ref(rconn, "db", "PAY-nope") is None
+    assert svc.resolve_ref(rconn, "db", "TXN-nope") is None
+
+
+def test_resolve_unknown_prefix_returns_none(rconn):
+    assert svc.resolve_ref(rconn, "db", "FOO-1") is None

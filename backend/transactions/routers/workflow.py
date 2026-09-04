@@ -67,6 +67,16 @@ def stats(
     return to_json_response(data)
 
 
+@router.get("/resolve/{ref}")
+def resolve_ref(request: Request, ref: str) -> JSONResponse:
+    """Resolve a PAY-/TXN-/ACC-/NOTIF- ref to its parent paymentId for the command search."""
+    connection, db_name = _deps(request)
+    result = workflow_read_service.resolve_ref(connection, db_name, ref)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"no payment found for ref {ref}")
+    return to_json_response(result)
+
+
 # Declared last so the literal paths above are matched first — otherwise "/workflow/stats"
 # would bind here as a paymentId.
 @router.get("/payments/{payment_id}")

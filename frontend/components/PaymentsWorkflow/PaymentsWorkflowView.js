@@ -2,80 +2,72 @@
 
 // Client shell for the Payments Workflow route (Payments Analyst persona).
 //
-// Owns the lens selection, the selected payment, and the single refresh key — the
-// one-owner rule GlPipelineView establishes. Deliberately no page-level poll: the list is
-// a surface an analyst reads and filters, and refreshing it under a cursor is hostile. The
-// only thing that changes while you watch it is the selected payment's ledger trace, and
-// PaymentTrace already owns that poll (usePipelineTrace, self-terminating).
-import { useCallback, useState } from "react";
-import { SegmentedControl, SegmentedControlOption } from "@leafygreen-ui/segmented-control";
-import { H2, Body } from "@leafygreen-ui/typography";
+// Two lenses, switched from the NavBar top bar (not a local toggle) via
+// PaymentsWorkflowContext so the nav and this page share one source of truth:
+//   * Payments  — the initiation wizard. On submit, the wizard's "View lifecycle" action
+//     swaps in the PaymentDeepDive for the just-created payment *in this same lens*, so the
+//     analyst watches the saga without hopping to Activity. Back returns to a fresh form.
+//   * Activity  — the historical list; selecting a payment shows its lifecycle.
+//
+// Owns the per-lens selected payment and the single refresh key — the one-owner rule
+// GlPipelineView establishes. No page-level poll: the list is a surface an analyst reads and
+// filters, and refreshing it under a cursor is hostile. The only thing that changes while
+// you watch it is the selected payment's ledger trace, and PaymentDeepDive already owns that
+// poll (usePipelineTrace, self-terminating).
+import { useCallback, useEffect, useState } from "react";
 
 import styles from "./PaymentsWorkflow.module.css";
 import InitiateWizard from "./InitiateWizard";
 import PaymentsLens from "./PaymentsLens";
-
-const LENS = { INITIATE: "initiate", PAYMENTS: "payments", OPERATIONS: "operations" };
+import PaymentDeepDive from "./PaymentDeepDive";
+import { usePaymentsWorkflow, WORKFLOW_LENS } from "@/lib/context/PaymentsWorkflowContext";
 
 export default function PaymentsWorkflowView() {
-  const [lens, setLens] = useState(LENS.PAYMENTS);
+  const { lens } = usePaymentsWorkflow();
   const [refreshKey, setRefreshKey] = useState(0);
-  // Selecting a payment drills into its lifecycle; null means "show the list".
+  // Activity lens: the selected historical payment; null means "show the list".
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
+  // Payments lens: the payment just created via the wizard; null means "show the wizard".
+  const [initiatePaymentId, setInitiatePaymentId] = useState(null);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
-  // After initiating, jump straight to the trace for the payment just created — the demo's
-  // whole point is watching one payment move through the lifecycle.
+  // The wizard's "View lifecycle" action: show the deep dive for the new payment in place,
+  // staying on the Payments lens — do not jump to Activity.
   const handleInitiated = useCallback(
     (paymentId) => {
-      if (paymentId) setSelectedPaymentId(paymentId);
+      if (paymentId) setInitiatePaymentId(paymentId);
       refresh();
-      setLens(LENS.PAYMENTS);
     },
     [refresh]
   );
 
+  // Switching lens (from the NavBar) resets that lens's selection so neither re-shows a
+  // stale lifecycle. Keyed on `lens`, not the trace, so re-polls don't clobber it.
+  useEffect(() => {
+    setSelectedPaymentId(null);
+    setInitiatePaymentId(null);
+  }, [lens]);
+
   return (
     <div className={styles.pwRoot}>
-      <header className={styles.header}>
-        <H2>Payments Workflow</H2>
-        <Body className={styles.subtitle}>
-          Bank-assisted initiation and end-to-end traceability across the payment lifecycle.
-        </Body>
-        <div className={styles.tabs}>
-          <SegmentedControl
-            name="pw-lens"
-            value={lens}
-            // Switching lens returns to that lens's list. Without this, opening a payment
-            // in Payments and switching to Operations would show that payment's lifecycle
-            // instead of the exception list. `handleInitiated` sets the lens directly, so
-            // its deliberate select-then-switch is unaffected.
-            onChange={(v) => {
-              setLens(v);
-              setSelectedPaymentId(null);
-            }}
-            aria-label="Payments workflow lens"
-            // LG requires aria-controls on the parent or every option; the lenses all
-            // render into the same panel below.
-            aria-controls="pw-lens-panel"
-          >
-            <SegmentedControlOption value={LENS.INITIATE}>Initiate</SegmentedControlOption>
-            <SegmentedControlOption value={LENS.PAYMENTS}>Payments</SegmentedControlOption>
-            <SegmentedControlOption value={LENS.OPERATIONS}>Operations</SegmentedControlOption>
-          </SegmentedControl>
-        </div>
-      </header>
-
       <div id="pw-lens-panel" className={styles.lensPanel}>
-        {lens === LENS.INITIATE && <InitiateWizard onInitiated={handleInitiated} />}
+        {lens === WORKFLOW_LENS.PAYMENTS &&
+          (initiatePaymentId ? (
+            <PaymentDeepDive
+              paymentId={initiatePaymentId}
+              refreshKey={refreshKey}
+              onBack={() => setInitiatePaymentId(null)}
+            />
+          ) : (
+            <InitiateWizard onInitiated={handleInitiated} />
+          ))}
 
-        {lens !== LENS.INITIATE && (
+        {lens === WORKFLOW_LENS.ACTIVITY && (
           <PaymentsLens
-            // Remounting on lens change resets filters and paging, which is what switching
-            // between "all payments" and "exceptions only" should do.
+            // Remounting on lens change resets filters and paging, which is what entering
+            // Activity should do.
             key={lens}
-            exceptionsOnly={lens === LENS.OPERATIONS}
             refreshKey={refreshKey}
             onRefresh={refresh}
             selectedPaymentId={selectedPaymentId}

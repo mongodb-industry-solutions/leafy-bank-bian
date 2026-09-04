@@ -63,6 +63,71 @@ export const checkBadgeVariant = (outcome) => {
   }
 };
 
+/**
+ * Status → pill color family for the custom StatusPill (replaces @leafygreen-ui/badge on the
+ * back-office analyst surface). Same status→color mapping as statusBadgeVariant, but returns
+ * a family key the pill CSS classes resolve, instead of an LG Badge variant. TransactionsTable
+ * keeps LG Badge, so statusBadgeVariant stays.
+ *
+ * Families map to LeafyGreen palette pairs (research §2 / §3.4): border + text = dark2 of the
+ * family, background = light2. Pending/draft/unknown = gray outline.
+ */
+export const pillFamily = (status) => {
+  switch ((status || "").toUpperCase()) {
+    // Terminal success
+    case "SETTLED":
+    case "POSTED":
+    case "COMPLETED":
+    case "RECONCILED":
+      return "green";
+    // In flight
+    case "PENDING":
+    case "PROCESSING":
+    case "IN_PROGRESS":
+    case "SUBMITTED":
+      return "yellow";
+    // Failed or refused
+    case "FAILED":
+    case "REJECTED":
+    case "CANCELLED":
+    case "RETURNED":
+    case "REVERSED":
+    case "REFUNDED":
+    case "DISCREPANT":
+      return "red";
+    // Accepted but not yet executed
+    case "INITIATED":
+    case "VALIDATED":
+    case "ENRICHED":
+    case "FINAL_VALIDATED":
+    case "ROUTED":
+    case "AUTHORISED":
+    case "APPROVED":
+      return "blue";
+    case "DRAFT":
+    case "UNRECONCILED":
+      return "gray";
+    default:
+      return "gray";
+  }
+};
+
+/** `checks[].result` → pill family. Same mapping as checkBadgeVariant; SKIP → gray. */
+export const checkPillFamily = (outcome) => {
+  switch ((outcome || "").toUpperCase()) {
+    case "PASS":
+      return "green";
+    case "FAIL":
+      return "red";
+    case "PENDING":
+      return "yellow";
+    case "SKIP":
+      return "gray";
+    default:
+      return "gray";
+  }
+};
+
 export const fmtAmount = (amount, currency = "USD") =>
   amount == null
     ? "—"

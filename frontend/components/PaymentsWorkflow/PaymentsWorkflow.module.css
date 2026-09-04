@@ -8,19 +8,23 @@
    Breakpoint 1024 is LG's Desktop — `kg breakpoints -s leafygreen`. */
 
 .pwRoot {
-  --pw-bg: #ffffff;
-  --pw-border: #e2e8f0;
-  --pw-border-light: #f1f5f9;
-  --pw-text: #0f172a;
-  --pw-muted: #64748b;
-  --pw-faint: #94a3b8;
-  --pw-accent: #00684a;
-  --pw-accent-light: #e3fcf7;
-  --pw-surface: #f9fafb;
-  --pw-shadow: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
+  /* LeafyGreen palette only (research §2). Page = gray.light3, cards flat white,
+     hairlines = gray.light2, elevation by contrast + whitespace — not shadow. */
+  --pw-page: #f9fbfa;          /* gray.light3 — page background */
+  --pw-bg: #ffffff;             /* card surface */
+  --pw-border: #e8ebeb;         /* gray.light2 — hairline */
+  --pw-border-light: #e8ebeb;   /* gray.light2 — inner dividers, same hairline */
+  --pw-text: #1c2d38;           /* gray.dark3 — primary text */
+  --pw-muted: #3d4f58;          /* gray.dark2 — secondary text */
+  --pw-faint: #889397;          /* gray.base — meta / timestamps */
+  --pw-accent: #00684a;         /* green.dark2 — brand / primary actions */
+  --pw-accent-light: #e3fcf7;   /* green.light3 — active tint */
+  --pw-surface: #f9fbfa;        /* gray.light3 — subtle in-card fill */
+  --pw-shadow: none;            /* hairline-only, per the modern fintech recipe */
 
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--pw-text);
+  background: var(--pw-page);
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -33,22 +37,12 @@
 
 /* ── header ── */
 
-.header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .subtitle {
   color: var(--pw-muted);
 }
 
-.tabs {
-  margin-top: 8px;
-}
-
-/* The lens wrapper exists to give the SegmentedControl an aria-controls target. It carries
-   the column gap itself because .pwRoot's gap only reaches its own direct children. */
+/* The lens wrapper carries the column gap itself because .pwRoot's gap only reaches its own
+   direct children. The lens itself is switched from the NavBar top bar, not a local toggle. */
 .lensPanel {
   display: flex;
   flex-direction: column;
@@ -60,7 +54,7 @@
 .panel {
   background: var(--pw-bg);
   border: 1px solid var(--pw-border);
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: var(--pw-shadow);
   overflow: hidden;
 }
@@ -218,32 +212,32 @@
   border-top: 1px solid var(--pw-border-light);
 }
 
-/* ── horizontal lifecycle rail ──
-   Doina's design is a horizontal stage rail (the comment at the top of PaymentTrace.js
-   says so). Stages read left-to-right in saga order; selecting one opens its detail
-   underneath, so the rail stays one line tall no matter how much detail a stage carries.
+/* ── lifecycle: mini-stepper (zone 1) + vertical timeline (zone 2) ──
+   Research §3.3/§3.4. A single payment is a single-threaded state machine; each stage
+   carries too much to sit under a node, so the vertical spine is primary and the thin
+   horizontal stepper above is the clickable summary that preserves the saga's shape.
+   Clicking either scrolls the matching row into view and expands it. */
 
-   Overflow scrolls rather than wraps: a wrapped rail breaks the left-to-right reading of
-   the saga, which is the entire point of the shape. */
-
-.railScroll {
+.miniStepperScroll {
   overflow-x: auto;
-  padding: 8px 4px 16px;
+  padding: 4px 4px 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--pw-border-light);
 }
 
-.railTrack {
+.miniStepperTrack {
   display: flex;
   align-items: flex-start;
   min-width: min-content;
 }
 
-.stageNode {
+.miniNode {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 8px 4px;
-  min-width: 104px;
+  gap: 4px;
+  padding: 6px 4px;
+  min-width: 92px;
   background: none;
   border: none;
   cursor: pointer;
@@ -253,82 +247,232 @@
   text-align: center;
 }
 
-.stageNode:hover:not(:disabled) {
+.miniNode:hover {
   background: var(--pw-surface);
 }
 
-.stageNode:disabled {
-  cursor: default;
-  opacity: .55;
-}
-
-.stageNode:focus-visible {
+.miniNode:focus-visible {
   outline: 2px solid var(--pw-accent);
   outline-offset: 1px;
 }
 
-.stageNodeActive {
+.miniNodeActive {
   background: var(--pw-accent-light);
 }
 
-.stageNodeActive:hover {
-  background: var(--pw-accent-light);
-}
-
-.stageCircle {
-  width: 36px;
-  height: 36px;
+.miniCircle {
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--pw-accent);
-  color: #ffffff;
   flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
 }
 
-.stageCircleEmpty {
+.miniCompleted {
+  background: #00684a;   /* green.dark2 */
+  color: #ffffff;
+  border-color: #00684a;
+}
+
+.miniCurrent {
+  background: #c3e7fe;   /* blue.light2 */
+  color: #083c90;        /* blue.dark2 */
+  border-color: #083c90;
+  animation: pwPulse 1.8s ease-in-out infinite;
+}
+
+.miniFailed {
+  background: #970606;   /* red.dark2 */
+  color: #ffffff;
+  border-color: #970606;
+}
+
+.miniPending {
   background: var(--pw-bg);
-  border: 2px dashed var(--pw-border);
   color: var(--pw-faint);
+  border-color: var(--pw-border);
 }
 
-.stageLabel {
-  font-size: 12px;
-  line-height: 16px;
+.miniLabel {
+  font-size: 11px;
+  line-height: 14px;
   font-weight: 600;
-  max-width: 104px;
+  max-width: 92px;
+  color: var(--pw-muted);
 }
 
-.stageMeta {
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--pw-faint);
-}
-
-/* Sits level with the 36px circle's centre (8px node padding + 18px). */
-.stageConnector {
-  flex: 1 1 16px;
-  min-width: 16px;
+/* Sits level with the 24px circle's centre (6px node padding + 12px). */
+.miniConnector {
+  flex: 1 1 12px;
+  min-width: 12px;
   height: 2px;
   background: var(--pw-border);
-  margin-top: 26px;
+  margin-top: 18px;
 }
 
-.stageConnectorDone {
-  background: var(--pw-accent);
+.miniConnectorDone {
+  background: #00684a;   /* green.dark2 */
 }
 
-.stageDetail {
-  border-top: 1px solid var(--pw-border-light);
-  padding-top: 16px;
+/* ── vertical timeline ── */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
 }
 
-.stageDetailHead {
+.timelineRow {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Downstream of a failure: dim the stages that never ran. */
+.timelineRowDimmed {
+  opacity: .45;
+}
+
+.spine {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 14px;
+}
+
+.timelineNode {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  justify-content: center;
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+  z-index: 1;
+}
+
+.nodeCompleted {
+  background: #00684a;   /* green.dark2 */
+  color: #ffffff;
+  border-color: #00684a;
+}
+
+.nodeCurrent {
+  background: #c3e7fe;   /* blue.light2 */
+  color: #083c90;        /* blue.dark2 */
+  border-color: #083c90;
+  animation: pwPulse 1.8s ease-in-out infinite;
+}
+
+.nodeFailed {
+  background: #970606;   /* red.dark2 */
+  color: #ffffff;
+  border-color: #970606;
+}
+
+.nodePending {
+  background: var(--pw-bg);
+  color: var(--pw-faint);
+  border: 1px dashed var(--pw-border);
+}
+
+/* Vertical connector down to the next row's node. */
+.timelineConnector {
+  width: 2px;
+  flex: 1 1 auto;
+  min-height: 16px;
+  margin-top: 4px;
+  background: var(--pw-border);
+}
+
+.timelineConnectorDone {
+  background: #00684a;   /* green.dark2 */
+}
+
+/* After a failed stage the connector becomes a short dashed gray stub. */
+.timelineConnectorDashed {
+  background: transparent;
+  border-left: 2px dashed var(--pw-border);
+}
+
+.timelineContent {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: 20px;
+}
+
+.timelineRowHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.timelineRowHeader:hover {
+  background: var(--pw-surface);
+}
+
+.timelineRowHeader:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+.timelineStageLabel {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.timelineStageMeta {
+  font-size: 12px;
+  color: var(--pw-faint);
+  margin-right: auto;
+}
+
+.failedBanner {
+  margin: 4px 0 12px;
+  padding: 8px 12px;
+  border: 1px solid #970606;   /* red.dark2 */
+  border-radius: 6px;
+  background: #ffcdc7;         /* red.light2 */
+  color: #970606;              /* red.dark2 */
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.timelineRowBody {
+  border-top: 1px solid var(--pw-border-light);
+  padding-top: 16px;
+  animation: pwExpand 200ms ease;
+}
+
+@keyframes pwPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(8, 60, 144, .35); }
+  50%      { box-shadow: 0 0 0 4px rgba(8, 60, 144, 0); }
+}
+
+@keyframes pwExpand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* Detail bodies sit in columns so a stage with several small blocks (key/values + legs +
@@ -352,6 +496,15 @@
   text-transform: uppercase;
   letter-spacing: .04em;
   margin-bottom: 8px;
+}
+
+/* A raw document / ISO JSON / XML block can be arbitrarily long — cap it and scroll inside,
+   so one stage's payload cannot push the timeline row off the screen. */
+.codeScroll {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
 }
 
 /* ── stage 5: BUSINESS VIEW / ISO VIEW (her L548-565) ── */
@@ -391,7 +544,7 @@
 }
 
 .isoRow:nth-child(odd) {
-  background: rgba(0, 0, 0, .02);
+  background: var(--pw-surface);
 }
 
 .isoElement {
@@ -606,7 +759,7 @@
 .sectionCard {
   background: var(--pw-bg);
   border: 1px solid var(--pw-border);
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 16px;
 }
 
@@ -742,4 +895,144 @@
   font-weight: 600;
   font-size: 18px;
   line-height: 24px;
+}
+
+/* ── status pill (replaces @leafygreen-ui/badge on this surface) ──
+   Research §3.4: 24px tall, 12px uppercase 600, 1px solid border in the status color,
+   light2 background + dark2 text, pill radius. Scoped here — the rest of the app keeps LG
+   Badge. Colors are LeafyGreen palette pairs (research §2): border + text = dark2 of the
+   family, background = light2; pending/draft/neutral = gray outline. */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.pillGreen {
+  border-color: #00684a;   /* green.dark2 */
+  background: #c0fae6;     /* green.light2 */
+  color: #00684a;          /* green.dark2 */
+}
+
+.pillBlue {
+  border-color: #083c90;   /* blue.dark2 */
+  background: #c3e7fe;     /* blue.light2 */
+  color: #083c90;          /* blue.dark2 */
+}
+
+.pillYellow {
+  border-color: #944f01;   /* yellow.dark2 */
+  background: #ffec9e;     /* yellow.light2 */
+  color: #944f01;          /* yellow.dark2 */
+}
+
+.pillRed {
+  border-color: #970606;   /* red.dark2 */
+  background: #ffcdc7;     /* red.light2 */
+  color: #970606;          /* red.dark2 */
+}
+
+.pillGray {
+  border-color: #c1c7c6;   /* gray.light1 */
+  background: #f9fbfa;     /* gray.light3 */
+  color: #3d4f58;          /* gray.dark2 */
+}
+
+/* ── independent axes row (research §1.4 / §4) ──
+   Posting / settlement / reconciliation advance independently of currentState, so they get
+   their own row under the header — separate from the linear timeline. */
+
+.axesRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+}
+
+.axesHeading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.axisItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.axisLabel {
+  font-size: 12px;
+  color: var(--pw-muted);
+}
+
+/* ── command-palette search (research §3.1 #2 / §4) ──
+   One box, prefix-routed on Enter. PAY- deep-links, CUST- filters the list, the other refs
+   surface an explicit "needs backend resolve route" notice rather than a silent no-op. */
+
+.commandSearch {
+  margin-bottom: 16px;
+}
+
+.commandForm {
+  position: relative;
+  display: flex;
+  align-items: center;
+  max-width: 480px;
+}
+
+.commandIcon {
+  position: absolute;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  color: var(--pw-faint);
+  pointer-events: none;
+}
+
+.commandInput {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 36px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--pw-text);
+  background: var(--pw-bg);
+}
+
+.commandInput:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+.commandNotice {
+  margin-top: 8px;
+  max-width: 480px;
+  padding: 6px 10px;
+  border: 1px solid #944f01;   /* yellow.dark2 */
+  border-radius: 6px;
+  background: #ffec9e;         /* yellow.light2 */
+  color: #944f01;              /* yellow.dark2 */
+  font-size: 12px;
+  line-height: 20px;
 }

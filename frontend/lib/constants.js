@@ -32,7 +32,7 @@ export const USER_MAP = {
   // deliberately untouched: he still opens the separately-owned fsi-payments-processing
   // demo in a new tab.
   "67a1000000000000000000009": {
-    UserName: "Nadia",
+    UserName: "Harry",
     Role: "Payments Analyst",
     Section: "backoffice",
     Employer: "Leafy Bank",

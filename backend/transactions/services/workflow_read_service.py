@@ -266,3 +266,51 @@ def get_stats(
         "exceptions": exceptions,
         "byStatus": by_status,
     }
+
+
+def resolve_ref(connection: MongoDBConnection, db_name: str, ref: str) -> Optional[dict]:
+    """Resolve a typed ref (``PAY-``/``TXN-``/``ACC-``/``NOTIF-``) to its parent paymentId.
+
+    The back-office command search (research §3.1 #2) accepts any of the ``shared.refs``
+    prefixes and deep-links to that payment's lifecycle. ``PAY-`` is the payment's own id;
+    the others are secondary refs needing a lookup:
+
+    * ``TXN-``  — ``payments.txnId`` (written at initiation, ``payment_document.py:160``).
+    * ``ACC-``  — ``debtor.accountId`` **or** ``creditor.accountId``. An account has many
+      payments, so the most recent one wins — the analyst is looking for a way in, not an
+      exhaustive list.
+    * ``NOTIF-`` — ``notifications.notificationId`` → its ``paymentId``.
+
+    Returns ``{"paymentId", "matchedBy", "ref"}`` or ``None`` (router maps to 404). ``matchedBy``
+    is the field the ref was found on, so the UI can say *"jumped via txnId"* and make a silent
+    mismatch visible.
+    """
+    coll = _payments(connection, db_name)
+    upper = (ref or "").upper()
+
+    if upper.startswith("PAY-"):
+        payment = coll.find_one({"paymentId": ref}, {"paymentId": 1, "_id": 0})
+        return {"paymentId": payment["paymentId"], "matchedBy": "paymentId", "ref": ref} if payment else None
+
+    if upper.startswith("TXN-"):
+        payment = coll.find_one({"txnId": ref}, {"paymentId": 1, "_id": 0})
+        return {"paymentId": payment["paymentId"], "matchedBy": "txnId", "ref": ref} if payment else None
+
+    if upper.startswith("ACC-"):
+        # Newest first — an account has many payments; the most recent is the way in.
+        payment = coll.find_one(
+            {"$or": [{"debtor.accountId": ref}, {"creditor.accountId": ref}]},
+            {"paymentId": 1, "_id": 0},
+            sort=[("createdAt", -1)],
+        )
+        return {"paymentId": payment["paymentId"], "matchedBy": "accountId", "ref": ref} if payment else None
+
+    if upper.startswith("NOTIF-"):
+        notif = connection.get_collection(db_name, "notifications").find_one(
+            {"notificationId": ref}, {"paymentId": 1, "_id": 0}
+        )
+        if notif and notif.get("paymentId"):
+            return {"paymentId": notif["paymentId"], "matchedBy": "notificationId", "ref": ref}
+        return None
+
+    return None

@@ -99,6 +99,13 @@ export function buildLifecycleStages(payment, trace) {
   const events = payment?.lifecycle?.events ?? [];
   const checks = payment?.checks ?? [];
 
+  // Stage 6's fee ledger event — a SECOND ledgerEvents doc keyed {paymentId}-FEE
+  // (ingest_worker, stage 6). The backend has returned it as `trace.feeEvent` since
+  // doc 21 step 8, but it was never rendered, so the fee legs (DR 2111 / CR 4211)
+  // were invisible. Surfaced here as its own panel in the accounting group, mirroring
+  // the principal ledger event. Absent for internal transfers and no-fee wires.
+  const feeEvent = trace?.feeEvent ?? null;
+
   // Stage 7 — settlement event and position (doc 21 step 8).
   const se = trace?.settlementEvent ?? null;
   const positions = payment?.settlementPositions ?? [];
@@ -255,6 +262,36 @@ export function buildLifecycleStages(payment, trace) {
               : [],
             credits: le.creditLeg
               ? [leg(le.creditLeg.glAccountCode, names[le.creditLeg.glAccountCode] || "", le.creditLeg.amount)]
+              : [],
+          }
+        : null,
+    },
+    {
+      // The fee is a second ledgerEvents doc (idempotencyKey {paymentId}-FEE), not a
+      // second leg of the principal. It has its own debit/credit legs, its own subledger
+      // rows, and its own journal entry — so it gets its own panel in the accounting
+      // group, reusing the `ledgerEvent` renderer. Reached only when a fee was levied
+      // (wires with a stage-3 charge); internal transfers and no-fee wires have none.
+      key: "feeLedgerEvent",
+      label: "Fee ledger event",
+      icon: "Copy",
+      stage: 6,
+      group: "Accounting & posting",
+      reached: !!feeEvent,
+      status: feeEvent?.postingStatus,
+      meta: feeEvent
+        ? (feeEvent.postingResult?.journalEntryId || "wire fee")
+        : null,
+      kind: "ledgerEvent",
+      data: feeEvent,
+      legs: feeEvent
+        ? {
+            currency: feeEvent.debitLeg?.currency || feeEvent.creditLeg?.currency || "USD",
+            debits: feeEvent.debitLeg
+              ? [leg(feeEvent.debitLeg.glAccountCode, names[feeEvent.debitLeg.glAccountCode] || "", feeEvent.debitLeg.amount)]
+              : [],
+            credits: feeEvent.creditLeg
+              ? [leg(feeEvent.creditLeg.glAccountCode, names[feeEvent.creditLeg.glAccountCode] || "", feeEvent.creditLeg.amount)]
               : [],
           }
         : null,
