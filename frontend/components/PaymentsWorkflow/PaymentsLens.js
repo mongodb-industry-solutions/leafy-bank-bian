@@ -169,15 +169,33 @@ function CommandSearch({ onJump, onFilterCustomer }) {
   );
 }
 
+// The list's projection already carries `debtor`/`creditor` (name + accountId), so the
+// human-relevant column is the counterparty, not the internal customerId. Primary = the
+// beneficiary; the sub-line is the funding account the money leaves from.
+function beneficiaryOf(p) {
+  return {
+    name: p.creditor?.name || p.creditor?.accountId || "—",
+    sub: p.debtor?.accountId ? `from ${p.debtor.accountId}` : "",
+  };
+}
+
 function PaymentsTable({ items, selectedPaymentId, onSelect }) {
   return (
     <div className={styles.tableWrap}>
       <table className={styles.table}>
+        <colgroup>
+          <col style={{ width: "34%" }} />
+          <col style={{ width: "20%" }} />
+          <col style={{ width: "16%" }} />
+          <col style={{ width: "12%" }} />
+          <col style={{ width: "8%" }} />
+          <col style={{ width: "10%" }} />
+        </colgroup>
         <thead>
           <tr>
+            <th>Beneficiary</th>
             <th>Payment ID</th>
             <th>Created</th>
-            <th>Customer</th>
             <th className={styles.numeric}>Amount</th>
             <th>Rail</th>
             <th>Status</th>
@@ -186,6 +204,7 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
         <tbody>
           {items.map((p) => {
             const active = p.paymentId === selectedPaymentId;
+            const beneficiary = beneficiaryOf(p);
             return (
               <tr
                 key={p.paymentId}
@@ -203,14 +222,21 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                   }
                 }}
               >
-                <td className={styles.mono}>{p.paymentId}</td>
-                <td>{fmtWhen(p.createdAt)}</td>
-                <td>{p.customerId || "—"}</td>
-                <td className={styles.numeric}>{fmtAmount(p.amount, p.currency)}</td>
-                <td>{p.rail || "—"}</td>
                 <td>
-                  <StatusPill status={p.status} />
+                  <div className={styles.beneficiary} title={beneficiary.name}>
+                    {beneficiary.name}
+                  </div>
+                  {beneficiary.sub && (
+                    <div className={styles.beneficiarySub}>{beneficiary.sub}</div>
+                  )}
                 </td>
+                <td className={styles.mono}>{p.paymentId}</td>
+                <td className={styles.cellMuted}>{fmtWhen(p.createdAt)}</td>
+                <td className={`${styles.numeric} ${styles.cellAmount}`}>
+                  {fmtAmount(p.amount, p.currency)}
+                </td>
+                <td><span className={styles.railTag}>{p.rail || "—"}</span></td>
+                <td><StatusPill status={p.status} /></td>
               </tr>
             );
           })}
@@ -240,10 +266,12 @@ export default function PaymentsLens({
   const excepted = useWorkflowExceptions({ limit: PAGE_SIZE, skip: filters.skip }, refreshKey);
   const { items, total, loading, error } = exceptionsOnly ? excepted : listed;
 
-  const page = Math.floor(filters.skip / PAGE_SIZE) + 1;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const move = (delta) =>
     setFilters((f) => ({ ...f, skip: Math.max(0, f.skip + delta * PAGE_SIZE) }));
+  const clearFilters = () =>
+    setFilters({ status: "", rail: "", customerId: "", from: "", to: "", skip: 0 });
+  const activeFilterCount = [filters.status, filters.rail, filters.customerId, filters.from, filters.to]
+    .filter(Boolean).length;
 
   // Selecting a payment ADVANCES to the lifecycle in place, rather than appending it below
   // the table. Appending pushed the rail off the bottom of a full page of rows, so reading
@@ -266,37 +294,47 @@ export default function PaymentsLens({
     <div className={styles.stack}>
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
-          <Icon glyph={exceptionsOnly ? "Warning" : "List"} size={16} />
-          <span className={styles.panelTitle}>
-            {exceptionsOnly ? "Exceptions" : "Payments"}
-          </span>
-          <span className={styles.muted} style={{ marginLeft: 8 }}>
-            {loading ? "loading…" : `${total} total`}
-          </span>
-          <div style={{ marginLeft: "auto" }}>
-            <Button size="xsmall" leftGlyph={<Icon glyph="Refresh" />} onClick={onRefresh}>
+          <div className={styles.panelHead}>
+            <div className={styles.panelTitleRow}>
+              <Icon glyph={exceptionsOnly ? "Warning" : "List"} size={16} />
+              <span className={styles.panelTitle}>
+                {exceptionsOnly ? "Exceptions" : "Payments"}
+              </span>
+            </div>
+            <span className={styles.panelDesc}>
+              {exceptionsOnly
+                ? "Payments stopped in a terminal state that need intervention."
+                : "Payment orders initiated and moving through the lifecycle."}
+            </span>
+          </div>
+          <div className={styles.panelHeadRight}>
+            <span className={styles.resultCount}>
+              {loading ? "Loading…" : `${total} ${total === 1 ? "payment" : "payments"}`}
+            </span>
+            <Button size="small" leftGlyph={<Icon glyph="Refresh" />} onClick={onRefresh}>
               Refresh
             </Button>
           </div>
         </div>
 
-        <div className={styles.panelBody}>
-          {exceptionsOnly ? (
-            <span className={styles.muted}>
-              Payments that stopped in a terminal state and need intervention.
-            </span>
-          ) : (
-            <>
-              <CommandSearch
-                onJump={onSelect}
-                onFilterCustomer={(v) =>
-                  setFilters((f) => ({ ...f, customerId: v, skip: 0 }))
-                }
-              />
+        {!exceptionsOnly && (
+          <div className={styles.panelBody}>
+            <CommandSearch
+              onJump={onSelect}
+              onFilterCustomer={(v) =>
+                setFilters((f) => ({ ...f, customerId: v, skip: 0 }))
+              }
+            />
+            <div className={styles.filterBar}>
               <Filters value={filters} onChange={setFilters} />
-            </>
-          )}
-        </div>
+              {activeFilterCount > 0 && (
+                <Button size="xsmall" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className={styles.panelBody}>
@@ -322,8 +360,12 @@ export default function PaymentsLens({
               onSelect={onSelect}
             />
             <div className={styles.pager}>
-              <span className={styles.muted}>Page {page} of {pages}</span>
-              <div style={{ display: "flex", gap: 8 }}>
+              <span className={styles.muted}>
+                {items.length
+                  ? `Showing ${filters.skip + 1}–${Math.min(filters.skip + PAGE_SIZE, total)} of ${total}`
+                  : ""}
+              </span>
+              <div className={styles.pagerButtons}>
                 <Button size="xsmall" disabled={filters.skip === 0} onClick={() => move(-1)}>
                   Previous
                 </Button>

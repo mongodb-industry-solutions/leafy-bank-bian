@@ -948,22 +948,25 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
   return (
     <div className={styles.panel}>
       <div className={styles.panelHeader}>
-        {onBack && (
-          <Button
-            size="xsmall"
-            leftGlyph={<Icon glyph="ArrowLeft" />}
-            onClick={onBack}
-            className={styles.backButton}
-          >
-            Payments
-          </Button>
-        )}
-        <Icon glyph="Diagram3" size={16} />
-        <span className={styles.panelTitle}>Payment lifecycle</span>
-        <span className={`${styles.mono} ${styles.muted}`}>{paymentId}</span>
-        {payment?.status && (
-          <StatusPill status={payment.status} />
-        )}
+        <div className={styles.panelTitleRow}>
+          {onBack && (
+            <Button
+              size="xsmall"
+              leftGlyph={<Icon glyph="ArrowLeft" />}
+              onClick={onBack}
+              className={styles.backButton}
+            >
+              Payments
+            </Button>
+          )}
+          <span className={styles.panelTitle}>Payment lifecycle</span>
+        </div>
+        <div className={styles.panelHeadRight}>
+          <span className={`${styles.mono} ${styles.muted}`}>{paymentId}</span>
+          {payment?.status && (
+            <StatusPill status={payment.status} />
+          )}
+        </div>
       </div>
 
       <div className={styles.panelBody}>

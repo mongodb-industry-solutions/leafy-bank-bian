@@ -323,7 +323,7 @@ function SectionCard({ n, title, subtitle, children, className }) {
   return (
     <div className={`${styles.sectionCard} ${className || ""}`}>
       <div className={styles.sectionHeading}>
-        <span>{n}.</span>
+        <span className={styles.sectionNum}>{n}</span>
         <span>{title}</span>
       </div>
       {subtitle && <div className={styles.sectionSub}>{subtitle}</div>}
