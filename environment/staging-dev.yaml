@@ -1,0 +1,142 @@
+security:
+  dataClassification: "Internal"
+  dataDesignation: ["MI"]
+
+ownership:
+  driEmail: "kiran.tulsulkar@mongodb.com"
+
+# Multicontainer dev preview on the staging cluster (branch: integrate-payment-flow).
+# One pod: frontend (main, port 8080) + accounts/transactions/ledger sidecars on
+# localhost 8001/8002/8003. Top-level `env`/`envSecrets` apply to the main (frontend)
+# container only; each sidecar carries its own env below. The frontend is a Next.js
+# proxy with no direct Mongo access, so it needs no ksec secret — only the sidecars
+# pull MONGODB_URI / LEAFYBANK_DB_NAME / PARTY_AUTH_SECRET from the
+# `leafy-bank-bian-dev` ksec secret group (isolated dev DB).
+env:
+  NODE_ENV: staging
+  # Frontend proxy → sidecars via the shared pod loopback.
+  ACCOUNTS_BACKEND_URL: http://localhost:8001
+  TRANSACTIONS_BACKEND_URL: http://localhost:8002
+  TRANSACTIONS_BASE_URL: http://localhost:8002
+  LEDGER_BACKEND_URL: http://localhost:8003
+  # External shared staging services (open-finance monolith + chatbots) stay as-is.
+  CONSENT_BACKEND_URL: http://open-finance-next-gen-web-app:80
+  CHATBOT_BACKEND_URL: http://cross-be-pdf-rag-web-app:80
+  OPENFINANCE_CHATBOT_BACKEND_URL: http://openfinance-chatbot-web-app:80
+
+sidecarContainers:
+  # ---------- accounts (BIAN PartyReferenceDataDirectory + CurrentAccount) ----------
+  - name: accounts
+    containerPort: 8001
+    env:
+      - name: PORT
+        value: "8001"
+      - name: NODE_ENV
+        value: staging
+      - name: MONGODB_URI
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: MONGODB_URI
+      - name: LEAFYBANK_DB_NAME
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: LEAFYBANK_DB_NAME
+      # HS256 signing key — accounts signs the assessment token that transactions verifies.
+      - name: PARTY_AUTH_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: PARTY_AUTH_SECRET
+      - name: PARTY_AUTH_TOKEN_TTL_SECONDS
+        value: "3600"
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+  # ---------- transactions (BIAN PaymentOrderInitiation + PaymentSettlement) ----------
+  - name: transactions
+    containerPort: 8002
+    env:
+      - name: PORT
+        value: "8002"
+      - name: NODE_ENV
+        value: staging
+      - name: MONGODB_URI
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: MONGODB_URI
+      - name: LEAFYBANK_DB_NAME
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: LEAFYBANK_DB_NAME
+      # Same HS256 key as accounts (symmetric) — verifies the token accounts signed.
+      - name: PARTY_AUTH_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: PARTY_AUTH_SECRET
+      - name: REQUIRE_AUTHENTICATION
+        value: "false"
+      # Sanity bound on malformed input, NOT an entitlement limit. Keep above every
+      # segment limit so stage 2's entitlement policy is what actually decides.
+      - name: PAYMENT_LIMIT_USD
+        value: "1000000"
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+  # ---------- ledger (async GL pipeline — change streams + 10-min batch) ----------
+  - name: ledger
+    containerPort: 8003
+    env:
+      - name: PORT
+        value: "8003"
+      - name: NODE_ENV
+        value: staging
+      - name: MONGODB_URI
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: MONGODB_URI
+      - name: LEAFYBANK_DB_NAME
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: LEAFYBANK_DB_NAME
+      - name: ENABLE_CHANGE_STREAMS
+        value: "true"
+      - name: GL_BATCH_INTERVAL_SECONDS
+        value: "600"
+      # -1 = EOD topup worker disabled (staging/dev posture — avoids the busy-loop
+      # seen when the interval is -1 and the worker returns immediately).
+      - name: EOD_TOPUP_INTERVAL_SECONDS
+        value: "-1"
+      - name: EOD_TOPUP_THRESHOLD
+        value: "500"
+      - name: EOD_TOPUP_AMOUNT
+        value: "500"
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+serviceAccount:
+  enabled: true
+  irsa:
+    accountId: "275662791714"
+    roleName: "kanopy-staging-cicd-irsa"
