@@ -135,6 +135,12 @@ export function buildLifecycleStages(payment, trace) {
       meta: payment?.paymentId,
       kind: "initiation",
       data: payment,
+      intro:
+        "Captures the payment instruction and creates the canonical payments document " +
+        "immediately. Payment type and rail are set from the customer's selection at creation — " +
+        "never inferred downstream — and the debtor and creditor are frozen as immutable, " +
+        "point-in-time snapshots: the Travel Rule (FATF Rec 16) requires originator details to " +
+        "travel unchanged with the payment.",
     },
     {
       key: "authentication",
@@ -145,6 +151,18 @@ export function buildLifecycleStages(payment, trace) {
       meta: checks.length ? `${checks.length} checks` : "stage 2",
       kind: "checks",
       data: checks,
+      intro:
+        "Answers one question — is this caller allowed to initiate this amount? Two gates: " +
+        "party authentication — is this the real customer, corporate user, or API? — and " +
+        "payment entitlement — is this caller allowed to initiate this amount from this " +
+        "account? Records the authentication{} and entitlement{} assessments and the checks[] " +
+        "results the gates produce, including dual approval once the amount clears the segment " +
+        "threshold.",
+      raw: {
+        authentication: payment?.authentication ?? null,
+        entitlement: payment?.entitlement ?? null,
+        checks,
+      },
     },
     {
       // Stage 3 owns three states (VALIDATED -> ENRICHED -> FINAL_VALIDATED) and two kinds

@@ -426,6 +426,51 @@ function StateEvents({ events }) {
 // actor}. `outcome`/`reason` are read as fallbacks because this panel was built before the
 // array existed and guessed those two names — a document written by the code carries
 // `result`/`detail`.
+/**
+ * Render the per-check audit trail as a progressive gate flow rather than a flat list.
+ *
+ * The six stage-2 checks advance in the order a payment actually does — identity, then the
+ * funding account, then entitlement, then the amount limit, then approval. Each phase is a
+ * small headed group with the checks that belong to it, so the reader sees the gate sequence
+ * rather than a shuffled list. Checks from later stages (which share `checks[]`) still render,
+ * grouped under a generic heading. One row = a result pill + a concise plain-language label +
+ * the backend's one-line detail.
+ */
+const CHECK_PHASE = {
+  customer_authenticated: "Identity",
+  account_active: "Account",
+  account_unrestricted: "Account",
+  customer_entitled: "Entitlement",
+  payment_limit_available: "Payment limit",
+  dual_approval: "Approval",
+};
+const CHECK_ORDER = ["Identity", "Account", "Entitlement", "Payment limit", "Approval"];
+const CHECK_LABEL = {
+  customer_authenticated: "Customer authenticated",
+  account_active: "Account active",
+  account_unrestricted: "No debit restriction",
+  customer_entitled: "User entitled to debit",
+  payment_limit_available: "Payment limit available",
+  dual_approval: "Required approval",
+};
+const humanizeLabel = (s) =>
+  (s || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+function CheckRow({ c }) {
+  const result = c.result || c.outcome;
+  const detail = c.detail || c.reason;
+  return (
+    <div className={styles.checkRow}>
+      <StatusPill family={checkPillFamily(result)}>{result || "—"}</StatusPill>
+      <span className={styles.checkName} title={detail}>
+        {CHECK_LABEL[c.name] || humanizeLabel(c.name) || "check"}
+      </span>
+      {detail && <span className={styles.checkReason} title={detail}>{detail}</span>}
+      {c.mode && <span className={styles.checkMode}>{c.mode}</span>}
+    </div>
+  );
+}
+
 function Checks({ checks }) {
   if (!checks?.length) {
     return (
@@ -434,22 +479,30 @@ function Checks({ checks }) {
       </Body>
     );
   }
+  const groups = CHECK_ORDER.map((phase) => ({
+    phase,
+    entries: checks.filter((c) => CHECK_PHASE[c.name] === phase),
+  })).filter((g) => g.entries.length > 0);
+  const general = checks.filter((c) => !CHECK_PHASE[c.name]);
+
   return (
-    <div>
-      {checks.map((c, i) => {
-        const result = c.result || c.outcome;
-        const detail = c.detail || c.reason;
-        return (
-          <div className={styles.check} key={`${c.name || c.checkId}-${i}`}>
-            <StatusPill family={checkPillFamily(result)}>{result || "—"}</StatusPill>
-            <span className={styles.checkLabel}>
-              {c.label || c.name || c.checkId || "check"}
-              {detail ? <span className={styles.eventReason}> · {detail}</span> : null}
-            </span>
-            {c.mode && <span className={styles.muted}>{c.mode}</span>}
-          </div>
-        );
-      })}
+    <div className={styles.checkFlow}>
+      {groups.map((g) => (
+        <div className={styles.checkPhase} key={g.phase}>
+          <div className={styles.checkPhaseLabel}>{g.phase}</div>
+          {g.entries.map((c, i) => (
+            <CheckRow key={`${c.name || c.checkId}-${g.phase}-${i}`} c={c} />
+          ))}
+        </div>
+      ))}
+      {general.length > 0 && (
+        <div className={styles.checkPhase}>
+          <div className={styles.checkPhaseLabel}>Checks</div>
+          {general.map((c, i) => (
+            <CheckRow key={`${c.name || c.checkId}-${i}`} c={c} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -590,16 +643,19 @@ function summaryRows(stage, payment) {
   const d = stage.data;
   switch (stage.kind) {
     case "initiation":
+      // The canonical instruction. The parties have their own "Immutable parties" block
+      // below, so they are deliberately not repeated here.
       return [
-        ["Customer", d?.customerId],
-        ["Type / Rail", `${d?.type || "—"} · ${d?.rail || "—"}`],
+        ["Type · Rail", `${d?.type || "—"} · ${d?.rail || "—"}`],
         ["Amount", fmtAmount(d?.amount, d?.currency)],
         ["Priority", d?.priority],
+        ["Charge bearer", d?.chargeBearer],
         ["Channel", d?.initiation?.channel],
-        ["Debtor", d?.debtor ? `${d.debtor.name || "—"} (${d.debtor.accountId || "—"})` : null],
-        ["Creditor", d?.creditor ? `${d.creditor.name || "—"} (${d.creditor.accountId || "external"})` : null],
-        ["Remittance", d?.remittance?.unstructured],
-        ["Requested execution", d?.requestedExecutionDate],
+        ["Customer", d?.customerId],
+        ["Requested execution date", d?.requestedExecutionDate],
+        ["Purpose", d?.remittance?.unstructured],
+        ["End-to-end reference", d?.remittance?.reference],
+        ["Client reference", d?.remittance?.invoiceNo],
         ["Initiated", fmtWhen(d?.initiatedAt)],
       ];
     case "checks": {
@@ -747,7 +803,94 @@ function summaryRows(stage, payment) {
   }
 }
 
+/** One immutable party snapshot (debtor or creditor) as a card of key/values. */
+function PartyCard({ label, party, external }) {
+  const rows = [
+    ["Name", party?.name],
+    ["Account ID", party?.accountId],
+    ["Account no", party?.accountNo ? `····${String(party.accountNo).slice(-4)}` : null],
+    ["Account type", party?.accountType],
+    ["Bank", party?.bankName],
+    ["BIC", party?.bic],
+    ["Country", party?.bankCountry],
+  ].filter(([, v]) => v != null);
+  return (
+    <div className={styles.partyCard}>
+      <div className={styles.partyLabel}>
+        {label}
+        {external && !party?.accountId && (
+          <span className={styles.partyExternal}>external</span>
+        )}
+      </div>
+      <KeyValues rows={rows.length ? rows : [["—", "—"]]} />
+    </div>
+  );
+}
+
+/**
+ * The rail-specific initiation envelope — Doina's "type-specific initiation envelope". One is
+ * populated per rail; the other two stay all-null. Shows the fields stage 1 genuinely knows,
+ * and says what a later stage resolves (so nulls read as "not yet", not "missing").
+ */
+function InitEnvelope({ payment }) {
+  const rail = payment?.rail;
+  let rows = null;
+  let note = null;
+  if (rail === "WIRE") {
+    const w = payment?.wireDetails || {};
+    rows = [
+      ["Message definition", w.messageDefinitionIdentifier],
+      ["Payment method", w.paymentMethod],
+      ["Wire type", w.wireType],
+      ["Payment info id", w.paymentInformationId],
+      ["Service level", w.paymentTypeInformation?.serviceLevel?.code],
+      ["Initiating party", w.initiatingParty?.name],
+    ];
+    note =
+      "Wire type is derived from the two bank countries. Routing fields (network, local " +
+      "instrument code) stay null here — they are resolved in stage 4 orchestration.";
+  } else if (rail === "INTERNAL") {
+    const i = payment?.internalDetails || {};
+    rows = [
+      ["Transfer type", i.transferType],
+      ["Posting reference", i.postingReference],
+    ];
+    note =
+      "postingReference points at the ledger event the ledger service writes asynchronously — " +
+      "null at initiation.";
+  }
+  return (
+    <div>
+      <KeyValues rows={rows ? rows.filter(([, v]) => v != null) : [["Rail", rail || "—"]]} />
+      {note && <div className={styles.stageNote}>{note}</div>}
+      {rail && (
+        <div className={styles.stageNote}>
+          Exactly one envelope is populated per rail — the {rail} one carries the fields above;
+          the other two stay all-null.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A titled card of key/values — reused for the stage-2 authentication/entitlement gates. */
+function DetailCard({ label, tag, rows }) {
+  return (
+    <div className={styles.partyCard}>
+      <div className={styles.partyLabel}>
+        {label}
+        {tag && <span className={styles.partyExternal}>{tag}</span>}
+      </div>
+      <KeyValues rows={rows.length ? rows : [["—", "—"]]} />
+    </div>
+  );
+}
+
 function StageDetailBody({ stage, payment }) {
+  // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
+  // must sit above the early returns (rules of hooks).
+  const [showRaw, setShowRaw] = useState(false);
+
   if (!stage) return null;
 
   if (!stage.reached) {
@@ -759,6 +902,7 @@ function StageDetailBody({ stage, payment }) {
   }
 
   const showLegs = !!stage.legs;
+  const showInitiation = stage.kind === "initiation";
   const showEnrichment = stage.kind === "enrichment";
   const showAuthorization = stage.kind === "authorization";
   const showRailExecution = stage.kind === "railExecution";
@@ -772,10 +916,78 @@ function StageDetailBody({ stage, payment }) {
     showEnrichment || showAuthorization || showRailExecution
       ? stage.data?.checks
       : stage.data;
+  // Stage 1's only lifecycle event is INITIATED — the moment the instruction was captured.
+  const initEvents = (payment?.lifecycle?.events || []).filter(
+    (e) => (e.state || "").toUpperCase() === "INITIATED"
+  );
+  // The raw document is always present as an expandable artifact below the structured
+  // blocks. Most stages dump their `data`; stage 2 is a checks stage (so `data` is the
+  // checks array) and instead carries an explicit `raw` object of the assessments.
+  const showRawToggle =
+    (!!stage.data && !showChecks && !showStates && !showEnrichment) || !!stage.raw;
+  // Stage 2 is the only `checks`-kind stage: it renders the two gate assessments instead
+  // of the generic Summary, and surfaces the dual-approval rule (Doina's $25k → $10k demo).
+  const showStageTwo = stage.kind === "checks";
+  const a = payment?.authentication;
+  const e = payment?.entitlement;
+  const authRows = [
+    ["Method", a?.method],
+    ["Factor count", a?.factorCount],
+    ["Caller type", a?.callerType],
+    ["Session", a?.sessionRef],
+    ["Step-up", a?.stepUp ? "Yes" : null],
+    ["Sufficient", a?.sufficient ? "Yes" : "No"],
+    ["Assessed at", fmtWhen(a?.assessedAt)],
+  ];
+  const entRows = [
+    ["Segment", e?.segment],
+    ["Signing rule", e?.signingRule],
+    ["Per-payment limit", e?.perPaymentLimit != null ? fmtAmount(e.perPaymentLimit, payment?.currency) : null],
+    ["Dual-approval threshold", e?.dualApprovalThreshold != null ? fmtAmount(e.dualApprovalThreshold, payment?.currency) : null],
+    ["Dual approval required", e?.dualApprovalRequired ? `Yes · ${e.dualApprovalBy || "—"}` : "No"],
+    ["Assessed at", fmtWhen(e?.assessedAt)],
+  ];
 
   return (
-    <div className={styles.detailColumns}>
-        {showChecks && (
+    <>
+      {stage.intro && (
+        <div className={styles.stageIntro}>
+          <div className={styles.stageIntroLabel}>What this stage does</div>
+          <div className={styles.stageIntroText}>{stage.intro}</div>
+        </div>
+      )}
+      <div className={styles.detailColumns}>
+        {showStageTwo && (
+          <div className={styles.stageTwoGrid}>
+            <div className={styles.detailBlock}>
+              <div className={styles.detailBlockTitle}>The two gates</div>
+              <div className={styles.partyGrid}>
+                <DetailCard label="Party authentication" rows={authRows} />
+                <DetailCard label="Payment entitlement" rows={entRows} />
+              </div>
+              {payment?.amount != null &&
+                e?.dualApprovalThreshold != null &&
+                Number(payment.amount) > Number(e.dualApprovalThreshold) && (
+                <div className={styles.dualApprovalCallout}>
+                  <strong>Dual approval applies:</strong>{" "}
+                  {fmtAmount(payment?.amount, payment?.currency)} is above the{" "}
+                  {e?.segment || "segment"} dual-approval threshold of{" "}
+                  {fmtAmount(e?.dualApprovalThreshold, payment?.currency)} — a second approver
+                  ({e?.dualApprovalBy || "—"}) is required. Simulated: no human approved this
+                  payment; the interactive approval queue is deferred.
+                </div>
+              )}
+            </div>
+            <div className={styles.detailBlock}>
+              <div className={styles.detailBlockTitle}>Checks — gate results</div>
+              <Checks checks={checkList} />
+            </div>
+          </div>
+        )}
+
+        {/* Stage 2 renders its own checks inside the two-column grid; every other checks
+            stage (3/4/5) uses this generic block. */}
+        {showChecks && !showStageTwo && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Checks</div>
             <Checks checks={checkList} />
@@ -791,10 +1003,38 @@ function StageDetailBody({ stage, payment }) {
 
         {/* Stage 2 shows both: the six check results, and the assessment blocks
             (`authentication{}` / `entitlement{}`) that say what they were judged against. */}
-        {!showStates && (
+        {showInitiation && initEvents.length > 0 && (
+          <div className={styles.detailBlock}>
+            <div className={styles.detailBlockTitle}>State transition</div>
+            <StateEvents events={initEvents} />
+          </div>
+        )}
+
+        {!showStates && !showStageTwo && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Summary</div>
             <KeyValues rows={summaryRows(stage, payment)} />
+          </div>
+        )}
+
+        {showInitiation && (
+          <div className={styles.detailBlockWide}>
+            <div className={styles.detailBlockTitle}>Immutable parties</div>
+            <div className={styles.partyGrid}>
+              <PartyCard label="Debtor — the payer" party={stage.data?.debtor} />
+              <PartyCard
+                label="Creditor — the beneficiary"
+                party={stage.data?.creditor}
+                external
+              />
+            </div>
+          </div>
+        )}
+
+        {showInitiation && (
+          <div className={styles.detailBlockWide}>
+            <div className={styles.detailBlockTitle}>Initiation envelope</div>
+            <InitEnvelope payment={stage.data} />
           </div>
         )}
 
@@ -844,17 +1084,30 @@ function StageDetailBody({ stage, payment }) {
           </div>
         )}
 
-        {stage.data && !showChecks && !showStates && !showEnrichment && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>Raw document</div>
-            <div className={styles.codeScroll}>
-              <Code language="json" copyButtonAppearance="hover">
-                {JSON.stringify(stage.data, null, 2)}
-              </Code>
+        {showRawToggle && (
+          <div className={styles.detailBlockWide}>
+            <div className={styles.rawToggleBar}>
+              <button
+                type="button"
+                className={styles.rawToggle}
+                onClick={() => setShowRaw((v) => !v)}
+                aria-expanded={showRaw}
+              >
+                <span className={styles.rawToggleIco}>{"{ }"}</span>
+                {showRaw ? "Hide raw document" : "Show raw document"}
+              </button>
             </div>
+            {showRaw && (
+              <div className={styles.codeScroll} style={{ marginTop: 8 }}>
+                <Code language="json" copyButtonAppearance="hover">
+                  {JSON.stringify(stage.raw || stage.data, null, 2)}
+                </Code>
+              </div>
+            )}
           </div>
         )}
       </div>
+    </>
   );
 }
 

@@ -35,10 +35,6 @@ SEGMENTS = ("RETAIL", "COMMERCIAL", "PRIVATE", "SME")
 # `accounts.signatories[].signingRule` enum (`AccountSignatorySigningRuleType`).
 SIGNING_RULES = ("SOLE", "JOINT", "ANY_TWO")
 
-# A signing rule that names more than one signer always needs a second approver,
-# whatever the amount — that is what the rule means.
-_MULTI_SIGNER_RULES = frozenset({"JOINT", "ANY_TWO"})
-
 # Methods strong enough to stand alone above a step-up threshold. PASSWORD and API_KEY
 # are single-factor knowledge/possession secrets, so they need a second factor.
 _STRONG_METHODS = frozenset({"OTP", "BIOMETRIC", "MTLS"})
@@ -101,15 +97,15 @@ def signatory_for(signatories, customer_id: Optional[str]) -> Optional[dict]:
     return None
 
 
-def approval_required(amount: float, segment: Optional[str], signing_rule: Optional[str]) -> bool:
+def approval_required(amount: float, segment: Optional[str]) -> bool:
     """Does this payment need a second approver? (R8/R9)
 
-    Two independent triggers, either sufficient:
-      * the mandate names more than one signer (`JOINT` / `ANY_TWO`) — always, at any amount
-      * the amount is above the segment's dual-approval threshold
+    Amount-threshold only — Doina's "$25k -> payment > $10k -> second corporate approver
+    required". A multi-signer mandate does not itself trigger dual approval at any amount;
+    the amount is the trigger. (Corrected the earlier "always, whatever the amount" rule,
+    which made every sub-threshold payment on a JOINT account read as dual-approved and
+    produced a message claiming an amount was above a threshold it was not.)
     """
-    if signing_rule in _MULTI_SIGNER_RULES:
-        return True
     return amount > policy_for(segment)["dualApprovalThreshold"]
 
 

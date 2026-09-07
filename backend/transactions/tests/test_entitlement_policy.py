@@ -79,10 +79,13 @@ def test_a_non_signatory_gets_none_not_an_error(signatories):
 
 # --- dual approval (R8/R9) ---------------------------------------------------
 
-@pytest.mark.parametrize("rule", ["JOINT", "ANY_TWO"])
-def test_a_multi_signer_mandate_always_needs_a_second_approver(rule):
-    """At any amount — that is what the signing rule means."""
-    assert policy.approval_required(1.0, "COMMERCIAL", rule)
+def test_a_multi_signer_mandate_follows_the_amount_threshold():
+    """The trigger is the amount, not the signing rule — a below-threshold payment never
+    needs a second approver, however many signers the account names (Doina's demo line:
+    "$25k -> payment > $10k -> second corporate approver required")."""
+    assert not policy.approval_required(1.0, "COMMERCIAL")
+    assert policy.approval_required(9_999.99, "COMMERCIAL") is False
+    assert policy.approval_required(25_000.0, "COMMERCIAL")
 
 
 @pytest.mark.parametrize("amount,required", [
@@ -91,8 +94,8 @@ def test_a_multi_signer_mandate_always_needs_a_second_approver(rule):
     (10_000.01, True),
     (25_000.0, True),      # the flagship payment
 ])
-def test_sole_mandate_needs_approval_only_above_the_threshold(amount, required):
-    assert policy.approval_required(amount, "COMMERCIAL", "SOLE") is required
+def test_approval_is_required_only_above_the_threshold(amount, required):
+    assert policy.approval_required(amount, "COMMERCIAL") is required
 
 
 # --- step-up authentication (R1) ---------------------------------------------

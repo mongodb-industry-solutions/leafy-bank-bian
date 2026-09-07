@@ -172,7 +172,7 @@ def run(ctx: PaymentContext) -> None:
     # --- 6. dual_approval (R8/R9) -------------------------------------------
     # Stage 2 DECIDES the requirement; stage 4b keeps the APPROVED transition it already
     # owns and now reads this decision instead of asserting one (doc 15 B4).
-    approval_required = policy.approval_required(amount, segment, signing_rule)
+    approval_required = policy.approval_required(amount, segment)
     if approval_required:
         record(
             "dual_approval", checks.PASS,

@@ -619,6 +619,142 @@
   margin-bottom: 8px;
 }
 
+/* ── stage intro callout (what a stage does) ── */
+.stageIntro {
+  border: 1px solid var(--pw-border);
+  border-left: 3px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  background: var(--pw-surface);
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+
+.stageIntroLabel {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 4px;
+}
+
+.stageIntroText {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--pw-text);
+}
+
+/* ── stage 1: immutable parties + rail-specific initiation envelope ── */
+.partyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.partyCard {
+  border: 1px solid var(--pw-border);
+  border-radius: var(--pw-radius);
+  background: var(--pw-bg);
+  padding: 12px 16px;
+}
+
+.partyLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--pw-text);
+  margin-bottom: 8px;
+}
+
+.partyExternal {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  padding: 0 6px;
+  background: var(--pw-surface);
+}
+
+.stageNote {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--pw-muted);
+}
+
+/* Dual-approval rule (stage 2) — a green-accented callout, same treatment as stageIntro. */
+.dualApprovalCallout {
+  border: 1px solid var(--pw-border);
+  border-left: 3px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  background: var(--pw-surface);
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--pw-text);
+}
+
+/* Stage 2: the two gates beside the checks, so the panel uses the width instead of a tall
+   narrow column. Checks get slightly more room than the gate cards. */
+.stageTwoGrid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .stageTwoGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── expandable raw-document toggle (bottom of a stage body) ── */
+.rawToggleBar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rawToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+  color: var(--pw-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rawToggleIco {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.rawToggle:hover {
+  border-color: var(--pw-accent);
+  color: var(--pw-accent);
+}
+
+.rawToggle:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
 /* A raw document / ISO JSON / XML block can be arbitrarily long — cap it and scroll inside,
    so one stage's payload cannot push the timeline row off the screen. */
 .codeScroll {
@@ -819,18 +955,67 @@
 
 /* ── checks ── */
 
-.check {
+/* ── checks as a progressive gate flow (Identity → Account → Entitlement → Limit → Approval) ── */
+.checkFlow {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  font-size: 13px;
-  line-height: 20px;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.checkLabel {
-  flex: 1;
+.checkPhase {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.checkPhaseLabel {
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 8px 0 4px;
+  border-bottom: 1px solid var(--pw-border);
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  font-size: 13px;
+  line-height: 20px;
   min-width: 0;
+  border-bottom: 1px solid var(--pw-border-light);
+}
+
+.checkRow:last-child {
+  border-bottom: none;
+}
+
+.checkName {
+  font-weight: 600;
+  color: var(--pw-text);
+  white-space: nowrap;
+  flex: none;
+}
+
+.checkReason {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pw-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.checkMode {
+  font-size: 11px;
+  color: var(--pw-faint);
+  flex: none;
 }
 
 /* ── create-payment form ──
