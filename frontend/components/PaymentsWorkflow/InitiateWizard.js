@@ -2,29 +2,34 @@
 
 // Create Payment — bank-assisted initiation (doc 16 §7b).
 //
-// One comprehensive "Enter details" screen, not a four-step drip. Three numbered sections,
-// and the split between them mirrors the request contract rather than being cosmetic:
+// A rich two-pane surface, not a plain form. The left pane is the form
+// (payment type → from/amount/to → details); the right pane is a live order
+// summary that recomputes as the form changes (this is the Wise / Stripe /
+// Mercury "send money" pattern — the summary is the source of truth for the
+// money story, so it stays in view and never contradicts the form).
 //
-//   1. Select Payment Type      → `rail` (and which envelope section 3 renders)
-//   2. Payment Details          → the CANONICAL common layer, shared by every rail
-//   3. Payment Type Details     → the rail envelope (`wireDetails` / `internalDetails`)
-//                                 plus the creditor fields only that rail needs
+// The section split mirrors the request contract rather than being cosmetic:
+//   Payment type        → `rail` (and which envelope the details render)
+//   From → Amount → To  → the canonical common layer (debtor, amount, creditor)
+//   Payment details     → the rest of the common layer + the rail envelope
+//                        (`wireDetails` / `internalDetails`)
 //
-// That is the same seam `api_models.PaymentOrderInitiateRequest` draws, so a field's
-// position on screen tells you where it lands in the document.
-//
-// Doina's mockup is customer self-service; this is the bank-assisted variant an employee
-// drives, which per her own Frontend research differs only at the initiation layer —
-// hence the Customer field at the top of section 2 and `channel: "BRANCH"`.
+// Doina's mockup is customer self-service; this is the bank-assisted variant an
+// employee drives, which per her own Frontend research differs only at the
+// initiation layer — hence the Customer field and `channel: "BRANCH"`.
 import { useMemo, useState } from "react";
 import Badge from "@leafygreen-ui/badge";
 import Banner from "@leafygreen-ui/banner";
 import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
+import { OptionGroup, Select, Option } from "@leafygreen-ui/select";
+import {
+  SegmentedControl,
+  SegmentedControlOption,
+} from "@leafygreen-ui/segmented-control";
 import TextInput from "@leafygreen-ui/text-input";
-import { Select, Option } from "@leafygreen-ui/select";
-import Stepper, { Step } from "@leafygreen-ui/stepper";
-import { Body, H2 } from "@leafygreen-ui/typography";
+import { Body, H2, Overline } from "@leafygreen-ui/typography";
+
 
 import styles from "./PaymentsWorkflow.module.css";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
@@ -39,13 +44,13 @@ import { fmtAmount } from "@/lib/paymentsWorkflow/status";
 const STEPS = ["Enter details", "Review", "Confirmation"];
 
 // Phase 1 is wires + internal transfers; ACH and cards are Phase 2. The unavailable rails
-// are listed rather than hidden so the demo can point at the roadmap — `disabled` keeps
-// them unselectable.
+// are shown as tiles rather than hidden so the demo can point at the roadmap — `disabled`
+// keeps them unselectable.
 const PAYMENT_TYPES = [
   { rail: "WIRE", label: "Wires", phase: 1, available: true, glyph: "Building",
-    blurb: "Real-time or near-real-time transfer of funds between banks." },
+    blurb: "Between banks, ISO 20022. 1–2 business days." },
   { rail: "INTERNAL", label: "Internal Transfer", phase: 1, available: true, glyph: "Refresh",
-    blurb: "Book transfer between two Leafy Bank accounts. Settles on our own ledger." },
+    blurb: "Book transfer between two Leafy Bank accounts. Instant." },
   { rail: "ACH", label: "ACH", phase: 2, available: false, glyph: "Menu",
     blurb: "Batch clearing house transfers. Phase 2." },
   { rail: "CARD", label: "Cards", phase: 2, available: false, glyph: "CreditCard",
@@ -54,19 +59,53 @@ const PAYMENT_TYPES = [
 
 // Contract values are ISO 20022 codes; the labels spell out who actually pays.
 const CHARGE_BEARERS = [
-  ["DEBT", "DEBT — Sender pays all charges"],
-  ["CRED", "CRED — Beneficiary pays all charges"],
-  ["SHAR", "SHAR — Shared between both parties"],
-  ["SLEV", "SLEV — Following service level"],
+  ["DEBT", "Sender pays all charges"],
+  ["CRED", "Beneficiary pays all charges"],
+  ["SHAR", "Shared between both parties"],
+  ["SLEV", "Following service level"],
 ];
+
+// Per-rail delivery + fee facts for the order summary. Demo constants (the wire fee is the
+// stage-6 WIRE_FEE; delivery figures are illustrative, not a backend claim).
+const RAIL_FACTS = {
+  WIRE: { label: "Wire transfer", delivery: "1–2 business days", fee: 25.0 },
+  INTERNAL: { label: "Internal transfer", delivery: "Instant (on-us)", fee: 0 },
+};
+const WIRE_FEE = 25.0;
 
 const CLEARING_SYSTEMS = ["USABA", "USPID", "GBDSC", "CHBCC", "DEBLZ", "CACPA"];
 const ACCOUNT_TYPES = ["Checking", "Savings", "Current", "FixedDeposit"];
 const PRIORITIES = ["NORMAL", "HIGH", "URGENT"];
-const TRANSFER_TYPES = [
-  ["OWN_ACCOUNT", "Own account"],
-  ["THIRD_PARTY", "Third party"],
+
+// ISO 20022 ExternalPurpose1Code values, verbatim from the canonical spec enum
+// (`backend/data/seed/leafy_bank_bian.purposeCodes.json`). `categoryPurpose` is the
+// top-level common-layer field: stage 3 resolves it against the `purposeCodes`
+// collection and mirrors it into `remittance.purposeCode`, which is what feeds the
+// pacs.008 CtgyPurp and the stage-4 purpose-code AML check through to execution.
+const PURPOSE_CODES = [
+  ["SALA", "Salary Payment", "Payroll"],
+  ["PENS", "Pension Payment", "Payroll"],
+  ["TAXS", "Tax Payment", "Government"],
+  ["SUPP", "Supplier Payment", "Trade"],
+  ["GDDS", "Purchase of Goods", "Trade"],
+  ["SCVE", "Purchase of Services", "Trade"],
+  ["INTC", "Intra-Company Payment", "Treasury"],
+  ["TREA", "Treasury Payment", "Treasury"],
+  ["DIVI", "Dividend Payment", "Securities"],
+  ["COMM", "Commission Payment", "Fees"],
+  ["LOAN", "Loan Disbursement or Repayment", "Lending"],
+  ["SECU", "Securities Settlement", "Securities"],
+  ["TRAD", "Trade Settlement Payment", "Trade"],
+  ["HEDG", "Hedging Payment", "Securities"],
+  ["GOVT", "Government Payment", "Government"],
 ];
+
+// Grouped by the spec's demo-only `category` field so the Select renders optgroups.
+const PURPOSE_CATEGORIES = [...new Set(PURPOSE_CODES.map(([, , cat]) => cat))].map(
+  (cat) => ({ label: cat, options: PURPOSE_CODES.filter(([, , c]) => c === cat) })
+);
+
+const QUICK_AMOUNTS = [100, 500, 1000, 2500];
 
 const EMPTY = {
   rail: "WIRE",
@@ -79,6 +118,7 @@ const EMPTY = {
   purpose: "",
   endToEndReference: "",
   clientReference: "",
+  categoryPurpose: "",
   chargeBearer: "SLEV",
   // creditor — external
   beneficiaryName: "",
@@ -96,8 +136,6 @@ const EMPTY = {
   priority: "NORMAL",
   serviceLevelCode: "",
   localInstrumentCode: "",
-  // internal envelope
-  transferType: "THIRD_PARTY",
 };
 
 const isWire = (form) => form.rail === "WIRE";
@@ -129,6 +167,11 @@ function buildPayload(form) {
   // Split these into separate inputs if a demo ever needs both distinct.
   if (form.clientReference) payload.clientReference = form.clientReference;
 
+  // Top-level common-layer purpose code (ISO ExternalPurpose). Optional. The contract
+  // accepts it; stage 3 resolves it against `purposeCodes` and mirrors it into
+  // `remittance.purposeCode` (`enrichment_plan._plan_purpose_codes`).
+  if (form.categoryPurpose) payload.categoryPurpose = form.categoryPurpose;
+
   const remittance = {
     unstructured: form.purpose || null,
     reference: form.endToEndReference || null,
@@ -156,16 +199,26 @@ function buildPayload(form) {
     };
     payload.creditor = Object.fromEntries(Object.entries(creditor).filter(([, v]) => v));
 
-    const wire = {};
-    if (form.serviceLevelCode) wire.serviceLevel = { code: form.serviceLevelCode };
-    if (form.localInstrumentCode) wire.localInstrument = { code: form.localInstrumentCode };
     // `wireType` is deliberately NOT sent — the server derives it from the two bank
     // countries and nulls it when either is unknown (doc 13, initiation_envelope.py).
+    const wire = {};
+    // serviceLevel / localInstrument nest under paymentTypeInformation — the contract's
+    // `WireDetailsBody` has no top-level fields for them (`extra="forbid"`), so sending
+    // them flat would 422. Mirror the shape the envelope builder reads.
+    const pti = {};
+    if (form.serviceLevelCode) pti.serviceLevel = { code: form.serviceLevelCode };
+    if (form.localInstrumentCode) pti.localInstrument = { code: form.localInstrumentCode };
+    if (Object.keys(pti).length) wire.paymentTypeInformation = pti;
     if (Object.keys(wire).length) payload.wireDetails = wire;
   } else {
     // An account we hold — name, BIC and address resolve from the snapshot server-side.
     payload.creditor = { accountId: form.creditorAccountId };
-    payload.internalDetails = { transferType: form.transferType };
+    // `transferType` is NOT sent. It is DERIVED server-side from the debtor/creditor
+    // snapshot (`initiation_envelope.build_internal_details`, feeding off ctx.is_internal
+    // = "same customer"), so it is the single source of truth. Sending it would override
+    // the derivation and permit an inconsistent OWN_ACCOUNT for a different-customer
+    // transfer — the wizard only displays the derived value, never chooses it.
+    payload.internalDetails = {};
   }
 
   return payload;
@@ -214,9 +267,11 @@ function validate(form) {
 const AUTOFILL_MIN = 10;
 const AUTOFILL_MAX = 20000;
 
-// Autofill's beneficiary-bank pool. Every row here MUST match a `BIC_DIRECTORY` row in
-// backend/data/seed/leafy_bank_bian.correspondentBanks.json — `clearingSystemMemberId`
-// included.
+// Autofill's beneficiary pool. Each row is a FULLY COHERENT payee: the address country, the
+// beneficiary's bank country, the clearing system and the purpose all agree, so an
+// autopopulated wire reads as one believable transaction — not a random splice of a name, a
+// bank and an unrelated purpose. The bank facts (bic/country/clearingSystemCode/
+// clearingSystemMemberId) are verbatim from the seed directory.
 //
 // Why the member id matters (fixed 2026-08-31): autofill used to generate a random 9-digit
 // number here, so stage-3 enrichment resolved the directory row and *corrected* it. Every
@@ -226,30 +281,25 @@ const AUTOFILL_MAX = 20000;
 // diff only shows fields that genuinely started empty.
 //
 // `test_autofill_pool_matches_the_bank_directory` (backend, test_reference_data.py) parses
-// this array and asserts it against the seed. Add a bank in one place, add it in both.
-const EXTERNAL_BANKS = [
-  { bankName: "JPMorgan Chase Bank, N.A.", bic: "CHASUS33", country: "US", clearingSystemCode: "USABA", clearingSystemMemberId: "121000248" },
-  { bankName: "Citibank, N.A.", bic: "CITIUS33", country: "US", clearingSystemCode: "USABA", clearingSystemMemberId: "021000089" },
-  { bankName: "Barclays Bank PLC", bic: "BARCGB22", country: "GB", clearingSystemCode: "GBDSC", clearingSystemMemberId: "202053" },
-  { bankName: "Deutsche Bank AG", bic: "DEUTDEFF", country: "DE", clearingSystemCode: "DEBLZ", clearingSystemMemberId: "50070010" },
-  { bankName: "UBS Switzerland AG", bic: "UBSWCHZH", country: "CH", clearingSystemCode: "CHBCC", clearingSystemMemberId: "230" },
-  { bankName: "Royal Bank of Canada", bic: "ROYCCAT2", country: "CA", clearingSystemCode: "CACPA", clearingSystemMemberId: "000300002" },
+// this array and asserts the bank facts against the seed. Add a bank in one place, add it in
+// both.
+const EXTERNAL_RECIPIENTS = [
+  { bankName: "JPMorgan Chase Bank, N.A.", bic: "CHASUS33", country: "US", clearingSystemCode: "USABA", clearingSystemMemberId: "121000248", payeeName: "Contoso Manufacturing Inc", address: "440 Industrial Way, Detroit, MI 48201", accountNo: "0123456789", accountType: "Checking", purposeText: "Supplier payment", purposeCode: "SUPP" },
+  { bankName: "Citibank, N.A.", bic: "CITIUS33", country: "US", clearingSystemCode: "USABA", clearingSystemMemberId: "021000089", payeeName: "Adventure Works Supply Co", address: "782 Market Street, San Francisco, CA 94103", accountNo: "9876543210", accountType: "Checking", purposeText: "Purchase of goods", purposeCode: "GDDS" },
+  { bankName: "Barclays Bank PLC", bic: "BARCGB22", country: "GB", clearingSystemCode: "GBDSC", clearingSystemMemberId: "202053", payeeName: "Northwind Traders Ltd", address: "12 Cheapside, London EC2V 6AD", accountNo: "11223344556", accountType: "Current", purposeText: "Invoice settlement", purposeCode: "SUPP" },
+  { bankName: "Deutsche Bank AG", bic: "DEUTDEFF", country: "DE", clearingSystemCode: "DEBLZ", clearingSystemMemberId: "50070010", payeeName: "Fabrikam Logistics GmbH", address: "Hafenstrasse 8, 20359 Hamburg", accountNo: "1234567890", accountType: "Current", purposeText: "Freight and handling", purposeCode: "GDDS" },
+  { bankName: "UBS Switzerland AG", bic: "UBSWCHZH", country: "CH", clearingSystemCode: "CHBCC", clearingSystemMemberId: "230", payeeName: "Tailspin Aviation SA", address: "Route de Meyrin 21, 1215 Geneva", accountNo: "0201234567", accountType: "Current", purposeText: "Purchase of services", purposeCode: "SCVE" },
+  { bankName: "Royal Bank of Canada", bic: "ROYCCAT2", country: "CA", clearingSystemCode: "CACPA", clearingSystemMemberId: "000300002", payeeName: "Lakeshore Foods Ltd", address: "77 Harbour Street, Toronto, ON M5J 0A7", accountNo: "003003497", accountType: "Checking", purposeText: "Supplier payment", purposeCode: "SUPP" },
 ];
 
-const EXTERNAL_PAYEES = [
-  { name: "Northwind Traders Ltd", address: "12 Cheapside, London" },
-  { name: "Contoso Manufacturing Inc", address: "440 Industrial Way, Detroit" },
-  { name: "Fabrikam Logistics GmbH", address: "Hafenstrasse 8, Hamburg" },
-  { name: "Tailspin Aviation SA", address: "Route de Meyrin 21, Geneva" },
-  { name: "Adventure Works Supply Co", address: "77 Harbour Street, Toronto" },
-];
-
+// [free-text purpose, ISO ExternalPurpose code]. The code pairs with the text so an
+// autopopulated payment resolves to a real purpose code in stage 3 (PASS, not SKIP).
 const AUTOFILL_PURPOSES = [
-  "Invoice settlement",
-  "Supplier payment",
-  "Consulting services",
-  "Quarterly rent",
-  "Freight and handling",
+  ["Invoice settlement", "SUPP"],
+  ["Supplier payment", "SUPP"],
+  ["Consulting services", "SCVE"],
+  ["Quarterly rent", "SCVE"],
+  ["Freight and handling", "GDDS"],
 ];
 
 const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
@@ -281,6 +331,7 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
   ).toFixed(2);
   const debtor = pickDebtor(accountsByCustomer, Number(amount));
   if (!debtor) return form;
+  const purpose = pick(AUTOFILL_PURPOSES);
 
   const next = {
     ...EMPTY,
@@ -289,7 +340,8 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
     debtorAccountId: debtor.account.accountId,
     currency: debtor.account.currency || "USD",
     amount,
-    purpose: pick(AUTOFILL_PURPOSES),
+    purpose: purpose[0],
+    categoryPurpose: purpose[1],
     endToEndReference: `E2E-${digits(8)}`,
     clientReference: `INV-${digits(6)}`,
     chargeBearer: pick(CHARGE_BEARERS)[0],
@@ -297,20 +349,23 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
   };
 
   if (isWire(next)) {
-    const bank = pick(EXTERNAL_BANKS);
-    const payee = pick(EXTERNAL_PAYEES);
+    const rec = pick(EXTERNAL_RECIPIENTS);
     return {
       ...next,
-      beneficiaryName: payee.name,
-      beneficiaryAddress: payee.address,
-      beneficiaryAccountNo: digits(10),
-      beneficiaryCountry: bank.country,
-      beneficiaryBankName: bank.bankName,
-      bic: bank.bic,
-      clearingSystemCode: bank.clearingSystemCode,
-      // The directory's real value, NOT `digits(9)` — see the note on EXTERNAL_BANKS.
-      clearingSystemMemberId: bank.clearingSystemMemberId,
-      accountNumberType: pick(ACCOUNT_TYPES),
+      beneficiaryName: rec.payeeName,
+      beneficiaryAddress: rec.address,
+      beneficiaryAccountNo: rec.accountNo,
+      beneficiaryCountry: rec.country,
+      beneficiaryBankName: rec.bankName,
+      bic: rec.bic,
+      clearingSystemCode: rec.clearingSystemCode,
+      // The directory's real value, NOT `digits(9)` — see the note on EXTERNAL_RECIPIENTS.
+      clearingSystemMemberId: rec.clearingSystemMemberId,
+      accountNumberType: rec.accountType,
+      // The recipient's own purpose — coherent with the business, and it makes stage 3
+      // resolve a real purpose code (PASS) rather than SKIP.
+      purpose: rec.purposeText,
+      categoryPurpose: rec.purposeCode,
     };
   }
 
@@ -322,7 +377,6 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
   return {
     ...next,
     creditorAccountId: candidates.length ? pick(candidates).accountId : "",
-    transferType: pick(TRANSFER_TYPES)[0],
   };
 }
 
@@ -335,6 +389,165 @@ function SectionCard({ n, title, subtitle, children, className }) {
       </div>
       {subtitle && <div className={styles.sectionSub}>{subtitle}</div>}
       {children}
+    </div>
+  );
+}
+
+// The stepped "From → To" block: debit side, the amount hero, then the beneficiary.
+function TransferCard({ kind, children }) {
+  return (
+    <div className={styles.flowCard}>
+      <div className={styles.flowHeading}>
+        <span className={styles.flowBadge}>{kind}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// Masked account number with a reveal toggle — the standard "show/hide" affordance. The
+// account is shown last-4 by default (sensitive identifier) and the full number on click,
+// so the operator can confirm the exact account when it matters without it being on screen
+// the whole time.
+function AccountMask({ type, number }) {
+  const [revealed, setRevealed] = useState(false);
+  const prefix = type ? `${type} ` : "";
+  const masked = `${prefix}····${String(number || "").slice(-4)}`;
+  const shown = `${prefix}${number || "—"}`;
+  return (
+    <span className={styles.acctMask}>
+      <span>{revealed ? shown : masked}</span>
+      <button
+        type="button"
+        className={styles.acctMaskToggle}
+        onClick={() => setRevealed((v) => !v)}
+        aria-label={revealed ? "Hide account number" : "Show account number"}
+        aria-pressed={revealed}
+        title={revealed ? "Hide account number" : "Show account number"}
+      >
+        <Icon glyph={revealed ? "Unlock" : "Lock"} size={14} />
+      </button>
+    </span>
+  );
+}
+
+// The live right-rail summary. Pure presentational — reads the same derived values the form
+// uses, so it can never disagree with the form. Does not submit; the CTA is in the header.
+function OrderSummary({
+  form, customer, debtor, recipientLabel, isOwnAccount, selectedType,
+}) {
+  const facts = RAIL_FACTS[form.rail] || RAIL_FACTS.WIRE;
+  const amount = Number(form.amount) || 0;
+  const hasAmount = amount > 0;
+  // The wire fee only bites once an amount is entered — showing a $25 total on an empty
+  // form reads as a bug, not a fee.
+  const fee = isWire(form) && hasAmount ? WIRE_FEE : 0;
+  const total = amount + fee;
+  const purposeName = PURPOSE_CODES.find(([c]) => c === form.categoryPurpose)?.[1] || "";
+  const recipientSub = isWire(form)
+    ? `${form.beneficiaryBankName ? form.beneficiaryBankName + " · " : ""}${form.beneficiaryAccountNo || ""}`
+    : isOwnAccount
+      ? "Own account"
+      : "Third party";
+
+  return (
+    <div className={styles.summaryCard}>
+      <div className={styles.summaryHead}>
+        <Overline>Order summary</Overline>
+        <Badge variant={isWire(form) ? "green" : "blue"}>{selectedType.label}</Badge>
+      </div>
+
+      <div className={styles.summaryBlock}>
+        <div className={styles.summaryLabel}>From</div>
+        <div className={styles.summaryValue}>
+          {customer?.identification?.legalName || "Select a customer"}
+        </div>
+        {debtor && (
+          <div className={styles.summarySub}>
+            <AccountMask type={debtor.type} number={debtor.accountNumber} />
+          </div>
+        )}
+      </div>
+
+      <div className={styles.summaryBlock}>
+        <div className={styles.summaryLabel}>To</div>
+        <div className={styles.summaryValue}>{recipientLabel || "Select a beneficiary"}</div>
+        {recipientLabel && (
+          <div className={styles.summarySub}>{recipientSub || "—"}</div>
+        )}
+      </div>
+
+      <div className={styles.summaryDivider} />
+
+      <div className={styles.summaryMoney}>
+        <div className={styles.summaryAmount}>
+          {fmtAmount(form.amount || 0, form.currency)}
+        </div>
+        <div className={styles.summaryAmountTag}>{facts.label}</div>
+      </div>
+
+      <div className={styles.summaryLine}>
+        <span>Service fee</span>
+        <span className={styles.summaryLineValue}>{fee ? fmtAmount(fee, form.currency) : "—"}</span>
+      </div>
+      <div className={styles.summaryLine}>
+        <span>Total debited</span>
+        <span className={styles.summaryLineValue}>{fmtAmount(total, form.currency)}</span>
+      </div>
+      <div className={styles.summaryLine}>
+        <span>Arrives</span>
+        <span className={styles.summaryLineValue}>{facts.delivery}</span>
+      </div>
+
+      <div className={styles.summaryDivider} />
+
+      <div className={styles.summaryLine}>
+        <span>Purpose</span>
+        <span className={styles.summaryLineValue}>
+          {form.categoryPurpose ? `${form.categoryPurpose}${purposeName ? " · " + purposeName : ""}` : "—"}
+        </span>
+      </div>
+      <div className={styles.summaryLine}>
+        <span>Priority</span>
+        <span className={styles.summaryLineValue}>{form.priority}</span>
+      </div>
+
+      <div className={styles.summaryCallout}>
+        <Icon glyph="InfoWithCircle" size={16} />
+        <span>Bank-assisted initiation · {selectedType.phase === 1 ? "Phase 1" : "Phase 2"}</span>
+      </div>
+    </div>
+  );
+}
+
+// Compact, left-aligned step indicator for the Review / Confirmation steps. The create step
+// deliberately has NO indicator of its own: its section numbers (1 Payment type · 2 Transfer ·
+// 3 Payment details) carry structure there, and a second "1 2 3" floating on top was exactly
+// the oddity flagged on the first draft.
+function StepIndicator({ current }) {
+  return (
+    <div className={styles.reviewSteps} aria-label={`Step ${current} of 3`}>
+      {STEPS.map((label, i) => {
+        const n = i + 1;
+        const done = n < current;
+        const active = n === current;
+        return (
+          <div key={label} className={styles.reviewStep}>
+            <span
+              className={[
+                styles.reviewStepDot,
+                done && styles.reviewStepDotDone,
+                active && styles.reviewStepDotCurrent,
+              ].filter(Boolean).join(" ")}
+            >
+              {done ? <Icon glyph="Checkmark" size={12} /> : n}
+            </span>
+            <span className={[styles.reviewStepLabel, active && styles.reviewStepLabelActive].filter(Boolean).join(" ")}>
+              {label}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -369,6 +582,31 @@ export default function InitiateWizard({ onInitiated }) {
         const a = allAccounts.find((x) => x.accountId === form.creditorAccountId);
         return a ? `${a.ownerName || ""} ${a.type} ····${String(a.accountNumber || "").slice(-4)}`.trim() : "—";
       })();
+
+  // `internalDetails.transferType` is DERIVED, not chosen — OWN_ACCOUNT when the creditor
+  // shares the debtor's customer (FR-1.7; the server derives it from the same rule,
+  // `capture.py ctx.is_internal` = "same customer, not same bank"). Compute it here so the
+  // read-only display always agrees with what the server persists. The wizard never sends
+  // the field (see buildPayload), so a user cannot create an inconsistent OWN_ACCOUNT.
+  const creditorAccount = allAccounts.find((x) => x.accountId === form.creditorAccountId);
+  const isOwnAccount =
+    form.rail === "INTERNAL" &&
+    Boolean(form.customerId) &&
+    Boolean(creditorAccount) &&
+    creditorAccount.customerId === form.customerId;
+  const transferTypeLabel =
+    form.rail !== "INTERNAL"
+      ? ""
+      : !form.creditorAccountId
+        ? "—"
+        : isOwnAccount
+          ? "Own account"
+          : "Third party";
+
+  // The quick-amount chip that matches the debtor's available balance exactly.
+  const chipUseAvailable = debtor?.balance?.available != null;
+  const amountOverBalance =
+    !!form.amount && !!debtor && Number(form.amount) > (debtor.balance?.available ?? 0);
 
   function toReview() {
     if (Object.keys(errors).length) {
@@ -422,11 +660,7 @@ export default function InitiateWizard({ onInitiated }) {
     return (
       <div className={styles.panel}>
         <div className={styles.panelBody}>
-          <div className={styles.stepperBar}>
-            <Stepper currentStep={2} maxDisplayedSteps={3}>
-              {STEPS.map((l) => <Step key={l}>{l}</Step>)}
-            </Stepper>
-          </div>
+          <StepIndicator current={3} />
           <div className={styles.confirmBox}>
             <Icon glyph="CheckmarkWithCircle" size={48} fill="#00684a" />
             <H2>Payment submitted</H2>
@@ -454,28 +688,9 @@ export default function InitiateWizard({ onInitiated }) {
   // --- review ---------------------------------------------------------------
 
   if (step === 1) {
-    const rows = [
-      ["Payment type", `${selectedType.label} (Phase ${selectedType.phase})`],
-      ["Customer", customer?.identification?.legalName || form.customerId],
-      ["Debit account", debtor ? `${debtor.type} ····${String(debtor.accountNumber || "").slice(-4)}` : form.debtorAccountId],
-      ["Amount", fmtAmount(form.amount, form.currency)],
-      ["Beneficiary", recipientLabel],
-      ...(isWire(form)
-        ? [
-            ["Beneficiary account", form.beneficiaryAccountNo],
-            ["Beneficiary bank", `${form.beneficiaryBankName} (${form.bic})`],
-            ["Country", form.beneficiaryCountry],
-            ["Routing / member ID", form.clearingSystemMemberId || "—"],
-          ]
-        : [["Transfer type", form.transferType]]),
-      ["Value date", form.valueDate || "Today"],
-      ["Purpose", form.purpose],
-      ["End-to-end reference", form.endToEndReference || "—"],
-      ["Client reference", form.clientReference || "—"],
-      ["Charges", form.chargeBearer],
-      ["Priority", form.priority],
-      ["Channel", "BRANCH (bank-assisted)"],
-    ];
+    // Read-only render of the SAME two-pane layout the initiate step uses — From / Amount / To
+    // cards + the live order-summary rail — so Review reads as a locked preview, not a tabular
+    // surprise. The submit actions live at the bottom; the step indicator is left-aligned.
     return (
       <div className={styles.panel}>
         {/* Renders in a portal, so its position in the tree does not matter. It lives on
@@ -494,16 +709,12 @@ export default function InitiateWizard({ onInitiated }) {
         <div className={styles.panelBody}>
           <div className={styles.createHeader}>
             <div>
+              <StepIndicator current={2} />
               <H2>Review payment</H2>
               <Body className={styles.subtitle}>
                 Confirm the details before submitting for processing.
               </Body>
             </div>
-          </div>
-          <div className={styles.stepperBar}>
-            <Stepper currentStep={1} maxDisplayedSteps={3}>
-              {STEPS.map((l) => <Step key={l}>{l}</Step>)}
-            </Stepper>
           </div>
 
           {isWire(form) && (
@@ -513,21 +724,132 @@ export default function InitiateWizard({ onInitiated }) {
             </Banner>
           )}
 
-          <div className={styles.twoCol} style={{ marginTop: 16 }}>
-            <table className={styles.kv}>
-              <tbody>
-                {rows.slice(0, Math.ceil(rows.length / 2)).map(([k, v]) => (
-                  <tr key={k}><td>{k}</td><td>{v || "—"}</td></tr>
-                ))}
-              </tbody>
-            </table>
-            <table className={styles.kv}>
-              <tbody>
-                {rows.slice(Math.ceil(rows.length / 2)).map(([k, v]) => (
-                  <tr key={k}><td>{k}</td><td>{v || "—"}</td></tr>
-                ))}
-              </tbody>
-            </table>
+          <div className={styles.initiateGrid}>
+            <div className={styles.initiateMain}>
+              <SectionCard n={2} title="Transfer">
+                <div className={styles.transferPath}>
+                  <TransferCard kind="From">
+                    <div className={styles.kvBlock}>
+                      <div className={styles.kvRow}>
+                        <span className={styles.kvRowLabel}>Customer</span>
+                        <span className={styles.kvRowValue}>{customer?.identification?.legalName || form.customerId}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span className={styles.kvRowLabel}>Debit account</span>
+                        <span className={styles.kvRowValue}>
+                          {debtor ? <AccountMask type={debtor.type} number={debtor.accountNumber} /> : form.debtorAccountId}
+                        </span>
+                      </div>
+                      {debtor?.balance?.available != null && (
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Available</span>
+                          <span className={styles.kvRowValue}>{fmtAmount(debtor.balance.available, debtor.currency)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </TransferCard>
+
+                  <div className={styles.amountHero}>
+                    <div className={styles.amountHeroTop}>
+                      <span className={styles.amountHeroLabel}>Amount</span>
+                      <span className={styles.amountCurrency}>{form.currency}</span>
+                    </div>
+                    <div className={styles.amountReadonly}>{fmtAmount(form.amount, form.currency)}</div>
+                    <div className={styles.amountMeta}>
+                      {selectedType.label} · {recipientLabel}
+                    </div>
+                  </div>
+
+                  <TransferCard kind="To">
+                    {isWire(form) ? (
+                      <div className={styles.kvBlock}>
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Beneficiary</span>
+                          <span className={styles.kvRowValue}>{form.beneficiaryName}</span>
+                        </div>
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Account</span>
+                          <span className={styles.kvRowValue}>{form.beneficiaryAccountNo}</span>
+                        </div>
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Bank</span>
+                          <span className={styles.kvRowValue}>{form.beneficiaryBankName} ({form.bic})</span>
+                        </div>
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Country</span>
+                          <span className={styles.kvRowValue}>{form.beneficiaryCountry}</span>
+                        </div>
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Routing</span>
+                          <span className={styles.kvRowValue}>{form.clearingSystemMemberId || "—"}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={styles.kvBlock}>
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Beneficiary</span>
+                          <span className={styles.kvRowValue}>{creditorAccount?.ownerName || "—"}</span>
+                        </div>
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Account</span>
+                          <span className={styles.kvRowValue}>
+                            {creditorAccount
+                              ? <AccountMask type={creditorAccount.type} number={creditorAccount.accountNumber} />
+                              : "—"}
+                          </span>
+                        </div>
+                        <div className={styles.kvRow}>
+                          <span className={styles.kvRowLabel}>Transfer type</span>
+                          <span className={styles.kvRowValue}>{transferTypeLabel}</span>
+                        </div>
+                      </div>
+                    )}
+                  </TransferCard>
+                </div>
+              </SectionCard>
+
+              <SectionCard n={3} title="Payment details">
+                <div className={styles.kvBlock}>
+                  <div className={styles.kvRow}>
+                    <span className={styles.kvRowLabel}>Purpose</span>
+                    <span className={styles.kvRowValue}>{form.purpose}</span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span className={styles.kvRowLabel}>Category purpose</span>
+                    <span className={styles.kvRowValue}>{form.categoryPurpose || "—"}</span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span className={styles.kvRowLabel}>Value date</span>
+                    <span className={styles.kvRowValue}>{form.valueDate || "Today"}</span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span className={styles.kvRowLabel}>Priority</span>
+                    <span className={styles.kvRowValue}>{form.priority}</span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span className={styles.kvRowLabel}>Charges</span>
+                    <span className={styles.kvRowValue}>{form.chargeBearer}</span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span className={styles.kvRowLabel}>Client reference</span>
+                    <span className={styles.kvRowValue}>{form.clientReference || "—"}</span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span className={styles.kvRowLabel}>End-to-end reference</span>
+                    <span className={styles.kvRowValue}>{form.endToEndReference || "—"}</span>
+                  </div>
+                </div>
+              </SectionCard>
+            </div>
+
+            <OrderSummary
+              form={form}
+              customer={customer}
+              debtor={debtor}
+              recipientLabel={recipientLabel}
+              isOwnAccount={isOwnAccount}
+              selectedType={selectedType}
+            />
           </div>
 
           {submitError && (
@@ -561,11 +883,11 @@ export default function InitiateWizard({ onInitiated }) {
           <div>
             <H2>Create Payment</H2>
             <Body className={styles.subtitle}>
-              Enter payment details and submit for processing.
+              Bank-assisted initiation — set up a wire or internal transfer for a customer.
             </Body>
           </div>
           <div className={styles.headerActions}>
-            <Button onClick={reset}>Clear form</Button>
+            <Button onClick={reset}>Clear</Button>
             <Button
               onClick={autopopulate}
               disabled={loading || !allAccounts.length}
@@ -585,234 +907,320 @@ export default function InitiateWizard({ onInitiated }) {
           </div>
         </div>
 
-        <div className={styles.stepperBar}>
-          <Stepper currentStep={0} maxDisplayedSteps={3}>
-            {STEPS.map((l) => <Step key={l}>{l}</Step>)}
-          </Stepper>
-        </div>
-
-        {loading && <div className={styles.emptyState}>Loading customers and accounts…</div>}
-
-        {!loading && (
-          <div className={styles.createGrid}>
-            <SectionCard n={1} title="Select Payment Type" className={styles.fullSpan}>
-              <div style={{ maxWidth: 420 }}>
-                <Select
-                  label="Payment Type"
-                  value={form.rail}
-                  onChange={(v) => set("rail", v)}
-                  allowDeselect={false}
-                >
-                  {PAYMENT_TYPES.map((t) => (
-                    <Option
-                      key={t.rail}
-                      value={t.rail}
-                      disabled={!t.available}
-                      glyph={<Icon glyph={t.glyph} />}
-                      description={t.available ? "Available" : "Coming soon"}
-                    >
-                      {`${t.label} (Phase ${t.phase})`}
-                    </Option>
-                  ))}
-                </Select>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              n={2}
-              title="Payment Details (Canonical)"
-              subtitle="Common-layer fields — identical on every rail."
-            >
-              <div className={styles.twoCol}>
-                <div className={styles.fieldStack}>
-                  <div className={styles.colHeading}>Debit side</div>
-                  <Select
-                    label="Customer"
-                    description="Who this payment is created for."
-                    placeholder="Select a customer"
-                    value={form.customerId}
-                    onChange={(v) => setForm((f) => ({ ...f, customerId: v, debtorAccountId: "" }))}
-                    errorMessage={err("customerId")}
-                    state={state("customerId")}
-                    allowDeselect={false}
-                  >
-                    {customers.map((c) => (
-                      <Option key={c.customerId} value={c.customerId}>
-                        {c.identification?.legalName || c.customerId}
-                      </Option>
-                    ))}
-                  </Select>
-
-                  <Select
-                    label="Debit Account"
-                    placeholder={form.customerId ? "Select an account" : "Select a customer first"}
-                    value={form.debtorAccountId}
-                    onChange={(v) => set("debtorAccountId", v)}
-                    disabled={!form.customerId}
-                    errorMessage={err("debtorAccountId")}
-                    state={state("debtorAccountId")}
-                    allowDeselect={false}
-                  >
-                    {customerAccounts.map((a) => (
-                      <Option key={a.accountId} value={a.accountId}>
-                        {`${a.type} | ····${String(a.accountNumber || "").slice(-4)} | ${a.currency || "USD"}`}
-                      </Option>
-                    ))}
-                  </Select>
-                  {debtor?.balance?.available != null && (
-                    <div className={styles.balanceHint}>
-                      Available balance: {fmtAmount(debtor.balance.available, debtor.currency)}
-                    </div>
-                  )}
-
-                  <TextInput
-                    label="Payment Currency"
-                    description="ISO 4217"
-                    value={form.currency}
-                    onChange={(e) => set("currency", e.target.value.toUpperCase())}
-                    errorMessage={err("currency")}
-                    state={state("currency")}
-                  />
-                  <TextInput
-                    label="Payment Amount"
-                    type="number"
-                    value={form.amount}
-                    onChange={(e) => set("amount", e.target.value)}
-                    errorMessage={err("amount")}
-                    state={state("amount")}
-                  />
-                  <TextInput
-                    label="Value Date"
-                    type="date"
-                    description="Requested execution date. Defaults to today."
-                    optional
-                    value={form.valueDate}
-                    onChange={(e) => set("valueDate", e.target.value)}
-                  />
+        {loading ? (
+          <div className={styles.loadingBlock}>
+            <Icon glyph="Refresh" size={20} className={styles.spin} />
+            <span>Loading customers and accounts…</span>
+          </div>
+        ) : (
+          <div className={styles.initiateGrid}>
+            {/* ── form (left) ── */}
+            <div className={styles.initiateMain}>
+              <SectionCard n={1} title="Payment type">
+                <div className={styles.railGrid}>
+                  {PAYMENT_TYPES.map((t) => {
+                    const active = form.rail === t.rail;
+                    return (
+                      <button
+                        key={t.rail}
+                        type="button"
+                        className={[
+                          styles.railTile,
+                          active && styles.railTileActive,
+                          !t.available && styles.railTileDisabled,
+                        ].filter(Boolean).join(" ")}
+                        onClick={() => { if (t.available) set("rail", t.rail); }}
+                        disabled={!t.available}
+                        aria-pressed={active}
+                      >
+                        <span className={styles.railTileGlyph}><Icon glyph={t.glyph} size={20} /></span>
+                        <span className={styles.railTileText}>
+                          <span className={styles.railTileLabel}>{t.label}</span>
+                          <span className={styles.railTileBlurb}>{t.blurb}</span>
+                        </span>
+                        <Badge variant={t.available ? "green" : "gray"}>
+                          {t.available ? `Phase ${t.phase}` : "Phase 2"}
+                        </Badge>
+                      </button>
+                    );
+                  })}
                 </div>
+              </SectionCard>
 
-                <div className={styles.fieldStack}>
-                  <div className={styles.colHeading}>Beneficiary</div>
-
-                  {isWire(form) ? (
-                    <>
-                      <TextInput
-                        label="Beneficiary Name"
-                        value={form.beneficiaryName}
-                        onChange={(e) => set("beneficiaryName", e.target.value)}
-                        errorMessage={err("beneficiaryName")}
-                        state={state("beneficiaryName")}
-                      />
-                      <TextInput
-                        label="Beneficiary Account"
-                        value={form.beneficiaryAccountNo}
-                        onChange={(e) => set("beneficiaryAccountNo", e.target.value)}
-                        errorMessage={err("beneficiaryAccountNo")}
-                        state={state("beneficiaryAccountNo")}
-                      />
-                      <TextInput
-                        label="Beneficiary Address"
-                        optional
-                        value={form.beneficiaryAddress}
-                        onChange={(e) => set("beneficiaryAddress", e.target.value)}
-                      />
-                      <TextInput
-                        label="Beneficiary Country"
-                        description="2-letter ISO code"
-                        value={form.beneficiaryCountry}
-                        onChange={(e) => set("beneficiaryCountry", e.target.value.toUpperCase())}
-                        errorMessage={err("beneficiaryCountry")}
-                        state={state("beneficiaryCountry")}
-                      />
-                    </>
-                  ) : (
-                    <>
+              <SectionCard n={2} title="Transfer">
+                <div className={styles.transferPath}>
+                  <TransferCard kind="From">
+                    <div className={styles.fieldStack}>
                       <Select
-                        label="Beneficiary Account"
-                        description="Any Leafy Bank current or savings account."
-                        placeholder="Select a recipient"
-                        value={form.creditorAccountId}
-                        onChange={(v) => set("creditorAccountId", v)}
-                        errorMessage={err("creditorAccountId")}
-                        state={state("creditorAccountId")}
+                        label="Customer"
+                        description="Who this payment is created for."
+                        placeholder="Select a customer"
+                        value={form.customerId}
+                        onChange={(v) => setForm((f) => ({ ...f, customerId: v, debtorAccountId: "" }))}
+                        errorMessage={err("customerId")}
+                        state={state("customerId")}
                         allowDeselect={false}
                       >
-                        {allAccounts
-                          .filter((a) => a.accountId !== form.debtorAccountId)
-                          .map((a) => (
-                            <Option key={a.accountId} value={a.accountId}>
-                              {`${a.ownerName ? a.ownerName + " | " : ""}${a.type} | ····${String(a.accountNumber || "").slice(-4)}`}
-                            </Option>
-                          ))}
+                        {customers.map((c) => (
+                          <Option key={c.customerId} value={c.customerId}>
+                            {c.identification?.legalName || c.customerId}
+                          </Option>
+                        ))}
                       </Select>
-                      <div className={styles.infoBox}>
-                        Beneficiary name, address and BIC resolve from the account snapshot
-                        server-side — no need to key them.
+
+                      <Select
+                        label="Debit Account"
+                        placeholder={form.customerId ? "Select an account" : "Select a customer first"}
+                        value={form.debtorAccountId}
+                        onChange={(v) => set("debtorAccountId", v)}
+                        disabled={!form.customerId}
+                        errorMessage={err("debtorAccountId")}
+                        state={state("debtorAccountId")}
+                        allowDeselect={false}
+                      >
+                        {customerAccounts.map((a) => (
+                          <Option key={a.accountId} value={a.accountId}>
+                            {`${a.type} ····${String(a.accountNumber || "").slice(-4)} · ${a.currency || "USD"}`}
+                          </Option>
+                        ))}
+                      </Select>
+
+                      {debtor?.balance?.available != null && (
+                        <button
+                          type="button"
+                          className={styles.balanceChip}
+                          onClick={() => set("amount", String(debtor.balance.available))}
+                          title="Use the whole available balance"
+                        >
+                          <Icon glyph="Wallet" size={16} />
+                          Available {fmtAmount(debtor.balance.available, debtor.currency)} — use
+                        </button>
+                      )}
+                    </div>
+                  </TransferCard>
+
+                  {/* Amount hero */}
+                  <div className={styles.amountHero}>
+                    <div className={styles.amountHeroTop}>
+                      <label className={styles.amountHeroLabel}>Amount</label>
+                      <Select
+                        label="Currency"
+                        value={form.currency}
+                        onChange={(v) => set("currency", v)}
+                        allowDeselect={false}
+                        className={styles.currencySelect}
+                      >
+                        {["USD", "EUR", "GBP", "CAD", "CHF"].map((c) => (
+                          <Option key={c} value={c}>{c}</Option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className={styles.amountRow}>
+                      <input
+                        className={[styles.amountInput, (err("amount") ? styles.amountInputError : "")].filter(Boolean).join(" ")}
+                        value={form.amount}
+                        onChange={(e) => set("amount", e.target.value)}
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        aria-label="Payment amount"
+                      />
+                      <span className={styles.amountCurrency}>{form.currency}</span>
+                    </div>
+                    {err("amount") && <div className={styles.amountError}>{err("amount")}</div>}
+                    {amountOverBalance && (
+                      <div className={styles.amountError}>
+                        Exceeds the account's available balance.
                       </div>
-                    </>
-                  )}
-
-                  <TextInput
-                    label="Payment Purpose / Description"
-                    value={form.purpose}
-                    onChange={(e) => set("purpose", e.target.value)}
-                    errorMessage={err("purpose")}
-                    state={state("purpose")}
-                  />
-                  <TextInput
-                    label="End-to-End Reference"
-                    description="Carried unchanged to the beneficiary."
-                    optional
-                    value={form.endToEndReference}
-                    onChange={(e) => set("endToEndReference", e.target.value)}
-                  />
-                  <TextInput
-                    label="Client Reference"
-                    description="PO number, invoice ID — your own record."
-                    optional
-                    value={form.clientReference}
-                    onChange={(e) => set("clientReference", e.target.value)}
-                  />
-                  <Select
-                    label="Charges"
-                    value={form.chargeBearer}
-                    onChange={(v) => set("chargeBearer", v)}
-                    allowDeselect={false}
-                  >
-                    {CHARGE_BEARERS.map(([v, l]) => (
-                      <Option key={v} value={v}>{l}</Option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              n={3}
-              title="Payment Type Details"
-              subtitle={selectedType.blurb}
-            >
-              <div className={styles.fieldStack}>
-                <div className={styles.subPanel}>
-                  <div className={styles.subPanelTitle}>
-                    Additional fields for {selectedType.label}
+                    )}
+                    <div className={styles.quickChips}>
+                      {QUICK_AMOUNTS.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          className={styles.chip}
+                          onClick={() => set("amount", String(n))}
+                        >
+                          {fmtAmount(n, form.currency)}
+                        </button>
+                      ))}
+                      {chipUseAvailable && (
+                        <button
+                          type="button"
+                          className={styles.chip}
+                          onClick={() => set("amount", String(debtor.balance.available))}
+                        >
+                          Max
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className={styles.fieldStack}>
+
+                  <TransferCard kind="To">
                     {isWire(form) ? (
-                      <>
+                      <div className={styles.fieldStack}>
+                        <div className={styles.flowHint}>
+                          <Icon glyph="Bank" size={16} />
+                          <span>External beneficiary — enter the payee's own details.</span>
+                        </div>
+                        <TextInput
+                          label="Beneficiary Name"
+                          value={form.beneficiaryName}
+                          onChange={(e) => set("beneficiaryName", e.target.value)}
+                          errorMessage={err("beneficiaryName")}
+                          state={state("beneficiaryName")}
+                        />
+                        <TextInput
+                          label="Beneficiary Account"
+                          value={form.beneficiaryAccountNo}
+                          onChange={(e) => set("beneficiaryAccountNo", e.target.value)}
+                          errorMessage={err("beneficiaryAccountNo")}
+                          state={state("beneficiaryAccountNo")}
+                        />
+                        <div className={styles.twoCol}>
+                          <TextInput
+                            label="Beneficiary Country"
+                            description="2-letter ISO code"
+                            value={form.beneficiaryCountry}
+                            onChange={(e) => set("beneficiaryCountry", e.target.value.toUpperCase())}
+                            errorMessage={err("beneficiaryCountry")}
+                            state={state("beneficiaryCountry")}
+                          />
+                          <TextInput
+                            label="SWIFT / BIC"
+                            value={form.bic}
+                            onChange={(e) => set("bic", e.target.value.toUpperCase())}
+                            errorMessage={err("bic")}
+                            state={state("bic")}
+                          />
+                        </div>
+                        <TextInput
+                          label="Beneficiary Address"
+                          optional
+                          value={form.beneficiaryAddress}
+                          onChange={(e) => set("beneficiaryAddress", e.target.value)}
+                        />
+                      </div>
+                    ) : (
+                      <div className={styles.fieldStack}>
+                        <Select
+                          label="Beneficiary Account"
+                          description="Any Leafy Bank current or savings account."
+                          placeholder="Select a recipient"
+                          value={form.creditorAccountId}
+                          onChange={(v) => set("creditorAccountId", v)}
+                          errorMessage={err("creditorAccountId")}
+                          state={state("creditorAccountId")}
+                          allowDeselect={false}
+                        >
+                          {allAccounts
+                            .filter((a) => a.accountId !== form.debtorAccountId)
+                            .map((a) => (
+                              <Option key={a.accountId} value={a.accountId}>
+                                {`${a.ownerName ? a.ownerName + " · " : ""}${a.type} ····${String(a.accountNumber || "").slice(-4)}`}
+                              </Option>
+                            ))}
+                        </Select>
+                        <div className={styles.flowHint}>
+                          <Icon glyph="Building" size={16} />
+                          <span>
+                            Transfer type (own / third party) is derived from whether the
+                            beneficiary shares {customer?.identification?.legalName || "the payer"}'s customer.
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </TransferCard>
+                </div>
+              </SectionCard>
+
+              <SectionCard n={3} title="Payment details">
+                <div className={styles.twoCol}>
+                  <div className={styles.fieldStack}>
+                    <TextInput
+                      label="Payment Purpose / Description"
+                      value={form.purpose}
+                      onChange={(e) => set("purpose", e.target.value)}
+                      errorMessage={err("purpose")}
+                      state={state("purpose")}
+                    />
+                    <Select
+                      label="Category Purpose"
+                      description="ISO ExternalPurpose code. Stage 3 resolves it against the purposeCodes table."
+                      placeholder="None"
+                      value={form.categoryPurpose}
+                      onChange={(v) => set("categoryPurpose", v)}
+                    >
+                      {PURPOSE_CATEGORIES.map((g) => (
+                        <OptionGroup key={g.label} label={g.label}>
+                          {g.options.map(([code, name]) => (
+                            <Option key={code} value={code}>{`${code} — ${name}`}</Option>
+                          ))}
+                        </OptionGroup>
+                      ))}
+                    </Select>
+                    <TextInput
+                      label="Value Date"
+                      type="date"
+                      description="Requested execution date. Defaults to today."
+                      optional
+                      value={form.valueDate}
+                      onChange={(e) => set("valueDate", e.target.value)}
+                    />
+                  </div>
+
+                  <div className={styles.fieldStack}>
+                    <div className={styles.colHeading}>Execution</div>
+                    <label className={styles.priorityLabel}>Priority</label>
+                    <SegmentedControl
+                      value={form.priority}
+                      onChange={(v) => set("priority", v)}
+                      size="small"
+                    >
+                      {PRIORITIES.map((p) => (
+                        <SegmentedControlOption key={p} value={p} label={p} />
+                      ))}
+                    </SegmentedControl>
+
+                    <Select
+                      label="Charges"
+                      description="Applies to wire transfers."
+                      value={form.chargeBearer}
+                      onChange={(v) => set("chargeBearer", v)}
+                      allowDeselect={false}
+                    >
+                      {CHARGE_BEARERS.map(([v, l]) => (
+                        <Option key={v} value={v}>{l}</Option>
+                      ))}
+                    </Select>
+
+                    <TextInput
+                      label="Client Reference"
+                      description="PO number, invoice ID — your own record."
+                      optional
+                      value={form.clientReference}
+                      onChange={(e) => set("clientReference", e.target.value)}
+                    />
+                    <TextInput
+                      label="End-to-End Reference"
+                      description="Carried unchanged to the beneficiary."
+                      optional
+                      value={form.endToEndReference}
+                      onChange={(e) => set("endToEndReference", e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {isWire(form) && (
+                  <div className={styles.wireEnvelope}>
+                    <div className={styles.subPanelTitle}>Wire routing &amp; processing</div>
+                    <div className={styles.twoCol}>
+                      <div className={styles.fieldStack}>
                         <TextInput
                           label="Beneficiary Bank Name"
                           value={form.beneficiaryBankName}
                           onChange={(e) => set("beneficiaryBankName", e.target.value)}
                           errorMessage={err("beneficiaryBankName")}
                           state={state("beneficiaryBankName")}
-                        />
-                        <TextInput
-                          label="SWIFT / BIC Code"
-                          value={form.bic}
-                          onChange={(e) => set("bic", e.target.value.toUpperCase())}
-                          errorMessage={err("bic")}
-                          state={state("bic")}
                         />
                         <TextInput
                           label="ABA / Routing Number"
@@ -831,6 +1239,8 @@ export default function InitiateWizard({ onInitiated }) {
                             <Option key={c} value={c}>{c}</Option>
                           ))}
                         </Select>
+                      </div>
+                      <div className={styles.fieldStack}>
                         <Select
                           label="Account Number Type"
                           value={form.accountNumberType}
@@ -841,39 +1251,7 @@ export default function InitiateWizard({ onInitiated }) {
                             <Option key={t} value={t}>{t}</Option>
                           ))}
                         </Select>
-                      </>
-                    ) : (
-                      <Select
-                        label="Transfer Type"
-                        value={form.transferType}
-                        onChange={(v) => set("transferType", v)}
-                        allowDeselect={false}
-                      >
-                        {TRANSFER_TYPES.map(([v, l]) => (
-                          <Option key={v} value={v}>{l}</Option>
-                        ))}
-                      </Select>
-                    )}
-
-                    <Select
-                      label="Priority"
-                      value={form.priority}
-                      onChange={(v) => set("priority", v)}
-                      allowDeselect={false}
-                    >
-                      {PRIORITIES.map((p) => (
-                        <Option key={p} value={p}>{p}</Option>
-                      ))}
-                    </Select>
-
-                    {isWire(form) && (
-                      <>
-                        <button
-                          type="button"
-                          className={styles.disclosure}
-                          onClick={() => setShowAdvanced((v) => !v)}
-                          aria-expanded={showAdvanced}
-                        >
+                        <button type="button" className={styles.disclosure} onClick={() => setShowAdvanced((v) => !v)} aria-expanded={showAdvanced}>
                           <Icon glyph={showAdvanced ? "ChevronUp" : "ChevronDown"} size={12} />
                           {showAdvanced ? "Hide additional options" : "Show additional options"}
                         </button>
@@ -892,35 +1270,30 @@ export default function InitiateWizard({ onInitiated }) {
                               value={form.localInstrumentCode}
                               onChange={(e) => set("localInstrumentCode", e.target.value.toUpperCase())}
                             />
-                            <div className={styles.infoBox}>
-                              Wire type (domestic vs international) is derived server-side from
-                              the two bank countries — it is not keyed here.
-                            </div>
                           </>
                         )}
-                      </>
-                    )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className={styles.infoBox}>
                   <div className={styles.infoBoxTitle}>Phase information</div>
-                  <div>
-                    <Badge variant="green">Phase 1</Badge> Wires, Internal Transfer
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    <Badge variant="lightgray">Phase 2</Badge> ACH, Cards
-                  </div>
+                  <div><Badge variant="green">Phase 1</Badge> Wires, Internal Transfer</div>
+                  <div style={{ marginTop: 4 }}><Badge variant="gray">Phase 2</Badge> ACH, Cards</div>
                 </div>
+              </SectionCard>
+            </div>
 
-                {isWire(form) && (
-                  <Banner variant="info">
-                    External wires are captured and validated, then held at SUBMITTED — rail
-                    execution arrives in stage 5.
-                  </Banner>
-                )}
-              </div>
-            </SectionCard>
+            {/* ── live summary (right) ── */}
+            <OrderSummary
+              form={form}
+              customer={customer}
+              debtor={debtor}
+              recipientLabel={recipientLabel}
+              isOwnAccount={isOwnAccount}
+              selectedType={selectedType}
+            />
           </div>
         )}
 
