@@ -206,6 +206,102 @@ def test_a_null_reference_store_resolves_nothing_and_raises_nothing():
 
 
 # --------------------------------------------------------------------------- #
+# 1b. FR-3.12 — regulatory reports
+# --------------------------------------------------------------------------- #
+
+def _reg_outcome(plan):
+    return next(o for o in plan.outcomes if o[0] == "regulatory_reports_assessed")
+
+
+def test_a_cross_border_wire_attracts_a_regulatory_declaration():
+    """FR-3.12 — a WIRE with wireType INTERNATIONAL gets a CROSS_BORDER_DECLARATION."""
+    payment = _wire()
+    payment["wireDetails"]["wireType"] = "INTERNATIONAL"
+    plan = enrichment_plan.plan(payment, _store(), external_creditor=True)
+
+    reports = plan.updates["correspondent.regulatoryReports"]
+    assert [r["reportType"] for r in reports] == ["CROSS_BORDER_DECLARATION"]
+    r = reports[0]
+    assert r["authority"] == enrichment_plan.REGULATORY_AUTHORITY
+    assert r["status"] == "REQUIRED"
+    assert r["simulated"] is True
+    assert r["thresholdAmount"] is None
+    # The plan is pure — `assessedAt` is null until enrichment.run stamps it.
+    assert r["assessedAt"] is None
+    _, result, _ = _reg_outcome(plan)
+    assert result == "PASS"
+
+
+def test_a_high_value_wire_attracts_a_threshold_report():
+    """FR-3.12 — a WIRE at or above the threshold gets a THRESHOLD_REPORT carrying it."""
+    payment = _wire(amount=25_000.0, instructedAmount=25_000.0)
+    plan = enrichment_plan.plan(payment, _store(), external_creditor=True)
+
+    reports = plan.updates["correspondent.regulatoryReports"]
+    assert [r["reportType"] for r in reports] == ["THRESHOLD_REPORT"]
+    assert reports[0]["thresholdAmount"] == enrichment_plan.regulatory_report_threshold()
+
+
+def test_a_cross_border_high_value_wire_gets_both_reports():
+    """Both triggers can fire on one payment — two entries, order is stable."""
+    payment = _wire(amount=25_000.0, instructedAmount=25_000.0)
+    payment["wireDetails"]["wireType"] = "INTERNATIONAL"
+    plan = enrichment_plan.plan(payment, _store(), external_creditor=True)
+
+    reports = plan.updates["correspondent.regulatoryReports"]
+    assert [r["reportType"] for r in reports] == [
+        "CROSS_BORDER_DECLARATION", "THRESHOLD_REPORT",
+    ]
+    _, result, detail = _reg_outcome(plan)
+    assert result == "PASS" and "2 regulatory report(s)" in detail
+
+
+def test_a_domestic_wire_under_threshold_gets_no_report():
+    """The spec's "Empty array if none" — no $set, so the diff stays clean."""
+    payment = _wire(amount=5_000.0, instructedAmount=5_000.0)
+    payment["wireDetails"]["wireType"] = "DOMESTIC"
+    plan = enrichment_plan.plan(payment, _store(), external_creditor=True)
+
+    assert "correspondent.regulatoryReports" not in plan.updates
+    _, result, _ = _reg_outcome(plan)
+    assert result == "SKIP"
+
+
+def test_an_internal_transfer_gets_no_regulatory_report():
+    """A book transfer reaches no clearing system — SKIP, not a refusal."""
+    plan = enrichment_plan.plan(
+        _wire(rail="INTERNAL", amount=25_000.0), _store(), external_creditor=False
+    )
+    assert "correspondent.regulatoryReports" not in plan.updates
+    _, result, detail = _reg_outcome(plan)
+    assert result == "SKIP" and "INTERNAL" in detail
+
+
+def test_the_threshold_is_env_configurable(monkeypatch):
+    """Lazy env read — raising the threshold lifts the threshold report off a $25k wire."""
+    monkeypatch.setenv("REGULATORY_REPORT_THRESHOLD_USD", "50000")
+    payment = _wire(amount=25_000.0, instructedAmount=25_000.0)
+    plan = enrichment_plan.plan(payment, _store(), external_creditor=True)
+
+    assert "correspondent.regulatoryReports" not in plan.updates
+    _, result, _ = _reg_outcome(plan)
+    assert result == "SKIP"
+
+
+def test_the_plan_does_not_stamp_the_assessment_time():
+    """The plan is pure (no clock) — `assessedAt` is null until enrichment.run owns `now`.
+
+    Same class as the mapper purity test: enrichment must be deterministic given its inputs,
+    so a timestamp can only be stamped by the caller that owns the clock."""
+    payment = _wire()
+    payment["wireDetails"]["wireType"] = "INTERNATIONAL"
+    plan = enrichment_plan.plan(payment, _store(), external_creditor=True)
+
+    for report in plan.updates["correspondent.regulatoryReports"]:
+        assert report["assessedAt"] is None
+
+
+# --------------------------------------------------------------------------- #
 # 2. The enrichment{} record (B1)
 # --------------------------------------------------------------------------- #
 

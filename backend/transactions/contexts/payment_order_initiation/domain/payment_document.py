@@ -156,6 +156,9 @@ def build(ctx) -> dict:
         # identity.
         "endToEndId": ctx.end_to_end_id,
         "idempotencyKey": ctx.idempotency_key,
+        # DR-1.1: customer's own internal tracking reference, distinct from endToEndId.
+        # Not in the canonical `payments` spec — see `test_payment_document_spec._KNOWN_EXTRAS`.
+        "clientReference": ctx.client_reference,
         "instructionId": derive_ref("INSTR", oid),
         "txnId": derive_ref("TXN", oid),
         "uetr": f"UETR-{str(oid)}",
@@ -171,6 +174,11 @@ def build(ctx) -> dict:
         "instructedCurrency": ctx.instructed_currency,
         "amount": ctx.instructed_amount,
         "currency": ctx.instructed_currency,
+        # Spec-declared scalar (`propose_payments.json` ~642, not required). Opened at
+        # build so enrichment can `$set` it without an `$exists` branch — same pattern as
+        # `fraud`/`enrichment`/`authentication`. Enrichment writes the simulated rate
+        # and diverges `amount` when the instructed currency differs (FR-3.14).
+        "fxRate": None,
         "chargeBearer": ctx.charge_bearer,
         "categoryPurpose": ctx.category_purpose,
         # R8 — captured at the entry screen for EVERY rail. Single source of truth: the
@@ -190,7 +198,9 @@ def build(ctx) -> dict:
         "correspondent": {
             "correspondentBic": None,
             "intermediaryBic": None,
-            # Spec-required array. Empty at initiation; stage 3/4 append.
+            # Spec-required array. Empty at initiation; stage 3 enrichment appends
+            # (`enrichment_plan._plan_regulatory_reports`) when the wire is cross-border
+            # or above the reporting threshold. Shape is temporary pending Doina (Q24).
             "regulatoryReports": [],
             # PENDING, because at initiation no screening has run — and PENDING is a legal
             # value of the spec's own enum (`CLEAR | HIT | PENDING | BLOCKED`). This used to
@@ -257,6 +267,17 @@ def build(ctx) -> dict:
         # that the spec does not declare — argued for in B5 rather than slipped in, because
         # `test_no_field_is_written_that_the_spec_does_not_declare` pins the set.
         "enrichment": None,
+        # Stage 3 corridor audit snapshot (doc L404: "computed outcome snapshot,
+        # not new instruction data"). The EIGHTH field written that the spec does not
+        # declare — argued for the same way as the sixth, and pinned by the same test.
+        # An object (not None): stage 3 writes `validation.determinedCategory` via a
+        # dotted `$set`, and a dotted set into a null parent is rejected by MongoDB (and
+        # by FakeCollection's `setdefault`, which won't replace a present None). Keeping
+        # it `{}` also means a later field (FR-3.9 `overallStatus`/`failureReasons[]`) can
+        # land without clobbering `determinedCategory` — the whole-object `$set` an
+        # earlier version used would have overwritten siblings. The other blocks stay None:
+        # each is a whole-object write owned by one stage, so the clobber risk doesn't arise.
+        "validation": {},
         "initiation": {
             "initiatedAt": now,
             "initiatedBy": ctx.debtor_customer_id,

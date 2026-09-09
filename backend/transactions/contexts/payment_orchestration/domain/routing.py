@@ -145,6 +145,13 @@ def decide(
             "Both accounts are held at Leafy Bank, so the payment posts on our own ledger "
             "and reaches no clearing system."
         )
+    # FR-4.2: the rail-selection fallback (an untyped back-office/API intake with no
+    # explicit rail) is intentionally OUT OF SCOPE for Phase 1. The Aug 27 doc
+    # (L534) calls it "the exception path, not the primary Phase 1 flow" and marks it
+    # "TBD — Agentic opportunity." `rail` is required on the request
+    # (`api_models.py:174`, `extra="forbid"`), so a payment without a rail 422s
+    # before the saga starts — the fallback is unreachable by construction. The
+    # `else` branch above covers INTERNAL and any future rail, not the untyped case.
 
     correspondent_bic = None
     requires_correspondent = network == SWIFT

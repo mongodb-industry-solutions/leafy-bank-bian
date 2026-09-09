@@ -74,6 +74,10 @@ class PaymentContext:
     requested_execution_date: Optional[date] = None
     channel: str = "API"
     idempotency_key: Optional[str] = None
+    # DR-1.1: customer's own internal tracking reference (PO number, contract ID),
+    # distinct from endToEndId. Optional; the canonical `payments` spec does not
+    # declare it — see `test_payment_document_spec._KNOWN_EXTRAS`.
+    client_reference: Optional[str] = None
     # The channel's authentication assertion, as supplied. Optional — stage 2 records
     # `method: NONE` and a SKIP when it is absent, and never a PASS (doc 15 B1).
     authentication: Optional[dict] = None

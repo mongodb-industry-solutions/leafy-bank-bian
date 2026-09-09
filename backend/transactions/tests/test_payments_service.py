@@ -386,8 +386,10 @@ def test_exact_available_balance_is_allowed(service, db):
         ("USD", "USD", "EUR"),   # instruction disagrees the other way
     ],
 )
-def test_currency_mismatch_rejected(db, debtor_ccy, creditor_ccy, instructed):
-    """FX is out of scope for Phase 1; all three disagreement shapes must reject."""
+def test_currency_mismatch_warns_and_proceeds(db, debtor_ccy, creditor_ccy, instructed):
+    """FR-3.14 — currency mismatch is a WARN, not a refusal. The payment
+    proceeds; enrichment attaches a SIMULATED fxRate when the instructed
+    currency differs from the debtor account currency."""
     db["accounts"] = FakeCollection([
         _account(DEBTOR, CUST_D, currency=debtor_ccy),
         _account(CREDITOR, CUST_C, currency=creditor_ccy),
@@ -395,16 +397,26 @@ def test_currency_mismatch_rejected(db, debtor_ccy, creditor_ccy, instructed):
     db["payments"].unique_on = "endToEndId"
     svc = PaymentsService(FakeConnection(db), "leafy_bank_bian", payment_limit_usd=50_000.0)
 
-    # The message now names both sides and the reason, and arrives as the
-    # `currency_consistent` check's detail (stage 3 records outcomes, doc 17 R2/R12).
-    with pytest.raises(ValueError, match="FX is out of scope"):
-        _initiate(svc, instructed_currency=instructed)
+    # The currency_consistent check WARNs (stage 3 records outcomes, doc 17 R2/R12).
+    payment = _initiate(svc, instructed_currency=instructed)
 
-    _assert_rejected(db, reason_match="FX is out of scope", at_state="INITIATED")
+    # The payment was NOT rejected — it settled (internal transfer).
+    assert payment["status"] == "SETTLED"
 
-    failed = _one(db, "currency_consistent")
-    assert failed["result"] == "FAIL"
-    assert failed["stage"] == "3 validate"
+    warn = _one(db, "currency_consistent")
+    assert warn["result"] == "WARN"
+    assert warn["stage"] == "3 validate"
+    assert "FX" in warn["detail"]
+
+    # When the instructed currency differs from the debtor account currency,
+    # enrichment attaches a SIMULATED fxRate and diverges `amount` (FR-3.14).
+    # Otherwise no FX is applied (SKIP).
+    if debtor_ccy != instructed:
+        assert payment["fxRate"] is not None
+        assert payment["amount"] != payment["instructedAmount"]
+        assert payment["currency"] == debtor_ccy
+    else:
+        assert payment["fxRate"] is None
 
 
 # --- 3. closed account --------------------------------------------------------

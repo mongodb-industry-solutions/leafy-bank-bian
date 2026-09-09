@@ -126,12 +126,11 @@ def _initiate_kwargs(body) -> dict:
         "category_purpose": body.categoryPurpose,
         "requested_execution_date": body.requestedExecutionDate,
         "channel": body.channel,
-        # Stage 2 (doc 15 B1). The body's assertion is the pre-token fallback and is
-        # OVERRIDDEN by `_resolve_identity` whenever a valid token is presented — a claim
-        # the caller made about itself must never outrank one the bank signed. Left on the
-        # contract until every caller sends a token (`REQUIRE_AUTHENTICATION`), then
-        # removed. None here means nothing was asserted: stage 2 records `method: NONE`
-        # and a SKIP, never a PASS.
+        "client_reference": body.clientReference,
+        # Stage 2 (doc 15 B1). The body's assertion is the pre-token fallback: it wins
+        # when no token is presented (`_resolve_identity` omits the `authentication` key so
+        # the merge below does not clobber it), and is overridden by verified claims when one
+        # is. A claim the caller made about itself must never outrank one the bank signed.
         "authentication": body.authentication.model_dump() if body.authentication else None,
         "wire_details": body.wireDetails.model_dump() if body.wireDetails else None,
         "ach_details": body.achDetails.model_dump() if body.achDetails else None,

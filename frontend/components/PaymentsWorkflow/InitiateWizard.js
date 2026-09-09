@@ -122,6 +122,13 @@ function buildPayload(form) {
 
   if (form.valueDate) payload.requestedExecutionDate = form.valueDate;
 
+  // DR-1.1: the customer's own internal tracking reference (PO number, contract ID),
+  // distinct from endToEndId. The backend threads this through to the `payments` doc.
+  // The same value is also mirrored into `remittance.invoiceNo` below, because the deep-dive
+  // panel ("Client reference") and the pacs.008 remittance mapper read that field today.
+  // Split these into separate inputs if a demo ever needs both distinct.
+  if (form.clientReference) payload.clientReference = form.clientReference;
+
   const remittance = {
     unstructured: form.purpose || null,
     reference: form.endToEndReference || null,

@@ -36,6 +36,7 @@ supply, after it).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -68,6 +69,52 @@ _FEE_PAYER_BY_CHARGE_BEARER = {
     "SLEV": "DEBTOR",     # following service level — the debtor's side, for our purposes
 }
 
+# Simulated FX rates for the demo (FR-3.14). Phase 1 has no live FX provider — a
+# mock/fixed table keyed by (instructed_currency, debtor_account_currency). `amount` is
+# diverged to `instructedAmount * rate` in the debtor account's currency (the settlement
+# currency per the spec). A USD-to-USD international wire hits the no-op path below.
+SIMULATED_FX_RATES = {
+    ("EUR", "USD"): 1.08,
+    ("GBP", "USD"): 1.27,
+    ("USD", "EUR"): 0.92,
+    ("USD", "GBP"): 0.79,
+}
+_DEFAULT_SIMULATED_RATE = 1.0
+
+# FR-3.12 — regulatory reporting. The canonical spec declares `correspondent.
+# regulatoryReports` as a **required** array of `PaymentRegulatoryReportingRecord` ("Empty
+# array if none") but gives **no item schema** — the element shape is undefined (Q24, unsent).
+# The shape below is a temporary one authored to satisfy FR-3.12 ("populate when cross-border
+# or above threshold") and aligned with the sibling `sanctionsCheck{status, checkedAt,
+# provider}` record: a status, a timestamp, and an authority, plus the trigger reason and a
+# `simulated` flag. Doina ratifies the real shape as Q24; if she renames fields it is a
+# document/seed migration, not a pipeline change. `simulated: true` because the demo determines
+# a report is REQUIRED but files nothing with any authority.
+REGULATORY_AUTHORITY = "FINCEN-SIMULATED"
+REGULATORY_REPORT_STATUS = "REQUIRED"
+_REPORT_TYPE_CROSS_BORDER = "CROSS_BORDER_DECLARATION"
+_REPORT_TYPE_THRESHOLD = "THRESHOLD_REPORT"
+_DEFAULT_REGULATORY_REPORT_THRESHOLD_USD = 10_000.0
+
+
+def regulatory_report_threshold() -> float:
+    """The amount at which a wire attracts a threshold regulatory report.
+
+    Read **lazily**, never at module scope: a module-level `os.getenv` runs before
+    `load_dotenv` and silently takes the default (defects.md 2026-06-30). Same discipline as
+    `duplicate_detection.window_seconds`. Default 10,000 — the US BSA Currency Transaction
+    Report threshold, recognizable to an FSI audience. Env-configurable so a demo scenario can
+    move it without a code change.
+    """
+    raw = os.getenv("REGULATORY_REPORT_THRESHOLD_USD")
+    if raw is None:
+        return _DEFAULT_REGULATORY_REPORT_THRESHOLD_USD
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_REGULATORY_REPORT_THRESHOLD_USD
+    return value if value > 0 else _DEFAULT_REGULATORY_REPORT_THRESHOLD_USD
+
 
 @dataclass
 class EnrichmentPlan:
@@ -97,7 +144,10 @@ class EnrichmentPlan:
         return bool(self.updates)
 
 
-def plan(payment: dict, reference_data, *, external_creditor: bool) -> EnrichmentPlan:
+def plan(
+    payment: dict, reference_data, *, external_creditor: bool,
+    debtor_account_currency: Optional[str] = None,
+) -> EnrichmentPlan:
     """Everything stage 3 can resolve for this payment, without writing anything.
 
     `payment` is the persisted document — the same object `original{}` is snapshotted from,
@@ -113,6 +163,8 @@ def plan(payment: dict, reference_data, *, external_creditor: bool) -> Enrichmen
     _plan_purpose_codes(p, payment, reference_data)
     _plan_fees(p, payment, rail)
     _plan_initiating_party(p, payment)
+    _plan_fx(p, payment, debtor_account_currency)
+    _plan_regulatory_reports(p, payment)
     return p
 
 
@@ -325,6 +377,142 @@ def _plan_initiating_party(p: EnrichmentPlan, payment: dict) -> None:
     }
     p._set("wireDetails.initiatingParty", party,
            before=wire.get("initiatingParty"), source="authentication")
+
+
+def _plan_fx(p: EnrichmentPlan, payment: dict,
+              debtor_account_currency: Optional[str]) -> None:
+    """FR-3.14 — attach a SIMULATED FX rate when the instructed currency
+    differs from the debtor account currency.
+
+    Writes `fxRate` (spec-declared scalar, `propose_payments.json` ~642), diverges
+    `amount` to the settlement amount, and sets `currency` to the debtor account's
+    currency (the settlement currency per the spec: "Settlement amount after FX" /
+    "Settlement currency"). Records a `fx_rate_applied` check.
+
+    No-op when currencies match (or debtor account currency is unknown) — a
+    USD-to-USD international wire is unaffected. The actual money move in
+    `execute.py` uses `ctx.instructed_amount`; the diverged `amount` is the document's
+    settlement-amount field for display and audit, not the debit amount. No real FX
+    settlement exists in the demo, so this is honest as a labelled simulation.
+    """
+    instructed_currency = payment.get("instructedCurrency")
+    if (not debtor_account_currency
+            or debtor_account_currency == instructed_currency):
+        p.outcomes.append((
+            "fx_rate_applied", "SKIP",
+            f"No FX required — instructed currency {instructed_currency} "
+            f"matches debtor account currency {debtor_account_currency}.",
+        ))
+        return
+
+    rate = SIMULATED_FX_RATES.get(
+        (instructed_currency, debtor_account_currency),
+        _DEFAULT_SIMULATED_RATE,
+    )
+    instructed_amount = payment.get("instructedAmount", 0)
+    settlement_amount = round(instructed_amount * rate, 2)
+
+    p._set("fxRate", rate, before=payment.get("fxRate"), source="simulated-fx-table")
+    p._set("amount", settlement_amount, before=payment.get("amount"), source="simulated-fx")
+    p._set("currency", debtor_account_currency,
+           before=payment.get("currency"), source="simulated-fx")
+
+    p.outcomes.append((
+        "fx_rate_applied", "PASS",
+        f"Simulated FX rate {rate} ({instructed_currency}→"
+        f"{debtor_account_currency}) applied: {instructed_amount:,.2f} "
+        f"{instructed_currency} → {settlement_amount:,.2f} "
+        f"{debtor_account_currency}. Rate source: SIMULATED — no live FX "
+        "provider in Phase 1.",
+    ))
+
+
+def _plan_regulatory_reports(p: EnrichmentPlan, payment: dict) -> None:
+    """FR-3.12 — populate `correspondent.regulatoryReports[]` when the wire is
+    cross-border or above the reporting threshold.
+
+    The canonical spec declares the array (required, "Empty array if none") but no item
+    schema, so the record shape here is temporary and awaits Doina's ratification (Q24). It
+    mirrors the sibling `sanctionsCheck` record — a status, a timestamp, an authority — plus
+    the trigger reason and `simulated: true`. The timestamp (`assessedAt`) is left null by the
+    plan and stamped by `enrichment.run`, which owns the clock; same discipline as
+    `payment_document.build` initialising fields null for a later stage to fill.
+
+    Two triggers, both can fire on one payment:
+      * **cross-border** — `wireDetails.wireType == "INTERNATIONAL"` (the stage-1 corridor
+        determination, the same signal stage 4 routes on) → a `CROSS_BORDER_DECLARATION`.
+      * **threshold** — `amount` ≥ `regulatory_report_threshold()` → a `THRESHOLD_REPORT`
+        carrying the threshold that fired.
+
+    Scoped to WIRE: a book transfer reaches no clearing system and attracts no regulatory
+    report in this demo's posture. A domestic wire under the threshold keeps `[]` (the spec's
+    "Empty array if none") and a SKIP — no `$set`, so the before/after diff stays clean.
+    `wireType` is read in preference to `creditor.bankCountry` because the plan runs against
+    the pre-enrichment document, and `bankCountry` is resolved by `_plan_creditor_bank` (a
+    sibling, whose updates this helper cannot see); `wireType` was derived at stage 1.
+    """
+    rail = payment.get("rail")
+    if rail != "WIRE":
+        p.outcomes.append((
+            "regulatory_reports_assessed", "SKIP",
+            f"Regulatory reporting applies to wire transfers; rail {rail} carries none.",
+        ))
+        return
+
+    reports: list[dict] = []
+
+    wire_type = (payment.get("wireDetails") or {}).get("wireType")
+    if wire_type == "INTERNATIONAL":
+        creditor = payment.get("creditor") or {}
+        reports.append({
+            "reportType": _REPORT_TYPE_CROSS_BORDER,
+            "authority": REGULATORY_AUTHORITY,
+            "status": REGULATORY_REPORT_STATUS,
+            "assessedAt": None,  # stamped by enrichment.run, which owns `now`
+            "reason": (
+                "Cross-border wire requires a regulatory declaration "
+                f"(wireType {wire_type})."
+            ),
+            "thresholdAmount": None,
+            "simulated": True,
+        })
+
+    amount = payment.get("amount") or 0
+    threshold = regulatory_report_threshold()
+    if amount >= threshold:
+        reports.append({
+            "reportType": _REPORT_TYPE_THRESHOLD,
+            "authority": REGULATORY_AUTHORITY,
+            "status": REGULATORY_REPORT_STATUS,
+            "assessedAt": None,
+            "reason": (
+                f"Wire amount {amount:,.2f} {payment.get('currency', '')} meets or "
+                f"exceeds the {threshold:,.0f} reporting threshold."
+            ),
+            "thresholdAmount": threshold,
+            "simulated": True,
+        })
+
+    if not reports:
+        p.outcomes.append((
+            "regulatory_reports_assessed", "SKIP",
+            f"Domestic wire below the {threshold:,.0f} reporting threshold — no "
+            "regulatory report required.",
+        ))
+        return
+
+    correspondent = payment.get("correspondent") or {}
+    p._set(
+        "correspondent.regulatoryReports", reports,
+        before=correspondent.get("regulatoryReports", []),
+        source="regulatory-reporting-rules",
+    )
+    p.outcomes.append((
+        "regulatory_reports_assessed", "PASS",
+        f"{len(reports)} regulatory report(s) attached: "
+        + ", ".join(r["reportType"] for r in reports)
+        + f". Authority {REGULATORY_AUTHORITY} — SIMULATED, no filing occurs in the demo.",
+    ))
 
 
 def snapshot_original(payment: dict, paths: list[str]) -> dict:

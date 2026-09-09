@@ -733,10 +733,11 @@ def test_the_fee_reconfirmation_is_skipped_off_the_wire_rail(service, db):
 
 def test_stage_three_checks_are_untouched_by_stage_four(service, db):
     """Every stage appends to ONE array (doc 15 B3), so stage 4 must not disturb stage 3's
-    ten entries or their order."""
+    entries or their order. Stage 3 enrichment gained `fx_rate_applied` (FR-3.14) and
+    `regulatory_reports_assessed` (FR-3.12), so the count is 16."""
     _initiate(service)
     stage_three = [c["name"] for c in _checks(db, "3 ")]
-    assert len(stage_three) == 14
+    assert len(stage_three) == 16
     assert stage_three[0] == "required_fields"
 
 

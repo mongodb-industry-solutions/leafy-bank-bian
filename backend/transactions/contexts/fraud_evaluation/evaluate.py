@@ -288,9 +288,10 @@ def _record_fee_reconfirmation(record, payment: dict) -> None:
     customer approval again or reject/hold"*, and re-pricing without telling anyone is the
     one option she does not offer.
 
-    ⚠️ FX is deliberately not re-confirmed. `fxRate` has no write path anywhere in the repo
-    and stage 3 **refuses** any currency mismatch, so no Phase 1 payment can carry a rate.
-    Confirming a rate that cannot exist would be theatre (doc 18 §6).
+    ⚠️ FX is deliberately not re-confirmed. Stage 3 now WARNS on a currency mismatch
+    and enrichment writes a SIMULATED `fxRate` (FR-3.14), but the rate is a fixed mock —
+    re-confirming a mock against itself is theatre (doc 18 §6). A live FX provider
+    would change this.
     """
     from contexts.payment_order_initiation.domain import enrichment_plan
 

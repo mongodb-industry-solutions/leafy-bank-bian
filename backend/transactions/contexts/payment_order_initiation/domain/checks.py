@@ -10,7 +10,7 @@ result "none" — and doc 07's P1 item 4 asks for exactly this artifact: *per-ch
 actor, timestamp, sync/async*, for stage 2 **and** stage 3.
 
 One general array rather than a per-stage structure (doc 15 B3): stage 2 appends its six
-entries, stage 3 will append its nine, and a consumer filters by `stage`. The demo trace is
+entries, stage 3 appends its ten, and a consumer filters by `stage`. The demo trace is
 then a single document read, which is the point D2 made when it embedded `lifecycle{}`.
 
 ## The rules

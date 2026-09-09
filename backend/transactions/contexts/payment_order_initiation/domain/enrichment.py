@@ -58,13 +58,21 @@ def run(ctx: PaymentContext) -> None:
     payment = payments.find_one({"_id": ctx.payment_oid}) or {}
 
     plan = enrichment_plan.plan(
-        payment, ctx.reference_data, external_creditor=ctx.is_external_creditor
+        payment, ctx.reference_data, external_creditor=ctx.is_external_creditor,
+        debtor_account_currency=(ctx.debtor_account or {}).get("currency"),
     )
 
     recorded = [
         checks.check(STAGE, name, result, mode=checks.SYNC, detail=detail, at=now)
         for name, result, detail in plan.outcomes
     ]
+
+    # FR-3.12 — the regulatory-report plan is pure (no clock), so it leaves each report's
+    # `assessedAt` null. Enrichment owns `now` (same as `resolvedAt`), so it stamps the
+    # assessment time here, before the `$set`. Same discipline as `payment_document.build`
+    # initialising a field null for a later stage to fill.
+    for report in plan.updates.get("correspondent.regulatoryReports", []):
+        report["assessedAt"] = now
 
     update: dict = dict(plan.updates)
     update["enrichment"] = {

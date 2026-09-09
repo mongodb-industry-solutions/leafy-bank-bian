@@ -10,6 +10,11 @@
 // displayed on the same screen that answers it, so there is no out-of-band channel and this
 // is not two-factor authentication. What is real: the code is an HMAC bound to this session,
 // the server verifies it, and a wrong answer is refused.
+//
+// The `reason` prop is the backend's REFUSAL string, not a message meant for a user — it
+// carries the HTTP status and a Python repr (`400: {'detail': …}`). We never show it
+// verbatim; we extract the amount it wraps and render clean prose instead, so the panel
+// reads like a bank's auth step rather than a leaked API response.
 
 import React, { useEffect, useState } from "react";
 import Modal from "@leafygreen-ui/modal";
@@ -21,10 +26,26 @@ import {
   evaluateStepUpChallenge,
   retrieveStepUpChallenge,
 } from "@/lib/api/partyAuthentication";
+import { fmtAmount } from "@/lib/paymentsWorkflow/status";
+import styles from "./StepUpModal.module.css";
+
+// The backend refusal's own phrasing (`authenticate.py`): "… is not sufficient for
+// 11,308.66 — step-up authentication required." We match on the amount it embeds, never on
+// the status/repr wrapper, so a change upstream to the HTTP shape cannot break the copy.
+const AMOUNT_RE = /sufficient for ([\d,]+\.\d{2})/;
+
+/** The payment amount the backend refused, parsed from the refusal string. */
+function amountFromReason(reason) {
+  if (typeof reason !== "string") return null;
+  const m = reason.match(AMOUNT_RE);
+  if (!m) return null;
+  const amount = Number(m[1].replace(/,/g, ""));
+  return Number.isNaN(amount) ? null : amount;
+}
 
 /**
  * @param {boolean} open
- * @param {string}  reason    the refusal text from the backend, shown verbatim
+ * @param {string}  reason    the backend refusal string — parsed, never shown raw
  * @param {Function} onCancel
  * @param {Function} onSuccess called once the session is re-issued at two factors; the
  *                             caller retries its original request
@@ -34,6 +55,8 @@ export default function StepUpModal({ open, reason, onCancel, onSuccess }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  const amount = amountFromReason(reason);
 
   useEffect(() => {
     if (!open) {
@@ -67,35 +90,46 @@ export default function StepUpModal({ open, reason, onCancel, onSuccess }) {
   }
 
   return (
-    <Modal open={open} setOpen={(v) => !v && onCancel?.()}>
+    <Modal open={open} setOpen={(v) => !v && onCancel?.()} contentClassName={styles.content}>
       <H3>Additional authentication required</H3>
 
-      {reason && (
-        <Banner variant="warning" style={{ marginTop: 12 }}>
-          {reason}
-        </Banner>
-      )}
-
-      <Body style={{ marginTop: 16 }}>
-        This payment is above the entitlement step-up threshold for the account&apos;s
-        customer segment, so a second factor is required before it can be initiated.
+      <Body style={{ marginTop: 12 }}>
+        {amount != null
+          ? `This payment of ${fmtAmount(amount)} is above the step-up threshold for this account, so a second factor is required before it can be initiated.`
+          : "This payment is above the step-up threshold for this account, so a second factor is required before it can be initiated."}
       </Body>
 
       <Banner variant="info" style={{ marginTop: 16 }}>
-        <strong>SIMULATED</strong> — a real deployment sends this code to the customer&apos;s
-        registered device. Here it is shown on screen, so this demonstrates the step-up
-        control, not two-factor authentication. The code is bound to this session and is
-        verified server-side: a wrong code is refused.
+        <strong>Simulated:</strong> in production this code goes to the customer&apos;s
+        registered device. It is shown on screen here, so this demonstrates the step-up
+        control, not two-factor authentication. A wrong code is refused.
       </Banner>
 
       {challenge?.challengeCode && (
-        <Body style={{ marginTop: 16 }}>
-          One-time code: <strong style={{ letterSpacing: 2 }}>{challenge.challengeCode}</strong>
-        </Body>
+        <div style={{ marginTop: 20 }}>
+          <Body style={{ fontWeight: 600 }}>Verification code</Body>
+          <div
+            style={{
+              marginTop: 8,
+              padding: "16px 14px",
+              borderRadius: 8,
+              background: "#F9FBFA",
+              border: "1px solid #E8EDEB",
+              fontFamily: "'SFMono-Regular', 'MongoDB Value Serif', Menlo, monospace",
+              fontSize: 26,
+              fontWeight: 600,
+              letterSpacing: 6,
+              textAlign: "center",
+              color: "#001E2B",
+            }}
+          >
+            {challenge.challengeCode}
+          </div>
+        </div>
       )}
 
       <TextInput
-        label="One-time code"
+        label="Enter the one-time code"
         description={challenge?.questionText || "Enter the six-digit code."}
         value={code}
         onChange={(e) => setCode(e.target.value)}

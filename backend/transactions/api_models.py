@@ -185,6 +185,10 @@ class PaymentOrderInitiateRequest(BaseModel):
     requestedExecutionDate: Optional[date] = None
     channel: ChannelLiteral = "API"
     idempotencyKey: Optional[str] = None
+    # DR-1.1: customer's own internal tracking reference (PO number, contract ID),
+    # distinct from endToEndId. Optional; the canonical `payments` spec does not
+    # declare it — see `test_payment_document_spec._KNOWN_EXTRAS`.
+    clientReference: Optional[str] = None
 
     # Stage 2. Optional, so every existing caller keeps validating unchanged — with
     # `extra="forbid"` adding an optional field is safe, removing one is not.

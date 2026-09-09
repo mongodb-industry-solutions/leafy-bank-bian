@@ -97,16 +97,21 @@ def resolve_identity(header_value: Optional[str], requested_customer_id: str) ->
     """Turn the header into `{customer_ref, authentication}` for the payment saga.
 
     Returns the customer the payment must be initiated for, and the assertion stage 2 will
-    grade. With no token and `REQUIRE_AUTHENTICATION` off, both come back unauthenticated:
-    the body's `customerId` and `authentication: None`, which stage 2 records as
-    `method: NONE` and a **SKIP** — never a PASS. That is the same honest reading it has
-    always had for an absent assertion.
+    grade. With a valid token, both come back from verified claims. With no token and
+    `REQUIRE_AUTHENTICATION` off, only `customer_ref` is returned — the body's `customerId`
+    stands, and the body's `authentication` assertion (if any) stands too, as the pre-token
+    fallback. Returning `authentication: None` here would clobber that fallback in the
+    `**{**_initiate_kwargs(body), **identity}` merge at the caller. When no assertion was
+    supplied either, stage 2 records `method: NONE` and a **SKIP** — never a PASS.
     """
     token = bearer_token(header_value)
     if token is None:
         if require_authentication():
             raise AuthenticationError("Authentication token is required.")
-        return {"customer_ref": requested_customer_id, "authentication": None}
+        # Omit `authentication` so the body's fallback assertion survives the caller's
+        # `**{**_initiate_kwargs(body), **identity}` merge. Returning None here used to
+        # clobber it (defects.md 2026-09-08, discriminator-conflation class).
+        return {"customer_ref": requested_customer_id}
 
     claims = verify(token)
     caller_type = claims.get("callerType")

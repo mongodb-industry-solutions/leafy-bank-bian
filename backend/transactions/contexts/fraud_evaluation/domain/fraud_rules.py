@@ -53,9 +53,10 @@ MODEL_ID = "SIMULATED-BASELINE"
 MODEL_VERSION = "v1"
 MODEL_BASELINE_SCORE = 4
 
-# Amount bands, in the payment's own currency. The demo is USD throughout (stage 3 refuses
-# any currency mismatch), so no FX normalisation is attempted — doing it with `fxRate`,
-# which has no write path anywhere, would be fabricated precision.
+# Amount bands, in the payment's own currency. The demo is primarily USD; stage 3
+# now WARNS on a currency mismatch and enrichment attaches a SIMULATED `fxRate` (FR-3.14),
+# so the bands stay in the payment's instructed currency — normalising against a mock
+# rate would add fabricated precision to the score.
 _AMOUNT_BANDS = [
     (1_000_000, 45, "at or above 1,000,000"),
     (250_000, 30, "at or above 250,000"),

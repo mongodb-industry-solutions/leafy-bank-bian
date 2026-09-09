@@ -41,10 +41,22 @@ const SUCCESS_TERMINAL = new Set(["SETTLED", "RECONCILED", "POSTED", "COMPLETED"
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /**
- * Per-stage node state for the mini-stepper and the vertical timeline, derived from how far
- * the saga reached and whether it ended in success or failure. Stages before the last
- * reached one are "completed"; the last reached one is "current" (in flight), "completed"
- * (terminal success), or "failed" (terminal failure); stages after it are "pending".
+ * Per-stage node state for the mini-stepper and the vertical timeline.
+ *
+ * Two different progress models live on this one rail, and they must not be conflated:
+ *
+ *   * stages 1-5 (the linear saga) — order is the fact. A stage is "completed" if a later
+ *     stage was reached; the last reached one is "current" (in flight), "completed"
+ *     (terminal success) or "failed" (terminal failure); later ones are "pending".
+ *
+ *   * stages 6-8 (posting / settlement / reconciliation) — independent axes that advance
+ *     ALONGSIDE the saga, not in lockstep with it (research §1.4). Settlement can be
+ *     SETTLED while posting is still not started. Their completion is the stage's OWN
+ *     terminal status, never its position relative to a later stage — otherwise an
+ *     un-started accounting stage is "filled in" as green just because settlement finished.
+ *
+ * The independent axis stages carry their own `status` (le.postingStatus, jn.status,
+ * lifecycle.settlementStatus, reconciliation.overallResult, …). We key off that directly.
  */
 function nodeStates(stages, paymentStatus) {
   if (!stages?.length) return [];
@@ -58,7 +70,16 @@ function nodeStates(stages, paymentStatus) {
   const status = (paymentStatus || "").toUpperCase();
   const failed = FAILED_STATES.has(status);
   const done = SUCCESS_TERMINAL.has(status);
-  return stages.map((_, i) => {
+  return stages.map((s, i) => {
+    // Independent axis (stage ≥ 6): completion is the stage's own terminal fact.
+    if (s.stage >= 6) {
+      const ownStatus = (s.status || "").toUpperCase();
+      if (FAILED_STATES.has(ownStatus)) return "failed";
+      if (SUCCESS_TERMINAL.has(ownStatus)) return "completed";
+      // Reached but not terminal (PENDING, etc.): in flight. Never reached: not started.
+      return s.reached ? "current" : "pending";
+    }
+    // Linear saga (stages 1-5): order is the fact.
     if (i < lastReached) return "completed";
     if (i === lastReached) return failed ? "failed" : done ? "completed" : "current";
     return "pending";

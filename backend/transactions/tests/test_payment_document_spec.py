@@ -123,6 +123,13 @@ _KNOWN_EXTRAS = {
     # L459-460 before/after screen cannot be drawn from a document that holds one
     # value per field. A SEVENTH must be argued for in the same way.
     "enrichment",
+    # Stage 1 (DR-1.1): customer's own internal tracking reference (PO number,
+    # contract ID), distinct from endToEndId. Doina's Aug 27 research doc asks for
+    # it explicitly; the canonical `payments` spec does not declare it.
+    "clientReference",
+    # Stage 3 (doc L404): corridor category audit snapshot — "computed outcome
+    # snapshot, not new instruction data." The EIGHTH; argued for the same way.
+    "validation",
 }
 
 
@@ -143,6 +150,9 @@ def test_stage_two_slots_are_empty_at_creation():
     assert doc["authentication"] is None
     assert doc["entitlement"] is None
     assert doc["enrichment"] is None
+    assert doc["validation"] == {}
+    assert doc["fxRate"] is None
+    assert doc["clientReference"] is None
 
 
 def _enum_fields(schema, prefix=""):

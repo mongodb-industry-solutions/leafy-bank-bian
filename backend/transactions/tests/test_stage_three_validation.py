@@ -1,11 +1,11 @@
-"""Stage 3 step 3 — the nine recorded checks, and the two new refusals.
+"""Stage 3 step 3 — the ten recorded checks, and the two new refusals.
 
 Doc 17 §3 step 3's gate, as tests. Four groups:
 
 1. **`identifier_format`** (R8) — BIC / IBAN / ABA shape and checksums, pure.
 2. **`rail_viability`** (R10) — the type/rail matrix, with its keys and values asserted
    against the canonical spec's own `enum` arrays (defect 2026-04-28: never hand-rolled).
-3. **`validation.run` behaviour** — all nine checks present, in order, with truthful modes;
+3. **`validation.run` behaviour** — all ten checks present, in order, with truthful modes;
    one test per refusal path.
 4. **Fixture fidelity** — the identifiers the fixtures supply must themselves satisfy the
    rules under test, or every acceptance assertion is vacuous.
@@ -255,6 +255,16 @@ def test_the_corridor_check_reports_domestic_for_an_internal_transfer(service, d
     assert entry["result"] == "PASS"
     assert "DOMESTIC" in entry["detail"]
     assert bank_identity.OUR_BANK_COUNTRY in entry["detail"]
+
+
+def test_the_corridor_category_audit_snapshot_is_persisted(service, db):
+    """FR-3.7 — `validation.determinedCategory` is written to the payment doc, not just
+    reported in a check. It is a dotted-path `$set` (separate from the checks `$push`) so it
+    survives even a later refusal — the snapshot records what was determined, regardless of
+    outcome. `validation` is initialised `{}` so the parent exists for the dotted write."""
+    _initiate(service)
+    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    assert payment["validation"]["determinedCategory"] == "domestic-same-bank"
 
 
 def test_a_non_viable_type_is_refused_and_names_the_check(db):

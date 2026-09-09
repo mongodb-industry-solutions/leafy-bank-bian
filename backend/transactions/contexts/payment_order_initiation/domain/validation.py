@@ -6,7 +6,7 @@ payment valid, and is the money or credit actually available?"*
 Reads  ctx: debtor_account, creditor_account, debtor_account_ref, creditor_account_ref,
             creditor_party, instructed_amount, instructed_currency, payment_type,
             payment_rail, is_external_creditor, payment_oid, current_state, collections
-Writes ctx: current_state -> VALIDATED; nine `payments.checks[]` entries
+Writes ctx: current_state -> VALIDATED; ten `payments.checks[]` entries
 
 ## What changed in stage 3, and what did not
 
@@ -21,7 +21,7 @@ validation and it needs no account data. The DEBTOR account-status check stays i
 to use the account is stage 2's question. The CREDITOR check below stays here — a payee's
 account state is payment validity, not the payer's entitlement.
 
-## Refuse here, warn later
+## Refuse here, warn later — with one exception
 
 This module holds the rules that make a payment order invalid **on its face**, so each one
 raises. A failure raises `ValueError`; the saga catches it, marks the payment REJECTED with
@@ -34,6 +34,11 @@ cannot resolve is a WARN in the enrichment half, never a refusal: one missing di
 must not fail every wire (doc 17 B7, and the 2026-07-01 lesson about permanent vs transient
 failure). The split is: `validation` refuses on the caller's error, `enrichment` warns on
 ours, `final_validation` refuses on what enrichment failed to supply.
+
+**One exception (FR-3.14):** `currency_consistent` WARNs on a currency mismatch rather
+than refusing, because the payment can proceed with a SIMULATED fxRate attached at
+enrichment. A currency mismatch is a caller's error that we choose to defer rather than
+refuse — the international wire (a named core journey, L959) must not be blocked by it.
 
 ## Still to come in this stage
 
@@ -130,24 +135,30 @@ def run(ctx: PaymentContext) -> None:
     )
 
     # --- 6. currency_consistent (R2) ---------------------------------------
+    # FR-3.14: a currency mismatch is a WARN, not a refusal — the payment proceeds
+    # and enrichment attaches a SIMULATED fxRate when the instructed currency differs
+    # from the debtor account currency. One outcome per check (if/elif/else).
     debtor_currency = debtor.get("currency")
     if debtor_currency != ctx.instructed_currency:
-        refuse(
-            "currency_consistent",
+        record(
+            "currency_consistent", checks.WARN,
             f"Debtor account is {debtor_currency}, instruction is "
-            f"{ctx.instructed_currency} — FX is out of scope for Phase 1.",
+            f"{ctx.instructed_currency} — FX conversion will be applied at a "
+            "simulated rate during enrichment (FR-3.14).",
         )
-    if not external and creditor.get("currency") != debtor_currency:
-        refuse(
-            "currency_consistent",
+    elif not external and creditor.get("currency") != debtor_currency:
+        record(
+            "currency_consistent", checks.WARN,
             f"Creditor account is {creditor.get('currency')}, debtor account is "
-            f"{debtor_currency} — FX is out of scope for Phase 1.",
+            f"{debtor_currency} — internal FX conversion will be applied at a "
+            "simulated rate during enrichment (FR-3.14).",
         )
-    record(
-        "currency_consistent", checks.PASS,
-        f"Debtor account currency {debtor_currency} matches the instruction"
-        + ("" if external else " and the creditor account") + ".",
-    )
+    else:
+        record(
+            "currency_consistent", checks.PASS,
+            f"Debtor account currency {debtor_currency} matches the instruction"
+            + ("" if external else " and the creditor account") + ".",
+        )
 
     # --- 7. beneficiary_recognised (R7) ------------------------------------
     # An external beneficiary has no account here to inspect. Its status and currency are
@@ -319,13 +330,22 @@ def _validate_identifiers(refuse, record, ctx, external: bool, creditor_party: d
 
 
 def _record_corridor(record, ctx, external: bool, creditor_party: dict) -> None:
-    """R9 — domestic vs cross-border, by comparing bank countries.
+    """R9 — domestic vs cross-border corridor (FR-3.7, 4-category matrix L396-401).
 
-    Records the outcome; writes no flag. `derive_wire_type()` performed this comparison at
-    stage 1 and left the result in `wireDetails.wireType`, **null when either country is
-    unknown** rather than guessed. This check is what makes that determination visible, and
-    an unknown corridor is a SKIP — not a failure, because an internal transfer legitimately
-    has no counterparty bank country.
+    Determines 3 of the doc's 4 categories from data available today:
+      - domestic-same-bank — creditor held by us (not external)
+      - domestic-different-bank — external, beneficiary bank country == our country
+      - cross-border — external, beneficiary bank country != our country
+
+    The 4th split (cross-border-direct vs cross-border-intermediary) needs correspondent
+    directory data we don't have (doc 17 B2), so it is DEFERRED and recorded as a
+    single "cross-border" category with a note in the check detail.
+
+    Records `validation.determinedCategory` as an audit snapshot (doc L404:
+    "computed outcome snapshot, not new instruction data") directly on the payment —
+    separate from the checks `$push` flush, so it survives even a later refusal.
+    `wireType` (DOMESTIC/INTERNATIONAL) stays 2-value: it drives ISO 20022 message
+    structure, not the corridor.
     """
     our_country = bank_identity.OUR_BANK_COUNTRY
     their_country = (
@@ -341,12 +361,43 @@ def _record_corridor(record, ctx, external: bool, creditor_party: dict) -> None:
         )
         return
 
-    corridor = "DOMESTIC" if their_country == our_country else "INTERNATIONAL"
+    # 3 of the doc's 4 categories determinable from data we have today (L396-401).
+    # The 4th — cross-border-direct vs cross-border-intermediary — needs correspondent
+    # directory data we don't have (doc 17 B2: correspondentBanks is JP/IN only),
+    # so it is DEFERRED and recorded as a single "cross-border" category with a note.
+    if not external:
+        category = "domestic-same-bank"
+        corridor = "DOMESTIC"
+    elif their_country == our_country:
+        category = "domestic-different-bank"
+        corridor = "DOMESTIC"
+    else:
+        category = "cross-border"
+        corridor = "INTERNATIONAL"
+
+    # Audit snapshot (doc L404: "computed outcome snapshot, not new instruction data").
+    # Written directly here — separate from the checks `$push` flush — because the
+    # category is an audit snapshot, not a check, and should survive even a later
+    # refusal (it records what was determined, regardless of outcome).
+    ctx.collections.payments.update_one(
+        {"_id": ctx.payment_oid},
+        # Dotted path — `validation` is initialised `{}` so the parent exists. Setting only
+        # the category leaves sibling fields intact when FR-3.9's overallStatus/
+        # failureReasons[] land; a whole-object `$set` would have clobbered them.
+        {"$set": {"validation.determinedCategory": category}},
+    )
+
     record(
         "domestic_or_crossborder", checks.PASS,
         f"Beneficiary bank country {their_country} vs originating {our_country} — "
-        f"{corridor}."
-        + ("" if external else " Both accounts are held by the bank."),
+        f"{corridor}. Corridor category: {category}."
+        + ("" if external else " Both accounts are held by the bank.")
+        + (
+            " Cross-border direct vs intermediary determination deferred — "
+            "correspondent directory data not available."
+            if category == "cross-border"
+            else ""
+        ),
     )
 
 

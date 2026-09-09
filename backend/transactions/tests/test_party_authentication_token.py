@@ -50,10 +50,26 @@ def test_the_scheme_is_case_insensitive():
 # --- no token ----------------------------------------------------------------
 
 def test_without_a_token_the_body_stands_and_the_assertion_is_absent():
-    """The pre-token behaviour, kept deliberately while the UI rolls out. Stage 2 records
-    `method: NONE` and a SKIP for this — never a PASS."""
+    """No token: `resolve_identity` returns only `customer_ref` so the body's fallback
+    assertion (if any) survives the `**{**_initiate_kwargs(body), **identity}` merge at the
+    caller. Returning `authentication: None` here used to clobber that fallback (defects.md
+    2026-09-08, discriminator-conflation class). Stage 2 still records `method: NONE` and a
+    SKIP when no assertion was supplied either — never a PASS."""
     identity = party_auth.resolve_identity(None, "CUST-9")
-    assert identity == {"customer_ref": "CUST-9", "authentication": None}
+    assert identity == {"customer_ref": "CUST-9"}
+
+
+def test_the_body_authentication_survives_the_route_merge_when_no_token():
+    """The initiate route composes `{**_initiate_kwargs(body), **identity}`. With no token,
+    `resolve_identity` omits `authentication`, so a body-supplied fallback assertion must
+    survive that spread and reach stage 2 — the property Fix #1 restored. The resolver test
+    above pins that `identity` has no `authentication` key; this pins the composition that
+    the route actually performs, so a regression to `authentication: None` in the resolver
+    would be caught here as a clobber, not just as a key-shape change."""
+    body_authentication = {"method": "PASSWORD", "factorCount": 1}
+    identity = party_auth.resolve_identity(None, "CUST-9")
+    merged = {**{"authentication": body_authentication}, **identity}
+    assert merged["authentication"] == body_authentication
 
 
 def test_with_the_flag_on_a_missing_token_is_refused(monkeypatch):
