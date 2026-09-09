@@ -40,6 +40,7 @@ from contexts.fraud_evaluation import evaluate
 from contexts.party_authentication import authenticate
 from contexts.payment_order_initiation.application import capture
 from contexts.payment_order_initiation.domain import enrichment, lifecycle, validation
+from contexts.payment_order_initiation.domain.lifecycle import StepUpRequired
 from contexts.payment_orchestration import orchestrate
 from contexts.payment_rail import execute
 from contexts.payment_settlement import settle
@@ -68,13 +69,16 @@ STAGES = [
 ]
 
 
-def run(ctx: PaymentContext) -> dict:
+def run(ctx: PaymentContext, *, start_index: int = 0) -> dict:
     """Run the payment lifecycle. Returns the persisted payment document.
 
     Raises `ValueError` on any validation failure; the caller maps it to HTTP 400.
     A stage may call `ctx.stop(result)` to end the saga early — used for idempotent replay.
+
+    `start_index` skips stages the context already passed — used by `Resume`, which re-enters
+    the saga on a HELD payment at stage 2 (skip 1 capture, whose document already exists).
     """
-    for label, stage in STAGES:
+    for label, stage in STAGES[start_index:]:
         if stage is None:
             # Stage 6 (Accounting) has no call here by design. The ledger service derives
             # `ledgerEvents` from a change stream on `transactions`, so the payment path
@@ -85,6 +89,11 @@ def run(ctx: PaymentContext) -> dict:
 
         try:
             stage(ctx)
+        except StepUpRequired as exc:
+            # A held (not rejected) payment: leave it at INITIATED awaiting a second factor,
+            # so the channel can resume the SAME document (Kiran, 2026-09-09).
+            _mark_step_up(ctx, label, exc)
+            return ctx.result
         except ValueError as exc:
             _mark_rejected(ctx, label, exc)
             raise
@@ -98,6 +107,24 @@ def run(ctx: PaymentContext) -> dict:
             "payment lifecycle completed without a result — stage 5 (execute) must set ctx.result"
         )
     return ctx.result
+
+
+def _mark_step_up(ctx: PaymentContext, label: str, exc: ValueError) -> None:
+    """Hold the payment at the step-up gate instead of rejecting it.
+
+    The payment stays one document (status `INITIATED`, `stepUpRequired: true`) so the
+    channel can resume the SAME payment after a second factor — no second document, no
+    REJECTED row (Kiran, 2026-09-09). Never raises, for the same reason as `_mark_rejected`.
+    """
+    if ctx.payment_oid is None or ctx.current_state is None:
+        # Raised by a stage before the instruction was persisted — nothing to mark.
+        return
+    ctx.collections.payments.update_one(
+        {"_id": ctx.payment_oid},
+        {"$set": {"stepUpRequired": True, "stepUpReason": str(exc)}},
+    )
+    ctx.halt = True
+    ctx.result = ctx.collections.payments.find_one({"_id": ctx.payment_oid})
 
 
 def _mark_rejected(ctx: PaymentContext, label: str, exc: ValueError) -> None:

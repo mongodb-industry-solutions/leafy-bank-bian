@@ -124,7 +124,7 @@ export default function SendMoneyModal({
 
     setSubmitting(true);
     setError(null);
-    const { error: err } = await coreApi("PaymentOrderInitiation/Initiate", {
+    const { data, error: err } = await coreApi("PaymentOrderInitiation/Initiate", {
       method: "POST",
       body: {
         customerId,
@@ -150,6 +150,13 @@ export default function SendMoneyModal({
     if (err) {
       // coreApi returns "<status>: <body>"; surface the backend detail.
       setError(err.replace(/^\d+:\s*/, ""));
+      return;
+    }
+    // 2026-09-09: stage 2 holds (not rejects) an over-threshold payment for a second factor.
+    // This screen has no step-up channel, so report it honestly rather than closing as if
+    // the money moved. (The back-office Create Payment wizard resumes it.)
+    if (data?.stepUpRequired) {
+      setError("This payment needs an additional authentication step (step-up) before it can be sent. It was not initiated.");
       return;
     }
     refreshData();

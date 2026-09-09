@@ -700,6 +700,32 @@
   color: var(--pw-text);
 }
 
+/* 2026-09-09 (Kiran): the step-up approval CTA in the stage-2 panel. Deliberately louder than
+   the dual-approval note — this is the ONE thing the analyst must do before the payment can
+   proceed, so it spans the full panel width and leads with an accent bar + icon. */
+.stepUpCallout {
+  grid-column: 1 / -1;
+  border: 1px solid var(--pw-border);
+  border-left: 3px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  background: var(--pw-accent-light);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stepUpCalloutTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--pw-text);
+}
+.stepUpCallout .stepUpCalloutTitle svg {
+  color: var(--pw-accent);
+}
+
 /* Stage 2: the two gates beside the checks, so the panel uses the width instead of a tall
    narrow column. Checks get slightly more room than the gate cards. */
 .stageTwoGrid {

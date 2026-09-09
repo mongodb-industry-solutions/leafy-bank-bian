@@ -115,6 +115,13 @@ export function buildLifecycleStages(payment, trace) {
   const reached = (...states) => events.some((e) => states.includes(e.state));
   const eventsFor = (...states) => events.filter((e) => states.includes(e.state));
 
+  // 2026-09-09 (Kiran): a payment HELD at the step-up gate sits at INITIATED with
+  // `stepUpRequired` set — stage 2 has evaluated the (insufficient) assertion but recorded
+  // no `checks[]` yet, so it must NOT render as "not reached". It is exactly where the
+  // analyst must approve: the stage-2 panel shows the required-verification CTA.
+  const heldForStepUp =
+    payment?.stepUpRequired === true && payment?.status === "INITIATED";
+
   // Stage 5's artifacts live in their own collections, so `/workflow/payments/{id}` joins
   // them on (doc 19 §3 step 8). The LAST attempt is the current one — the array is
   // append-only, so its order is the history.
@@ -147,10 +154,15 @@ export function buildLifecycleStages(payment, trace) {
       label: "Authentication & entitlement",
       icon: "Lock",
       stage: 2,
-      reached: checks.length > 0,
-      meta: checks.length ? `${checks.length} checks` : "stage 2",
+      reached: checks.length > 0 || heldForStepUp,
+      meta: heldForStepUp
+        ? "verification required"
+        : checks.length
+          ? `${checks.length} checks`
+          : "stage 2",
       kind: "checks",
       data: checks,
+      actionRequired: heldForStepUp,
       intro:
         "Answers one question — is this caller allowed to initiate this amount? Two gates: " +
         "party authentication — is this the real customer, corporate user, or API? — and " +

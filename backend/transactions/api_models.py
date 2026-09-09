@@ -247,6 +247,17 @@ class PaymentOrderBulkInitiateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PaymentOrderResumeRequest(BaseModel):
+    """`POST /PaymentOrderProcedure/Resume` — re-enter a payment HELD at the step-up gate.
+
+    The channel collects a second factor (the assertion rides on the `Authorization` bearer
+    token, exactly as Initiate), then resumes the SAME payment instead of creating a second
+    document — one id end to end (Kiran, 2026-09-09).
+    """
+    paymentId: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
 class FraudEvaluationRequest(BaseModel):
     """BIAN `POST /FraudEvaluation/Evaluate`.
 

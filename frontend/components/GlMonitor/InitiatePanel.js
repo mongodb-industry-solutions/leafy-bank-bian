@@ -51,6 +51,13 @@ export default function InitiatePanel({ onFired, onRefresh, nextBatchAt, batchIn
       setResult({ ok: false, text: `Error: ${error}` });
       return;
     }
+    // 2026-09-09: stage 2 holds (not rejects) an over-threshold payment for a second factor.
+    // This panel has no step-up channel, so surface it honestly rather than falsely
+    // reporting the payment as in-flight. (The back-office Create Payment wizard resumes it.)
+    if (data?.stepUpRequired) {
+      setResult({ ok: false, text: "Payment requires additional authentication (step-up); not initiated on this screen." });
+      return;
+    }
     const pid = data.paymentId || data.payment_id || data.id || "—";
     setResult({ ok: true, pid, syncing: true });
     await pollForPipeline(pid);

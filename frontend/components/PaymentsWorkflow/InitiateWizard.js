@@ -32,9 +32,7 @@ import { Body, H2, Overline } from "@leafygreen-ui/typography";
 
 
 import styles from "./PaymentsWorkflow.module.css";
-import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { coreApi } from "@/lib/api/client";
-import { isStepUpRequired } from "@/lib/api/partyAuthentication";
 import { useBankAssistedParties } from "@/lib/api/hooks";
 import { fmtAmount } from "@/lib/paymentsWorkflow/status";
 
@@ -559,10 +557,11 @@ export default function InitiateWizard({ onInitiated }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
-  // Non-null while the step-up challenge is on screen; holds the backend's refusal text so
-  // the modal can quote the reason it opened rather than paraphrasing it.
-  const [stepUpReason, setStepUpReason] = useState(null);
   const [createdId, setCreatedId] = useState(null);
+  // 2026-09-09 (Kiran): a held payment is approved in the lifecycle at stage 2, NOT here. Set
+  // when Initiate returns the payment HELD for a second factor, so the confirmation routes the
+  // user to the lifecycle to complete it rather than popping the OTP dialog over this form.
+  const [awaitingStepUp, setAwaitingStepUp] = useState(false);
 
   const { customers, accountsByCustomer, allAccounts, loading } = useBankAssistedParties();
 
@@ -640,14 +639,16 @@ export default function InitiateWizard({ onInitiated }) {
     });
     setSubmitting(false);
     if (error) {
-      // Stage 2 refused the factor, not the payment: the amount is over the segment's
-      // step-up threshold. Collect a second factor and retry rather than surfacing a dead
-      // end — the refusal is the trigger for the step-up, which is the point of it.
-      if (isStepUpRequired(error)) {
-        setStepUpReason(error);
-        return;
-      }
       setSubmitError(error);
+      return;
+    }
+    // Stage 2 HELD the payment for a second factor. Per Kiran (2026-09-09) it is approved in
+    // the lifecycle at stage 2, not over this form — so surface a made-and-awaiting-verification
+    // confirmation and route the user there (View lifecycle), one payment, one id.
+    if (data?.stepUpRequired) {
+      setAwaitingStepUp(true);
+      setCreatedId(data?.paymentId || data?.payment_id || data?.id || null);
+      setStep(2);
       return;
     }
     setCreatedId(data?.paymentId || data?.payment_id || data?.id || null);
@@ -662,10 +663,16 @@ export default function InitiateWizard({ onInitiated }) {
         <div className={styles.panelBody}>
           <StepIndicator current={3} />
           <div className={styles.confirmBox}>
-            <Icon glyph="CheckmarkWithCircle" size={48} fill="#00684a" />
-            <H2>Payment submitted</H2>
+            <Icon
+              glyph={awaitingStepUp ? "Lock" : "CheckmarkWithCircle"}
+              size={48}
+              fill={awaitingStepUp ? "#00684a" : "#00684a"}
+            />
+            <H2>{awaitingStepUp ? "Payment created" : "Payment submitted"}</H2>
             <Body className={styles.muted}>
-              The payment order was accepted and is moving through the lifecycle.
+              {awaitingStepUp
+                ? "This payment is awaiting an additional authentication step (a second factor) at stage 2. Open the lifecycle to approve it and continue."
+                : "The payment order was accepted and is moving through the lifecycle."}
             </Body>
             <div className={styles.confirmId}>{createdId || "—"}</div>
             <div className={styles.headerActions}>
@@ -676,7 +683,7 @@ export default function InitiateWizard({ onInitiated }) {
                 rightGlyph={<Icon glyph="ArrowRight" />}
                 onClick={() => onInitiated?.(createdId)}
               >
-                View lifecycle
+                {awaitingStepUp ? "Approve in lifecycle" : "View lifecycle"}
               </Button>
             </div>
           </div>
@@ -693,19 +700,8 @@ export default function InitiateWizard({ onInitiated }) {
     // surprise. The submit actions live at the bottom; the step indicator is left-aligned.
     return (
       <div className={styles.panel}>
-        {/* Renders in a portal, so its position in the tree does not matter. It lives on
-            the review step because that is the only step that submits. */}
-        <StepUpModal
-          open={stepUpReason !== null}
-          reason={stepUpReason}
-          onCancel={() => setStepUpReason(null)}
-          onSuccess={() => {
-            // The session is now two-factor. Retry the same payload: the amount and the
-            // entitlement are unchanged, only the strength of the assertion moved.
-            setStepUpReason(null);
-            submit();
-          }}
-        />
+        {/* Step-up is approved in the lifecycle (stage 2), not over this form (2026-09-09) —
+            see the "Approve in lifecycle" confirmation. */}
         <div className={styles.panelBody}>
           <div className={styles.createHeader}>
             <div>

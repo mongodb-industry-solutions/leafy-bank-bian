@@ -2,14 +2,20 @@
 //
 // Stage 2's entitlement policy refuses a single weak factor above the segment's step-up
 // threshold (COMMERCIAL at 10,000). Level 1 issues PASSWORD/1, so a payment over that
-// threshold is refused with "step-up authentication required" — correct, and until now
-// unanswerable from the UI. These two calls answer it:
+// threshold is insufficient. It is now answered end-to-end (2026-09-09): the initiate does
+// NOT reject — it HOLDS the payment (`stepUpRequired: true`) so the channel can collect a
+// second factor here and RESUME the SAME payment (one document, one id). These two calls
+// take the step-up:
 //
 //   Question/{id}/Retrieve  — fetch the challenge (the code, because this is a simulation)
 //   Question/Evaluate       — submit it; on success the session is re-issued at OTP/2
 //
 // The step-up happens BECAUSE the entitlement engine demanded it. That ordering is the
-// demo beat, and it is why the refusal is not simply configured away.
+// demo beat, and it is why the will-not-configure-away is now a hold, not a refusal.
+//
+// ⚠️ `isStepUpRequired` / `STEP_UP_MARKER` below are LEGACY: they matched the old "refusal is
+// a 400" flow. The initiate now returns `data.stepUpRequired`, so callers read that flag, not
+// the error string. Kept for reference; the retail Send-Money modal's step-up is not wired.
 
 import { coreApi, currentSessionRef, setSessionToken } from "@/lib/api/client";
 

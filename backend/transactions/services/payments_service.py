@@ -30,7 +30,7 @@ from contexts.payment_order_initiation.adapters.mongo_reference_data import (
 )
 from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_rail.adapters.simulated_wire_rail import SimulatedWireRail
-from contexts.payment_order_initiation.domain import checks
+from contexts.payment_order_initiation.domain import checks, lifecycle
 from process.payment_context import PaymentCollections, PaymentContext
 
 logger = logging.getLogger(__name__)
@@ -172,6 +172,107 @@ class PaymentsService:
             settlement_outcome=settlement_outcome,
         )
         return payment_lifecycle.run(ctx)
+
+    def resume_payment(
+        self, payment_id: str, *, customer_ref: str, authentication: Optional[dict]
+    ) -> dict:
+        """Resume a payment HELD at the step-up gate, now with a second factor.
+
+        Re-enters the saga at stage 2 (skips 1 capture — the document already exists), so the
+        SAME payment advances through the rest of the lifecycle: one document, one id. This is
+        what replaces the old "create a second document on retry" step-up flow (Kiran,
+        2026-09-09).
+        """
+        payment = self.payments.find_one({"paymentId": payment_id})
+        if payment is None:
+            raise ValueError(f"Payment {payment_id} not found.")
+        if not payment.get("stepUpRequired") or payment.get("status") != lifecycle.INITIATED:
+            raise ValueError(f"Payment {payment_id} is not awaiting step-up.")
+        ctx = self._context_from_doc(
+            payment, customer_ref=customer_ref, authentication=authentication
+        )
+        return payment_lifecycle.run(ctx, start_index=1)
+
+    def _context_from_doc(
+        self, payment: dict, *, customer_ref: str, authentication: Optional[dict]
+    ) -> PaymentContext:
+        """Rebuild the capture-time context from a persisted payment document.
+
+        A held payment has no in-memory context any more, but every later stage reads those
+        fields from `ctx` (not from the doc's snapshot). So a resume reconstructs the same
+        fields `capture.run` would have set — re-fetching the account/customer documents the
+        doc references and re-deriving the flags — so the saga can continue from stage 2.
+        """
+        colls = self._collections()
+        debtor_ref = payment["debtor"]["accountId"]
+        creditor = payment.get("creditor") or {}
+        creditor_ref = creditor.get("accountId")
+        is_external = creditor_ref is None
+
+        debtor_account = colls.accounts.find_one({"accountId": debtor_ref})
+        debtor_customer_id = payment["customerId"]
+        debtor_customer = colls.customers.find_one({"customerId": debtor_customer_id})
+        creditor_account = None
+        creditor_customer = None
+        creditor_customer_id = None
+        if not is_external:
+            creditor_account = colls.accounts.find_one({"accountId": creditor_ref})
+            if creditor_account:
+                creditor_customer_id = (
+                    creditor_account.get("customerSnapshot") or {}
+                ).get("customerId")
+                creditor_customer = colls.customers.find_one(
+                    {"customerId": creditor_customer_id}
+                )
+
+        remittance = payment.get("remittance") or {}
+        initiation = payment.get("initiation") or {}
+        rdate = payment.get("requestedExecutionDate")
+        requested_execution_date = date.fromisoformat(rdate) if rdate else None
+
+        ctx = PaymentContext(
+            customer_ref=customer_ref,
+            debtor_account_ref=debtor_ref,
+            creditor_account_ref=creditor_ref,
+            creditor_party=dict(creditor) if is_external else None,
+            instructed_amount=payment["instructedAmount"],
+            instructed_currency=payment["instructedCurrency"],
+            payment_type=payment["type"],
+            payment_rail=payment["rail"],
+            remittance_unstructured=remittance.get("unstructured"),
+            remittance_reference=remittance.get("reference"),
+            remittance_invoice_no=remittance.get("invoiceNo"),
+            priority=payment["priority"],
+            charge_bearer=payment["chargeBearer"],
+            category_purpose=payment.get("categoryPurpose"),
+            requested_execution_date=requested_execution_date,
+            channel=initiation.get("channel", "API"),
+            client_reference=payment.get("clientReference"),
+            authentication=authentication,
+            wire_details=payment.get("wireDetails"),
+            ach_details=payment.get("achDetails"),
+            internal_details=payment.get("internalDetails"),
+            collections=colls,
+            payment_limit_usd=self.payment_limit_usd,
+            reference_data=self.reference_data,
+            rail_gateway=self.rail_gateway,
+        )
+        ctx.payment_oid = payment["_id"]
+        ctx.payment_id = payment["paymentId"]
+        ctx.end_to_end_id = payment["endToEndId"]
+        ctx.txn_code = "PMNT-ICDT-BOOK" if payment["rail"] == "INTERNAL" else "PMNT-ICDT-ESCT"
+        ctx.is_external_creditor = is_external
+        ctx.is_internal = not is_external and debtor_customer_id == creditor_customer_id
+        ctx.debtor_account = debtor_account
+        ctx.debtor_customer = debtor_customer
+        ctx.debtor_customer_id = debtor_customer_id
+        ctx.creditor_account = creditor_account
+        ctx.creditor_customer = creditor_customer
+        ctx.creditor_customer_id = creditor_customer_id
+        ctx.payment_doc = payment
+        ctx.current_state = payment["status"]
+        ctx.now = datetime.now(timezone.utc)
+        return ctx
 
     def retrieve_payment(self, payment_ref: str) -> Optional[dict]:
         """Retrieve a payment plus its single transaction doc (v4_21)."""

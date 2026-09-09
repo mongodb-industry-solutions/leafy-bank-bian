@@ -130,6 +130,10 @@ _KNOWN_EXTRAS = {
     # Stage 3 (doc L404): corridor category audit snapshot — "computed outcome
     # snapshot, not new instruction data." The EIGHTH; argued for the same way.
     "validation",
+    # 2026-09-09 (Kiran): the step-up hold. Stage 2 leaves an over-threshold payment at
+    # INITIATED with these set, so the channel can resume the SAME document after a second
+    # factor. The NINTH and TENTH; argued for in the resume work, not slipped in.
+    "stepUpRequired", "stepUpReason",
 }
 
 

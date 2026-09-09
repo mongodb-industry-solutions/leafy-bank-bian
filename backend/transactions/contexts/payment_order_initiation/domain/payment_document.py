@@ -159,6 +159,11 @@ def build(ctx) -> dict:
         # DR-1.1: customer's own internal tracking reference, distinct from endToEndId.
         # Not in the canonical `payments` spec — see `test_payment_document_spec._KNOWN_EXTRAS`.
         "clientReference": ctx.client_reference,
+        # 2026-09-09 (Kiran): the step-up hold. False at build; the saga sets true (plus a
+        # reason) when stage 2 holds the payment for a second factor — and the channel then
+        # resumes the SAME document. Not in the canonical spec (see `_KNOWN_EXTRAS`).
+        "stepUpRequired": False,
+        "stepUpReason": None,
         "instructionId": derive_ref("INSTR", oid),
         "txnId": derive_ref("TXN", oid),
         "uetr": f"UETR-{str(oid)}",

@@ -16,6 +16,7 @@ from api_models import (
     PaymentConfirmationRequest,
     PaymentOrderBulkInitiateRequest,
     PaymentOrderInitiateRequest,
+    PaymentOrderResumeRequest,
     PaymentSettlementInitiateRequest,
 )
 from shared import party_authentication_token as party_auth
@@ -153,6 +154,8 @@ async def payment_order_procedure_initiate(
         return _bian_response({
             "paymentId": payment_doc["paymentId"],
             "status": payment_doc["status"],
+            "stepUpRequired": payment_doc.get("stepUpRequired", False),
+            "stepUpReason": payment_doc.get("stepUpReason"),
             "payment": _strip(payment_doc),
         })
     except HTTPException:
@@ -161,6 +164,45 @@ async def payment_order_procedure_initiate(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logging.error("PaymentOrderInitiation/Initiate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/PaymentOrderProcedure/Resume")
+async def payment_order_procedure_resume(
+    body: PaymentOrderResumeRequest,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Re-enter a payment held at the step-up gate with a now-sufficient (second-factor)
+    assertion.
+
+    Runs the SAME payment from stage 2 — one document, one id through the whole lifecycle
+    (Kiran, 2026-09-09). The assertion is read off the Authorization bearer token, exactly
+    as it is on Initiate, so the channel just completes the step-up and re-submits.
+    """
+    payment = payments_service.payments.find_one({"paymentId": body.paymentId})
+    if payment is None:
+        raise HTTPException(status_code=404, detail=f"Payment {body.paymentId} not found.")
+    try:
+        identity = party_auth.resolve_identity(authorization, payment["customerId"])
+    except party_auth.AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    try:
+        payment_doc = payments_service.resume_payment(
+            body.paymentId,
+            customer_ref=identity["customer_ref"],
+            authentication=identity.get("authentication"),
+        )
+        return _bian_response({
+            "paymentId": payment_doc["paymentId"],
+            "status": payment_doc["status"],
+            "payment": _strip(payment_doc),
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("PaymentOrderProcedure/Resume failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal payment processing error.")
 
 

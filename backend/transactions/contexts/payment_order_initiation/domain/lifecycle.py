@@ -44,6 +44,17 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+
+class StepUpRequired(ValueError):
+    """A payment hit the step-up gate with an insufficient factor.
+
+    NOT a rejection. The saga catches it separately from `ValueError` and HOLDS the payment
+    (status stays `INITIATED`, `stepUpRequired: true`) instead of marking it REJECTED, so the
+    channel can collect a second factor and resume the SAME payment — one document, one id
+    (Kiran, 2026-09-09). Subclasses ValueError so it maps to a 400 at the route if it ever
+    escapes the saga; the saga is expected to handle it first.
+    """
+
 logger = logging.getLogger(__name__)
 
 # --- states ------------------------------------------------------------------

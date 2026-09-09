@@ -866,13 +866,37 @@ def test_an_asserted_authentication_passes_and_is_recorded(service, db):
     assert assessment["assessedBy"] == "transactions-service"
 
 
-def test_a_weak_factor_is_refused_above_the_step_up_threshold(service, db):
-    """RETAIL steps up above 2,500; one password does not carry 5,000."""
+def test_a_weak_factor_holds_above_the_step_up_threshold(service, db):
+    """RETAIL steps up above 2,500; one password does not carry 5,000.
+
+    Since 2026-09-09 this is a HOLD, not a rejection: the payment stays ONE document at
+    INITIATED with `stepUpRequired` set, and the channel resumes it with a second factor —
+    no REJECTED row, no second document (Kiran).
+    """
     weak = {"method": "PASSWORD", "factorCount": 1}
-    with pytest.raises(ValueError, match="step-up authentication required"):
-        _initiate(service, instructed_amount=5_000.0, authentication=weak)
-    assert _one(db, "customer_authenticated")["result"] == "FAIL"
-    _assert_rejected(db, reason_match="step-up", at_state="INITIATED")
+    held = _initiate(service, instructed_amount=5_000.0, authentication=weak)
+    assert held["stepUpRequired"] is True
+    assert held["status"] == "INITIATED"
+    assert db["transactions"].inserted == [], "no money moved while held"
+    assert len(db["payments"].inserted) == 1
+
+
+def test_resuming_a_held_payment_completes_the_same_document(service, db):
+    """Resume continues the SAME payment from stage 2 — one id end to end, never a second doc,
+    never a REJECTED row."""
+    weak = {"method": "PASSWORD", "factorCount": 1}
+    held = _initiate(service, instructed_amount=5_000.0, authentication=weak)
+    payment_id = held["paymentId"]
+
+    done = service.resume_payment(payment_id, customer_ref=CUST_D, authentication=_ASSERTION)
+
+    assert done["paymentId"] == payment_id, "the resumed payment is the SAME document"
+    assert done["status"] == "SETTLED"
+    assert len(db["payments"].inserted) == 1, "must not create a second document"
+    # The one document ends SETTLED, not REJECTED, and never showed a REJECTED blip.
+    assert db["payments"].find_one({"paymentId": payment_id})["status"] == "SETTLED"
+    assert db["transactions"].inserted, "the resumed payment moved money exactly once"
+    assert len(db["transactions"].inserted) == 1
 
 
 # --- R4: account_active -------------------------------------------------------

@@ -25,8 +25,10 @@ import { Body } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
+import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, legTotals } from "./lifecycleStages";
 import { usePaymentWorkflow, usePipelineTrace } from "@/lib/api/hooks";
+import { coreApi } from "@/lib/api/client";
 import {
   checkPillFamily,
   fmtAmount,
@@ -174,7 +176,11 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
               )}
               {expanded && (
                 <div className={styles.timelineRowBody}>
-                  <StageDetailBody stage={s} payment={payment} />
+                  <StageDetailBody
+                    stage={s}
+                    payment={payment}
+                    onApprove={() => setStepUpOpen(true)}
+                  />
                 </div>
               )}
             </div>
@@ -907,7 +913,7 @@ function DetailCard({ label, tag, rows }) {
   );
 }
 
-function StageDetailBody({ stage, payment }) {
+function StageDetailBody({ stage, payment, onApprove }) {
   // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
   // must sit above the early returns (rules of hooks).
   const [showRaw, setShowRaw] = useState(false);
@@ -979,7 +985,24 @@ function StageDetailBody({ stage, payment }) {
       )}
       <div className={styles.detailColumns}>
         {showStageTwo && (
-          <div className={styles.stageTwoGrid}>
+          <>
+            {stage.actionRequired && (
+              <div className={styles.stepUpCallout}>
+                <div className={styles.stepUpCalloutTitle}>
+                  <Icon glyph="Lock" />
+                  <span>Verification required here</span>
+                </div>
+                <Body>
+                  This payment is above the account's step-up threshold and is waiting for an
+                  additional authentication factor before it can proceed. Approve it here to
+                  continue it through the lifecycle.
+                </Body>
+                <Button variant="primary" onClick={onApprove}>
+                  Authenticate &amp; continue
+                </Button>
+              </div>
+            )}
+            <div className={styles.stageTwoGrid}>
             <div className={styles.detailBlock}>
               <div className={styles.detailBlockTitle}>The two gates</div>
               <div className={styles.partyGrid}>
@@ -1003,7 +1026,8 @@ function StageDetailBody({ stage, payment }) {
               <div className={styles.detailBlockTitle}>Checks — gate results</div>
               <Checks checks={checkList} />
             </div>
-          </div>
+            </div>
+          </>
         )}
 
         {/* Stage 2 renders its own checks inside the two-column grid; every other checks
@@ -1160,10 +1184,34 @@ function AxesRow({ payment }) {
 }
 
 export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
-  const { payment, loading, error } = usePaymentWorkflow(paymentId, refreshKey);
+  // 2026-09-09 (Kiran): the step-up approval happens HERE, at stage 2, not at initiate. A held
+  // payment is resumed from this view; `nudge` bumps into the hook's refresh key so the
+  // lifecycle re-renders once the resume advances it past INITIATED.
+  const [nudge, setNudge] = useState(0);
+  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const [stepUpError, setStepUpError] = useState(null);
+  const { payment, loading, error } = usePaymentWorkflow(
+    paymentId,
+    (refreshKey || 0) + nudge
+  );
   // Ledger half. Self-terminating poll — stops once the journal entry lands.
   const { trace } = usePipelineTrace(paymentId, !!paymentId);
   const [selectedKey, setSelectedKey] = useState("initiation");
+
+  async function resumePayment() {
+    if (!paymentId) return;
+    setStepUpError(null);
+    const { data, error: err } = await coreApi("PaymentOrderProcedure/Resume", {
+      method: "POST",
+      body: { paymentId },
+    });
+    if (err) {
+      setStepUpError(err);
+      return;
+    }
+    setStepUpOpen(false);
+    setNudge((n) => n + 1);
+  }
   const rowRefs = useRef({});
   const setRowRef = useCallback(
     (key) => (el) => {
@@ -1243,8 +1291,19 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
         </div>
       </div>
 
+      <StepUpModal
+        open={stepUpOpen}
+        reason={payment?.stepUpReason || "step-up authentication required"}
+        onCancel={() => {
+          setStepUpOpen(false);
+          setStepUpError(null);
+        }}
+        onSuccess={resumePayment}
+      />
+
       <div className={styles.panelBody}>
         {error && <Banner variant="danger">Could not load payment — {error}</Banner>}
+        {stepUpError && <Banner variant="danger">{stepUpError}</Banner>}
         {loading && <div className={styles.emptyState}>Loading…</div>}
         {!loading && !error && !payment && (
           <div className={styles.emptyState}>Payment not found: {paymentId}</div>

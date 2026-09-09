@@ -50,6 +50,7 @@ from datetime import datetime, timezone
 
 from contexts.party_authentication.domain import entitlement_policy as policy
 from contexts.payment_order_initiation.domain import checks
+from contexts.payment_order_initiation.domain.lifecycle import StepUpRequired
 from process.payment_context import PaymentContext
 
 STAGE = "2 authenticate"
@@ -103,10 +104,13 @@ def run(ctx: PaymentContext) -> None:
             "The payments hub performs no authentication of its own.",
         )
     elif not policy.authentication_sufficient(method, factor_count, amount, segment):
-        refuse(
-            "customer_authenticated",
+        # NOT `refuse` — an insufficient factor is a HOLD, not a rejection. The saga catches
+        # `StepUpRequired` and leaves the payment at INITIATED awaiting a second factor, so
+        # the channel can resume the SAME payment (one doc, one id). A genuine rejection
+        # (bad account, no signatory, over limit) still refuses.
+        raise StepUpRequired(
             f"Authentication method {method} with {factor_count} factor(s) is not "
-            f"sufficient for {amount:,.2f} — step-up authentication required.",
+            f"sufficient for {amount:,.2f} — step-up authentication required."
         )
     else:
         record(
