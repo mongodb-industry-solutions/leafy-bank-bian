@@ -163,6 +163,7 @@ def plan(
     _plan_purpose_codes(p, payment, reference_data)
     _plan_fees(p, payment, rail)
     _plan_initiating_party(p, payment)
+    _plan_service_level(p, payment)
     _plan_fx(p, payment, debtor_account_currency)
     _plan_regulatory_reports(p, payment)
     return p
@@ -377,6 +378,41 @@ def _plan_initiating_party(p: EnrichmentPlan, payment: dict) -> None:
     }
     p._set("wireDetails.initiatingParty", party,
            before=wire.get("initiatingParty"), source="authentication")
+
+
+# pain.001 PmtTpInf/SvcLvl code for each declared priority. Sourced from the ISO 20022
+# ExternalServiceLevel1Code external code set (the workspace copy is Doina's
+# 1Q2026_externalcodesets_v1.json), not from memory: URGP = urgent payment, SDVA = same day
+# value, NORM = normal. A high-priority wire is same-day value, so HIGH maps to SDVA.
+SERVICE_LEVEL_BY_PRIORITY = {
+    "URGENT": "URGP",
+    "HIGH": "SDVA",
+    "NORMAL": "NORM",
+}
+
+
+def _plan_service_level(p: EnrichmentPlan, payment: dict) -> None:
+    """Project the payment's declared `priority` onto pain.001 `PmtTpInf/SvcLvl`.
+
+    The pacs.008 mapper reads `serviceLevel.code` (pacs008.py) but nothing ever wrote it, so
+    every wire's envelope carried an empty `SvcLvl`. The payment already knows its `priority`,
+    so this fills the gap — the envelope's pain.001 alignment and the emitted `<SvcLvl>` both
+    become real. WIRE only: other rails have no paymentTypeInformation to write.
+    """
+    if payment.get("rail") != "WIRE":
+        return
+    wire = payment.get("wireDetails") or {}
+    pti = wire.get("paymentTypeInformation") or {}
+    sl = pti.get("serviceLevel") or {}
+    if sl.get("code") is not None:
+        # A caller-supplied or stage-4 value wins; never overwrite it.
+        return
+    code = SERVICE_LEVEL_BY_PRIORITY.get((payment.get("priority") or "NORMAL").upper())
+    if code:
+        p._set(
+            "wireDetails.paymentTypeInformation.serviceLevel.code", code,
+            before=sl.get("code"), source="priority",
+        )
 
 
 def _plan_fx(p: EnrichmentPlan, payment: dict,

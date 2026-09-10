@@ -791,6 +791,17 @@ function RailViews({ data }) {
 
 
 /** Per-kind key/value rows. One place to extend when a later stage lands. */
+// The FR-3.7 corridor category (`validation.determinedCategory`) is the finer domestic-vs-
+// cross-border determination; `wireType` (DOMESTIC/INTERNATIONAL) is the coarser stage-1 field,
+// used as the fallback when the corridor hasn't been determined (e.g. a pre-stage-3 payment).
+const CORRIDOR_LABELS = {
+  "domestic-same-bank": "Domestic — same bank",
+  "domestic-different-bank": "Domestic — different bank",
+  "cross-border": "Cross-border",
+};
+const corridorLabel = (payment) =>
+  CORRIDOR_LABELS[payment?.validation?.determinedCategory] ?? payment?.wireDetails?.wireType;
+
 function summaryRows(stage, payment) {
   const d = stage.data;
   switch (stage.kind) {
@@ -839,11 +850,12 @@ function summaryRows(stage, payment) {
         ["Warnings", warned || null],
         ["Refusals", failed || null],
         ["Fields enriched", e?.resolved?.length ?? null],
-        ["Corridor", payment?.wireDetails?.wireType],
+        ["Corridor", corridorLabel(payment)],
         ["Purpose", payment?.categoryPurpose],
         ["Charges", payment?.fees?.length
           ? payment.fees.map((f) => `${fmtAmount(f.amount, f.currency)} ${f.type} (${f.chargedTo})`).join(", ")
           : null],
+        ["FX rate", payment?.fxRate ?? null],
         ["Enriched at", fmtWhen(e?.resolvedAt)],
       ];
     }
@@ -997,6 +1009,10 @@ function InitEnvelope({ payment }) {
       ["Payment info id", w.paymentInformationId],
       ["Service level", w.paymentTypeInformation?.serviceLevel?.code],
       ["Initiating party", w.initiatingParty?.name],
+      // Phase 1 has no on-behalf-of scenario, so these are null (doc 17 §6). Render an explicit
+      // "—" (N/A) rather than dropping the row, so an audience can see the fields exist.
+      ["Ultimate debtor", w.ultimateDebtor?.name ?? "—"],
+      ["Ultimate creditor", w.ultimateCreditor?.name ?? "—"],
     ];
     note =
       "Wire type is derived from the two bank countries. Routing fields (network, local " +

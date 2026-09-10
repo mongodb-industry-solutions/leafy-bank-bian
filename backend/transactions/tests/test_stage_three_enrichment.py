@@ -198,6 +198,36 @@ def test_an_operator_initiated_payment_is_distinguishable():
     assert "OPERATOR" in plan.updates["wireDetails.initiatingParty"]["identification"]
 
 
+def test_the_priority_projects_to_the_wire_service_level():
+    """FR-1.6 detail — the envelope's pain.001 alignment: priority → PmtTpInf/SvcLvl."""
+    plan = enrichment_plan.plan(_wire(), _store(), external_creditor=True)
+    assert plan.updates["wireDetails.paymentTypeInformation.serviceLevel.code"] == "NORM"
+
+
+def test_an_urgent_wire_is_an_urgent_payment():
+    """URGENT maps to URGP (ISO ExternalServiceLevel1Code 'urgent payment')."""
+    plan = enrichment_plan.plan(_wire(priority="URGENT"), _store(), external_creditor=True)
+    assert plan.updates["wireDetails.paymentTypeInformation.serviceLevel.code"] == "URGP"
+
+
+def test_a_high_priority_wire_is_same_day_value():
+    """HIGH maps to SDVA — a high-priority wire is same-day value."""
+    plan = enrichment_plan.plan(_wire(priority="HIGH"), _store(), external_creditor=True)
+    assert plan.updates["wireDetails.paymentTypeInformation.serviceLevel.code"] == "SDVA"
+
+
+def test_a_caller_supplied_service_level_is_never_overwritten():
+    """The enrichment must not clobber a stage-1 caller value (or a stage-4 one)."""
+    payment = _wire(priority="URGENT")
+    payment["wireDetails"] = {
+        "wireType": None,
+        "initiatingParty": None,
+        "paymentTypeInformation": {"serviceLevel": {"code": "SDVA"}},
+    }
+    plan = enrichment_plan.plan(payment, _store(), external_creditor=True)
+    assert "wireDetails.paymentTypeInformation.serviceLevel.code" not in plan.updates
+
+
 def test_a_null_reference_store_resolves_nothing_and_raises_nothing():
     plan = enrichment_plan.plan(_wire(), NullReferenceData(), external_creditor=True)
     # Our own side still resolves — it comes from a constant, not a lookup.
