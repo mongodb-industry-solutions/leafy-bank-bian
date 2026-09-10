@@ -21,6 +21,7 @@ import Code from "@leafygreen-ui/code";
 import { Tab, Tabs } from "@leafygreen-ui/tabs";
 import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
+import Tooltip from "@leafygreen-ui/tooltip";
 import { Body } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
@@ -41,6 +42,14 @@ const FAILED_STATES = new Set([
 const SUCCESS_TERMINAL = new Set(["SETTLED", "RECONCILED", "POSTED", "COMPLETED"]);
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+// The ✓ belongs to the LINEAR saga (stages 1-5), where order is the fact. An independent-axis
+// stage (6-8: posting / settlement / reconciliation) that reaches its own terminal state
+// renders as a plain filled circle — no ✓ — so settlement finishing before posting doesn't
+// drop a lone check in the middle of the sequence (research §1.4: these axes advance
+// alongside the saga, not in order).
+const nodeGlyph = (stage, state) =>
+  state === "failed" ? "×" : state === "completed" ? (stage >= 6 ? "" : "✓") : "";
 
 /**
  * Per-stage node state for the mini-stepper and the vertical timeline.
@@ -112,11 +121,7 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
               title={s.label}
             >
               <span className={`${styles.miniCircle} ${styles[`mini${cap(states[i])}`]}`}>
-                {states[i] === "completed"
-                  ? "✓"
-                  : states[i] === "failed"
-                  ? "×"
-                  : ""}
+                {nodeGlyph(s.stage, states[i])}
               </span>
               <span className={styles.miniLabel}>{s.label}</span>
             </button>
@@ -144,11 +149,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
           >
             <div className={styles.spine}>
               <span className={`${styles.timelineNode} ${styles[`node${cap(nodeState)}`]}`}>
-                {nodeState === "completed"
-                  ? "✓"
-                  : nodeState === "failed"
-                  ? "×"
-                  : ""}
+                {nodeGlyph(s.stage, nodeState)}
               </span>
               {i < stages.length - 1 && (
                 <span
@@ -531,15 +532,21 @@ const humanizeLabel = (s) =>
 function CheckRow({ c }) {
   const result = c.result || c.outcome;
   const detail = c.detail || c.reason;
-  return (
+  const name = CHECK_LABEL[c.name] || humanizeLabel(c.name) || "check";
+  // The full detail is a hover tooltip, not truncated inline text. The row stays a compact
+  // pill + name + mode so a long reason no longer pushes the check column open or ellipsizes.
+  const row = (
     <div className={styles.checkRow}>
       <StatusPill family={checkPillFamily(result)}>{result || "—"}</StatusPill>
-      <span className={styles.checkName} title={detail}>
-        {CHECK_LABEL[c.name] || humanizeLabel(c.name) || "check"}
-      </span>
-      {detail && <span className={styles.checkReason} title={detail}>{detail}</span>}
+      <span className={styles.checkName}>{name}</span>
       {c.mode && <span className={styles.checkMode}>{c.mode}</span>}
     </div>
+  );
+  if (!detail) return row;
+  return (
+    <Tooltip trigger={row}>
+      <span className={styles.checkDetailTip}>{detail}</span>
+    </Tooltip>
   );
 }
 

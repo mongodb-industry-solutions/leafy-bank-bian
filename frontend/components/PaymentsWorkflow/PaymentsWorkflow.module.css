@@ -1060,15 +1060,14 @@
   flex: none;
 }
 
-.checkReason {
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--pw-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1 1 auto;
-  min-width: 0;
+/* The full check detail, shown in the hover tooltip instead of truncated inline text.
+   `white-space: normal` (not the row's nowrap) so a long reason wraps its full width in the
+   tooltip rather than ellipsizing. */
+.checkDetailTip {
+  display: block;
+  max-width: 360px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .checkMode {

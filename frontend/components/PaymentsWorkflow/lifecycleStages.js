@@ -194,6 +194,11 @@ export function buildLifecycleStages(payment, trace) {
       stage: 3,
       reached: reached("VALIDATED", "ENRICHED", "FINAL_VALIDATED"),
       meta: stageThreeMeta(payment, reached),
+      intro:
+        "Validates the instructed payment — structure, the debtor and creditor accounts, and " +
+        "duplicate and idempotency — then enriches the gaps: bank and clearing-member IDs, " +
+        "routing data, a purpose code, regulatory info and FX. Records the domestic/cross-" +
+        "border determination, and confirms the chosen payment type is viable on the rail.",
       kind: "enrichment",
       data: {
         events: eventsFor("VALIDATED", "ENRICHED", "FINAL_VALIDATED"),
@@ -218,6 +223,11 @@ export function buildLifecycleStages(payment, trace) {
       stage: 4,
       reached: reached("ROUTED", "AUTHORISED", "APPROVED"),
       meta: stageFourMeta(payment, reached),
+      intro:
+        "Chooses the execution path within the already-selected rail, writes the immutable " +
+        "routing snapshot, and confirms the commitment back to the originator. Then scores the " +
+        "fully-formed payment for fraud and runs transaction-level authorization — approve, " +
+        "decline, or hold.",
       kind: "authorization",
       data: {
         events: eventsFor("ROUTED", "AUTHORISED", "APPROVED"),
@@ -256,6 +266,10 @@ export function buildLifecycleStages(payment, trace) {
       reached: reached("SUBMITTED", "IN_PROGRESS") || !!tx,
       status: execution?.status ?? tx?.transactionStatus,
       meta: stageFiveMeta(payment, reached, execution, tx),
+      intro:
+        "Transforms the canonical payment into a rail-specific message at the rail boundary — a " +
+        "pacs.008 for a wire — submits it to the network, and records the execution and its " +
+        "acknowledgement. A book transfer reaches no rail and is recorded as exactly that.",
       kind: "railExecution",
       data: {
         events: eventsFor("SUBMITTED", "IN_PROGRESS"),
@@ -289,6 +303,11 @@ export function buildLifecycleStages(payment, trace) {
       // The payment's own posting fact, not the event's postingMode (which was always
       // "BATCH" — a constant, so it told the reader nothing).
       meta: accountingMeta(payment, jn),
+      intro:
+        "Posts the balanced debit and credit legs at minor-unit precision — the payment's own " +
+        "accounting fact, written by the ledger service — and captures the financial history as " +
+        "sub-ledger entries that roll up into a journal entry, whose id is written back to the " +
+        "preceding records.",
       kind: "ledgerEvent",
       data: le,
       legs: le
@@ -319,6 +338,10 @@ export function buildLifecycleStages(payment, trace) {
       meta: feeEvent
         ? (feeEvent.postingResult?.journalEntryId || "wire fee")
         : null,
+      intro:
+        "The wire fee is a second balanced event — its own debit and credit legs, its own " +
+        "sub-ledger rows and its own journal entry — not a second leg of the principal. Present " +
+        "only when stage 3 levies a charge on a wire.",
       kind: "ledgerEvent",
       data: feeEvent,
       legs: feeEvent
@@ -342,6 +365,10 @@ export function buildLifecycleStages(payment, trace) {
       reached: sls.length > 0,
       status: sls.length ? (sls.every((e) => e.journalEntryId) ? "POSTED" : "PENDING") : null,
       meta: sls.length ? `${sls.length} entries` : null,
+      intro:
+        "The paired control-account entry for each side of a posting — one debit, one credit, " +
+        "balanced — stamped with the journal-entry id once the batch posts. The general ledger " +
+        "aggregates these.",
       kind: "subLedger",
       data: sls,
       legs: sls.length
@@ -363,6 +390,10 @@ export function buildLifecycleStages(payment, trace) {
       reached: !!jn,
       status: jn?.status,
       meta: jn?.periodCode,
+      intro:
+        "The aggregation of the sub-ledger entries by (period, control account, side) into a " +
+        "posted journal entry — the moment the accounting facts become a balanced, immutable " +
+        "journal.",
       kind: "journal",
       data: jn,
       legs: jn
@@ -383,6 +414,11 @@ export function buildLifecycleStages(payment, trace) {
       reached: reached("SETTLED", "FAILED", "RETURNED") || !!position,
       status: payment?.lifecycle?.settlementStatus || undefined,
       meta: position?.modelLabel || (clearing.settledAt ? "settled" : "pending"),
+      intro:
+        "Posts the credit to a clearing or correspondent account, simulates the external " +
+        "settlement response, and distinguishes internal posting from external settlement. " +
+        "Records the settlement position and the settlement event — SETTLED no longer happens " +
+        "inside the money move.",
       kind: "legs",
       data: { position, clearing },
       legs: se
@@ -412,6 +448,10 @@ export function buildLifecycleStages(payment, trace) {
               ? "discrepancy"
               : "awaiting the GL batch")
         : (reached("RECONCILED") ? "reconciled" : "stage 8"),
+      intro:
+        "Runs the three-way match — payment to rail, rail to settlement account, settlement " +
+        "account to the general ledger — and flags any discrepancy. Runs in the ledger service " +
+        "after the settlement journal posts, so RECONCILED arrives asynchronously.",
       kind: "reconciliation",
       data: {
         check: trace?.reconciliation ?? null,
