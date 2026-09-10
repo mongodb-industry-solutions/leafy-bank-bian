@@ -993,7 +993,7 @@ function StageDetailBody({ stage, payment, onApprove }) {
                   <span>Verification required here</span>
                 </div>
                 <Body>
-                  This payment is above the account's step-up threshold and is waiting for an
+                  This payment is above the account&apos;s step-up threshold and is waiting for an
                   additional authentication factor before it can proceed. Approve it here to
                   continue it through the lifecycle.
                 </Body>
