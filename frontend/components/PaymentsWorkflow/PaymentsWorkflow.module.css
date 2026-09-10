@@ -736,8 +736,27 @@
   align-items: start;
 }
 
+/* Stage 3 — controlled grid, not the auto-fit `detailColumns`. Stage 3 is the densest
+   (a checks trail + a summary + a before/after diff + three transitions), and four
+   auto-fit columns crammed them together. Checks collapses to a summary banner, so it
+   gets the full width on top (no dead column under a collapsed trail); Summary and
+   State transitions share a row beneath it; the before/after diff spans the full width
+   last so its As-captured / After-enrichment pair has room. */
+.stageThreeGrid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.stageThreeGrid > .detailBlockWide {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 900px) {
-  .stageTwoGrid {
+  .stageTwoGrid,
+  .stageThreeGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -870,11 +889,18 @@
   justify-content: space-between;
   gap: 8px;
   padding: 4px 0;
+  min-width: 0;
+}
+
+/* Long values (an enrichment before/after object string) must wrap rather than push the
+   column open; ledger amounts are short so wrapping them is a no-op. */
+.legRow > * {
+  min-width: 0;
 }
 
 .legAmount {
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .legsFoot {
@@ -961,6 +987,13 @@
   border-bottom: 1px solid var(--pw-border-light);
   font-size: 13px;
   line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+/* Let the reason cell shrink below its content's min-width, so a long reason that wraps
+   stays inside the column instead of pushing it open. */
+.event > div:first-child {
+  min-width: 0;
 }
 
 .event:last-child {
@@ -1042,6 +1075,58 @@
   font-size: 11px;
   color: var(--pw-faint);
   flex: none;
+}
+
+/* ── checks summary banner (collapse/expand) ──
+   The top-level "is this stage clean?" answer, with the per-check trail behind a click.
+   Styled like the raw-document toggle so a summary banner and an expandable trail read
+   as the same interaction on this surface. */
+.checkSummary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.checkSummary:hover {
+  border-color: var(--pw-accent);
+}
+
+.checkSummaryCount {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-text);
+  flex: none;
+}
+
+.checkSummaryBreakdown {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--pw-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkSummaryChevron {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--pw-muted);
+  flex: none;
+}
+
+.checkDetail {
+  margin-top: 12px;
 }
 
 /* ── create-payment form ──

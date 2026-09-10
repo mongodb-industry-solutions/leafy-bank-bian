@@ -99,6 +99,13 @@ export function buildLifecycleStages(payment, trace) {
   const events = payment?.lifecycle?.events ?? [];
   const checks = payment?.checks ?? [];
 
+  // Stage 2's own checks only. Every other stage filters its checks by stage prefix
+  // (3/4/5 below); stage 2 historically passed the whole `checks` array, so it rendered
+  // every check from every stage under "Authentication & entitlement" and counted them
+  // all in the meta. Doina's FR-2.6 is explicit that fraud/risk auth belong to stage 4,
+  // not here — so the filter is a correctness fix, not cosmetics.
+  const stageTwoChecks = checks.filter((c) => String(c?.stage || "").startsWith("2 "));
+
   // Stage 6's fee ledger event — a SECOND ledgerEvents doc keyed {paymentId}-FEE
   // (ingest_worker, stage 6). The backend has returned it as `trace.feeEvent` since
   // doc 21 step 8, but it was never rendered, so the fee legs (DR 2111 / CR 4211)
@@ -154,14 +161,14 @@ export function buildLifecycleStages(payment, trace) {
       label: "Authentication & entitlement",
       icon: "Lock",
       stage: 2,
-      reached: checks.length > 0 || heldForStepUp,
+      reached: stageTwoChecks.length > 0 || heldForStepUp,
       meta: heldForStepUp
         ? "verification required"
-        : checks.length
-          ? `${checks.length} checks`
+        : stageTwoChecks.length
+          ? `${stageTwoChecks.length} checks`
           : "stage 2",
       kind: "checks",
-      data: checks,
+      data: stageTwoChecks,
       actionRequired: heldForStepUp,
       intro:
         "Answers one question — is this caller allowed to initiate this amount? Two gates: " +
@@ -173,7 +180,7 @@ export function buildLifecycleStages(payment, trace) {
       raw: {
         authentication: payment?.authentication ?? null,
         entitlement: payment?.entitlement ?? null,
-        checks,
+        checks: stageTwoChecks,
       },
     },
     {

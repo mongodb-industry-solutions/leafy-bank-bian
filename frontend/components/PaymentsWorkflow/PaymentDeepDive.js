@@ -255,13 +255,58 @@ function EnrichmentDiff({ enrichment }) {
   );
 }
 
-/** A resolved value as one line. Objects (an initiating party, a fee) are summarised. */
+/**
+ * Stage 3's body, laid out in a controlled grid rather than the generic auto-fit
+ * `detailColumns`, which crammed four blocks into as many narrow columns. Checks now
+ * collapses to a summary banner by default, so it is given the full width on top (no dead
+ * column under a collapsed trail); Summary and State transitions sit side by side beneath
+ * it; the Progressive-enrichment diff spans the full width last, so its As-captured /
+ * After-enrichment pair has room. Same controlled-grid intent as stage 2's `stageTwoGrid`.
+ */
+function EnrichmentBody({ stage, payment, checkList }) {
+  const events = stage.data?.events || [];
+  return (
+    <div className={styles.stageThreeGrid}>
+      <div className={styles.detailBlockWide}>
+        <div className={styles.detailBlockTitle}>Checks</div>
+        <Checks checks={checkList} />
+      </div>
+      <div className={styles.detailBlock}>
+        <div className={styles.detailBlockTitle}>Summary</div>
+        <KeyValues rows={summaryRows(stage, payment)} />
+      </div>
+      <div className={styles.detailBlock}>
+        <div className={styles.detailBlockTitle}>State transitions</div>
+        <StateEvents events={events} />
+      </div>
+      <div className={styles.detailBlockWide}>
+        <div className={styles.detailBlockTitle}>Progressive enrichment</div>
+        <EnrichmentDiff enrichment={stage.data?.enrichment} />
+      </div>
+    </div>
+  );
+}
+
+/** A resolved value as one concise line. Plain scalars pass through; an object (a fee, a
+ *  regulatory report) is collapsed to its naming field plus the qualifier that matters, so
+ *  the "after enrichment" column reads "WIRE_FEE 25.00 USD (SHARED)" rather than a raw
+ *  `k: v, k2: v2, …` dump. Arrays (e.g. regulatoryReports[]) join their items on " ; ".
+ *  The full value is one click away on the raw-document toggle. */
 function fmtEnriched(value) {
   if (value === null || value === undefined || value === "") return "—";
   if (Array.isArray(value)) {
-    return value.map((v) => fmtEnriched(v)).join("; ");
+    if (!value.length) return "—";
+    return value.map((v) => fmtEnriched(v)).join(" ; ");
   }
   if (typeof value === "object") {
+    const name = value.reportType || value.type || value.name || value.code;
+    if (name) {
+      const extras = [];
+      if (value.amount != null) extras.push(fmtAmount(value.amount, value.currency));
+      if (value.status) extras.push(`(${value.status})`);
+      else if (value.chargedTo) extras.push(`(${value.chargedTo})`);
+      return extras.length ? `${name} ${extras.join(" ")}` : name;
+    }
     return Object.entries(value)
       .filter(([, v]) => v !== null && v !== undefined && v !== "")
       .map(([k, v]) => `${k}: ${v}`)
@@ -498,7 +543,56 @@ function CheckRow({ c }) {
   );
 }
 
-function Checks({ checks }) {
+/**
+ * Roll `checks[]` up to a one-line verdict — "does the top-level status say all good?"
+ * Any FAIL dominates; then WARN, then PENDING, then SKIP; a clean PASS list reads "all
+ * passed". The per-check trail stays one click away behind this summary.
+ */
+function summarizeChecks(checks) {
+  const counts = { PASS: 0, FAIL: 0, WARN: 0, SKIP: 0, PENDING: 0 };
+  checks.forEach((c) => {
+    const r = (c.result || c.outcome || "").toUpperCase();
+    if (r in counts) counts[r] += 1;
+  });
+  const { PASS, FAIL, WARN, SKIP, PENDING } = counts;
+  let verdict;
+  let family;
+  if (FAIL) {
+    verdict = `${FAIL} failed`;
+    family = "red";
+  } else if (WARN) {
+    verdict = `${WARN} warning${WARN === 1 ? "" : "s"}`;
+    family = "yellow";
+  } else if (PENDING) {
+    verdict = `${PENDING} pending`;
+    family = "yellow";
+  } else if (SKIP) {
+    verdict = "passed";
+    family = "green";
+  } else {
+    verdict = "all passed";
+    family = "green";
+  }
+  const bits = [];
+  if (PASS) bits.push(`${PASS} pass`);
+  if (WARN) bits.push(`${WARN} warn`);
+  if (SKIP) bits.push(`${SKIP} skip`);
+  if (PENDING) bits.push(`${PENDING} pending`);
+  if (FAIL) bits.push(`${FAIL} fail`);
+  return { verdict, family, breakdown: bits.join(" · ") };
+}
+
+/**
+ * The per-check audit trail, collapsed by default to a summary banner — the top-level
+ * "is this stage clean?" answer — with the full trail behind a click. Shared by the
+ * stages that append to `checks[]` (2/3/4/5), so the collapse/expand behaves the same
+ * everywhere and one payment's checks never spill across a stage panel.
+ *
+ * `defaultOpen` lets a caller pin a specific stage's trail open (stage 2's gate flow is
+ * the demo's telling screen); otherwise it starts closed.
+ */
+function Checks({ checks, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
   if (!checks?.length) {
     return (
       <Body className={styles.muted}>
@@ -506,6 +600,7 @@ function Checks({ checks }) {
       </Body>
     );
   }
+  const summary = summarizeChecks(checks);
   const groups = CHECK_ORDER.map((phase) => ({
     phase,
     entries: checks.filter((c) => CHECK_PHASE[c.name] === phase),
@@ -513,21 +608,44 @@ function Checks({ checks }) {
   const general = checks.filter((c) => !CHECK_PHASE[c.name]);
 
   return (
-    <div className={styles.checkFlow}>
-      {groups.map((g) => (
-        <div className={styles.checkPhase} key={g.phase}>
-          <div className={styles.checkPhaseLabel}>{g.phase}</div>
-          {g.entries.map((c, i) => (
-            <CheckRow key={`${c.name || c.checkId}-${g.phase}-${i}`} c={c} />
-          ))}
-        </div>
-      ))}
-      {general.length > 0 && (
-        <div className={styles.checkPhase}>
-          <div className={styles.checkPhaseLabel}>Checks</div>
-          {general.map((c, i) => (
-            <CheckRow key={`${c.name || c.checkId}-${i}`} c={c} />
-          ))}
+    <div>
+      <button
+        type="button"
+        className={styles.checkSummary}
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <StatusPill family={summary.family}>{summary.verdict}</StatusPill>
+        <span className={styles.checkSummaryCount}>
+          {checks.length} check{checks.length === 1 ? "" : "s"}
+        </span>
+        {summary.breakdown && (
+          <span className={styles.checkSummaryBreakdown}>{summary.breakdown}</span>
+        )}
+        <span className={styles.checkSummaryChevron} aria-hidden>
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open && (
+        <div className={styles.checkDetail}>
+          <div className={styles.checkFlow}>
+            {groups.map((g) => (
+              <div className={styles.checkPhase} key={g.phase}>
+                <div className={styles.checkPhaseLabel}>{g.phase}</div>
+                {g.entries.map((c, i) => (
+                  <CheckRow key={`${c.name || c.checkId}-${g.phase}-${i}`} c={c} />
+                ))}
+              </div>
+            ))}
+            {general.length > 0 && (
+              <div className={styles.checkPhase}>
+                <div className={styles.checkPhaseLabel}>Checks</div>
+                {general.map((c, i) => (
+                  <CheckRow key={`${c.name || c.checkId}-${i}`} c={c} />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1032,7 +1150,7 @@ function StageDetailBody({ stage, payment, onApprove }) {
 
         {/* Stage 2 renders its own checks inside the two-column grid; every other checks
             stage (3/4/5) uses this generic block. */}
-        {showChecks && !showStageTwo && (
+        {showChecks && !showStageTwo && !showEnrichment && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Checks</div>
             <Checks checks={checkList} />
@@ -1055,7 +1173,7 @@ function StageDetailBody({ stage, payment, onApprove }) {
           </div>
         )}
 
-        {!showStates && !showStageTwo && (
+        {!showStates && !showStageTwo && !showEnrichment && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Summary</div>
             <KeyValues rows={summaryRows(stage, payment)} />
@@ -1100,10 +1218,7 @@ function StageDetailBody({ stage, payment, onApprove }) {
         )}
 
         {showEnrichment && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>Progressive enrichment</div>
-            <EnrichmentDiff enrichment={stage.data?.enrichment} />
-          </div>
+          <EnrichmentBody stage={stage} payment={payment} checkList={checkList} />
         )}
 
         {showRailExecution && (
@@ -1115,7 +1230,7 @@ function StageDetailBody({ stage, payment, onApprove }) {
           </div>
         )}
 
-        {(showEnrichment || showAuthorization || showRailExecution) && !!stage.data?.events?.length && (
+        {(showAuthorization || showRailExecution) && !!stage.data?.events?.length && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>State transitions</div>
             <StateEvents events={stage.data.events} />
