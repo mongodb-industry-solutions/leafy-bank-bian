@@ -102,7 +102,7 @@ def test_the_transaction_doc_gained_only_the_two_fee_fields(service, db):  # noq
 
 def test_a_creditor_borne_fee_is_not_carried(service, db):  # noqa: F811
     """B3(d) — `_FEE_PAYER_BY_CHARGE_BEARER` can produce a creditor-borne fee from an ISO
-    `CRED`/`SHAR` charge bearer, and which account such a fee debits is Doina's call (Q44).
+    `CRED` charge bearer, and which account such a fee debits is Doina's call (Q44).
     Skipped rather than posted to a guessed account."""
     from contexts.payment_rail.execute import _debtor_borne_fee
 
@@ -113,6 +113,21 @@ def test_a_creditor_borne_fee_is_not_carried(service, db):  # noqa: F811
         ]}
 
     assert _debtor_borne_fee(_Ctx()) == 0.0
+
+
+def test_a_shared_fee_is_carried_for_the_debtor(service, db):  # noqa: F811
+    """ISO `SHAR` (shared) means the sending bank charges the debtor its fee — the
+    creditor's half is a receivable on the receiving end, not a deduction here. So
+    `chargedTo == "SHARED"` posts the full amount to the debtor's ledger, same as DEBTOR."""
+    from contexts.payment_rail.execute import _debtor_borne_fee
+
+    class _Ctx:
+        payment_id = "PAY-1"
+        payment_doc = {"fees": [
+            {"type": "WIRE_FEE", "amount": 25.00, "chargedTo": "SHARED"},
+        ]}
+
+    assert _debtor_borne_fee(_Ctx()) == 25.00
 
 
 def test_debtor_borne_fees_are_summed(service, db):  # noqa: F811

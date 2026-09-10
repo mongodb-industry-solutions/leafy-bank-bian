@@ -128,7 +128,7 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
 }
 
 /** Zone 2 — vertical spine of expandable rows; the selected row expands to its full detail. */
-function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef }) {
+function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove }) {
   const failedIdx = states.indexOf("failed");
   return (
     <div className={styles.timeline}>
@@ -179,7 +179,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                   <StageDetailBody
                     stage={s}
                     payment={payment}
-                    onApprove={() => setStepUpOpen(true)}
+                    onApprove={onApprove}
                   />
                 </div>
               )}
@@ -1200,6 +1200,11 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
 
   async function resumePayment() {
     if (!paymentId) return;
+    // Close the modal as soon as the OTP is verified — the Resume API call that
+    // follows is not the user's action and making them wait for it with the modal
+    // still open reads as "nothing happened". If Resume fails, the error surfaces
+    // in the panel body banner (stepUpError) below.
+    setStepUpOpen(false);
     setStepUpError(null);
     const { data, error: err } = await coreApi("PaymentOrderProcedure/Resume", {
       method: "POST",
@@ -1209,7 +1214,6 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
       setStepUpError(err);
       return;
     }
-    setStepUpOpen(false);
     setNudge((n) => n + 1);
   }
   const rowRefs = useRef({});
@@ -1325,6 +1329,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
               onSelect={setSelectedKey}
               payment={payment}
               setRowRef={setRowRef}
+              onApprove={() => setStepUpOpen(true)}
             />
           </>
         )}

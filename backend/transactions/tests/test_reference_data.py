@@ -336,7 +336,7 @@ def test_bank_seed_covers_our_own_bank_and_the_sample_beneficiary():
 
 
 def _autofill_pool() -> list[dict]:
-    """`EXTERNAL_RECIPIENTS` from the wizard, parsed rather than duplicated here.
+    """`EXTERNAL_BANKS` from the wizard, parsed rather than duplicated here.
 
     Duplicating it would create a third copy of the same facts (seed, wizard, test) and the
     test would stop noticing when the wizard drifts — which is the whole thing it exists for.
@@ -345,8 +345,8 @@ def _autofill_pool() -> list[dict]:
         TRANSACTIONS_ROOT.parents[1]
         / "frontend" / "components" / "PaymentsWorkflow" / "InitiateWizard.js"
     ).read_text()
-    block = re.search(r"EXTERNAL_RECIPIENTS\s*=\s*\[(.*?)\];", wizard, re.S)
-    assert block, "EXTERNAL_RECIPIENTS not found — autofill pool moved; update this test"
+    block = re.search(r"EXTERNAL_BANKS\s*=\s*\[(.*?)\];", wizard, re.S)
+    assert block, "EXTERNAL_BANKS not found — autofill pool moved; update this test"
 
     rows = []
     for line in block.group(1).splitlines():

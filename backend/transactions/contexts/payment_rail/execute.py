@@ -452,10 +452,11 @@ def _flush(ctx: PaymentContext, recorded: list) -> None:
 def _debtor_borne_fee(ctx: PaymentContext) -> float:
     """The charge the debtor bears, for the ledger's fee leg (stage 6, doc 20 B3).
 
-    Only `chargedTo == "DEBTOR"` is carried. `_FEE_PAYER_BY_CHARGE_BEARER` can produce a
-    creditor-borne fee from an ISO `CRED`/`SHAR` charge bearer, and which account such a fee
-    debits is Doina's call (Q44) — so it is skipped here rather than posted to the wrong
-    account. Skipping is visible in the log, not silent.
+    `chargedTo` of `DEBTOR` or `SHARED` is carried. From the sending bank's ledger
+    perspective, `SHAR` (shared) means the debtor's bank charges the debtor its fee — the
+    creditor's half is a receivable on the receiving end, not a deduction here. Only
+    `CREDITOR` is skipped: which account a creditor-borne fee debits is Doina's call (Q44),
+    so it is not posted to the wrong account. Skipping is visible in the log, not silent.
 
     Returns 0.0 when there is no fee, which is every internal transfer: stage 3 levies a
     charge on `rail == "WIRE"` only.
@@ -464,14 +465,14 @@ def _debtor_borne_fee(ctx: PaymentContext) -> float:
     skipped = []
     for fee in (ctx.payment_doc or {}).get("fees") or []:
         charged_to = fee.get("chargedTo")
-        if charged_to == "DEBTOR":
+        if charged_to in ("DEBTOR", "SHARED"):
             total += float(fee.get("amount") or 0.0)
         else:
             skipped.append(f"{fee.get('type')} chargedTo={charged_to}")
     if skipped:
         logger.info(
-            "payment %s: %d fee(s) not carried to the ledger (%s) — only debtor-borne "
-            "charges post in phase 1 (Q44)",
+            "payment %s: %d fee(s) not carried to the ledger (%s) — creditor-borne "
+            "charges do not post in phase 1 (Q44)",
             ctx.payment_id, len(skipped), "; ".join(skipped),
         )
     return total
