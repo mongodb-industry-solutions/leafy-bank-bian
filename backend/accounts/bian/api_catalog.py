@@ -113,7 +113,7 @@ API_CATALOG = {
                                     "tokenType", "expiresAt",
                                 ],
                                 "example": {
-                                    "partyAuthenticationId": "SESS-9F2C1A4B7D01",
+                                    "partyAuthenticationId": "<example session id — redacted>",
                                     "assessment": {
                                         "partyReference": "CUST-f88fb89e",
                                         "callerType": "CUSTOMER",
@@ -159,7 +159,7 @@ API_CATALOG = {
                                     "challengeCode", "deliveryChannel", "simulated",
                                 ],
                                 "example": {
-                                    "partyAuthenticationId": "SESS-9F2C1A4B7D01",
+                                    "partyAuthenticationId": "<example session id — redacted>",
                                     "questionId": "otp",
                                     "challengeCode": "482067",
                                     "deliveryChannel": "ON_SCREEN_SIMULATION",
