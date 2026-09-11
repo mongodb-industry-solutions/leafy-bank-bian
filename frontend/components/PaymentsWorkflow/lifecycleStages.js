@@ -234,10 +234,11 @@ export function buildLifecycleStages(payment, trace) {
         fraud: payment?.fraud || null,
         sanctions: payment?.correspondent?.sanctionsCheck || null,
         network: payment?.wireDetails?.network || null,
-        // Forward pointers, not the documents themselves: `routingSnapshots` and
-        // `paymentOrders` are separate collections, and the deep-dive endpoint returns the
-        // payment only. Showing the refs proves the artifacts exist and gives an operator
-        // the ids to look them up with, without adding a second fetch to this panel.
+        // Forward pointers to stage 4's artifacts. `routingSnapshots` is a separate
+        // collection; the commitment was folded into `payments.order` per Doina's Aug 27
+        // target model (L427-429), so `paymentOrderId` now points within the same document
+        // to `order.paymentOrderId`. Showing the refs proves the artifacts exist and gives
+        // an operator the ids to look them up with.
         refs: {
           routingSnapshotId: payment?.refs?.routingSnapshotId || null,
           paymentOrderId: payment?.refs?.paymentOrderId || null,

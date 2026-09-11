@@ -52,9 +52,9 @@ class PaymentsService:
         self.payments = self.db["payments"]
         self.transactions = self.db["transactions"]
         self.notifications = self.db["notifications"]
-        # Stage 4's two collections (doc 18 B1). Neither is in the canonical spec; both are
-        # named exactly as `payments.refs` declares their FK targets.
-        self.payment_orders = self.db["paymentOrders"]
+        # Stage 4a's collection (doc 18 B1). Not in the canonical spec; named exactly as
+        # `payments.refs` declares its FK target. Stage 4b's commitment was folded into
+        # `payments.order` per Doina's Aug 27 target model (L427-429) — no collection.
         self.routing_snapshots = self.db["routingSnapshots"]
         # Stage 5's two (doc 19 B2, B3). `paymentMessages` is Doina's rename (L780); the live
         # `canonicalJsonStorage` belongs to fsi-payments-processing and is never touched here.
@@ -101,7 +101,6 @@ class PaymentsService:
             payments=self.payments,
             transactions=self.transactions,
             notifications=self.notifications,
-            payment_orders=self.payment_orders,
             routing_snapshots=self.routing_snapshots,
             payment_executions=self.payment_executions,
             payment_messages=self.payment_messages,
@@ -356,13 +355,13 @@ class PaymentsService:
         if not payment:
             return None
 
-        order_id = (payment.get("refs") or {}).get("paymentOrderId")
+        order = payment.get("order") or {}
+        order_id = order.get("paymentOrderId")
         if not order_id:
             raise ValueError(
                 f"{payment_ref} has no committed execution path to confirm "
                 f"(state {(payment.get('lifecycle') or {}).get('currentState')})."
             )
-        order = self.payment_orders.find_one({"paymentOrderId": order_id}) or {}
 
         checks.append_checks(self.payments, payment["_id"], [
             checks.check(

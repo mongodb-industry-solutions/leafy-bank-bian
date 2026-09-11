@@ -533,6 +533,7 @@ def test_stage_four_records_its_checks_in_order(service, db):
         "risk_assessment",
         "fraud_score_within_threshold",
         "fees_reconfirmed",
+        "fx_quote_reconfirmed",
         "authorization_decision",
         "originator_confirmed",
     ]
@@ -587,21 +588,23 @@ def test_the_payment_order_does_not_exist_before_the_authorization_decision(serv
 
     `refs.paymentOrderId`'s own spec description — *"Written at orchestration, after
     authorization"* — is what resolves Doina's Q5 conflict. So the snapshot exists from
-    ROUTED, and the order only from APPROVED.
+    ROUTED, and the order only from APPROVED. The commitment was folded into `payments.order`
+    per Doina's Aug 27 target model (L427-429), so it is read off the payment document, not
+    a separate collection.
     """
     payment = _initiate(service)
-    orders = db["paymentOrders"].docs
+    order = payment["order"]
 
-    assert len(orders) == 1
-    assert payment["refs"]["paymentOrderId"] == orders[0]["paymentOrderId"]
+    assert order is not None
+    assert payment["refs"]["paymentOrderId"] == order["paymentOrderId"]
 
     # The order is committed at APPROVED, so it is stamped onto the document by the
     # APPROVED transition — not the ROUTED one.
     approved = next(e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED")
     routed = next(e for e in payment["lifecycle"]["events"] if e["state"] == "ROUTED")
     assert routed["at"] <= approved["at"]
-    assert orders[0]["routingSnapshotId"] == payment["refs"]["routingSnapshotId"]
-    assert orders[0]["authorization"]["decision"] == "APPROVED"
+    assert order["routingSnapshotId"] == payment["refs"]["routingSnapshotId"]
+    assert order["authorization"]["decision"] == "APPROVED"
 
 
 def test_the_fraud_block_carries_all_five_spec_required_subfields(service, db):
@@ -654,7 +657,7 @@ def test_a_declined_payment_is_rejected_and_never_passes_through_authorised(rich
     assert payment["lifecycle"]["currentState"] == "REJECTED"
     # The evidence survives the rejection — the demo must show WHY.
     assert payment["fraud"]["decision"] == "DECLINED"
-    assert rich_db["paymentOrders"].docs == [], "a declined payment commits nothing"
+    assert payment["order"] is None, "a declined payment commits nothing"
 
 
 def test_a_reviewed_payment_holds_at_authorised_and_commits_nothing(rich_service, rich_db):
@@ -665,7 +668,7 @@ def test_a_reviewed_payment_holds_at_authorised_and_commits_nothing(rich_service
 
     assert payment["fraud"]["decision"] == "REVIEW"
     assert payment["lifecycle"]["currentState"] == "AUTHORISED"
-    assert rich_db["paymentOrders"].docs == []
+    assert payment["order"] is None
     assert rich_db["transactions"].inserted == [], "money must not move on a held payment"
 
 
@@ -694,7 +697,7 @@ def test_a_future_dated_payment_is_warehoused_at_routed_and_moves_no_money(servi
     )
     assert payment["lifecycle"]["currentState"] == "ROUTED"
     assert db["transactions"].inserted == []
-    assert db["paymentOrders"].docs == []
+    assert payment["order"] is None
 
     warehoused = next(
         c for c in _checks(db, "4 orchestrate") if c["name"] == "warehoused_for_release"
@@ -729,6 +732,79 @@ def test_the_fee_reconfirmation_is_skipped_off_the_wire_rail(service, db):
         c for c in _checks(db, "4 authorize") if c["name"] == "fees_reconfirmed"
     )
     assert fee_check["result"] == "SKIP"
+
+
+def test_a_changed_fee_is_rejected_before_authorization():
+    """FR-4.12 fee half — a fee that no longer matches the schedule is REFUSED (the FR's
+    "reject/hold"), not a WARN that claims a hold it never makes.
+
+    The changed-quote state cannot arise through the saga — the schedule is a constant, so
+    stage 3 and stage 4b read the same value — so the guard is exercised directly. It is a
+    consistency check against drift/tampering, which is what "re-validate the quote" means
+    when the source is a fixed mock; the same shape as the fee PASS test, one layer down.
+    """
+    from contexts.fraud_evaluation import evaluate
+    from contexts.payment_order_initiation.domain import checks
+
+    recorded = []
+
+    def record(name, result, detail, *, mode=checks.SYNC):
+        recorded.append({"name": name, "result": result, "detail": detail})
+
+    def refuse(name, detail):
+        record(name, checks.FAIL, detail)
+        raise ValueError(detail)
+
+    payment = {"rail": "WIRE", "fees": [
+        {"amount": 99.0, "currency": "USD", "type": "WIRE_FEE", "chargedTo": "DEBTOR"}]}
+    with pytest.raises(ValueError, match="Fee changed since enrichment"):
+        evaluate._record_fee_reconfirmation(record, refuse, payment)
+
+    assert recorded[0]["name"] == "fees_reconfirmed"
+    assert recorded[0]["result"] == "FAIL"
+    assert "99" in recorded[0]["detail"]
+
+
+def test_a_changed_fx_quote_is_rejected_before_authorization():
+    """FR-4.12 FX half — a stored fxRate that no longer matches the rate schedule is REFUSED.
+
+    The schedule says EUR→USD is 0.92; a payment carrying 1.50 is rejected. Same reachability
+    note as the fee test: the changed state is injected because the synchronous saga cannot
+    produce it from a constant table.
+    """
+    from contexts.fraud_evaluation import evaluate
+    from contexts.payment_order_initiation.domain import checks
+
+    recorded = []
+
+    def record(name, result, detail, *, mode=checks.SYNC):
+        recorded.append({"name": name, "result": result, "detail": detail})
+
+    def refuse(name, detail):
+        record(name, checks.FAIL, detail)
+        raise ValueError(detail)
+
+    payment = {"instructedCurrency": "EUR", "fxRate": 1.50}
+    with pytest.raises(ValueError, match="FX quote changed"):
+        evaluate._record_fx_reconfirmation(
+            record, refuse, payment, debtor_account_currency="USD")
+
+    assert recorded[0]["name"] == "fx_quote_reconfirmed"
+    assert recorded[0]["result"] == "FAIL"
+
+
+def test_the_fx_quote_is_reconfirmed_on_a_cross_border_mismatch(rich_service, rich_db):
+    """FR-4.12 FX half — the PASS path through the real saga. A cross-border wire whose
+    instructed currency differs from the debtor account's attaches a simulated rate at
+    stage 3 (FR-3.14); stage 4b re-confirms it still matches the schedule immediately
+    before execution."""
+    payment = _international(
+        rich_service, instructed_amount=25_000.0, instructed_currency="EUR")
+    fx_check = next(
+        c for c in _checks(rich_db, "4 authorize") if c["name"] == "fx_quote_reconfirmed"
+    )
+    assert fx_check["result"] == "PASS"
+    assert "1.08" in fx_check["detail"]
 
 
 def test_stage_three_checks_are_untouched_by_stage_four(service, db):

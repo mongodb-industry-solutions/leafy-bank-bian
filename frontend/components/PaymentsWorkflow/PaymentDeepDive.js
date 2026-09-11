@@ -845,6 +845,19 @@ function summaryRows(stage, payment) {
       const checks = d?.checks || [];
       const warned = checks.filter((c) => c.result === "WARN").length;
       const failed = checks.filter((c) => c.result === "FAIL").length;
+      // FR-3.12 — the regulatory reports stage 3 attached (cross-border declaration and/or
+      // threshold report). An empty array is "assessed, none required" (the spec's "Empty
+      // array if none"); absent is "not assessed" and renders "—".
+      const reports = payment?.correspondent?.regulatoryReports;
+      const reportsLabel = !reports
+        ? null
+        : reports.length
+          ? reports.map((r) => r.reportType).join(", ")
+          : "None required";
+      // FR-3.20 — who submitted the instruction, distinct from the account holder. Read off
+      // the wireDetails envelope (caller-supplied or derived from the authenticated caller);
+      // shown here rather than only in the diff so a pass-through value is visible too.
+      const initiatingParty = payment?.wireDetails?.initiatingParty;
       return [
         ["Checks recorded", checks.length || null],
         ["Warnings", warned || null],
@@ -856,6 +869,10 @@ function summaryRows(stage, payment) {
           ? payment.fees.map((f) => `${fmtAmount(f.amount, f.currency)} ${f.type} (${f.chargedTo})`).join(", ")
           : null],
         ["FX rate", payment?.fxRate ?? null],
+        ["Regulatory reports", reportsLabel],
+        ["Initiating party", initiatingParty
+          ? (initiatingParty.name || initiatingParty.identification)
+          : null],
         ["Enriched at", fmtWhen(e?.resolvedAt)],
       ];
     }

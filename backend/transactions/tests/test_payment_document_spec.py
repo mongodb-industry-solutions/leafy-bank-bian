@@ -134,6 +134,11 @@ _KNOWN_EXTRAS = {
     # INITIATED with these set, so the channel can resume the SAME document after a second
     # factor. The NINTH and TENTH; argued for in the resume work, not slipped in.
     "stepUpRequired", "stepUpReason",
+    # 2026-09-10: the bank's execution commitment, folded into `payments` per Doina's
+    # Aug 27 target model (L427-429 strikes the `paymentOrders` collection through and
+    # asks to add those fields directly in `payments`). The ELEVENTH; argued for in
+    # `payment_document.build`'s `order` comment, not slipped in.
+    "order",
 }
 
 

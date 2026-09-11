@@ -283,6 +283,14 @@ def build(ctx) -> dict:
         # earlier version used would have overwritten siblings. The other blocks stay None:
         # each is a whole-object write owned by one stage, so the clobber risk doesn't arise.
         "validation": {},
+        # Stage 4b's commitment, folded into `payments` per Doina's Aug 27 target model
+        # (L427-429 strikes `paymentOrders` through and asks to "add these fields directly
+        # in the payments collection"). Null at initiation; stage 4b writes the whole
+        # object at the APPROVED transition. `refs.paymentOrderId` (a spec-declared FK,
+        # retained) now points within the same document to `order.paymentOrderId`. The
+        # ELEVENTH field written that the spec does not declare — argued for here, not
+        # slipped in, and pinned by `test_no_field_is_written_that_the_spec_does_not_declare`.
+        "order": None,
         "initiation": {
             "initiatedAt": now,
             "initiatedBy": ctx.debtor_customer_id,

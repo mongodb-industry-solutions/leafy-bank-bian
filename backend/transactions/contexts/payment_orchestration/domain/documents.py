@@ -1,23 +1,32 @@
-"""`routingSnapshots` and `paymentOrders` — the two documents stage 4 produces. Pure.
+"""`routingSnapshots` (a collection) and `order{}` (a sub-document on `payments`) — the
+two artifacts stage 4 produces. Pure builders, no DB access.
 
-⚠️ **Neither collection exists in the canonical spec.** Counted grep over
-`Consolidated_..._v34_Aug17.json`: `paymentOrders` 0, `routingSnapshots` 0, across all 22
-collections — yet `payments.refs` names both as FK targets with explicit FK descriptions
-(D3). So the relationships were authored and the collections never were, and these shapes
-are **ours**, built from Doina's L500 and her stage table at L928. Doc 18 B1; **Doina
-ratifies as Q28.** Field names follow her nouns so the mapping needs no translation table.
+⚠️ **Neither `routingSnapshots` nor a `paymentOrders` collection exists in the canonical
+spec.** Counted grep over `Consolidated_..._v34_Aug17.json`: `paymentOrders` 0,
+`routingSnapshots` 0, across all 22 collections — yet `payments.refs` names both as FK
+targets with explicit FK descriptions (D3). So the relationships were authored and the
+collections never were, and these shapes are **ours**, built from Doina's L500 and her
+stage table at L928. Doc 18 B1; **Doina ratifies as Q28.** Field names follow her nouns so
+the mapping needs no translation table.
 
-## The split, and why it matters
+## The fold — `paymentOrders` is now `payments.order{}`
 
-`payments` is what the customer **asked for**. `paymentOrders` is what the bank
-**committed to execute**. D4 chose separate collections over an `order{}` sub-document
-because *"the instruction-vs-commitment split is one of the model's strongest BIAN
-arguments"* — and because re-splitting live data later is the one flavour of mistake that
-isn't cheap in dev either.
+`payments` is what the customer **asked for**; the order is what the bank **committed to
+execute**. D4 originally chose a separate `paymentOrders` collection over an `order{}`
+sub-document because *"the instruction-vs-commitment split is one of the model's strongest
+BIAN arguments"*. **Reversed by Doina's Aug 27 target model** (L427-429): she strikes
+`paymentOrders` through and asks *"better to add these fields directly in the payments
+collection?"* — so the commitment now lives as `payments.order`, written at the APPROVED
+transition. The instruction-vs-commitment split is preserved as a sub-document boundary
+rather than a collection boundary. `refs.paymentOrderId` (a spec-declared FK, retained)
+now points within the same document to `order.paymentOrderId`.
+
+`routingSnapshots` stays a separate collection: Doina leaves it un-struck (L387) and names
+its immutability requirement explicitly (L500/L928), so it is not a candidate for folding.
 
 ## Timing — from the spec, not from us
 
-Her collections table says `paymentOrders` is created *"after validation and
+Her collections table says the commitment is created *"after validation and
 authorization"*; her §3 says *"at orchestration"*. Those read as a conflict (Q5) until you
 read the spec's own field description for `refs.paymentOrderId`:
 
@@ -26,7 +35,7 @@ read the spec's own field description for `refs.paymentOrderId`:
 Both, in that order. So:
 
 * `routingSnapshots` — written in `"4 orchestrate"`, at the `ROUTED` transition.
-* `paymentOrders`    — written in `"4 authorize"`, at the `APPROVED` transition.
+* `payments.order`   — written in `"4 authorize"`, at the `APPROVED` transition.
 
 `test_the_payment_order_does_not_exist_before_the_authorization_decision` asserts the
 ordering rather than trusting this docstring.
@@ -52,7 +61,6 @@ from contexts.payment_order_initiation.domain import bank_identity
 from shared.refs import derive_ref
 
 ROUTING_SNAPSHOTS = "routingSnapshots"
-PAYMENT_ORDERS = "paymentOrders"
 
 SOURCE_SYSTEM = "leafy-bank-payments-service"
 
@@ -144,11 +152,18 @@ def payment_order(
     warehoused: bool = False,
     oid: Optional[ObjectId] = None,
 ) -> dict:
-    """What the bank committed to execute, written after the authorization decision.
+    """The bank's execution commitment, written after the authorization decision as a
+    sub-document on `payments` (`payments.order`).
 
-    Doc 12 §3 listed the contents: *"selected rail, clearing network, value date, confirmed
-    amount/currency, FX, charges, execution conditions, routing decision"*. All of them are
-    here.
+    Doina's Aug 27 target model (L427-429) strikes the `paymentOrders` collection through
+    and asks to add those fields directly in `payments`; this builder produces the folded
+    sub-document. Doc 12 §3 listed the contents: *"selected rail, clearing network, value
+    date, confirmed amount/currency, FX, charges, execution conditions, routing decision"*.
+    All of them are here. `paymentId` / `customerId` are intentionally NOT repeated — they
+    already live on the owning `payments` document — and there is no `_id`: the sub-document
+    is addressed by its parent. `paymentOrderId` is kept as the commitment's own reference
+    (the bank's execution-commitment id, distinct from `paymentId`), and `refs.paymentOrderId`
+    points to it within the same document.
 
     ⚠️ **`confirmedAmount` must equal `payments.amount`.** A fee is *recorded*, never
     deducted (doc 17 §7): `amount` is the ledger's primary input across the boundary, and a
@@ -157,10 +172,7 @@ def payment_order(
     """
     oid = oid or ObjectId()
     return {
-        "_id": oid,
         "paymentOrderId": derive_ref("PO", oid),
-        "paymentId": payment.get("paymentId"),
-        "customerId": payment.get("customerId"),
         # --- the commitment ---------------------------------------------------
         "rail": payment.get("rail"),
         "type": payment.get("type"),
@@ -190,6 +202,4 @@ def payment_order(
         "committedAt": now,
         "committedBy": "orchestration-service",
         "sourceSystem": SOURCE_SYSTEM,
-        "createdAt": now,
-        "updatedAt": now,
     }

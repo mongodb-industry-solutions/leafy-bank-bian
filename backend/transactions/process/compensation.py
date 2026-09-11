@@ -22,7 +22,8 @@ TODO (Doina stage 9):
     retry unboundedly, and distinguish permanent failures from transient ones.
   - compensation for a partial saga failure — today the only multi-write step is stage 5's
     ACID block, which rolls back on its own, so there is nothing to compensate yet. That
-    changes the moment stage 4a starts writing `paymentOrders` before stage 5 runs.
+    changes the moment stage 4a starts writing `routingSnapshots` (and stage 4b stamps
+    `payments.order`) before stage 5 runs.
 """
 
 from __future__ import annotations

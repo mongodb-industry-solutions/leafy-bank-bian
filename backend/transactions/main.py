@@ -298,9 +298,9 @@ def _stage_four_artifacts(payment_id: str) -> dict:
         "routingSnapshot": payments_service.routing_snapshots.find_one(
             {"routingSnapshotId": refs.get("routingSnapshotId")}
         ) if refs.get("routingSnapshotId") else None,
-        "paymentOrder": payments_service.payment_orders.find_one(
-            {"paymentOrderId": refs.get("paymentOrderId")}
-        ) if refs.get("paymentOrderId") else None,
+        # The commitment was folded into `payments.order` per Doina's Aug 27 target model
+        # (L427-429); no separate collection to look up.
+        "paymentOrder": payment.get("order"),
     }
 
 

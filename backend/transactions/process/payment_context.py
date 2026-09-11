@@ -38,9 +38,10 @@ class PaymentCollections:
     payments: Any
     transactions: Any
     notifications: Any
-    # Stage 4's two new collections (doc 18 B1). Optional so a context built before this
-    # stage existed — or a test that does not reach stage 4 — still constructs.
-    payment_orders: Any = None
+    # Stage 4a's collection (doc 18 B1). Optional so a context built before this stage
+    # existed — or a test that does not reach stage 4 — still constructs. Stage 4b's
+    # commitment was folded into `payments.order` per Doina's Aug 27 target model
+    # (L427-429), so it no longer has a collection of its own.
     routing_snapshots: Any = None
     # Stage 5's two new collections (doc 19 B2, B3). Optional for the same reason as stage
     # 4's: a context built before this stage existed, or a test that never reaches a rail,
@@ -124,7 +125,7 @@ class PaymentContext:
     current_state: Optional[str] = None
     fraud: Optional[dict] = None
     # Stage 4a's output, read by stage 4b. The saga's own mechanism for crossing a stage
-    # boundary (see this module's docstring): `paymentOrders` is written at APPROVED, in
+    # boundary (see this module's docstring): `payments.order` is written at APPROVED, in
     # stage 4b, but the strategy it commits to was decided in stage 4a.
     execution_strategy: Optional[Any] = None
     routing_snapshot_id: Optional[str] = None

@@ -14,7 +14,7 @@ Reads  ctx: payment_doc, execution_strategy, routing_snapshot_id, warehoused,
             current_state, collections
 Writes ctx: fraud; current_state -> AUTHORISED (-> APPROVED); `payments.fraud`,
             `payments.correspondent.sanctionsCheck`, `payments.clearing.authorisedAt`,
-            `payments.refs.paymentOrderId`; `paymentOrders`; five `checks[]` entries
+            `payments.order`, `payments.refs.paymentOrderId`; seven `checks[]` entries
 
 ## Her demo display is the check list (L508-515)
 
@@ -46,13 +46,16 @@ which is defect 2026-04-24. Holding at AUTHORISED is the honest representation a
 ## The payment order lands here, not in 4a
 
 `refs.paymentOrderId`'s own spec description settles the Q5 timing conflict: *"Written at
-orchestration, after authorization."* `routingSnapshots` is 4a's; `paymentOrders` is the
-bank's **commitment**, so it follows the decision (doc 18 B1).
+orchestration, after authorization."* `routingSnapshots` is 4a's; `payments.order` is the
+bank's **commitment**, so it follows the decision (doc 18 B1). The commitment was folded
+into `payments` from a separate `paymentOrders` collection per Doina's Aug 27 target model
+(L427-429).
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_order_initiation.domain import checks, lifecycle
@@ -164,8 +167,17 @@ def run(ctx: PaymentContext) -> None:
             f"{fraud_rules.REVIEW_THRESHOLD}.",
         )
 
-    # --- 4. fees_reconfirmed (R17) ------------------------------------------
-    _record_fee_reconfirmation(record, payment)
+    # --- 4. quote_reconfirmed (R17 / FR-4.12) -------------------------------
+    # The fee AND the FX quote stage 3 established are re-derived from the same schedules and
+    # compared immediately before execution. A *changed* quote refuses — the FR's "reject/
+    # hold" — so the payment is rejected and the originator re-initiates for current pricing.
+    # Re-pricing silently is the one option the FR does not offer. A *missing* quote is a
+    # stage-3 gap (nothing to re-confirm), so it WARNs rather than refusing.
+    _record_fee_reconfirmation(record, refuse, payment)
+    _record_fx_reconfirmation(
+        record, refuse, payment,
+        debtor_account_currency=(ctx.debtor_account or {}).get("currency"),
+    )
 
     # --- 5. authorization_decision (R13, R21) -------------------------------
     record(
@@ -218,12 +230,16 @@ def run(ctx: PaymentContext) -> None:
     )
 
     if assessment.holds:
-        # Held, not rejected, and NOT committed: no payment order is written, because the
+        # Held, not rejected, and NOT committed: `payments.order` stays null, because the
         # bank has not committed to execute.
         ctx.stop(ctx.payment_doc)
         return
 
     # --- the commitment ------------------------------------------------------
+    # Folded into `payments.order` per Doina's Aug 27 target model (L427-429): the
+    # `paymentOrders` collection is struck through, the commitment lives as a sub-document.
+    # Written in the SAME transition as APPROVED — the commitment and the state that
+    # attests to it are one fact (§11), so a reader can't see one without the other.
     order = documents.payment_order(
         payment=ctx.payment_doc or payment,
         strategy=ctx.execution_strategy,
@@ -239,13 +255,15 @@ def run(ctx: PaymentContext) -> None:
         now=now,
         warehoused=ctx.warehoused,
     )
-    _insert_order(ctx, order)
 
     lifecycle.advance_ctx(
         ctx, lifecycle.APPROVED,
         actor="transactions-service",
         reason=_approval_reason(ctx),
-        extra={"refs.paymentOrderId": order["paymentOrderId"]},
+        extra={
+            "order": order,
+            "refs.paymentOrderId": order["paymentOrderId"],
+        },
     )
 
     # --- 6. originator_confirmed (R8) — BIAN PaymentConfirmation, SD 47766 ---
@@ -280,18 +298,21 @@ def run(ctx: PaymentContext) -> None:
 
 # --------------------------------------------------------------------------- #
 
-def _record_fee_reconfirmation(record, payment: dict) -> None:
-    """R17 — *"immediately before execution, verify that the fee/rate is still valid."*
+def _record_fee_reconfirmation(record, refuse, payment: dict) -> None:
+    """R17 / FR-4.12 — re-derive the fee from the same schedule stage 3 used and compare.
 
-    Re-derives the fee from the same schedule stage 3 used and compares. A change **holds**
-    the payment rather than silently re-pricing it: her requirement is *"either obtain
-    customer approval again or reject/hold"*, and re-pricing without telling anyone is the
-    one option she does not offer.
+    A *changed* fee refuses (the FR's "reject/hold"): the payment is rejected and the
+    originator re-initiates to obtain current pricing. Re-pricing silently is the one option
+    the FR does not offer. A *missing* fee is a stage-3 gap, not quote drift — there is
+    nothing to re-confirm — so it WARNs rather than refusing.
 
-    ⚠️ FX is deliberately not re-confirmed. Stage 3 now WARNS on a currency mismatch
-    and enrichment writes a SIMULATED `fxRate` (FR-3.14), but the rate is a fixed mock —
-    re-confirming a mock against itself is theatre (doc 18 §6). A live FX provider
-    would change this.
+    The fee is a flat demo constant, so in the synchronous saga this guard can only ever
+    PASS. It exists to catch drift, tampering or a future priced schedule whose quote can
+    change between enrichment and authorization — which is what "re-validate the quote
+    immediately before execution" means. The earlier "re-confirming a mock is theatre"
+    deferral was wrong in shape: a guard that asserts a stored value still matches its
+    source is a real guard even when the source is constant. The FX half applies the same
+    reasoning (see `_record_fx_reconfirmation`).
     """
     from contexts.payment_order_initiation.domain import enrichment_plan
 
@@ -305,7 +326,8 @@ def _record_fee_reconfirmation(record, payment: dict) -> None:
     if not fees:
         record(
             "fees_reconfirmed", checks.WARN,
-            "A wire carries no fee record — stage 3 enrichment did not price it.",
+            "A wire carries no fee record — stage 3 enrichment did not price it. "
+            "Nothing to re-confirm.",
         )
         return
 
@@ -313,17 +335,70 @@ def _record_fee_reconfirmation(record, payment: dict) -> None:
     actual = fees[0].get("amount")
     fee_type = fees[0].get("type")
     if actual != expected:
-        record(
-            "fees_reconfirmed", checks.WARN,
+        refuse(
+            "fees_reconfirmed",
             f"Fee changed since enrichment: {actual} on the payment, {expected:,.2f} in "
-            "the current schedule. Held for customer re-approval rather than re-priced.",
+            "the current schedule. Payment rejected — re-initiate to obtain current "
+            "pricing. The settlement amount was never adjusted (doc 17 §7).",
         )
-        return
     record(
         "fees_reconfirmed", checks.PASS,
         f"{expected:,.2f} {fees[0].get('currency')} {fee_type} still matches the fee "
         f"schedule, borne by {fees[0].get('chargedTo')}. The settlement amount is "
         "unchanged.",
+    )
+
+
+def _record_fx_reconfirmation(record, refuse, payment: dict, *,
+                              debtor_account_currency: Optional[str]) -> None:
+    """R17 / FR-4.12 — re-confirm the FX quote stage 3 attached (FR-3.14).
+
+    Re-derives the expected simulated rate for the (instructed → debtor-account) pair from
+    the same table `enrichment_plan._plan_fx` used and compares it to `payments.fxRate`.
+    A *changed* rate refuses (reject/hold): re-initiate for a current quote. A currency
+    mismatch with no `fxRate` is a stage-3 gap → WARN. No mismatch → SKIP.
+
+    The rate is a fixed mock, so like the fee this guard can only PASS in the synchronous
+    saga; it exists to catch drift, tampering or a future live FX provider whose quote can
+    expire — which is the "expired or changed" case the FR names. That is what makes it a
+    real guard rather than theatre: it asserts the stored quote still matches its source.
+    """
+    from contexts.payment_order_initiation.domain import enrichment_plan
+
+    instructed_currency = payment.get("instructedCurrency")
+    if (not debtor_account_currency
+            or debtor_account_currency == instructed_currency):
+        record(
+            "fx_quote_reconfirmed", checks.SKIP,
+            f"No FX required — instructed currency {instructed_currency} "
+            f"matches debtor account currency {debtor_account_currency}.",
+        )
+        return
+
+    expected = enrichment_plan.SIMULATED_FX_RATES.get(
+        (instructed_currency, debtor_account_currency),
+        enrichment_plan._DEFAULT_SIMULATED_RATE,
+    )
+    actual = payment.get("fxRate")
+    if actual is None:
+        record(
+            "fx_quote_reconfirmed", checks.WARN,
+            f"Instructed {instructed_currency} vs debtor {debtor_account_currency} "
+            "differs, but stage 3 attached no fxRate — nothing to re-confirm.",
+        )
+        return
+    if actual != expected:
+        refuse(
+            "fx_quote_reconfirmed",
+            f"FX quote changed since enrichment: {actual} on the payment, {expected} in "
+            "the current schedule. Payment rejected — re-initiate to obtain a current "
+            "quote.",
+        )
+    record(
+        "fx_quote_reconfirmed", checks.PASS,
+        f"Simulated FX rate {actual} ({instructed_currency}→"
+        f"{debtor_account_currency}) still matches the rate schedule. SIMULATED — "
+        "no live FX provider in Phase 1.",
     )
 
 
@@ -378,17 +453,6 @@ def _creditor_account_no(ctx):
     if ctx.is_external_creditor:
         return (ctx.creditor_party or {}).get("accountNo")
     return (ctx.creditor_account or {}).get("accountNumber")
-
-
-def _insert_order(ctx, order: dict) -> None:
-    collections = ctx.collections
-    handle = getattr(collections, "payment_orders", None)
-    if handle is None:
-        db = getattr(collections, "db", None)
-        if db is None:  # pragma: no cover
-            return
-        handle = db[documents.PAYMENT_ORDERS]
-    handle.insert_one(order)
 
 
 def _flush(ctx: PaymentContext, recorded: list) -> None:
