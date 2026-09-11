@@ -22,6 +22,9 @@ export const statusBadgeVariant = (status) => {
     case "IN_PROGRESS":
     case "SUBMITTED":
       return "yellow";
+    // Held for manual review (FR-4.13) — needs an operator action, not yet authorised
+    case "PENDING_REVIEW":
+      return "yellow";
     // Failed or refused
     case "FAILED":
     case "REJECTED":
@@ -85,6 +88,9 @@ export const pillFamily = (status) => {
     case "PROCESSING":
     case "IN_PROGRESS":
     case "SUBMITTED":
+      return "yellow";
+    // Held for manual review (FR-4.13) — needs an operator action, not yet authorised
+    case "PENDING_REVIEW":
       return "yellow";
     // Failed or refused
     case "FAILED":

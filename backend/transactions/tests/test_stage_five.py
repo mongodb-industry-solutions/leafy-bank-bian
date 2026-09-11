@@ -197,6 +197,24 @@ def test_every_iso_value_comes_from_the_canonical_payment(wire_payment, db):  # 
         assert value in allowed, f"{path} = {value!r} is on neither the payment nor the constant list"
 
 
+def test_the_pacs008_reads_routing_settlement_from_the_snapshot_record(wire_payment, db):  # noqa: F811
+    """FR-5.2 — the pacs.008's routing/settlement fields come from the routingSnapshots
+    record (the immutable copy of stage 4's decision), not re-derived from the in-memory
+    strategy at execution time. The value date and the instructing/instructed agents in the
+    message match the persisted snapshot by value — proving the mapper reads the record rather
+    than re-deriving."""
+    snapshot = db["routingSnapshots"].docs[0]
+    message = db["paymentExecutions"].docs[0]["message"]
+    grp_hdr = pacs008.body(message)["GrpHdr"]
+
+    # The interbank settlement date comes from the snapshot's valueDate.
+    assert grp_hdr["IntrBkSttlmDt"] == snapshot["valueDate"]
+    # The instructing agent (our bank) and instructed agent (creditor's bank) match the
+    # snapshot's routing agents by value — read off the persisted record, not the strategy.
+    assert grp_hdr["InstgAgt"]["FinInstnId"]["BICFI"] == snapshot["instructingAgent"]["bic"]
+    assert grp_hdr["InstdAgt"]["FinInstnId"]["BICFI"] == snapshot["beneficiaryAgent"]["bic"]
+
+
 def test_the_mapper_does_no_io():
     """R1 — *"only at the rail boundary"* is a claim about call sites, so the mapper must be
     callable with a dict and nothing else. An import of pymongo or `process` here would mean

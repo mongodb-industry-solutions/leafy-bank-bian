@@ -12,9 +12,11 @@ it is on the Q1 naming-correction list.
 Reads  ctx: payment_doc, execution_strategy, routing_snapshot_id, warehoused,
             is_external_creditor, debtor_account_ref, creditor_*, payment_oid,
             current_state, collections
-Writes ctx: fraud; current_state -> AUTHORISED (-> APPROVED); `payments.fraud`,
-            `payments.correspondent.sanctionsCheck`, `payments.clearing.authorisedAt`,
-            `payments.order`, `payments.refs.paymentOrderId`; seven `checks[]` entries
+Writes ctx: fraud; current_state -> AUTHORISED (-> APPROVED), or PENDING_REVIEW on a
+            REVIEW hold; `payments.fraud`, `payments.correspondent.sanctionsCheck`,
+            `payments.clearing.authorisedAt` (APPROVED only), `payments.order`,
+            `payments.confirmation` (APPROVED only — FR-4.4), `payments.refs.paymentOrderId`;
+            seven `checks[]` entries
 
 ## Her demo display is the check list (L508-515)
 
@@ -27,7 +29,7 @@ Writes ctx: fraud; current_state -> AUTHORISED (-> APPROVED); `payments.fraud`,
 The four checks below are named so that screen renders straight off `checks[]` with no
 bespoke mapping in the frontend.
 
-## Three outcomes, no invented state
+## Three outcomes
 
 `fraud.decision` is the spec's own enum — `APPROVED | REVIEW | DECLINED` — so all three were
 already *legal*; they were simply unreachable behind a hardcoded literal.
@@ -36,12 +38,18 @@ already *legal*; they were simply unreachable behind a hardcoded literal.
 * **DECLINED** — raise. The saga marks the payment REJECTED (`payment_lifecycle._mark_rejected`)
   and re-raises, so stage 5 can never run on an unapproved payment. This activates code that
   sat commented out since the stage was scaffolded.
-* **REVIEW** — advance to AUTHORISED and **stop there** via `ctx.stop()`. The payment never
-  reaches APPROVED and **no payment order is written** — the bank has not committed.
+* **REVIEW** — advance to **PENDING_REVIEW** and stop there via `ctx.stop()`. The payment
+  never reaches AUTHORISED or APPROVED and **no payment order is written** — the bank has
+  not committed. `clearing.authorisedAt` is not written either: a payment under manual
+  review has not been authorised.
 
-Why REVIEW is not its own state: `PENDING REVIEW` is in her L530 list but **not** in the
-canonical `status` enum (Q6, escalated to Q33). Adding it would be inventing an enum value,
-which is defect 2026-04-24. Holding at AUTHORISED is the honest representation available.
+`PENDING_REVIEW` is a Kiran-added lifecycle state (Q33 resolved 2026-09-11), not in the
+canonical `status` / `currentState` enum. The conformance guard admits it via an explicit,
+documented extension (`test_payment_document_spec._ENUM_EXTENSIONS`) so the addition is
+auditable rather than a value smuggled past the guard — the 2026-04-24 `bian-mapping`
+anti-pattern. Pending Doina's ratification into the canonical spec (out-of-repo follow-up);
+until then an operator resolve route (PENDING_REVIEW -> AUTHORISED -> APPROVED, or ->
+REJECTED) is wired in the transition graph but not yet exposed as a route.
 
 ## The payment order lands here, not in 4a
 
@@ -212,6 +220,30 @@ def run(ctx: PaymentContext) -> None:
             f"({', '.join(assessment.rules_fired) or 'no rules fired'})."
         )
 
+    if assessment.holds:
+        # REVIEW — held at PENDING_REVIEW, not AUTHORISED (FR-4.13). The bank has NOT
+        # authorised a payment still under manual review, so `clearing.authorisedAt` is not
+        # written and no order is committed (`payments.order` stays null). The fraud block
+        # and screening result land in the same write as the transition — the score and the
+        # state that attests to it are one fact (§11). Queryable on `status ==
+        # PENDING_REVIEW` and visible on the operations dashboard. An operator's later
+        # approve resumes PENDING_REVIEW -> AUTHORISED -> APPROVED (transition wired; the
+        # resume route itself is a follow-on, not built here).
+        lifecycle.advance_ctx(
+            ctx, lifecycle.PENDING_REVIEW,
+            actor="fraud-service",
+            reason=(
+                f"Fraud score {assessment.score}/100, decision {assessment.decision}; "
+                f"sanctions {screening.status} — held for manual review"
+            ),
+            extra={
+                "fraud": ctx.fraud,
+                "correspondent.sanctionsCheck": sanctions_block,
+            },
+        )
+        ctx.stop(ctx.payment_doc)
+        return
+
     # The fraud block, the screening result and the authorisation timestamp land in the SAME
     # write as the AUTHORISED transition — the score and the state that attests to it are one
     # fact, and splitting them would let a reader see one without the other (§11).
@@ -228,12 +260,6 @@ def run(ctx: PaymentContext) -> None:
             "clearing.authorisedAt": now,
         },
     )
-
-    if assessment.holds:
-        # Held, not rejected, and NOT committed: `payments.order` stays null, because the
-        # bank has not committed to execute.
-        ctx.stop(ctx.payment_doc)
-        return
 
     # --- the commitment ------------------------------------------------------
     # Folded into `payments.order` per Doina's Aug 27 target model (L427-429): the
@@ -256,12 +282,21 @@ def run(ctx: PaymentContext) -> None:
         warehoused=ctx.warehoused,
     )
 
+    # FR-4.4 — the originator confirmation (BIAN PaymentConfirmation, SD 47766). A persisted
+    # artifact, not just an attested check: the confirmation sub-doc lands in the SAME APPROVED
+    # write as the order — the commitment, the confirmation of it, and the state that attests
+    # to both are one fact (§11). Distinct from stage 5's `notifications` (the sender-side
+    # "you paid $X" record, exactly one per payment): this says "on track, execution path
+    # committed," earlier and independent of settlement. See `documents.confirmation`.
+    confirmation = documents.confirmation(order=order, now=now)
+
     lifecycle.advance_ctx(
         ctx, lifecycle.APPROVED,
         actor="transactions-service",
         reason=_approval_reason(ctx),
         extra={
             "order": order,
+            "confirmation": confirmation,
             "refs.paymentOrderId": order["paymentOrderId"],
         },
     )
@@ -276,21 +311,22 @@ def run(ctx: PaymentContext) -> None:
     # once the commitment is written, so it cannot travel with the flush above. ASYNC,
     # because a confirmation to the originator is a notification, not an inline answer.
     #
-    # ⚠️ No notification document is written. Stage 5 owns `notifications`, and the
-    # sender-only rule there is "exactly 1 notification per payment" — emitting a second one
-    # here would break that invariant. The confirmation is recorded as evidence; wiring it to
-    # a customer-facing channel is doc 18 §6's deferred row.
+    # The confirmation is now a persisted sub-doc (`payments.confirmation`, written in the
+    # APPROVED transition above), so this check attests a real artifact rather than a vacuum.
+    # It is NOT a `notifications` document: stage 5 owns that collection and its "exactly 1
+    # per payment" invariant, and the confirmation is a different message at a different time.
     checks.append_checks(ctx.collections.payments, ctx.payment_oid, [
         checks.check(
             STAGE, "originator_confirmed", checks.PASS, mode=checks.ASYNC,
             actor="payment-confirmation-service",
             at=now,
             detail=(
-                f"Execution path committed as {order['paymentOrderId']} "
-                f"({order['executionStrategy']}"
+                f"Confirmation {confirmation['confirmationId']} sent to the originator via "
+                f"{confirmation['channel']} — execution path committed as "
+                f"{order['paymentOrderId']} ({order['executionStrategy']}"
                 + (f" via {order['clearingNetwork']}" if order["clearingNetwork"] else "")
-                + f", value date {order['valueDate']}). Confirmed to the originator — "
-                "distinct from the settlement confirmation that follows much later."
+                + f", value date {order['valueDate']}). Distinct from the settlement "
+                "confirmation that follows much later."
             ),
         )
     ])

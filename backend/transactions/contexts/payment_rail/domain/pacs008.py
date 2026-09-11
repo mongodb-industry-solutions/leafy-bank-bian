@@ -134,22 +134,32 @@ def _account(party: dict) -> Optional[dict]:
 
 
 def build(payment: dict, *, settlement_mtd: Optional[str] = None,
-          value_date: Optional[str] = None) -> dict:
+          value_date: Optional[str] = None,
+          snapshot: Optional[dict] = None) -> dict:
     """The pacs.008 document for one payment. Pure — pass a payment dict, get a message.
 
-    `settlement_mtd` and `value_date` are passed in rather than read off the payment because
-    both are **stage 4's** decisions, held on the routing strategy by the caller. Neither is
-    on the document at the moment the message is built:
+    FR-5.2 — routing/settlement fields are read from the **routingSnapshots record** (the
+    immutable copy of stage 4's routing decision), which the caller (`execute.py`) loads via
+    `refs.routingSnapshotId` and passes here as `snapshot`. Nothing routing/settlement is
+    re-derived at execution time: the value date, the settlement method, and the
+    instructing/instructed/debtor/creditor *agents* all come off that persisted record.
+    `settlement_mtd`/`value_date` remain as fallbacks for the standalone/test call (no
+    snapshot); `settlement_method` is still *derived* from the snapshot's clearing network +
+    correspondent because no field in the canonical model holds one (Q40).
 
-    * `settlement_mtd` is derived (`settlement_method`) and stored nowhere at all (Q40).
-    * ⚠️ `value_date` is the interbank settlement date, and `clearing.settlementDate` is
-      stamped from the rail acknowledgement — i.e. **after** this message is generated. So
-      reading it off the payment yields `None`, which silently produced a pacs.008 with no
-      `IntrBkSttlmDt` — a **required** element. Caught by
-      `test_the_pacs008_matches_the_iso20022_format_spec`, which is the entire reason that
-      test exists.
+    The one routing field that does NOT come from the snapshot is `IntrmyAgt1`: the
+    intermediary hop appears only when our correspondent is not the beneficiary's own bank,
+    and that hop/no-hop distinction lives on `payments.correspondent.intermediaryBic`
+    (orchestrate.py R26) — the snapshot's correspondent block records the correspondent BIC
+    but not whether it IS the beneficiary's bank, so it cannot decide the hop. Reading the
+    hop from the payment doc is not "re-deriving routing data"; it is reading the one field
+    that encodes the hop semantics.
 
-    Both fall back for the standalone/test call.
+    `value_date` is not on the document at message-build time (`clearing.settlementDate` is
+    stamped from the rail acknowledgement, after this message is generated), so without the
+    snapshot it would yield `None` — a missing required `IntrBkSttlmDt`. Caught by
+    `test_the_pacs008_matches_the_iso20022_format_spec`, which is the entire reason that test
+    exists.
     """
     debtor = payment.get("debtor") or {}
     creditor = payment.get("creditor") or {}
@@ -157,6 +167,39 @@ def build(payment: dict, *, settlement_mtd: Optional[str] = None,
     remittance = payment.get("remittance") or {}
     correspondent = payment.get("correspondent") or {}
     clearing = payment.get("clearing") or {}
+    snap = snapshot or {}
+    snap_instructing = snap.get("instructingAgent") or {}
+    snap_beneficiary = snap.get("beneficiaryAgent") or {}
+    snap_correspondent = snap.get("correspondent") or {}
+
+    # FR-5.2 — the routing/settlement decision, read off the persisted routing snapshot.
+    resolved_value_date = (
+        snap.get("valueDate") or value_date
+        or clearing.get("settlementDate") or payment.get("requestedExecutionDate")
+    )
+    resolved_settlement_mtd = settlement_mtd or settlement_method(
+        clearing_network=snap.get("clearingNetwork"),
+        via_correspondent=bool(
+            snap_correspondent.get("bic") or correspondent.get("correspondentBic")
+        ),
+    )
+    # The four agents are routing data — read off the snapshot's instructing/beneficiary
+    # agents when present, falling back to the payment doc + bank_identity for the
+    # standalone call. The snapshot's instructing agent is our bank; its beneficiary agent
+    # is the creditor's bank — so InstgAgt/DbtrAgt both resolve to us, InstdAgt/CdtrAgt to
+    # the creditor's bank, exactly as the routing decision recorded.
+    instg = snap_instructing or {
+        "bic": bank_identity.OUR_BIC,
+        "bankName": bank_identity.OUR_BANK_NAME,
+        "clearingSystemMemberId": debtor.get("clearingSystemMemberId") or bank_identity.OUR_ABA,
+        "clearingSystemCode": debtor.get("clearingSystemCode") or bank_identity.OUR_CLEARING_SYSTEM_CODE,
+    }
+    instd = snap_beneficiary or {
+        "bic": creditor.get("bic"),
+        "bankName": creditor.get("bankName"),
+        "clearingSystemMemberId": creditor.get("clearingSystemMemberId"),
+        "clearingSystemCode": creditor.get("clearingSystemCode"),
+    }
 
     group_header = {
         "MsgId": payment.get("msgId"),
@@ -167,17 +210,16 @@ def build(payment: dict, *, settlement_mtd: Optional[str] = None,
         # message, so a group-level settlement date is unambiguous.
         # ⚠️ The real schema also permits it per transaction; with no XSD available locally
         # (see the conformance test's docstring) the one local source decides it.
-        "IntrBkSttlmDt": value_date
-        or clearing.get("settlementDate")
-        or payment.get("requestedExecutionDate"),
-        "SttlmInf": {"SttlmMtd": settlement_mtd or SETTLEMENT_CLEARING},
+        "IntrBkSttlmDt": resolved_value_date,
+        "SttlmInf": {"SttlmMtd": resolved_settlement_mtd},
         "InstgAgt": _agent(
-            bank_identity.OUR_BIC,
-            bank_identity.OUR_BANK_NAME,
-            debtor.get("clearingSystemMemberId") or bank_identity.OUR_ABA,
-            debtor.get("clearingSystemCode") or bank_identity.OUR_CLEARING_SYSTEM_CODE,
+            instg.get("bic"), instg.get("bankName"),
+            instg.get("clearingSystemMemberId"), instg.get("clearingSystemCode"),
         ),
-        "InstdAgt": _agent(creditor.get("bic"), creditor.get("bankName")),
+        "InstdAgt": _agent(
+            instd.get("bic"), instd.get("bankName"),
+            instd.get("clearingSystemMemberId"), instd.get("clearingSystemCode"),
+        ),
     }
 
     transaction = {
@@ -204,20 +246,17 @@ def build(payment: dict, *, settlement_mtd: Optional[str] = None,
         "Dbtr": _party(debtor),
         "DbtrAcct": _account(debtor),
         "DbtrAgt": _agent(
-            debtor.get("bic") or bank_identity.OUR_BIC,
-            debtor.get("bankName") or bank_identity.OUR_BANK_NAME,
-            debtor.get("clearingSystemMemberId"),
-            debtor.get("clearingSystemCode"),
+            instg.get("bic"), instg.get("bankName"),
+            instg.get("clearingSystemMemberId"), instg.get("clearingSystemCode"),
         ),
         # One hop or two. Stage 4 sets `intermediaryBic` only when our correspondent is
         # NOT the beneficiary's own bank, so this element appears exactly when a hop
-        # genuinely happens (orchestrate.py, R26).
+        # genuinely happens (orchestrate.py, R26). Read from the payment doc, not the
+        # snapshot — see the build() docstring: the snapshot cannot decide the hop.
         "IntrmyAgt1": _agent(correspondent.get("intermediaryBic")),
         "CdtrAgt": _agent(
-            creditor.get("bic"),
-            creditor.get("bankName"),
-            creditor.get("clearingSystemMemberId"),
-            creditor.get("clearingSystemCode"),
+            instd.get("bic"), instd.get("bankName"),
+            instd.get("clearingSystemMemberId"), instd.get("clearingSystemCode"),
         ),
         "Cdtr": _party(creditor),
         "CdtrAcct": _account(creditor),

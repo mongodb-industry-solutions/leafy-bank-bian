@@ -220,7 +220,6 @@ def _execute_rail_bound(ctx: PaymentContext, record, recorded: list,
     """Her L544 pipeline, in her order: canonical -> mapper -> pacs.008 -> rail -> clearing."""
     payment = ctx.payment_doc or {}
     strategy = ctx.execution_strategy
-    correspondent = payment.get("correspondent") or {}
 
     # --- both ids first, so each document carries the other's ref at insert --
     # `derive_ref` is deterministic from the oid, so pre-minting removes the only
@@ -230,19 +229,18 @@ def _execute_rail_bound(ctx: PaymentContext, record, recorded: list,
     message_id = derive_ref("PM", message_oid)
     execution_id = derive_ref("PE", execution_oid)
 
-    # --- 2. iso20022_message_generated (R1, R3, R5) --------------------------
-    settlement_mtd = pacs008.settlement_method(
-        clearing_network=getattr(strategy, "network", None),
-        via_correspondent=bool(correspondent.get("correspondentBic")),
-    )
-    message = pacs008.build(
-        payment,
-        settlement_mtd=settlement_mtd,
-        # Stage 4 decided the value date; `clearing.settlementDate` is not stamped until the
-        # acknowledgement below, so the strategy is the only source at this point.
-        value_date=getattr(strategy, "value_date", None),
-    )
+    # --- 2. iso20022_message_generated (R1, R3, R5, FR-5.2) -------------------
+    # FR-5.2: the pacs.008's routing/settlement fields are read from the routingSnapshots
+    # record (the immutable copy of stage 4's decision), not re-derived from the in-memory
+    # strategy at execution time. Loaded via the forward pointer stage 4a stamped
+    # (`refs.routingSnapshotId`); the mapper reads value date, settlement method and the
+    # four agents off it, falling back to the payment doc for the standalone/test call.
+    snapshot = _load_routing_snapshot(ctx, payment)
+    message = pacs008.build(payment, snapshot=snapshot)
     produced = pacs008.elements(message)
+    settlement_mtd = (pacs008.body(message).get("GrpHdr") or {}).get(
+        "SttlmInf", {}
+    ).get("SttlmMtd")
     record(
         "iso20022_message_generated", checks.PASS,
         f"{pacs008.MESSAGE_FORMAT} built at the rail boundary from the canonical payment "
@@ -442,6 +440,23 @@ def _collection(ctx: PaymentContext, attr: str, name: str):
         return handle
     db = getattr(collections, "db", None)
     return None if db is None else db[name]
+
+
+def _load_routing_snapshot(ctx: PaymentContext, payment: dict):
+    """FR-5.2 — the persisted routing decision, by the forward pointer stage 4a stamped.
+
+    Returns the `routingSnapshots` record (`refs.routingSnapshotId`) or None when no
+    collection handle is available or no pointer is set. None lets `pacs008.build` fall
+    back to the payment doc + params, so a hand-built context or a test that does not reach
+    stage 4 still maps a message.
+    """
+    handle = _collection(ctx, "routing_snapshots", "routingSnapshots")
+    if handle is None:
+        return None
+    ref = (payment.get("refs") or {}).get("routingSnapshotId")
+    if not ref:
+        return None
+    return handle.find_one({"routingSnapshotId": ref})
 
 
 def _flush(ctx: PaymentContext, recorded: list) -> None:

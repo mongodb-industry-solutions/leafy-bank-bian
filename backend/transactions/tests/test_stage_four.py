@@ -660,16 +660,34 @@ def test_a_declined_payment_is_rejected_and_never_passes_through_authorised(rich
     assert payment["order"] is None, "a declined payment commits nothing"
 
 
-def test_a_reviewed_payment_holds_at_authorised_and_commits_nothing(rich_service, rich_db):
-    """R21's *hold*. No `PENDING REVIEW` state exists in the canonical enum (Q6/Q33), so the
-    payment holds at AUTHORISED rather than inventing one — and no payment order is
-    written, because the bank has not committed."""
+def test_a_reviewed_payment_holds_at_pending_review_and_commits_nothing(rich_service, rich_db):
+    """R21's *hold*, now at its own status. A REVIEW decision advances to PENDING_REVIEW
+    (FR-4.13 / Q33 resolved 2026-09-11) — not AUTHORISED, because the bank has not authorised
+    a payment still under manual review. No order is committed and `authorisedAt` is not
+    written; money does not move."""
     payment = _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
 
     assert payment["fraud"]["decision"] == "REVIEW"
-    assert payment["lifecycle"]["currentState"] == "AUTHORISED"
+    assert payment["lifecycle"]["currentState"] == "PENDING_REVIEW"
+    # The status mirror follows currentState, never leads it (D1) — so it is queryable on the
+    # top-level `status` field too, which is what an operational dashboard indexes on.
+    assert payment["status"] == "PENDING_REVIEW"
     assert payment["order"] is None
+    assert payment["clearing"].get("authorisedAt") is None, "a reviewed payment is not authorised"
     assert rich_db["transactions"].inserted == [], "money must not move on a held payment"
+    # The PENDING_REVIEW transition is recorded in the event trail with its reason.
+    review_event = next(e for e in payment["lifecycle"]["events"]
+                        if e["state"] == "PENDING_REVIEW")
+    assert "manual review" in review_event["reason"]
+
+
+def test_a_pending_review_payment_is_queryable_by_status(rich_service, rich_db):
+    """FR-4.13 — 'queryable and visible on operational dashboards.' The held payment is
+    findable by a status query against the collection, the way an operations dashboard would."""
+    _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
+    held = rich_db["payments"].find({"status": "PENDING_REVIEW"})
+    assert len(held) == 1
+    assert held[0]["fraud"]["decision"] == "REVIEW"
 
 
 def test_a_sanctions_hit_refuses_and_records_the_screening_result(service, db):
@@ -849,7 +867,7 @@ def test_payment_confirmation_refuses_when_nothing_is_committed(rich_service, ri
     """A confirmation for a payment with no execution path would be a false statement to the
     customer — her L502 ties the confirmation to the commitment."""
     payment = _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
-    assert payment["lifecycle"]["currentState"] == "AUTHORISED"  # held for review
+    assert payment["lifecycle"]["currentState"] == "PENDING_REVIEW"  # held for review
 
     with pytest.raises(ValueError, match="no committed execution path"):
         rich_service.confirm_to_originator(payment["paymentId"])
@@ -863,6 +881,46 @@ def test_payment_confirmation_re_sends_for_a_committed_payment(rich_service, ric
 
     assert result["confirmed"] is True
     assert result["paymentOrderId"] == payment["refs"]["paymentOrderId"]
+    assert result["confirmationId"] == payment["confirmation"]["confirmationId"]
     assert result["clearingNetwork"] == "SWIFT"
     # Append-only: the re-send is a new entry, never a rewrite of the original.
     assert len(rich_db["payments"].docs[-1]["checks"]) == before + 1
+
+
+def test_a_confirmation_artifact_is_written_at_approval_before_settlement(rich_service, rich_db):
+    """FR-4.4. The originator confirmation is a persisted sub-doc on `payments`, written at the
+    APPROVED transition — at commitment time, before settlement, independent of it. It is NOT
+    a `notifications` document (stage 5 owns that, exactly one per payment)."""
+    payment = _international(rich_service, instructed_amount=25_000.0)
+
+    conf = payment["confirmation"]
+    assert conf is not None, "confirmation written at APPROVED"
+    assert conf["status"] == "SENT"
+    assert conf["channel"] == "CUSTOMER_APP"
+    assert conf["paymentOrderId"] == payment["order"]["paymentOrderId"]
+    assert conf["confirmationId"].startswith("PC-")
+    # It lands at commitment, before settlement: the confirmation is written in the APPROVED
+    # transition's `extra` (stage 4b), which is structurally before stage 5/7. confirmedAt is
+    # a real timestamp; it is not asserted equal to the APPROVED event's `at` because
+    # `lifecycle.advance` mints its own datetime internally (microseconds apart).
+    from datetime import datetime as _dt
+    assert isinstance(conf["confirmedAt"], _dt)
+    approved = next(e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED")
+    assert "SETTLED" not in [e["state"] for e in payment["lifecycle"]["events"]] or (
+        conf["confirmedAt"] <= next(e for e in payment["lifecycle"]["events"]
+                                    if e["state"] == "SETTLED")["at"]
+    )
+
+
+def test_the_confirmation_is_distinct_from_the_stage_five_notification(rich_service, rich_db):
+    """FR-4.4. The confirmation (stage 4b) and the sender notification (stage 5) are different
+    artifacts at different times. The 'exactly one notification per payment' invariant is
+    untouched: the confirmation is a sub-doc on `payments`, not a row in `notifications`.
+    An internal transfer settles in the same ACID block, so it writes exactly one
+    notification — the cleanest path to assert the invariant alongside the confirmation."""
+    _initiate(rich_service)
+    payment = rich_db["payments"].docs[-1]
+
+    assert payment["confirmation"] is not None, "stage-4b confirmation present"
+    # Stage 5's sender-only invariant still holds — one notification, not two.
+    assert len(rich_db["notifications"].inserted) == 1, "sender-only notification"

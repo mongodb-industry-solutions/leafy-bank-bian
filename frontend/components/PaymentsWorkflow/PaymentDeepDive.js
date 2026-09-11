@@ -898,6 +898,10 @@ function summaryRows(stage, payment) {
         ["Alert ID", f?.alertId],
         ["Routing snapshot", d?.refs?.routingSnapshotId],
         ["Payment order", d?.refs?.paymentOrderId],
+        // FR-4.4 — the originator confirmation (PaymentConfirmation, SD 47766): a persisted
+        // artifact written at APPROVED, distinct from stage 5's settlement notification.
+        ["Confirmation", payment?.confirmation?.confirmationId ?? null],
+        ["Confirmed", fmtWhen(payment?.confirmation?.confirmedAt)],
         ["Authorised", fmtWhen(payment?.clearing?.authorisedAt)],
         ["Assessed", fmtWhen(f?.checkedAt)],
       ];

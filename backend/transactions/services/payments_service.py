@@ -363,6 +363,7 @@ class PaymentsService:
                 f"(state {(payment.get('lifecycle') or {}).get('currentState')})."
             )
 
+        confirmation = payment.get("confirmation") or {}
         checks.append_checks(self.payments, payment["_id"], [
             checks.check(
                 "4 authorize", "originator_confirmed", checks.PASS,
@@ -376,6 +377,7 @@ class PaymentsService:
         ])
         return {
             "paymentId": payment_ref,
+            "confirmationId": confirmation.get("confirmationId"),
             "paymentOrderId": order_id,
             "executionStrategy": order.get("executionStrategy"),
             "clearingNetwork": order.get("clearingNetwork"),

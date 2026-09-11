@@ -139,6 +139,28 @@ _KNOWN_EXTRAS = {
     # asks to add those fields directly in `payments`). The ELEVENTH; argued for in
     # `payment_document.build`'s `order` comment, not slipped in.
     "order",
+    # 2026-09-11: the originator confirmation (BIAN PaymentConfirmation, SD 47766),
+    # written at APPROVED (FR-4.4). The TWELFTH; argued for in `documents.confirmation`'s
+    # docstring — a 1:1 artifact distinct from stage 5's `notifications`, folded onto
+    # `payments` the same way `order` is.
+    "confirmation",
+}
+
+# Enum values the code writes that are NOT in the canonical spec's enum for that field —
+# admitted explicitly so the guard stays honest about what it allows, rather than silently
+# passing an out-of-enum value (the 2026-04-24 `bian-mapping` anti-pattern).
+#
+# `PENDING_REVIEW` (Kiran, 2026-09-11, Q33 resolved): a REVIEW fraud decision holds the
+# payment at this status (FR-4.13). The canonical `status` / `lifecycle.currentState` /
+# `lifecycle.events[].state` enum declares `PENDING` (the sanctions/initiation status, a
+# different thing) but not `PENDING_REVIEW`. Pending Doina's ratification into the canonical
+# spec (`doinas-research/propose_payments.json` + the consolidated v35 model) — that edit
+# lives outside this repo and is tracked as an out-of-repo follow-up. When it lands, remove
+# this map and the guard reverts to the spec alone.
+_ENUM_EXTENSIONS = {
+    "status": {"PENDING_REVIEW"},
+    "lifecycle.currentState": {"PENDING_REVIEW"},
+    "lifecycle.events[].state": {"PENDING_REVIEW"},
 }
 
 
@@ -215,12 +237,13 @@ def _rest(dotted, after):
 def _assert_enum_values_legal(schema, doc, where):
     """Shared by the built-document and post-stage-4 variants below."""
     for path, allowed in _enum_fields(schema):
+        allowed_plus = set(allowed) | _ENUM_EXTENSIONS.get(path, set())
         value = _dig(doc, path)
         values = value if isinstance(value, list) else [value]
         for one in values:
             if one is None and None not in allowed:
                 continue  # absent/unwritten is a required-field concern, tested above
-            assert one in allowed, (
+            assert one in allowed_plus, (
                 f"{where}: {path}={one!r} is not in the spec enum {allowed}"
             )
 
@@ -277,6 +300,32 @@ def test_enum_values_are_legal_after_every_stage_that_writes_them():
     doc["wireDetails"]["network"] = routing.SWIFT
 
     _assert_enum_values_legal(schema, doc, "after stages 3 and 4")
+
+
+def test_pending_review_is_admitted_as_a_documented_enum_extension():
+    """FR-4.13 / Q33 (resolved 2026-09-11). PENDING_REVIEW is a Kiran-added lifecycle status
+    the canonical enum does not declare. The guard admits it via _ENUM_EXTENSIONS so the
+    addition is auditable rather than smuggled past (the 2026-04-24 anti-pattern). This pins
+    both halves: the value is NOT in the spec enum, and the guard still accepts a document
+    carrying it on all three enum-checked paths (status, currentState, events[].state).
+
+    Self-destructs when the canonical spec is updated: if PENDING_REVIEW lands in the spec
+    enum, the first assert fails and tells the next reader to drop it from _ENUM_EXTENSIONS
+    and let the guard revert to the spec alone."""
+    schema = _schema()
+    assert "PENDING_REVIEW" not in schema["properties"]["status"]["enum"], (
+        "PENDING_REVIEW is now in the canonical spec enum — remove it from "
+        "_ENUM_EXTENSIONS and delete this test; the guard should revert to the spec alone."
+    )
+    doc = payment_document.build(_ctx(payment_rail="WIRE"))
+    doc["lifecycle"]["currentState"] = "PENDING_REVIEW"
+    doc["status"] = "PENDING_REVIEW"
+    doc["lifecycle"]["events"].append({
+        "state": "PENDING_REVIEW", "at": doc["createdAt"],
+        "actor": "fraud-service", "actorType": "SERVICE", "reason": "held for review",
+    })
+    # No AssertionError => PENDING_REVIEW is admitted on all three paths.
+    _assert_enum_values_legal(schema, doc, "at PENDING_REVIEW hold")
 
 
 def test_the_fee_type_the_code_writes_is_in_the_spec_enum():

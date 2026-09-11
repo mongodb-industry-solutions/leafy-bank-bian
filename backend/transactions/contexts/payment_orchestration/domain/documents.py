@@ -203,3 +203,48 @@ def payment_order(
         "committedBy": "orchestration-service",
         "sourceSystem": SOURCE_SYSTEM,
     }
+
+
+def confirmation(
+    *,
+    order: dict,
+    now: datetime,
+    oid: Optional[ObjectId] = None,
+) -> dict:
+    """The originator confirmation (BIAN PaymentConfirmation, SD 47766) — written at the
+    APPROVED transition as a sub-document on `payments`, in the same write as `order`.
+
+    Doina's L502: PaymentConfirmation *"sends confirmation feedback to the customer/originator
+    once orchestration has committed to an execution path, independent of the final settlement
+    confirmation much later."* So it is distinct from stage 5's `notifications` (the
+    sender-side "you paid $X" record, exactly one per payment — `build_notifications`): the
+    confirmation says "your payment is on track, the execution path is committed," earlier in
+    the flow and before settlement. Folding it onto `payments` mirrors the `order{}` fold
+    (Doina's Aug 27 target model L427-429 strikes `paymentOrders` and asks to add the fields
+    directly in `payments`); a 1:1 artifact is a sub-doc, not a collection.
+
+    `channel` is a simulated delivery channel. No real push (email/SMS) exists in this demo,
+    so "delivery" is represented by this persisted artifact being visible on the originator's
+    surface (the stage-4 panel + customer view), not by a push event. `status: "SENT"` is
+    backed by the artifact existing at commitment time. This is the **twelfth** field written
+    that the canonical spec does not declare; argued here the same way `order`'s eleventh is,
+    and admitted via `test_payment_document_spec._KNOWN_EXTRAS`.
+    """
+    oid = oid or ObjectId()
+    return {
+        "confirmationId": derive_ref("PC", oid),
+        "paymentOrderId": order["paymentOrderId"],
+        "executionStrategy": order["executionStrategy"],
+        "clearingNetwork": order["clearingNetwork"],
+        "valueDate": order["valueDate"],
+        "confirmedAt": now,
+        "channel": "CUSTOMER_APP",
+        "status": "SENT",
+        "message": (
+            "Your payment is on track — execution path committed "
+            f"({order['executionStrategy']}"
+            + (f" via {order['clearingNetwork']}" if order["clearingNetwork"] else "")
+            + f", value date {order['valueDate']})."
+        ),
+        "sourceSystem": SOURCE_SYSTEM,
+    }

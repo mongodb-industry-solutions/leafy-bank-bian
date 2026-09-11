@@ -66,10 +66,10 @@ function stageFourMeta(payment, reached) {
   const decision = payment?.fraud?.decision;
   const network = payment?.wireDetails?.network;
 
-  // A payment held at AUTHORISED is a REVIEW that never reached APPROVED. There is no
-  // `PENDING REVIEW` lifecycle state to read (it is in Doina's L530 list but not in the
-  // canonical `status` enum — Q33), so the hold is inferred from the two states, which is
-  // exactly the ambiguity Q33 asks her to resolve.
+  // A REVIEW decision holds at PENDING_REVIEW (FR-4.13 / Q33 resolved 2026-09-11) — its own
+  // status now, read directly rather than inferred from "AUTHORISED but not APPROVED".
+  if (payment?.lifecycle?.currentState === "PENDING_REVIEW") return "pending review";
+  // Fallback for docs written before the state existed (a REVIEW held at AUTHORISED).
   if (decision === "REVIEW" && !reached("APPROVED")) return "held for review";
   if (decision === "DECLINED") return "declined";
   if (decision && network) return `${decision} · ${network}`;
@@ -211,17 +211,18 @@ export function buildLifecycleStages(payment, trace) {
       },
     },
     {
-      // Stage 4 owns three states (ROUTED -> AUTHORISED -> APPROVED) and four kinds of
+      // Stage 4 owns ROUTED -> (PENDING_REVIEW | AUTHORISED) -> APPROVED and four kinds of
       // output: the routing decision, the fraud assessment, the sanctions result and the
       // authorization decision. `kind: "authorization"` renders Doina's L508-515 display —
       // "Risk assessment completed", "Sanctions and AML screening passed", "Fraud risk score
       // within threshold", "Decision: APPROVED" — straight off `checks[]`, which is why the
-      // backend check NAMES match her four lines one-for-one.
+      // backend check NAMES match her four lines one-for-one. PENDING_REVIEW is the REVIEW
+      // hold (FR-4.13): the payment is routed but not yet authorised.
       key: "authorization",
       label: "Orchestration & authorization",
       icon: "Diagram3",
       stage: 4,
-      reached: reached("ROUTED", "AUTHORISED", "APPROVED"),
+      reached: reached("ROUTED", "PENDING_REVIEW", "AUTHORISED", "APPROVED"),
       meta: stageFourMeta(payment, reached),
       intro:
         "Chooses the execution path within the already-selected rail, writes the immutable " +
@@ -230,7 +231,7 @@ export function buildLifecycleStages(payment, trace) {
         "decline, or hold.",
       kind: "authorization",
       data: {
-        events: eventsFor("ROUTED", "AUTHORISED", "APPROVED"),
+        events: eventsFor("ROUTED", "PENDING_REVIEW", "AUTHORISED", "APPROVED"),
         fraud: payment?.fraud || null,
         sanctions: payment?.correspondent?.sanctionsCheck || null,
         network: payment?.wireDetails?.network || null,
