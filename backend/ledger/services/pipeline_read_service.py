@@ -263,7 +263,6 @@ def get_gl_dashboard(
     *,
     period_code: Optional[str] = None,
     months: int = 3,
-    top_n: int = 5,
 ) -> dict:
     """Aggregate every GL dashboard block in a single response.
 
@@ -366,7 +365,6 @@ def get_gl_dashboard(
             "activity": {"$add": ["$debit", "$credit"]},
         }},
         {"$sort": {"activity": -1, "_id": 1}},
-        {"$limit": top_n},
         {"$lookup": {
             "from": "glAccounts",
             "localField": "_id",

@@ -112,6 +112,12 @@ export function buildLifecycleStages(payment, trace) {
   // were invisible. Surfaced here as its own panel in the accounting group, mirroring
   // the principal ledger event. Absent for internal transfers and no-fee wires.
   const feeEvent = trace?.feeEvent ?? null;
+  // A fee is levied only on a wire (enrichment _plan_fees SKIPs rail != WIRE), so the
+  // fee ledger-event stage is structurally empty for internal transfers and no-fee
+  // wires. Key the hide on whether stage 3 levied a charge (payment.fees), not on
+  // trace.feeEvent — a wire with a fee may briefly show feeEvent null before the
+  // worker ingests it, and that transient should still render as "pending", not vanish.
+  const hasFee = (payment?.fees?.length ?? 0) > 0;
 
   // Stage 7 — settlement event and position (doc 21 step 8).
   const se = trace?.settlementEvent ?? null;
@@ -461,7 +467,7 @@ export function buildLifecycleStages(payment, trace) {
         position,
       },
     },
-  ];
+  ].filter((s) => s.key !== "feeLedgerEvent" || hasFee);
 }
 
 export const legTotals = (legs) => {
