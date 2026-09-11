@@ -41,7 +41,7 @@ export default function GlDashboardSection({ refreshKey }) {
   // The totals are journal-derived, so they only change when the GL batch posts.
   // `refreshKey` (owned by GlPipelineView) advances when the batch actually runs
   // or the user hits Refresh All, forcing a refetch then rather than on a timer.
-  const { dashboard, loading } = useGlDashboard(null, true, 5, 3, refreshKey);
+  const { dashboard, loading } = useGlDashboard(null, true, 3, refreshKey);
   const summary = dashboard?.summary;
   const recon = dashboard?.reconciliation;
   const accounts = dashboard?.topControlAccounts ?? [];
@@ -58,7 +58,7 @@ export default function GlDashboardSection({ refreshKey }) {
   // These blocks are a rolling 3-month roll-up (not a single batch). Label the
   // window from the periods the API actually aggregated so it reads unambiguously.
   const scopeLabel = periodRangeLabel(dashboard?.periods);
-  // Totals across the accounts shown — nets to ~0 when this slice is balanced.
+  // Totals across all control accounts with posted activity in the window — nets to zero.
   const totalDebit = accounts.reduce((sum, a) => sum + (a.debit || 0), 0);
   const totalCredit = accounts.reduce((sum, a) => sum + (a.credit || 0), 0);
   const totalBalance = totalDebit - totalCredit;
@@ -73,11 +73,11 @@ export default function GlDashboardSection({ refreshKey }) {
         />
       </div>
 
-      {/* Column 2: Top control accounts table (replaces the bar chart) */}
+      {/* Column 2: Control accounts table (replaces the bar chart) */}
       <div className={styles.chartPane}>
         <div className={styles.tableWrap}>
           <div className={styles.tableHead}>
-            <div className={styles.tableTitle}>Top Control Accounts</div>
+            <div className={styles.tableTitle}>Control Accounts</div>
             {scopeLabel && <span className={styles.scopeChip}>{scopeLabel}</span>}
           </div>
           <div className={styles.tableBody}>
@@ -129,7 +129,7 @@ export default function GlDashboardSection({ refreshKey }) {
           </table>
           </div>
           <div className={styles.tableNote}>
-            Balance = Debit − Credit · Total nets to zero when accounts shown are balanced · rolling 3-month roll-up
+            Balance = Debit − Credit · totals net to zero over the window · rolling 3-month roll-up
           </div>
         </div>
       </div>

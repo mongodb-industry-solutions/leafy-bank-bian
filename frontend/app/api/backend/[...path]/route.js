@@ -7,9 +7,11 @@
  *
  * The BIAN backend is split across services. We route by the first path
  * segment (the BIAN service-domain name):
- *   - CurrentAccount/*, PartyReferenceDataDirectory/*
+ *   - CurrentAccount/*, PartyReferenceDataDirectory/*, PartyAuthentication/*
  *       → ACCOUNTS_BACKEND_URL     (accounts service)
- *   - PaymentOrderInitiation/*       → TRANSACTIONS_BACKEND_URL (transactions service)
+ *   - PaymentOrderInitiation/*, workflow/*
+ *       → TRANSACTIONS_BACKEND_URL (transactions service)
+ *   - pipeline/*                     → LEDGER_BACKEND_URL      (ledger service)
  *   - everything else (openfinance/*, encryption-demo/*, …)
  *       → CONSENT_BACKEND_URL        (open-finance monolith — fallback)
  */
@@ -27,10 +29,26 @@ const LEDGER_BACKEND =
 // Unmapped prefixes fall through to CONSENT_BACKEND.
 const BACKEND_BY_PREFIX = {
   PartyReferenceDataDirectory: ACCOUNTS_BACKEND,
+  // BIAN PartyAuthentication (SD 38917). On accounts because accounts owns `customers` —
+  // authentication is Party-domain work, not payments. The transactions service verifies
+  // the token it issues; it never mints one.
+  PartyAuthentication: ACCOUNTS_BACKEND,
   CurrentAccount: ACCOUNTS_BACKEND,
   PaymentOrderInitiation: TRANSACTIONS_BACKEND,
+  // BIAN PaymentOrderProcedure — same service domain as PaymentOrderInitiation. The step-up
+  // RESUME lives here (`POST /PaymentOrderProcedure/Resume`, 2026-09-09): the wizard resumes
+  // the same held payment rather than creating a second one.
+  PaymentOrderProcedure: TRANSACTIONS_BACKEND,
+  // BIAN PaymentSettlement (SD 40033, doc 21 B6). Settlement trigger lives on transactions
+  // — it owns `payments` and the `settle.run` stage. Scoped to this prefix only (defect
+  // 2026-07-06: blanket-applying a prefix convention broke every BIAN call).
+  PaymentSettlement: TRANSACTIONS_BACKEND,
   // GL pipeline monitor routes (read-only) live on the ledger service.
   pipeline: LEDGER_BACKEND,
+  // Back-office payments workflow routes (read-only) live on the transactions service —
+  // it owns `payments`. Deliberately NOT the ledger: /pipeline and /workflow are the two
+  // halves of the trace, and neither service reads the other's collections.
+  workflow: TRANSACTIONS_BACKEND,
 };
 
 async function proxy(request, { params }) {

@@ -17,7 +17,7 @@ import DetailPanel from "./DetailPanel";
 import styles from "./GlMonitor.module.css";
 import HealthBar from "./HealthBar";
 import InitiatePanel from "./InitiatePanel";
-import PaymentTrace from "./PaymentTrace";
+import PaymentTrace from "../PaymentTrace/PaymentTrace";
 import PipelineColumns from "./PipelineColumns";
 import PipelineStepper from "./PipelineStepper";
 

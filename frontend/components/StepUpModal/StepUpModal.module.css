@@ -1,0 +1,13 @@
+/* Scoped to this modal only, via contentClassName on the LG <Modal>.
+
+   LeafyGreen's Modal renders its own close "×" as a descendant of the content div
+   (data-testid="lg-modal-close"). Its own base style can land bottom / left for this
+   bundle; we pin it to the conventional top-right of the content panel. The rule is
+   scoped under .content so it cannot affect any other LG Modal on the page, and its
+   specificity (0,2,0) beats LG's single-class emotion rule, loading after it. */
+.content :global([data-testid="lg-modal-close"]) {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  cursor: pointer;
+}

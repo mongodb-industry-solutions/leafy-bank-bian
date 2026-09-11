@@ -1,0 +1,1477 @@
+/* Payments Workflow — back-office surface for the Payments Analyst persona.
+   Tokens and the reset are scoped under .pwRoot with :where() so this route's styling
+   cannot leak into the rest of the app, and so LeafyGreen's own component styles win
+   over ours (a :where() selector has zero specificity). Same approach as GlMonitor.module.css.
+
+   Every length below comes from LeafyGreen's spacing scale
+   (0 1 2 4 6 8 12 16 20 24 32 36 40 48 56 64 72) — `kg spacing -s leafygreen`.
+   Breakpoint 1024 is LG's Desktop — `kg breakpoints -s leafygreen`. */
+
+.pwRoot {
+  /* LeafyGreen palette only (research §2). Page = gray.light3, cards flat white,
+     hairlines = gray.light2, elevation by contrast + whitespace — not shadow. */
+  --pw-page: #e8edeb;          /* gray.light2 — page canvas, one step below the cards so white surfaces read */
+  --pw-bg: #ffffff;             /* card surface */
+  --pw-border: #e8ebeb;         /* gray.light2 — hairline */
+  --pw-border-light: #e8ebeb;   /* gray.light2 — inner dividers, same hairline */
+  --pw-text: #1c2d38;           /* gray.dark3 — primary text */
+  --pw-muted: #3d4f58;          /* gray.dark2 — secondary text */
+  --pw-faint: #889397;          /* gray.base — meta / timestamps */
+  --pw-accent: #00684a;         /* green.dark2 — brand / primary actions */
+  --pw-accent-light: #c0fae6;   /* green.light2 — active tint (was light3, too pale to read) */
+  --pw-surface: #f9fbfa;        /* gray.light3 — subtle in-card fill */
+  --pw-radius: 12px;            /* borderRadius.300 — cards */
+  --pw-shadow: 0 1px 2px rgba(16,36,43,.06), 0 4px 16px rgba(16,36,43,.06);  /* panel elevation */
+  --pw-shadow-card: 0 1px 2px rgba(16,36,43,.05);                            /* nested section-card elevation */
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--pw-text);
+  background: var(--pw-page);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+:where(.pwRoot, .pwRoot *, .pwRoot *::before, .pwRoot *::after) {
+  box-sizing: border-box;
+}
+
+/* ── header ── */
+
+.subtitle {
+  color: var(--pw-muted);
+}
+
+/* The lens wrapper carries the column gap itself because .pwRoot's gap only reaches its own
+   direct children. The lens itself is switched from the NavBar top bar, not a local toggle. */
+.lensPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── generic panel ── */
+
+.panel {
+  background: var(--pw-bg);
+  border: 1px solid var(--pw-border);
+  border-radius: var(--pw-radius);
+  box-shadow: var(--pw-shadow);
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--pw-border-light);
+  background: var(--pw-surface);
+}
+
+.panelHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.panelTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panelTitle {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.panelDesc {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pw-muted);
+}
+
+.panelHeadRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+.resultCount {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--pw-muted);
+  white-space: nowrap;
+}
+
+.panelBody {
+  padding: 20px;
+}
+
+/* Separates the drill-out control from the title it sits beside. */
+.backButton {
+  margin-right: 4px;
+}
+
+.muted {
+  color: var(--pw-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.emptyState {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--pw-muted);
+  font-size: 13px;
+}
+
+/* ── stacked full-width layout ──
+   The list and the lifecycle each get the whole width. An earlier side-by-side split gave
+   each half ~50% and made both congested: the table lost its columns to horizontal scroll
+   and the lifecycle lost the room a horizontal rail needs. */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── filters ── */
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--pw-border);
+  border-radius: var(--pw-radius);
+  background: var(--pw-surface);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  flex: 1;
+}
+
+.filterField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.filterLabel {
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-muted);
+}
+
+.filterInput {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--pw-bg);
+  color: var(--pw-text);
+}
+
+.filterInput:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+/* ── table ──
+   Hand-rolled: there is no @leafygreen-ui/table in this app's dependencies. */
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--pw-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--pw-border);
+  white-space: nowrap;
+}
+
+/* Status (last column) sits flush right alongside the right-aligned Amount. */
+.table th:last-child,
+.table td:last-child {
+  text-align: right;
+}
+
+.table td {
+  padding: 14px 16px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--pw-border-light);
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--pw-surface);
+}
+
+/* A 2px green accent on the row's left edge marks the selection — an inset shadow,
+   so the accent never shifts the row's content. */
+.rowActive {
+  background: var(--pw-accent-light);
+}
+
+.rowActive:hover {
+  background: var(--pw-accent-light);
+}
+
+.rowActive td:first-child {
+  box-shadow: inset 2px 0 0 var(--pw-accent);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Beneficiary is the primary, human-relevant cell: it gets the room and truncates,
+   instead of forcing a wide nowrap table that needs horizontal scroll. */
+.beneficiary {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--pw-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.beneficiarySub {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pw-faint);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cellMuted {
+  color: var(--pw-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cellAmount {
+  font-weight: 600;
+  color: var(--pw-text);
+  white-space: nowrap;
+}
+
+/* Rail as a quiet tag chip rather than a bare enum string. */
+.railTag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+  color: var(--pw-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--pw-border-light);
+}
+
+.pagerButtons {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── lifecycle: mini-stepper (zone 1) + vertical timeline (zone 2) ──
+   Research §3.3/§3.4. A single payment is a single-threaded state machine; each stage
+   carries too much to sit under a node, so the vertical spine is primary and the thin
+   horizontal stepper above is the clickable summary that preserves the saga's shape.
+   Clicking either scrolls the matching row into view and expands it. */
+
+.miniStepperScroll {
+  overflow-x: auto;
+  padding: 4px 4px 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--pw-border-light);
+}
+
+.miniStepperTrack {
+  display: flex;
+  align-items: flex-start;
+  min-width: min-content;
+}
+
+.miniNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  min-width: 92px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.miniNode:hover {
+  background: var(--pw-surface);
+}
+
+.miniNode:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+.miniNodeActive {
+  background: var(--pw-accent-light);
+}
+
+.miniCircle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+}
+
+.miniCompleted {
+  background: #00684a;   /* green.dark2 */
+  color: #ffffff;
+  border-color: #00684a;
+}
+
+.miniCurrent {
+  background: #c3e7fe;   /* blue.light2 */
+  color: #083c90;        /* blue.dark2 */
+  border-color: #083c90;
+  animation: pwPulse 1.8s ease-in-out infinite;
+}
+
+.miniFailed {
+  background: #970606;   /* red.dark2 */
+  color: #ffffff;
+  border-color: #970606;
+}
+
+.miniPending {
+  background: var(--pw-bg);
+  color: var(--pw-faint);
+  border-color: var(--pw-border);
+}
+
+.miniLabel {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  max-width: 92px;
+  color: var(--pw-muted);
+}
+
+/* Sits level with the 24px circle's centre (6px node padding + 12px). */
+.miniConnector {
+  flex: 1 1 12px;
+  min-width: 12px;
+  height: 2px;
+  background: var(--pw-border);
+  margin-top: 18px;
+}
+
+.miniConnectorDone {
+  background: #00684a;   /* green.dark2 */
+}
+
+/* ── vertical timeline ── */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.timelineRow {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Downstream of a failure: dim the stages that never ran. */
+.timelineRowDimmed {
+  opacity: .45;
+}
+
+.spine {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 14px;
+}
+
+.timelineNode {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+  z-index: 1;
+}
+
+.nodeCompleted {
+  background: #00684a;   /* green.dark2 */
+  color: #ffffff;
+  border-color: #00684a;
+}
+
+.nodeCurrent {
+  background: #c3e7fe;   /* blue.light2 */
+  color: #083c90;        /* blue.dark2 */
+  border-color: #083c90;
+  animation: pwPulse 1.8s ease-in-out infinite;
+}
+
+.nodeFailed {
+  background: #970606;   /* red.dark2 */
+  color: #ffffff;
+  border-color: #970606;
+}
+
+.nodePending {
+  background: var(--pw-bg);
+  color: var(--pw-faint);
+  border: 1px dashed var(--pw-border);
+}
+
+/* Vertical connector down to the next row's node. */
+.timelineConnector {
+  width: 2px;
+  flex: 1 1 auto;
+  min-height: 16px;
+  margin-top: 4px;
+  background: var(--pw-border);
+}
+
+.timelineConnectorDone {
+  background: #00684a;   /* green.dark2 */
+}
+
+/* After a failed stage the connector becomes a short dashed gray stub. */
+.timelineConnectorDashed {
+  background: transparent;
+  border-left: 2px dashed var(--pw-border);
+}
+
+.timelineContent {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: 20px;
+}
+
+.timelineRowHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.timelineRowHeader:hover {
+  background: var(--pw-surface);
+}
+
+.timelineRowHeader:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+.timelineStageLabel {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.timelineStageMeta {
+  font-size: 12px;
+  color: var(--pw-faint);
+  margin-right: auto;
+}
+
+.failedBanner {
+  margin: 4px 0 12px;
+  padding: 8px 12px;
+  border: 1px solid #970606;   /* red.dark2 */
+  border-radius: 6px;
+  background: #ffcdc7;         /* red.light2 */
+  color: #970606;              /* red.dark2 */
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.timelineRowBody {
+  border-top: 1px solid var(--pw-border-light);
+  padding-top: 16px;
+  animation: pwExpand 200ms ease;
+}
+
+@keyframes pwPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(8, 60, 144, .35); }
+  50%      { box-shadow: 0 0 0 4px rgba(8, 60, 144, 0); }
+}
+
+@keyframes pwExpand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Detail bodies sit in columns so a stage with several small blocks (key/values + legs +
+   JSON) uses the width the rail just bought us instead of stacking into a tall strip. */
+.detailColumns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.detailBlock {
+  min-width: 0;
+}
+
+.detailBlockTitle {
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 8px;
+}
+
+/* ── stage intro callout (what a stage does) ── */
+.stageIntro {
+  border: 1px solid var(--pw-border);
+  border-left: 3px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  background: var(--pw-surface);
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+
+.stageIntroLabel {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 4px;
+}
+
+.stageIntroText {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--pw-text);
+}
+
+/* ── stage 1: immutable parties + rail-specific initiation envelope ── */
+.partyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.partyCard {
+  border: 1px solid var(--pw-border);
+  border-radius: var(--pw-radius);
+  background: var(--pw-bg);
+  padding: 12px 16px;
+}
+
+.partyLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--pw-text);
+  margin-bottom: 8px;
+}
+
+.partyExternal {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  padding: 0 6px;
+  background: var(--pw-surface);
+}
+
+.stageNote {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--pw-muted);
+}
+
+/* Dual-approval rule (stage 2) — a green-accented callout, same treatment as stageIntro. */
+.dualApprovalCallout {
+  border: 1px solid var(--pw-border);
+  border-left: 3px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  background: var(--pw-surface);
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--pw-text);
+}
+
+/* 2026-09-09 (Kiran): the step-up approval CTA in the stage-2 panel. Deliberately louder than
+   the dual-approval note — this is the ONE thing the analyst must do before the payment can
+   proceed, so it spans the full panel width and leads with an accent bar + icon. */
+.stepUpCallout {
+  grid-column: 1 / -1;
+  border: 1px solid var(--pw-border);
+  border-left: 3px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  background: var(--pw-accent-light);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stepUpCalloutTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--pw-text);
+}
+.stepUpCallout .stepUpCalloutTitle svg {
+  color: var(--pw-accent);
+}
+
+/* Stage 2: the two gates beside the checks, so the panel uses the width instead of a tall
+   narrow column. Checks get slightly more room than the gate cards. */
+.stageTwoGrid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 24px;
+  align-items: start;
+}
+
+/* Stage 3 — controlled grid, not the auto-fit `detailColumns`. Stage 3 is the densest
+   (a checks trail + a summary + a before/after diff + three transitions), and four
+   auto-fit columns crammed them together. Checks collapses to a summary banner, so it
+   gets the full width on top (no dead column under a collapsed trail); Summary and
+   State transitions share a row beneath it; the before/after diff spans the full width
+   last so its As-captured / After-enrichment pair has room. */
+.stageThreeGrid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.stageThreeGrid > .detailBlockWide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .stageTwoGrid,
+  .stageThreeGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── expandable raw-document toggle (bottom of a stage body) ── */
+.rawToggleBar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rawToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+  color: var(--pw-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rawToggleIco {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.rawToggle:hover {
+  border-color: var(--pw-accent);
+  color: var(--pw-accent);
+}
+
+.rawToggle:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+/* A raw document / ISO JSON / XML block can be arbitrarily long — cap it and scroll inside,
+   so one stage's payload cannot push the timeline row off the screen. */
+.codeScroll {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+}
+
+/* ── stage 5: BUSINESS VIEW / ISO VIEW (her L548-565) ── */
+
+/* The two-tab pair spans the whole detail grid rather than sharing a 280px column with the
+   summary: an ISO element list in a narrow column wraps every row, which is exactly what
+   made the first deep-dive layout congested (Kiran, 2026-08-30). */
+.detailBlockWide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.tabBody {
+  padding-top: 16px;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* One row per produced ISO element, element name beside the value it was mapped to. Her
+   L565 — "demonstrates the relationship between business-domain data and payment messaging"
+   — is the reason this is a two-column pairing and not a JSON dump. The dump is below it,
+   for the reader who wants the whole message. */
+.isoRows {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.isoRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  align-items: baseline;
+}
+
+.isoRow:nth-child(odd) {
+  background: var(--pw-surface);
+}
+
+.isoElement {
+  font-family: "Source Code Pro", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pw-accent);
+  overflow-wrap: anywhere;
+}
+
+.isoValue {
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* ── double-entry legs ── */
+
+.legs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.legsHead {
+  font-weight: 600;
+  color: var(--pw-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--pw-border);
+}
+
+.legRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  min-width: 0;
+}
+
+/* Long values (an enrichment before/after object string) must wrap rather than push the
+   column open; ledger amounts are short so wrapping them is a no-op. */
+.legRow > * {
+  min-width: 0;
+}
+
+.legAmount {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.legsFoot {
+  border-top: 1px solid var(--pw-border);
+  margin-top: 4px;
+  padding-top: 4px;
+  font-weight: 600;
+}
+
+.balanced {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
+/* ── stage 8: three-way reconciliation tie-out ── */
+
+.reconTieOut {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.reconRows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.reconRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--pw-border);
+}
+
+.reconRow:last-child {
+  border-bottom: none;
+}
+
+.reconLabel {
+  color: var(--pw-muted);
+}
+
+.reconAmount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.reconVerdict {
+  margin-top: 4px;
+}
+
+/* ── key/value ── */
+
+.kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.kv td {
+  padding: 4px 0;
+  vertical-align: top;
+}
+
+.kv td:first-child {
+  color: var(--pw-muted);
+  width: 40%;
+  padding-right: 12px;
+}
+
+/* ── events ── */
+
+.event {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pw-border-light);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+/* Let the reason cell shrink below its content's min-width, so a long reason that wraps
+   stays inside the column instead of pushing it open. */
+.event > div:first-child {
+  min-width: 0;
+}
+
+.event:last-child {
+  border-bottom: none;
+}
+
+.eventReason {
+  color: var(--pw-muted);
+  font-size: 12px;
+}
+
+.eventWhen {
+  color: var(--pw-faint);
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* ── checks ── */
+
+/* ── checks as a progressive gate flow (Identity → Account → Entitlement → Limit → Approval) ── */
+.checkFlow {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.checkPhase {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.checkPhaseLabel {
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 8px 0 4px;
+  border-bottom: 1px solid var(--pw-border);
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  font-size: 13px;
+  line-height: 20px;
+  min-width: 0;
+  border-bottom: 1px solid var(--pw-border-light);
+}
+
+.checkRow:last-child {
+  border-bottom: none;
+}
+
+.checkName {
+  font-weight: 600;
+  color: var(--pw-text);
+  white-space: nowrap;
+  flex: none;
+}
+
+/* The full check detail, shown in the hover tooltip instead of truncated inline text.
+   `white-space: normal` (not the row's nowrap) so a long reason wraps its full width in the
+   tooltip rather than ellipsizing. */
+.checkDetailTip {
+  display: block;
+  max-width: 360px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.checkMode {
+  font-size: 11px;
+  color: var(--pw-faint);
+  flex: none;
+}
+
+/* ── checks summary banner (collapse/expand) ──
+   The top-level "is this stage clean?" answer, with the per-check trail behind a click.
+   Styled like the raw-document toggle so a summary banner and an expandable trail read
+   as the same interaction on this surface. */
+.checkSummary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.checkSummary:hover {
+  border-color: var(--pw-accent);
+}
+
+.checkSummaryCount {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-text);
+  flex: none;
+}
+
+.checkSummaryBreakdown {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--pw-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkSummaryChevron {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--pw-muted);
+  flex: none;
+}
+
+.checkDetail {
+  margin-top: 12px;
+}
+
+/* ── create-payment form ──
+   One comprehensive "Enter details" screen rather than a four-step drip: numbered sections,
+   canonical fields beside the rail-specific envelope. The section split mirrors the request
+   contract — section 2 is the common layer, section 3 is `wireDetails`/`internalDetails`. */
+
+.createHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.headerActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.stepperBar {
+  /* LG Stepper centers its steps internally, so the bar only needs to be a
+     centered box for the whole cluster to sit on the axis. */
+  margin: 0 auto 24px;
+  max-width: 640px;
+  display: flex;
+  justify-content: center;
+}
+
+/* Canonical details get twice the room of the rail envelope, matching their field count.
+   Below LG's Desktop breakpoint the envelope drops beneath rather than being squeezed. */
+.createGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .createGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.fullSpan {
+  grid-column: 1 / -1;
+}
+
+.sectionCard {
+  background: var(--pw-bg);
+  border: 1px solid var(--pw-border);
+  border-radius: var(--pw-radius);
+  padding: 20px;
+  box-shadow: var(--pw-shadow-card);
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 20px;
+  margin-bottom: 4px;
+}
+
+/* Numbered section badge — a solid green circle instead of a plain "1.", so the
+   three sections read as steps rather than footnotes. */
+.sectionNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--pw-accent);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sectionSub {
+  color: var(--pw-muted);
+  font-size: 12px;
+  line-height: 20px;
+  margin-bottom: 16px;
+}
+
+/* Two columns inside the canonical section: debit side left, beneficiary side right. */
+.twoCol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.fieldStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.colHeading {
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.balanceHint {
+  color: var(--pw-accent);
+  font-size: 12px;
+  line-height: 20px;
+  margin-top: -8px;
+}
+
+/* Boxed asides in the rail envelope column. */
+.infoBox {
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+  padding: 12px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.infoBoxTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.subPanel {
+  border: 1px solid var(--pw-border);
+  border-left: 4px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  background: var(--pw-surface);
+  padding: 16px;
+}
+
+.subPanelTitle {
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 20px;
+  margin-bottom: 12px;
+}
+
+/* Payment-type option: label left, availability right. */
+.optionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.disclosure {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  color: var(--pw-accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.formActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--pw-border-light);
+}
+
+.formActionsRight {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ── confirmation ── */
+
+.confirmBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.confirmId {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 24px;
+}
+
+/* ── status pill (replaces @leafygreen-ui/badge on this surface) ──
+   Research §3.4: 24px tall, 12px uppercase 600, 1px solid border in the status color,
+   light2 background + dark2 text, pill radius. Scoped here — the rest of the app keeps LG
+   Badge. Colors are LeafyGreen palette pairs (research §2): border + text = dark2 of the
+   family, background = light2; pending/draft/neutral = gray outline. */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.pillGreen {
+  border-color: #00684a;   /* green.dark2 */
+  background: #c0fae6;     /* green.light2 */
+  color: #00684a;          /* green.dark2 */
+}
+
+.pillBlue {
+  border-color: #083c90;   /* blue.dark2 */
+  background: #c3e7fe;     /* blue.light2 */
+  color: #083c90;          /* blue.dark2 */
+}
+
+.pillYellow {
+  border-color: #944f01;   /* yellow.dark2 */
+  background: #ffec9e;     /* yellow.light2 */
+  color: #944f01;          /* yellow.dark2 */
+}
+
+.pillRed {
+  border-color: #970606;   /* red.dark2 */
+  background: #ffcdc7;     /* red.light2 */
+  color: #970606;          /* red.dark2 */
+}
+
+.pillGray {
+  border-color: #c1c7c6;   /* gray.light1 */
+  background: #f9fbfa;     /* gray.light3 */
+  color: #3d4f58;          /* gray.dark2 */
+}
+
+/* ── independent axes row (research §1.4 / §4) ──
+   Posting / settlement / reconciliation advance independently of currentState, so they get
+   their own row under the header — separate from the linear timeline. */
+
+.axesRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  background: var(--pw-surface);
+}
+
+.axesHeading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.axisItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.axisLabel {
+  font-size: 12px;
+  color: var(--pw-muted);
+}
+
+/* ── command-palette search (research §3.1 #2 / §4) ──
+   One box, prefix-routed on Enter. PAY- deep-links, CUST- filters the list, the other refs
+   surface an explicit "needs backend resolve route" notice rather than a silent no-op. */
+
+.commandSearch {
+  margin-bottom: 16px;
+}
+
+.commandForm {
+  position: relative;
+  display: flex;
+  align-items: center;
+  max-width: 480px;
+}
+
+.commandIcon {
+  position: absolute;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  color: var(--pw-faint);
+  pointer-events: none;
+}
+
+.commandInput {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 36px;
+  border: 1px solid var(--pw-border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--pw-text);
+  background: var(--pw-bg);
+}
+
+.commandInput:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 1px;
+}
+
+.commandNotice {
+  margin-top: 8px;
+  max-width: 480px;
+  padding: 6px 10px;
+  border: 1px solid #944f01;   /* yellow.dark2 */
+  border-radius: 6px;
+  background: #ffec9e;         /* yellow.light2 */
+  color: #944f01;              /* yellow.dark2 */
+  font-size: 12px;
+  line-height: 20px;
+}

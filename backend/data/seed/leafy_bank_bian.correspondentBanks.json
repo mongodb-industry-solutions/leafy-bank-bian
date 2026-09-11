@@ -1,0 +1,99 @@
+{
+  "_notes": {
+    "recordType": "BIC-indexed institution directory for stage-3 enrichment (doc 17 B2, Q22). recordType BIC_DIRECTORY is NEW - the canonical spec declares only JP_ENTITY_BANK and IN_BRANCH, both corridor-specific. clearingSystemCode / clearingSystemMemberId are also new fields: the spec's only clearing-member field is `ifsc` (India), yet its own BIAN name is ClearingSystemMemberIdentification, so a generic pair is the correct generalisation and IFSC becomes a special case of it. Awaiting Doina's ratification. DEMO DATA: the two US routing numbers mirror her own wire_domestic sample (debtor 021000021, creditor 121000248 / JPMorgan Chase) so the sample is reproducible end to end; Citibank's is its published NY number. All three carry a valid ABA mod-10 checksum because step 3 validates it. The four non-US member ids are FORMAT-VALID SYNTHETIC values - there is no authoritative sort-code / BLZ table in this workspace, and none is claimed. This is demo reference data, not a Fed routing file.",
+    "bicSource": "The six external BICs are exactly the pool in frontend/components/PaymentsWorkflow/InitiateWizard.js EXTERNAL_BANKS. Autopopulate fabricates beneficiaries from that list, so any BIC missing here makes every autopopulated wire log a directory-miss WARN - correct behaviour that would read as a broken demo. Keep the two lists in step: add a bank there, add it here."
+  },
+  "records": [
+    {
+      "recordType": "BIC_DIRECTORY",
+      "country": "US",
+      "identification": {
+        "scheme": "BIC",
+        "value": "LEAFUS33"
+      },
+      "swiftCode": "LEAFUS33",
+      "bankName": "Leafy Bank",
+      "clearingSystemCode": "USABA",
+      "clearingSystemMemberId": "021000021",
+      "city": "New York"
+    },
+    {
+      "recordType": "BIC_DIRECTORY",
+      "country": "US",
+      "identification": {
+        "scheme": "BIC",
+        "value": "CHASUS33"
+      },
+      "swiftCode": "CHASUS33",
+      "bankName": "JPMorgan Chase Bank, N.A.",
+      "clearingSystemCode": "USABA",
+      "clearingSystemMemberId": "121000248",
+      "city": "New York"
+    },
+    {
+      "recordType": "BIC_DIRECTORY",
+      "country": "US",
+      "identification": {
+        "scheme": "BIC",
+        "value": "CITIUS33"
+      },
+      "swiftCode": "CITIUS33",
+      "bankName": "Citibank, N.A.",
+      "clearingSystemCode": "USABA",
+      "clearingSystemMemberId": "021000089",
+      "city": "New York"
+    },
+    {
+      "recordType": "BIC_DIRECTORY",
+      "country": "GB",
+      "identification": {
+        "scheme": "BIC",
+        "value": "BARCGB22"
+      },
+      "swiftCode": "BARCGB22",
+      "bankName": "Barclays Bank PLC",
+      "clearingSystemCode": "GBDSC",
+      "clearingSystemMemberId": "202053",
+      "city": "London"
+    },
+    {
+      "recordType": "BIC_DIRECTORY",
+      "country": "DE",
+      "identification": {
+        "scheme": "BIC",
+        "value": "DEUTDEFF"
+      },
+      "swiftCode": "DEUTDEFF",
+      "bankName": "Deutsche Bank AG",
+      "clearingSystemCode": "DEBLZ",
+      "clearingSystemMemberId": "50070010",
+      "city": "Frankfurt am Main"
+    },
+    {
+      "recordType": "BIC_DIRECTORY",
+      "country": "CH",
+      "identification": {
+        "scheme": "BIC",
+        "value": "UBSWCHZH"
+      },
+      "swiftCode": "UBSWCHZH",
+      "bankName": "UBS Switzerland AG",
+      "clearingSystemCode": "CHBCC",
+      "clearingSystemMemberId": "230",
+      "city": "Zurich"
+    },
+    {
+      "recordType": "BIC_DIRECTORY",
+      "country": "CA",
+      "identification": {
+        "scheme": "BIC",
+        "value": "ROYCCAT2"
+      },
+      "swiftCode": "ROYCCAT2",
+      "bankName": "Royal Bank of Canada",
+      "clearingSystemCode": "CACPA",
+      "clearingSystemMemberId": "000300002",
+      "city": "Toronto"
+    }
+  ]
+}

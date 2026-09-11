@@ -56,3 +56,32 @@ def retrieve_ledger_posting(
         raise HTTPException(status_code=404, detail=f"LedgerPosting {ledgerpostingid} not found")
 
     return to_json_response(event)
+
+
+# --- Stage 8: AccountReconciliation (BIAN SD 35449) ---------------------------
+# One route, exposing the three-way reconciliation result for one payment (doc 22 B6). The UI
+# reads this from /pipeline/trace/{id}'s `reconciliation` block; this route is the canonical BIAN
+# surface for conformance and curl. Same service function, two thin routes.
+
+from pydantic import BaseModel
+
+from services import reconciliation_service as _recon_service
+
+
+class AccountReconciliationRetrieveRequest(BaseModel):
+    paymentId: str
+
+
+@router.post("/AccountReconciliation/Retrieve")
+def retrieve_account_reconciliation(
+    body: AccountReconciliationRetrieveRequest,
+    request: Request,
+) -> JSONResponse:
+    connection = request.app.state.connection
+    db_name = request.app.state.db_name
+
+    check = _recon_service.compute_reconciliation(body.paymentId, connection, db_name)
+    if check is None:
+        raise HTTPException(status_code=404, detail=f"Payment {body.paymentId} not found")
+
+    return to_json_response(check.as_dict())

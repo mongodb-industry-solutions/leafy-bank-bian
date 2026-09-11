@@ -6,24 +6,14 @@ import Badge from "@leafygreen-ui/badge";
 import Tooltip from "@leafygreen-ui/tooltip";
 import styles from "./TransactionsTable.module.css";
 import { parseCalendarDate } from "@/lib/api/format";
+// One status→variant mapping for the whole app; see lib/paymentsWorkflow/status.js.
+import { statusBadgeVariant } from "@/lib/paymentsWorkflow/status";
 
 // Leafy Bank transactions get a green badge; any other (external) bank gets blue.
 const bankBadgeVariant = (bank) =>
   (bank || "").toLowerCase().replace(/\s/g, "") === "leafybank" ? "green" : "blue";
 
-const statusBadgeVariant = (status) => {
-  switch ((status || "").toUpperCase()) {
-    case "SETTLED":
-    case "POSTED":
-    case "COMPLETED": return "green";
-    case "PENDING":
-    case "PROCESSING": return "yellow";
-    case "FAILED":
-    case "REJECTED":
-    case "CANCELLED": return "red";
-    default: return "darkgray";
-  }
-};
+
 
 // Internal transactions belong to Leafy Bank; external ones carry their source.
 const bankFor = (t) =>

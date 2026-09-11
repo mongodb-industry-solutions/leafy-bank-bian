@@ -10,16 +10,24 @@ leg type is a new rule here, never a refactor of the callers (resolved #3/#4, Ph
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
+from typing import Optional
 
 from .coa_cache import ChartOfAccounts
 
+logger = logging.getLogger(__name__)
+
 # Bump on any rule change. Stamped on each emitted event as a provenance/version marker.
-MAPPING_VERSION = "1.0.0"
+# 1.1.0 — stage 6 added the fee rule (doc 20 B3).
+# 1.2.0 — stage 7 added the settlement rule (doc 21 B2): Dr clearing / Cr nostro or reserves.
+MAPPING_VERSION = "1.2.0"
 
 # eventType — subset of the spec's ledgerEvents.eventType enum exercised in Phase 1.
 EVENT_PAYMENT_PRINCIPAL = "PAYMENT_PRINCIPAL"
+EVENT_PAYMENT_FEE = "PAYMENT_FEE"
+EVENT_PAYMENT_SETTLEMENT = "PAYMENT_SETTLEMENT"
 
 # Accounting sides.
 SIDE_DEBIT = "DEBIT"
@@ -30,7 +38,13 @@ SIDE_CREDIT = "CREDIT"
 # account (read from account.gl.accountCode), so no account-type table is needed here and
 # account-type enum drift cannot bite. Extend this map when the fee/tax/FX rules land.
 BANK_GL_ACCOUNT_BY_EVENT_TYPE: dict[str, str] = {
-    # "FEE": "4200",   # Fee Income — added with the fee rule (future)
+    # ⚠️ `4211`, NOT `4200`. The code this line carried until stage 6 was `4200 Fee Income`,
+    # which is `isPostingAccount: false, level: 2` — a rollup group that cannot be posted to.
+    # A leg naming it would have failed `require_active_posting_account` and crashed
+    # `projection_worker` on a change-stream event (defect 2026-07-01, fired twice).
+    # `4211 Transaction Fee Income` is the leaf: level 4, normalBalance CREDIT, ACTIVE,
+    # "Payment and transaction processing fees".
+    EVENT_PAYMENT_FEE: "4211",
 }
 
 
@@ -119,6 +133,81 @@ def decompose_principal_payment(
     return legs
 
 
+def fee_gl_account(coa: ChartOfAccounts) -> Optional[str]:
+    """The Fee Income posting leaf, or None when the chart of accounts cannot supply one.
+
+    Returns None rather than raising, and that is the whole point of the function: a demo
+    database whose `glAccounts` lacks `4211` (or has it as a non-leaf) must still post the
+    principal. Raising here would take down `projection_worker` on a change-stream event,
+    which is the 2026-07-01 crash-loop — the one defect in this repo that has fired twice.
+    """
+    code = BANK_GL_ACCOUNT_BY_EVENT_TYPE.get(EVENT_PAYMENT_FEE)
+    if not code:
+        return None
+    try:
+        coa.require_active_posting_account(code)
+    except (ValueError, KeyError):
+        return None
+    return code
+
+
+def decompose_fee(
+    *,
+    fee_amount: float | str | Decimal,
+    currency: str,
+    debtor_account: dict,
+    coa: ChartOfAccounts,
+) -> list[PostingLeg]:
+    """Decompose a debtor-borne charge into its own balanced leg pair (doc 20 B3).
+
+    A fee the bank levies and the customer bears:
+      - debtor  -> DEBIT  its deposit control account (the customer's liability falls again)
+      - bank    -> CREDIT Fee Income (revenue rises)
+
+    Returns `[]` — not an exception — when there is no fee, or when the chart of accounts
+    cannot supply a Fee Income leaf. Both are ordinary outcomes: an internal transfer has no
+    fee (stage 3 levies on `rail == "WIRE"` only), and a CoA without `4211` should degrade
+    the demo, not crash a worker.
+
+    ⚠️ This is an ADDITIONAL pair, never an adjustment to the principal.
+    `enrichment_plan.py:264` — *"`amount` must not change. It is the settlement amount and
+    the ledger's primary input."*
+    """
+    amount_minor = to_minor_units(fee_amount)
+    if amount_minor <= 0:
+        return []
+
+    fee_account = fee_gl_account(coa)
+    if fee_account is None:
+        logger.warning(
+            "fee of %s %s not posted: no active Fee Income posting leaf in the chart of "
+            "accounts (expected %s). The principal legs are unaffected.",
+            fee_amount, currency, BANK_GL_ACCOUNT_BY_EVENT_TYPE.get(EVENT_PAYMENT_FEE),
+        )
+        return []
+
+    legs = [
+        PostingLeg(
+            event_type=EVENT_PAYMENT_FEE,
+            side=SIDE_DEBIT,
+            gl_account_code=_principal_gl_account(debtor_account, coa),
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=debtor_account["accountId"],
+        ),
+        PostingLeg(
+            event_type=EVENT_PAYMENT_FEE,
+            side=SIDE_CREDIT,
+            gl_account_code=fee_account,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=debtor_account["accountId"],
+        ),
+    ]
+    assert_balanced(legs)
+    return legs
+
+
 def assert_balanced(legs: list[PostingLeg]) -> None:
     """Guard: ΣDEBIT minor units == ΣCREDIT minor units across the legs.
 
@@ -130,3 +219,66 @@ def assert_balanced(legs: list[PostingLeg]) -> None:
     credit = sum(leg.amount_minor for leg in legs if leg.side == SIDE_CREDIT)
     if debit != credit:
         raise ValueError(f"unbalanced legs: sum(DEBIT)={debit} != sum(CREDIT)={credit}")
+
+
+def decompose_settlement(
+    *,
+    amount: float | str | Decimal,
+    currency: str,
+    clearing_account: dict,
+    settlement_account_code: str,
+    coa: ChartOfAccounts,
+) -> list[PostingLeg]:
+    """Decompose the settlement leg pair (doc 21 B2): Dr clearing / Cr nostro or reserves.
+
+    The second accounting event in a two-event wire. The first event (PAYMENT_PRINCIPAL)
+    moved the customer's deposit to the clearing account — ``Dr customer deposit / Cr 1131``.
+    This event moves the clearing position to the settlement account:
+
+      - Dr 1131 Wire Clearing       (clearing position reduced — the hold is released)
+      - Cr 1111 Nostro Accounts      (model 1: settled via a correspondent)
+        or Cr 1121 Minimum Reserve Requirements (model 2: settled directly at the central bank)
+
+    Both GL codes are validated as active posting leaves. The ``entityReference`` on both
+    legs is the clearing account — it is the operational account this event is about, and
+    it is the one ``accounts`` doc the projection worker can validate. The settlement
+    account (1111/1121) is a GL account, not an ``accounts`` document; differentiating the
+    legs by ``glAccountCode`` rather than ``entityReference`` keeps the projection worker on
+    a code path it already handles.
+
+    ⚠️ Vostro (model 3) is stubbed — Q48 blocks it — so this function is never called with a
+    vostro settlement code. If it ever is, the ``require_active_posting_account`` check will
+    raise on the missing code, which is the correct failure mode for a stubbed model.
+    """
+    amount_minor = to_minor_units(amount)
+    if amount_minor <= 0:
+        raise ValueError(f"settlement amount must be positive, got {amount!r}")
+
+    clearing_code = (clearing_account.get("gl") or {}).get("accountCode")
+    if not clearing_code:
+        raise ValueError(
+            f"clearing account {clearing_account.get('accountId')!r} has no gl.accountCode"
+        )
+    coa.require_active_posting_account(clearing_code)
+    coa.require_active_posting_account(settlement_account_code)
+
+    legs = [
+        PostingLeg(
+            event_type=EVENT_PAYMENT_SETTLEMENT,
+            side=SIDE_DEBIT,
+            gl_account_code=clearing_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=clearing_account["accountId"],
+        ),
+        PostingLeg(
+            event_type=EVENT_PAYMENT_SETTLEMENT,
+            side=SIDE_CREDIT,
+            gl_account_code=settlement_account_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=clearing_account["accountId"],
+        ),
+    ]
+    assert_balanced(legs)
+    return legs

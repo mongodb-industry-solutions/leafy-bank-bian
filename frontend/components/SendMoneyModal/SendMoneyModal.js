@@ -9,8 +9,12 @@ import { useUser } from "@/lib/context/UserContext";
 import { useAccounts, useBeneficiaryAccounts } from "@/lib/api/hooks";
 import { coreApi } from "@/lib/api/client";
 
-// Drives the payment's rail, which in turn drives ledger postingMode routing
-// (BATCH / NEAR_REALTIME / REALTIME — see backend/ledger/workers/ingest_worker.py).
+// Drives the payment's `rail`. Note the rail does NOT drive ledger postingMode —
+// ingest_worker.py hardcodes BATCH and only copies `rail` through.
+//
+// Venmo and PayPal are UI labels only: in this demo they settle on Leafy Bank's own
+// ledger, which is exactly what rail INTERNAL means, and neither is in the spec's rail
+// enum. The label stays, the wire value changes (doc 13 §2 B3).
 const PAYMENT_METHODS = [
   { id: "debit", label: "Debit Card" },
   { id: "bank_transfer", label: "Bank Transfer" },
@@ -22,9 +26,16 @@ const RAIL_BY_PAYMENT_METHOD = {
   debit: "INTERNAL",
   bank_transfer: "ACH",
   wire: "WIRE",
-  venmo: "VENMO",
-  paypal: "PAYPAL",
+  venmo: "INTERNAL",
+  paypal: "INTERNAL",
 };
+
+// The per-payment cap is decided server-side by the debtor customer's segment
+// (`entitlement_policy.py`), so this screen can no longer state a number: it used to read
+// "Transaction limit 500", which was `PAYMENT_LIMIT_USD` — a bound that has moved and was
+// never this customer's entitlement anyway. Showing the real figure needs an endpoint that
+// returns the caller's entitlement; until then, say what is true.
+const TRANSACTION_LIMIT_LABEL = "Subject to your account's payment entitlement";
 
 const TRANSFER_METHODS = [
   { id: "internal", label: "Internal Transfer" },
@@ -52,6 +63,12 @@ export default function SendMoneyModal({
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentOriginator, setPaymentOriginator] = useState("");
   const [paymentBeneficiary, setPaymentBeneficiary] = useState("");
+
+  // R8 — "Requested execution date: Today" is an entry-screen field for every rail.
+  // ISO YYYY-MM-DD, which is what the API expects.
+  const today = new Date().toISOString().slice(0, 10);
+  const [paymentExecutionDate, setPaymentExecutionDate] = useState(today);
+  const [transferExecutionDate, setTransferExecutionDate] = useState(today);
 
   const [transferAmount, setTransferAmount] = useState("");
   const [transferMethod, setTransferMethod] = useState("internal");
@@ -107,17 +124,25 @@ export default function SendMoneyModal({
 
     setSubmitting(true);
     setError(null);
-    const { error: err } = await coreApi("PaymentOrderInitiation/Initiate", {
+    const { data, error: err } = await coreApi("PaymentOrderInitiation/Initiate", {
       method: "POST",
       body: {
         customerId,
-        // type is validated but cosmetic; the rail is what matters for posting mode.
-        type: isTransfer ? "INTRABANK_TRANSFER" : "CREDIT_TRANSFER",
+        // An intrabank transfer IS a credit transfer — "intrabank" describes the rail,
+        // not the ISO 20022 payment type. The old INTRABANK_TRANSFER is not in the
+        // spec's type enum (doc 13 §2 B2).
+        type: "CREDIT_TRANSFER",
         rail,
+        requestedExecutionDate: isTransfer ? transferExecutionDate : paymentExecutionDate,
         debtor: { accountId: originator },
         creditor: { accountId: beneficiary },
         instructedAmount: amount,
         instructedCurrency: currency,
+        channel: "WEB",
+        // No `authentication` object: the assertion is no longer this screen's to make.
+        // `UserContext` authenticates the persona against BIAN PartyAuthentication and
+        // `client.js` attaches the resulting token, so stage 2 grades a signature the
+        // bank issued instead of a claim this component invented.
       },
     });
     setSubmitting(false);
@@ -125,6 +150,13 @@ export default function SendMoneyModal({
     if (err) {
       // coreApi returns "<status>: <body>"; surface the backend detail.
       setError(err.replace(/^\d+:\s*/, ""));
+      return;
+    }
+    // 2026-09-09: stage 2 holds (not rejects) an over-threshold payment for a second factor.
+    // This screen has no step-up channel, so report it honestly rather than closing as if
+    // the money moved. (The back-office Create Payment wizard resumes it.)
+    if (data?.stepUpRequired) {
+      setError("This payment needs an additional authentication step (step-up) before it can be sent. It was not initiated.");
       return;
     }
     refreshData();
@@ -209,7 +241,7 @@ export default function SendMoneyModal({
 
         {view === "digital-payment" && (
           <>
-            <Body className={styles.modalSubtext}>Transaction limit 500</Body>
+            <Body className={styles.modalSubtext}>{TRANSACTION_LIMIT_LABEL}</Body>
             <div className={styles.modalBody}>
               <div className={styles.formGroup}>
                 <label className={styles.formLabel} htmlFor="payment-amount">Transaction amount</label>
@@ -220,6 +252,17 @@ export default function SendMoneyModal({
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="Enter amount"
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel} htmlFor="payment-execution-date">Requested execution date</label>
+                <input
+                  id="payment-execution-date"
+                  className={styles.formInput}
+                  type="date"
+                  min={today}
+                  value={paymentExecutionDate}
+                  onChange={(e) => setPaymentExecutionDate(e.target.value)}
                 />
               </div>
               <div className={styles.formGroup}>
@@ -264,7 +307,7 @@ export default function SendMoneyModal({
 
         {view === "transfer" && (
           <>
-            <Body className={styles.modalSubtext}>Transaction limit 500</Body>
+            <Body className={styles.modalSubtext}>{TRANSACTION_LIMIT_LABEL}</Body>
             <div className={styles.modalBody}>
               <div className={styles.formGroup}>
                 <label className={styles.formLabel} htmlFor="transfer-amount">Transaction amount</label>
@@ -275,6 +318,17 @@ export default function SendMoneyModal({
                   value={transferAmount}
                   onChange={(e) => setTransferAmount(e.target.value)}
                   placeholder="Enter amount"
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel} htmlFor="transfer-execution-date">Requested execution date</label>
+                <input
+                  id="transfer-execution-date"
+                  className={styles.formInput}
+                  type="date"
+                  min={today}
+                  value={transferExecutionDate}
+                  onChange={(e) => setTransferExecutionDate(e.target.value)}
                 />
               </div>
               <div className={styles.formGroup}>

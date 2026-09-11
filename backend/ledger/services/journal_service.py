@@ -16,6 +16,7 @@ from bson import Int64, ObjectId
 from pymongo.errors import DuplicateKeyError
 
 from database.connection import MongoDBConnection
+from services.posting_writeback_service import write_back
 from shared.posting_rules import MAPPING_VERSION
 from shared.refs import PREFIX_JOURNAL_ENTRY, derive_ref
 
@@ -178,6 +179,12 @@ def write_journal(
         "journal %s posted (period=%s, lines=%d)",
         journal_id, journal["periodCode"], len(journal["entries"]),
     )
+
+    # OUTSIDE the transaction, by design (doc 20 B1). The journal is already committed; a
+    # failure here is a stale pointer on `payments`, never a lost or rolled-back journal.
+    # `write_back` swallows its own exceptions for that reason.
+    write_back(journal_id, event_ids, connection, db_name)
+
     return True
 
 
