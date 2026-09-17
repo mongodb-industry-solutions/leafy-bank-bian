@@ -150,7 +150,21 @@ def _simulated_response(payment_id: str, model: str, outcome: str) -> dict:
 
 
 def _write_settlement_position(ctx: PaymentContext, response: dict, model: str) -> str:
-    """R12 — one `settlementPositions` document per settlement run. Returns its ID.
+    """R12 / FR-7.4 / FR-7.6 — one `settlementPositions` document per settlement run.
+
+    Records the **expected** position (per the payment's clearing instruction = the amount
+    credited to the clearing account at stage 6, read from the `transactions` doc) and the
+    **actual** position (per the simulated response) as separate stored values, so stage-8's
+    three-way reconciliation has a stored pair to compare (FR-7.4). For a cross-border FX
+    wire, the correspondent/nostro FX exchange is recorded here too (FR-7.6): `fxRate`, the
+    instructed amount/currency, and the settlement amount/currency. The FX exchange is
+    metadata only — the settlement ledgerEvent posts the clearing amount (single-currency)
+    so 1131 nets to zero; no FX conversion leg.
+
+    Written for EVERY outcome (matched/delayed/unmatched/exception), not just matched, so a
+    non-matched settlement leaves a stored record of the discrepancy. `actualAmount` is the
+    clearing amount for matched, 0 for unmatched/exception (nothing settled), None for
+    delayed (still pending).
 
     The collection is absent from the canonical spec (0 matches, doc 21 §0) and from
     Doina's field-level sections — she names it at L744/L926 and never specifies it. This
@@ -164,8 +178,26 @@ def _write_settlement_position(ctx: PaymentContext, response: dict, model: str) 
 
     model_info = _SETTLEMENT_MODELS[model]
     payment = ctx.payment_doc or {}
-    amount = payment.get("amount", 0)
-    currency = payment.get("currency", "USD")
+    settlement_amount = payment.get("amount", 0)
+    settlement_currency = payment.get("currency", "USD")
+
+    # Expected = the clearing amount (what was credited to 1131 at stage 6), read from the
+    # `transactions` doc — the same source `settlement_worker` uses for the event legs, so
+    # leg 2 (expected vs posted debit) compares like-for-like and 1131 nets to zero.
+    txn = c.db["transactions"].find_one({"paymentId": ctx.payment_id}) or {}
+    expected_amount = txn.get("amount", 0)
+    expected_currency = txn.get("currency", "USD")
+
+    outcome = response["outcome"]
+    if outcome == MATCHED:
+        actual_amount = expected_amount
+        actual_currency = expected_currency
+    elif outcome in (UNMATCHED, EXCEPTION):
+        actual_amount = 0
+        actual_currency = expected_currency
+    else:  # DELAYED — settlement not yet confirmed
+        actual_amount = None
+        actual_currency = None
 
     doc = {
         "_id": oid,
@@ -176,10 +208,16 @@ def _write_settlement_position(ctx: PaymentContext, response: dict, model: str) 
         "modelLabel": model_info["label"],
         "clearingAccountCode": _WIRE_CLEARING_CODE,
         "settlementAccountCode": model_info["settlementAccountCode"],
-        "grossAmount": amount,
-        "currency": currency,
-        "outcome": response["outcome"],
-        "settlementStatus": _OUTCOME_TO_STATUS[response["outcome"]],
+        # FR-7.4: expected vs actual as separate stored values.
+        "expectedAmount": expected_amount,
+        "expectedCurrency": expected_currency,
+        "actualAmount": actual_amount,
+        "actualCurrency": actual_currency,
+        # Settlement-currency gross (the nostro view); equals expectedAmount when no FX.
+        "grossAmount": settlement_amount,
+        "currency": settlement_currency,
+        "outcome": outcome,
+        "settlementStatus": _OUTCOME_TO_STATUS[outcome],
         "batchRef": response["batchRef"],
         "statusCode": response.get("statusCode"),
         "rejectionCode": response.get("rejectionCode"),
@@ -189,10 +227,18 @@ def _write_settlement_position(ctx: PaymentContext, response: dict, model: str) 
         "sourceSystem": "leafy-bank-payments-service",
     }
 
+    # FR-7.6: record the correspondent/nostro FX exchange for a cross-border wire.
+    if payment.get("fxRate") is not None:
+        doc["fxRate"] = payment.get("fxRate")
+        doc["instructedAmount"] = payment.get("instructedAmount")
+        doc["instructedCurrency"] = payment.get("instructedCurrency")
+        doc["settlementAmount"] = settlement_amount
+        doc["settlementCurrency"] = settlement_currency
+
     c.db["settlementPositions"].insert_one(doc)
     logger.info(
         "settlementPositions %s created for paymentId=%s (model=%s, outcome=%s)",
-        position_id, ctx.payment_id, model, response["outcome"],
+        position_id, ctx.payment_id, model, outcome,
     )
     return position_id
 
@@ -278,6 +324,13 @@ def run(ctx: PaymentContext) -> None:
         f"batch: {response['batchRef']}, value date: {response.get('settlementDate')}.",
     )
 
+    # --- R12: write the settlementPositions document (every outcome) -------------
+    # FR-7.4: record expected vs actual for ALL four outcomes, not just matched, so a
+    # non-matched settlement leaves a stored discrepancy for stage-8 reconciliation
+    # (otherwise legs 2/3 sit PENDING forever with no signal). FR-7.6 records the FX
+    # exchange on the doc when stage 3 levied an FX rate.
+    _write_settlement_position(ctx, response, model)
+
     # --- B4: transition the payment per the outcome ------------------------------
     now_iso = datetime.now(timezone.utc).isoformat()
     extra: dict = {
@@ -350,6 +403,3 @@ def run(ctx: PaymentContext) -> None:
         )
         ctx.stop(ctx.payment_doc)
         return
-
-    # --- R12: write the settlementPositions document -----------------------------
-    _write_settlement_position(ctx, response, model)

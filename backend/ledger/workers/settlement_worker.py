@@ -75,6 +75,7 @@ def _clear_resume_token(connection: MongoDBConnection, db_name: str) -> None:
 
 def build_settlement_event(
     payment: dict,
+    txn: dict,
     clearing_account: dict,
     coa: ChartOfAccounts,
 ) -> dict:
@@ -82,7 +83,8 @@ def build_settlement_event(
 
     The ``settlementAccountCode`` (1111 or 1121) is read from ``payment.clearing`` —
     ``settle.py`` stamps it at the same moment as the SETTLED transition, so the worker never
-    sees a SETTLED payment without it.
+    sees a SETTLED payment without it. The leg AMOUNT comes from ``txn`` (the clearing amount
+    credited to 1131 at stage 6), not ``payment.amount`` — see the note at the call below.
     """
     settlement_code = (payment.get("clearing") or {}).get("settlementAccountCode")
     if not settlement_code:
@@ -91,9 +93,14 @@ def build_settlement_event(
             "settle.py must stamp it at the SETTLED transition"
         )
 
+    # Source the leg amount from the `transactions` doc (the clearing amount actually
+    # credited to 1131 at stage 6), NOT `payment.amount` — which `_plan_fx` diverges to the
+    # settlement-currency amount on a cross-border FX wire. Using txn.amount here makes
+    # `Dr 1131` (settlement) equal `Cr 1131` (principal) so the clearing account nets to
+    # zero; the FX exchange is recorded on `settlementPositions` instead (FR-7.6).
     legs = decompose_settlement(
-        amount=payment.get("amount", 0),
-        currency=payment.get("currency", "USD"),
+        amount=txn.get("amount", 0),
+        currency=txn.get("currency", "USD"),
         clearing_account=clearing_account,
         settlement_account_code=settlement_code,
         coa=coa,
@@ -192,7 +199,7 @@ def process_settlement(
     if not clearing_account:
         raise ValueError(f"clearing account {clearing_account_id!r} not found in accounts")
 
-    event = build_settlement_event(payment, clearing_account, coa)
+    event = build_settlement_event(payment, txn, clearing_account, coa)
     le_coll = connection.get_collection(db_name, "ledgerEvents")
     try:
         le_coll.insert_one(event)

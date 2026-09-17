@@ -246,22 +246,27 @@ def compute_reconciliation(
         legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
                               detail="Settlement response received but the settlement ledgerEvent has not been derived yet (awaiting CDC)."))
     else:
-        expected_minors = _majors_to_minors(position.get("grossAmount"))
+        # FR-7.4: compare the stored expected (clearing amount) vs the posted settlement
+        # debit leg. Fall back to grossAmount for positions written before the FR-7.4 fix
+        # (expectedAmount absent) — safe because those are all USD-USD wires where the two
+        # are equal.
+        expected = position.get("expectedAmount", position.get("grossAmount"))
+        expected_minors = _majors_to_minors(expected)
         posted_minors = _signed_leg_amount(settlement_event.get("debitLeg"))
         settled = position.get("settlementStatus") == "SETTLED"
         if expected_minors is None:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
-                                  detail="settlementPositions.grossAmount is missing."))
+                                  detail="settlementPositions.expectedAmount is missing."))
         elif expected_minors == posted_minors and settled:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_MATCH,
                                   left_amount=expected_minors,
                                   right_amount=posted_minors,
-                                  detail=f"Expected (mirror) {position.get('grossAmount')} == posted settlement leg; settlementStatus SETTLED."))
+                                  detail=f"Expected (mirror) {expected} == posted settlement leg; settlementStatus SETTLED."))
         elif expected_minors != posted_minors:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_MISMATCH,
                                   left_amount=expected_minors,
                                   right_amount=posted_minors,
-                                  detail="Settlement position grossAmount != settlement ledgerEvent leg amount."))
+                                  detail="Settlement position expectedAmount != settlement ledgerEvent leg amount."))
         else:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_MISMATCH,
                                   left_amount=expected_minors,

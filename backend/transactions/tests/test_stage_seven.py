@@ -77,7 +77,10 @@ def test_delayed_outcome_holds_at_in_progress(service, db):
     assert payment["clearing"]["settlementDate"] is not None, "delayed has a future value date"
 
     positions = _settlement_positions(db)
-    assert len(positions) == 0, "no settlementPositions for a delayed settlement — it hasn't settled"
+    assert len(positions) == 1, "FR-7.4: a position is written for every outcome, including delayed"
+    assert positions[0]["outcome"] == "delayed"
+    assert positions[0]["actualAmount"] is None, "delayed: actual settlement not yet known"
+    assert positions[0]["expectedAmount"] is not None
 
 
 def test_unmatched_outcome_fails_the_payment(service, db):
@@ -89,6 +92,11 @@ def test_unmatched_outcome_fails_the_payment(service, db):
     assert payment["lifecycle"]["settlementStatus"] == "FAILED"
     assert payment["clearing"]["rejectionCode"] is not None
 
+    positions = _settlement_positions(db)
+    assert len(positions) == 1, "FR-7.4: a position is written even for a rejected settlement"
+    assert positions[0]["outcome"] == "unmatched"
+    assert positions[0]["actualAmount"] == 0, "unmatched: nothing settled"
+
 
 def test_exception_outcome_returns_the_payment(service, db):
     """B4 exception → settlementStatus RETURNED, currentState RETURNED, saga halts."""
@@ -98,6 +106,11 @@ def test_exception_outcome_returns_the_payment(service, db):
     assert payment["lifecycle"]["currentState"] == "RETURNED"
     assert payment["lifecycle"]["settlementStatus"] == "RETURNED"
     assert payment["clearing"]["returnCode"] is not None
+
+    positions = _settlement_positions(db)
+    assert len(positions) == 1, "FR-7.4: a position is written even for a returned settlement"
+    assert positions[0]["outcome"] == "exception"
+    assert positions[0]["actualAmount"] == 0, "exception: nothing settled"
 
 
 # --- B4: every settlementStatus value is from the spec enum -------------------
@@ -169,3 +182,36 @@ def test_settlement_positions_carries_the_payment_id_both_ways(service, db):
     payment = _payment(db)
     positions = _settlement_positions(db)
     assert positions[0]["paymentId"] == payment["paymentId"]
+
+
+# --- FR-7.4 / FR-7.6: position shape (expected/actual + FX) --------------------
+
+def test_a_cross_border_fx_wire_records_the_fx_exchange_on_the_position(service, db):
+    """FR-7.6 — a cross-border FX wire records the correspondent/nostro FX exchange
+    (fxRate, instructed amount/currency, settlement amount/currency) on the
+    settlementPositions doc. FR-7.4: expectedAmount is the clearing amount (read from the
+    transactions doc), distinct from grossAmount (the FX-diverged settlement amount)."""
+    _initiate_external(service, instructed_currency="EUR", instructed_amount=1000.0)
+
+    payment = _payment(db)
+    assert payment["fxRate"] is not None, "FX applied — debtor USD, instructed EUR"
+
+    positions = _settlement_positions(db)
+    assert len(positions) == 1
+    pos = positions[0]
+
+    # FR-7.6: the FX exchange is recorded on the position.
+    assert pos["fxRate"] == payment["fxRate"]
+    assert pos["instructedAmount"] == 1000.0
+    assert pos["instructedCurrency"] == "EUR"
+    assert pos["settlementAmount"] == payment["amount"]
+    assert pos["settlementCurrency"] == payment["currency"]
+
+    # FR-7.4: expected (clearing amount from the transactions doc) vs gross (settlement
+    # amount) are distinct on an FX wire.
+    txn = db["transactions"].find_one({"paymentId": payment["paymentId"]})
+    assert pos["expectedAmount"] == txn["amount"]
+    assert pos["grossAmount"] == payment["amount"]
+    assert pos["expectedAmount"] != pos["grossAmount"], (
+        "FX wire: the clearing amount (txn) must differ from the settlement amount (payment)"
+    )

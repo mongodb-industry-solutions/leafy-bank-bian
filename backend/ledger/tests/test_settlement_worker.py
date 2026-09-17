@@ -59,6 +59,13 @@ _PAYMENT = {
     },
 }
 
+_TXN = {
+    "paymentId": "PAY-test0001",
+    "txnId": "TXN-test0001",
+    "amount": 250.0,
+    "currency": "USD",
+}
+
 
 # --- decompose_settlement -----------------------------------------------------
 
@@ -106,13 +113,13 @@ def test_both_gl_codes_are_validated():
 
 def test_the_settlement_event_has_the_right_idempotency_key():
     """B2 — the principal's key stays exactly `{paymentId}`; the settlement's is `-SETTLEMENT`."""
-    event = build_settlement_event(_PAYMENT, _CLEARING_ACCOUNT, _COA)
+    event = build_settlement_event(_PAYMENT, _TXN, _CLEARING_ACCOUNT, _COA)
     assert event["idempotencyKey"] == "PAY-test0001-SETTLEMENT"
 
 
 def test_the_settlement_event_sources_from_payments_not_transactions():
     """The settlement event is sourced from `payments`, not `transactions` (doc 21 B2)."""
-    event = build_settlement_event(_PAYMENT, _CLEARING_ACCOUNT, _COA)
+    event = build_settlement_event(_PAYMENT, _TXN, _CLEARING_ACCOUNT, _COA)
     assert event["sourceReference"]["sourceCollection"] == "payments"
     assert event["sourceReference"]["sourceType"] == "SETTLEMENT"
 
@@ -120,16 +127,33 @@ def test_the_settlement_event_sources_from_payments_not_transactions():
 def test_the_settlement_event_carries_the_mapping_version():
     """Provenance: the MAPPING_VERSION bump (1.2.0) is stamped on the event."""
     from shared.posting_rules import MAPPING_VERSION
-    event = build_settlement_event(_PAYMENT, _CLEARING_ACCOUNT, _COA)
+    event = build_settlement_event(_PAYMENT, _TXN, _CLEARING_ACCOUNT, _COA)
     assert event["mappingVersion"] == MAPPING_VERSION
 
 
 def test_the_settlement_event_legs_match_the_decomposition():
     """The event's legs are the decomposition's legs, in the event envelope."""
-    event = build_settlement_event(_PAYMENT, _CLEARING_ACCOUNT, _COA)
+    event = build_settlement_event(_PAYMENT, _TXN, _CLEARING_ACCOUNT, _COA)
     assert event["debitLeg"]["glAccountCode"] == "1131"
     assert event["creditLeg"]["glAccountCode"] == "1111"
     assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"]
     assert event["eventType"] == EVENT_PAYMENT_SETTLEMENT
     assert event["postingStatus"] == "PENDING"
     assert event["meta"]["subLedgerType"] == "CLEARING_AND_SETTLEMENT"
+
+
+def test_the_settlement_event_uses_the_clearing_amount_not_the_fx_diverged_amount():
+    """FR-7.6 hazard — for a cross-border FX wire, `payment.amount` is diverged by `_plan_fx`
+    to the settlement-currency amount, while `txn.amount` is the clearing amount credited to
+    1131 at stage 6. The settlement event must debit/credit 1131 by `txn.amount` so the
+    clearing account nets to zero — NOT by the diverged `payment.amount` (which would leave
+    1131 non-zero and break stage-8 leg 3)."""
+    payment = {**_PAYMENT, "amount": 1080.0, "currency": "USD", "fxRate": 1.08,
+               "instructedAmount": 1000.0, "instructedCurrency": "EUR"}
+    txn = {**_TXN, "amount": 1000.0, "currency": "EUR"}
+    event = build_settlement_event(payment, txn, _CLEARING_ACCOUNT, _COA)
+    # Legs carry the clearing amount (1000 EUR = 100000 minor), not the diverged 1080 USD.
+    assert event["debitLeg"]["amount"] == 100_000
+    assert event["creditLeg"]["amount"] == 100_000
+    assert event["debitLeg"]["currency"] == "EUR"
+    assert event["creditLeg"]["currency"] == "EUR"
