@@ -111,14 +111,12 @@ def test_every_required_field_is_written(schema, rail):
 # `additionalProperties: false` — and all deliberate:
 #   isInternal / createdBy   pre-existing, unrelated to any stage
 #   checks / authentication / entitlement
-#       stage 2 (doc 15 B3/B1). `payments` has no field for any check, authentication or
-#       approval outcome: `approvals[]` was prototyped and reverted
-#       (`propose_payments.json:26`) and never restored when D2/D3 restored `lifecycle{}`
-#       and `refs{}`. Added the same way those were — nullable, not `required` — and sent
-#       to Doina as Q12 to ratify. This set is the tripwire: a SIXTH extra must be argued
-#       for, not appear.
+#       stage 2 (doc 15 B3/B1). Now DECLARED in the spec with their content fields (Doina
+#       2026-09-15 ratified the previously-unsent Q12 — the shell-only `authentication` /
+#       `entitlement` and the bare `checks` array are filled per DR-2.1/DR-2.2), so they
+#       are no longer extras. This set is the tripwire: a change here must be argued for.
 _KNOWN_EXTRAS = {
-    "isInternal", "createdBy", "checks", "authentication", "entitlement",
+    "isInternal", "createdBy",
     # Stage 3 (doc 17 B1/B5). The sixth, and the argument for it is in B5: her
     # L459-460 before/after screen cannot be drawn from a document that holds one
     # value per field. A SEVENTH must be argued for in the same way.

@@ -1033,6 +1033,20 @@ def test_the_flagship_corporate_payment_settles_with_a_labelled_simulated_approv
     assert payment["entitlement"]["dualApprovalRequired"] is True
     assert payment["entitlement"]["segment"] == "COMMERCIAL"
     assert payment["entitlement"]["signingRule"] == "JOINT"
+    # DR-2.1 / DR-2.2 (Doina 2026-09-15): the named entitlement-check result + dual-approval
+    # record must be present on the populated `entitlement{}`, not just derivable from checks.
+    e = payment["entitlement"]
+    assert e["accountActive"] is True
+    assert e["limitAvailable"] is True      # 25,000 within the COMMERCIAL 500,000 limit
+    assert e["fundsAvailable"] is None      # stage 3 (Q13) — stage 2 answers limit, not funds
+    assert e["checkedAt"] is not None
+    da = e["dualApproval"]
+    assert da["required"] is True
+    assert da["threshold"] == 10000
+    assert da["status"] == "PASS"
+    assert da["approvers"] == ["SIMULATED-APPROVER-OPS"]
+    assert da["approvedBy"] == "SIMULATED-APPROVER-OPS"
+    assert da["approvedAt"] is not None
     assert payment["lifecycle"]["currentState"] == "SETTLED", "the demo still runs end to end"
     assert len(db["transactions"].inserted) == 1
 

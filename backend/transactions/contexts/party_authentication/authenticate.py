@@ -194,6 +194,11 @@ def run(ctx: PaymentContext) -> None:
             f"{signing_rule} — no second approver required.",
         )
 
+    # DR-2.1 / DR-2.2 (Doina 2026-09-15). `recorded` still holds all six checks here —
+    # `_flush` hasn't cleared it yet — so the named booleans are derivable from the results.
+    result_by_name = {c["name"]: c["result"] for c in recorded}
+    dual_status = result_by_name.get("dual_approval")
+
     _flush(
         ctx, recorded,
         extra={
@@ -219,7 +224,9 @@ def run(ctx: PaymentContext) -> None:
                 "assessedBy": "transactions-service",
                 "sufficient": method != "NONE",
             },
-            # Read by stage 4b for the APPROVED transition's reason.
+            # Read by stage 4b for the APPROVED transition's reason. The flat `dualApproval*`
+            # fields stay for stage-4b/UI compatibility; DR-2.1 / DR-2.2 (Doina 2026-09-15)
+            # add the named entitlement-check result + dual-approval record beneath them.
             "entitlement": {
                 "segment": segment,
                 "signingRule": signing_rule,
@@ -228,6 +235,21 @@ def run(ctx: PaymentContext) -> None:
                 "dualApprovalRequired": approval_required,
                 "dualApprovalBy": SIMULATED_APPROVER if approval_required else None,
                 "dualApprovalSimulated": approval_required,
+                # DR-2.1 — named entitlement-check result. `accountActive` / `limitAvailable`
+                # come from the check results; `fundsAvailable` is stage 3 (Q13), null here.
+                "accountActive": result_by_name.get("account_active") == checks.PASS,
+                "fundsAvailable": None,
+                "limitAvailable": result_by_name.get("payment_limit_available") == checks.PASS,
+                "checkedAt": now,
+                # DR-2.2 — dual-approval record.
+                "dualApproval": {
+                    "required": approval_required,
+                    "threshold": limits["dualApprovalThreshold"],
+                    "status": dual_status,
+                    "approvers": [SIMULATED_APPROVER] if approval_required else [],
+                    "approvedBy": SIMULATED_APPROVER if approval_required else None,
+                    "approvedAt": now if approval_required else None,
+                },
                 "assessedAt": now,
             },
         },
