@@ -110,6 +110,14 @@ def run(ctx: PaymentContext) -> None:
     # One timestamp for the instruction. Later stages stamp their own transition times.
     ctx.now = datetime.now(timezone.utc)
 
+    # No requested execution date, no forward-dating answer: default to the initiation
+    # date so the canonical `payments` doc always carries a non-null ReqdExctnDt (pain.001
+    # mandatory; Doina Stage 1 review 2026-09-15, "Sep 14 Data Model"). Same-day in the
+    # demo, which is the stage-4 orchestrator's expectation (`orchestrate.py:177`). The
+    # dataclass field stays Optional so a test fixture can still build a bare ctx.
+    if ctx.requested_execution_date is None:
+        ctx.requested_execution_date = ctx.now.date()
+
     # --- persist at DRAFT ----------------------------------------------------
     # Outside any ACID transaction: an order initiation is a distinct business step
     # (2026-06-18 decision), and it must survive a later validation failure so the

@@ -186,6 +186,20 @@ def test_stage_two_slots_are_empty_at_creation():
     assert doc["clientReference"] is None
 
 
+def test_a_wire_always_carries_its_pain001_mandatory_envelope_fields():
+    """Doina Stage 1 (2026-09-15): PmtInfId / PmtMtd are mandatory for a WIRE.
+
+    Enforced HERE, not as a collection-schema non-null: `wireDetails` is the discriminated
+    envelope — `initiation_envelope.null_wire_details()` writes `paymentInformationId: None`
+    / `paymentMethod: None` for internal / ACH / CARD / RTP — so a schema-level `required` +
+    `bsonType: "string"` on those two fields would reject every non-wire. The wire builder
+    always populates them (`build_wire_details`), so the wire case is pinned here instead.
+    """
+    doc = payment_document.build(_ctx(payment_rail="WIRE"))
+    assert doc["wireDetails"]["paymentInformationId"]
+    assert doc["wireDetails"]["paymentMethod"] == "TRF"
+
+
 def _enum_fields(schema, prefix=""):
     """Every (dotted path, allowed values) pair the spec declares, at ANY depth.
 

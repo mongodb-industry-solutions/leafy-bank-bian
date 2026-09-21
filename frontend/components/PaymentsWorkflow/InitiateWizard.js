@@ -171,6 +171,23 @@ function buildPayload(form) {
   return payload;
 }
 
+// Mirror of backend `identifier_format.bic_problem` (ISO 9362). The backend is the source
+// of truth; this copy only makes the error *reactive* — it clears as the user corrects the
+// field, instead of a one-shot banner snapshot from a past submit (Doina 2026-09-15). Keep
+// the rule byte-close to the Python module. `form.bic` is uppercased on change, so the
+// uppercase-only shape check is safe.
+const BIC_RE = /^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$/;
+function bicProblem(bic) {
+  if (!bic) return "";
+  if (bic.length !== 8 && bic.length !== 11) {
+    return `BIC '${bic}' is ${bic.length} characters; ISO 9362 allows 8 or 11.`;
+  }
+  if (!BIC_RE.test(bic)) {
+    return "BIC is not ISO 9362 shaped (4 letters, 2-letter country, 2 alphanumeric, optional 3-character branch).";
+  }
+  return "";
+}
+
 function validate(form) {
   const e = {};
   if (!form.customerId) e.customerId = "Select a customer.";
@@ -188,6 +205,10 @@ function validate(form) {
     if (!form.beneficiaryCountry) e.beneficiaryCountry = "Required.";
     // The spec's validator requires a creditor BIC on WIRE when the creditor is external.
     if (!form.bic) e.bic = "Required for an external wire.";
+    else {
+      const p = bicProblem(form.bic);
+      if (p) e.bic = p;
+    }
     if (!form.beneficiaryBankName) e.beneficiaryBankName = "Required.";
   } else {
     if (!form.creditorAccountId) e.creditorAccountId = "Select a recipient account.";
@@ -354,7 +375,13 @@ export default function InitiateWizard({ onInitiated }) {
 
   const { customers, accountsByCustomer, allAccounts, loading } = useBankAssistedParties();
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k, v) => {
+    setForm((f) => ({ ...f, [k]: v }));
+    // A field edit dismisses a stale backend error. `submitError` is a snapshot of a past
+    // submit; edit it away so correcting a value clears the banner instead of leaving the
+    // old message up (Doina 2026-09-15 — BIC 'TEST3' persisted after correction).
+    setSubmitError(null);
+  };
   const errors = useMemo(() => validate(form), [form]);
   const err = (k) => (showErrors ? errors[k] : undefined);
   const state = (k) => (err(k) ? "error" : "none");
