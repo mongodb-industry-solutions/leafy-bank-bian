@@ -21,11 +21,15 @@ BIAN PaymentSettlement (SD 40033, no published semantic API) + InternalBankAccou
 service's** `settlement_worker` via CDC on `payments` — never by the transactions service
 (decisions.md 2026-06-18, the async-CDC firewall).
 
-## Her four outcomes (B4, L630)
+## Her four outcomes (B4, L630, FR-7.3)
 
-matched → `SETTLED` · delayed → `PENDING` (stays at `IN_PROGRESS`) · unmatched → `FAILED`
-· exception → `RETURNED`. Every value comes from the spec's `settlementStatus` enum — no
-invented states.
+MATCHED → `SETTLED` · DELAYED → `PENDING` (stays at `IN_PROGRESS`) · UNMATCHED → `FAILED`
+· EXCEPTION → `RETURNED`. Every value comes from the spec's `settlementStatus` enum — no
+invented states. The `outcome` classification itself is an enum on `settlementPositions`
+(`MATCHED`/`UNMATCHED`/`DELAYED`/`EXCEPTION`), matched to the spec's `settlementStatus` enum
+via `_OUTCOME_TO_STATUS`. Doina (Sep 17): the four outcomes must be reachable and trigger
+distinct downstream behaviour, not just label the same result — UNMATCHED stamps a
+discrepancy amount + reason on `clearing` for the (deferred) Stage 9 exception queue.
 
 Reads  ctx: current_state, payment_doc, payment_id, payment_rail, is_external_creditor,
             execution_strategy, collections
@@ -79,13 +83,21 @@ _SETTLEMENT_MODELS: dict[str, dict] = {
 # The clearing account code for wire ( seeded in step 1).
 _WIRE_CLEARING_CODE = "1131"
 
-# --- her four outcomes (B4, L630) → spec settlementStatus enum ---------------
+# --- her four outcomes (B4, L630, FR-7.3) → spec settlementStatus enum -------
 # delayed is PENDING with a future settlementDate — a timing property, not a state
 # (doc 21 B4: "Do not invent states").
-MATCHED = "matched"
-DELAYED = "delayed"
-UNMATCHED = "unmatched"
-EXCEPTION = "exception"
+#
+# Uppercase to match the repo's enum convention (settlementStatus is uppercase) and the
+# `settlementPositions.outcome` enum declared in the consolidated spec. The request
+# contract (`api_models.SettlementOutcomeLiteral`) admits only these four — an unknown
+# value 422's at the boundary, never reaches `_OUTCOME_TO_STATUS` (which previously raised
+# KeyError → HTTP 500 on a free string).
+MATCHED = "MATCHED"
+DELAYED = "DELAYED"
+UNMATCHED = "UNMATCHED"
+EXCEPTION = "EXCEPTION"
+
+OUTCOME_VALUES = (MATCHED, DELAYED, UNMATCHED, EXCEPTION)
 
 _OUTCOME_TO_STATUS: dict[str, str] = {
     MATCHED: "SETTLED",
@@ -375,6 +387,13 @@ def run(ctx: PaymentContext) -> None:
         return
     elif outcome == UNMATCHED:
         extra["clearing.rejectionCode"] = response.get("rejectionCode")
+        # FR-7.3 / Doina (Sep 17): UNMATCHED feeds Stage 8's mismatch flag with a specific
+        # discrepancy amount and routes toward Stage 9's exception queue. The queue itself is
+        # deferred (stage 9 roadmap); stamp the discrepancy here so the routing is data-ready —
+        # expected (the clearing amount) minus actual (0 — nothing settled back).
+        expected_amount = (ctx.payment_doc or {}).get("amount", 0)
+        extra["clearing.discrepancyAmount"] = expected_amount
+        extra["clearing.discrepancyReason"] = response.get("rejectionCode")
         lifecycle.advance_ctx(
             ctx, lifecycle.FAILED,
             actor="payment-settlement-service",
@@ -384,6 +403,7 @@ def run(ctx: PaymentContext) -> None:
         _record_check(
             ctx, "settlement_rejected", checks.FAIL,
             f"Settlement rejected — {response.get('rejectionCode')}. Payment FAILED. "
+            f"Discrepancy {expected_amount} (expected {expected_amount}, received 0). "
             f"The clearing position must be reversed (stage 9).",
         )
         ctx.stop(ctx.payment_doc)

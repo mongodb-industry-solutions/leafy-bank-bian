@@ -136,9 +136,11 @@ class PaymentContext:
     # True when `requestedExecutionDate` is in the future: the payment is warehoused for
     # release and stage 4a halts it at ROUTED (doc 18 B9).
     warehoused: bool = False
-    # Stage 7's settlement outcome override. The saga defaults to "matched" (SETTLED); the
-    # BIAN route `POST /PaymentSettlement/Initiate` can set this to drive a demo scenario
-    # that needs unmatched/delayed/exception outcomes (doc 21 B4, step 7).
+    # Stage 7's settlement outcome override. The saga defaults to MATCHED (SETTLED); the
+    # Initiate request's `simulatedSettlementOutcome` (the demo wizard control) or the BIAN
+    # route `POST /PaymentSettlement/Initiate` can set this to drive a demo scenario that
+    # needs UNMATCHED/DELAYED/EXCEPTION outcomes (doc 21 B4, FR-7.3). Values are constrained
+    # to the `SettlementOutcomeLiteral` enum at the request boundary.
     settlement_outcome: Optional[str] = None
     # Stage 4b operator-review override (FR-4.13 resume). Set by `resolve_review` when an
     # operator approves/declines a payment held at MANUAL_FRAUD_REVIEW. "APPROVED" makes

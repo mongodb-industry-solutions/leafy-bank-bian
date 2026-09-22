@@ -874,7 +874,7 @@
 
 .legs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
   gap: 0 16px;
   font-size: 13px;
   line-height: 20px;
@@ -907,6 +907,21 @@
 .legAmount {
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+/* Ledger legs (stage 6/7 Dr/Cr): amounts are short and must stay on one line; the account
+   name ellipsizes if long. Scoped via `.legsLedger` so the enrichment diff (long object
+   strings in `.legAmount`) keeps wrapping. Credit column is wider (see `.legs`). */
+.legsLedger .legAmount {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  flex: none;
+}
+
+.legsLedger .legRow > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .legsFoot {

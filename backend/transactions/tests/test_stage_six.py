@@ -75,7 +75,7 @@ def test_an_internal_transfer_carries_no_fee(service, db):  # noqa: F811
 def test_an_external_wire_reaches_the_ledger_via_the_clearing_account(service, db):  # noqa: F811
     """Stage 7 doc 21 B1/B3 — the halt is gone. An external wire now writes a `transactions`
     doc (payee = the clearing account), so the ledger's CDC path observes it. The payment
-    settles via `settle.py` (default outcome: matched) — the boundary document exists, so
+    settles via `settle.py` (default outcome: MATCHED) — the boundary document exists, so
     stage 6's write-back and the GL pipeline are reachable."""
     _initiate_external(service)
     assert len(db["transactions"].docs) == 1

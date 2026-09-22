@@ -332,7 +332,7 @@ function Legs({ legs }) {
     );
 
   return (
-    <div className={styles.legs}>
+    <div className={`${styles.legs} ${styles.legsLedger}`}>
       <div className={styles.legsHead}>Debit</div>
       <div className={styles.legsHead}>Credit</div>
       {Array.from({ length: rows }).map((_, i) => (
@@ -987,6 +987,34 @@ function summaryRows(stage, payment) {
         ["Journal (leg 3)", check?.journalEntryId],
         ["Checked", check?.checkedAt ? fmtWhen(check.checkedAt) : null],
       ];
+    }
+    case "legs": {
+      // Stage 7 — clearing & settlement. `data` is { position, clearing }. Surface the
+      // four-way outcome (FR-7.3) and, for UNMATCHED, the discrepancy amount that routes
+      // toward the Stage 9 exception queue — not just the settlement status.
+      const pos = d?.position;
+      const clr = d?.clearing;
+      const outcome = pos?.outcome;
+      const rows = [
+        ["Outcome", outcome || "—"],
+        ["Settlement status", pos?.settlementStatus || payment?.lifecycle?.settlementStatus],
+        ["Settlement model", pos?.modelLabel],
+        // FR-7.1 (Doina Sep 18) — the event is named to read as the external-settlement posting
+        // (eventType: SETTLEMENT, distinct from the stage-6 PAYMENT_PRINCIPAL event).
+        ["Settlement event", d?.event?.eventType || "—"],
+        ["Settled at", clr?.settledAt ? fmtWhen(clr.settledAt) : null],
+        ["Value date", clr?.settlementDate],
+        ["Batch", pos?.batchRef],
+      ];
+      if (outcome === "UNMATCHED") {
+        rows.push(
+          ["Discrepancy amount", clr?.discrepancyAmount != null ? fmtAmount(clr.discrepancyAmount, pos?.currency || payment?.currency) : null],
+          ["Discrepancy reason", clr?.discrepancyReason],
+        );
+      }
+      if (clr?.rejectionCode) rows.push(["Rejection code", clr.rejectionCode]);
+      if (clr?.returnCode) rows.push(["Return code", clr.returnCode]);
+      return rows;
     }
     default:
       return [["Current state", payment?.lifecycle?.currentState]];

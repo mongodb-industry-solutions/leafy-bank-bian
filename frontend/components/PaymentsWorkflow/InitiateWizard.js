@@ -61,6 +61,18 @@ const CHARGE_BEARERS = [
 const CLEARING_SYSTEMS = ["USABA", "USPID", "GBDSC", "CHBCC", "DEBLZ", "CACPA"];
 const ACCOUNT_TYPES = ["Checking", "Savings", "Current", "FixedDeposit"];
 const PRIORITIES = ["NORMAL", "HIGH", "URGENT"];
+
+// Stage 7 FR-7.3 — the four simulated settlement outcomes (Doina Sep 17). A demo lever on
+// the back-office wizard so all four are drivable from the screen and their distinct
+// downstream behaviour is observable. MATCHED is the happy path; the others fork the
+// lifecycle (DELAYED → PENDING, UNMATCHED → FAILED + discrepancy, EXCEPTION → RETURNED).
+// Internal transfers settle atomically in stage 5 and ignore this — the control is wire-only.
+const SETTLEMENT_OUTCOMES = [
+  { value: "MATCHED", label: "Matched", description: "Response confirms expected amount/account — SETTLED" },
+  { value: "DELAYED", label: "Delayed", description: "No confirmation yet within the window — PENDING" },
+  { value: "UNMATCHED", label: "Unmatched", description: "Response disagrees — FAILED + discrepancy flag" },
+  { value: "EXCEPTION", label: "Exception", description: "Network/correspondent rejected — RETURNED" },
+];
 const TRANSFER_TYPES = [
   ["OWN_ACCOUNT", "Own account"],
   ["THIRD_PARTY", "Third party"],
@@ -96,6 +108,8 @@ const EMPTY = {
   localInstrumentCode: "",
   // internal envelope
   transferType: "THIRD_PARTY",
+  // stage 7 simulation lever (wire-only; default MATCHED = happy path)
+  simulatedSettlementOutcome: "MATCHED",
 };
 
 const isWire = (form) => form.rail === "WIRE";
@@ -162,6 +176,10 @@ function buildPayload(form) {
     // serviceLevel/localInstrument nest under paymentTypeInformation per the Pydantic
     // WireDetailsBody contract (extra="forbid") — flat placement 422's.
     if (Object.keys(pti).length) payload.wireDetails = { paymentTypeInformation: pti };
+
+    // Stage 7 simulation lever (FR-7.3) — DISABLED 2026-09-22. Doina's ask was the `outcome`
+    // enum on the schema, not a demo driver. Left commented so the lever can be re-enabled.
+    // payload.simulatedSettlementOutcome = form.simulatedSettlementOutcome;
   } else {
     // An account we hold — name, BIC and address resolve from the snapshot server-side.
     payload.creditor = { accountId: form.creditorAccountId };
@@ -511,6 +529,10 @@ export default function InitiateWizard({ onInitiated }) {
       ["Client reference", form.clientReference || "—"],
       ["Charges", form.chargeBearer],
       ["Priority", form.priority],
+      // Stage 7 outcome row — disabled with the selector (2026-09-22).
+      // ...(isWire(form)
+      //   ? [["Settlement outcome", form.simulatedSettlementOutcome]]
+      //   : []),
       ["Channel", "BRANCH (bank-assisted)"],
     ];
     return (
@@ -894,6 +916,37 @@ export default function InitiateWizard({ onInitiated }) {
 
                     {isWire(form) && (
                       <>
+                        {/* Stage 7 FR-7.3 — settlement-outcome selector DISABLED for now
+                            (commented out 2026-09-22). Doina's ask was the `outcome` enum on
+                            the schema, not a demo driver. The backend plumbing
+                            (`simulatedSettlementOutcome` on the request, the SettlementOutcome
+                            Literal, the settle.py branches) stays in place so this can be
+                            re-enabled by uncommenting when a demo needs the non-happy paths.
+                        <Select
+                          label="Simulated settlement outcome"
+                          description="Stage 7 demo control — picks the simulated external settlement response."
+                          value={form.simulatedSettlementOutcome}
+                          onChange={(v) => set("simulatedSettlementOutcome", v)}
+                          allowDeselect={false}
+                        >
+                          {SETTLEMENT_OUTCOMES.map((o) => (
+                            <Option key={o.value} value={o.value} description={o.description}>
+                              {o.label}
+                            </Option>
+                          ))}
+                        </Select>
+                        {form.simulatedSettlementOutcome !== "MATCHED" && (
+                          <div className={styles.infoBox}>
+                            This forces a non-happy-path settlement: the payment will{" "}
+                            {form.simulatedSettlementOutcome === "DELAYED"
+                              ? "hold at IN_PROGRESS (settlement PENDING)"
+                              : form.simulatedSettlementOutcome === "UNMATCHED"
+                                ? "FAIL with a stamped discrepancy amount (routes to the exception queue)"
+                                : "RETURN (network/correspondent rejection)"}{" "}
+                            — for demoing the distinct downstream outcomes (FR-7.3).
+                          </div>
+                        )}
+                        */}
                         <button
                           type="button"
                           className={styles.disclosure}

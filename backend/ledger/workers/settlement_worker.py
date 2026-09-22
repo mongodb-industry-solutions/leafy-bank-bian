@@ -38,6 +38,7 @@ from database.connection import MongoDBConnection
 from shared.coa_cache import ChartOfAccounts
 from shared.posting_rules import (
     MAPPING_VERSION,
+    EVENT_PAYMENT_SETTLEMENT,
     SIDE_CREDIT,
     SIDE_DEBIT,
     decompose_settlement,
@@ -127,13 +128,13 @@ def build_settlement_event(
         "occurredAt": occurred_at,
         "valueDate": occurred_at,
         "periodName": occurred_at.strftime("%B %Y"),
-        "description": f"PAYMENT_SETTLEMENT: {payment_id}",
+        "description": f"External settlement posting — SETTLEMENT: {payment_id}",
         "meta": {
             "subLedgerType": "CLEARING_AND_SETTLEMENT",
             "periodCode": period_code,
             "sourceSystem": _SOURCE_SYSTEM,
         },
-        "eventType": "PAYMENT_SETTLEMENT",
+        "eventType": EVENT_PAYMENT_SETTLEMENT,
         "debitLeg": {
             "glAccountCode": debit_leg.gl_account_code,
             "controlAccountCode": coa.control_account_for(debit_leg.gl_account_code),

@@ -440,7 +440,7 @@ export function buildLifecycleStages(payment, trace) {
         "Records the settlement position and the settlement event — SETTLED no longer happens " +
         "inside the money move.",
       kind: "legs",
-      data: { position, clearing },
+      data: { position, clearing, event: se },
       legs: se
         ? {
             currency: se.creditLeg?.currency || "USD",

@@ -33,6 +33,11 @@ SecCodeLiteral = Literal["PPD", "CCD", "WEB", "TEL"]
 AchDirectionLiteral = Literal["CREDIT", "DEBIT"]
 InternalTransferTypeLiteral = Literal["OWN_ACCOUNT", "THIRD_PARTY"]
 
+# Stage 7 (BIAN PaymentSettlement, SD 40033 — no published API). The four simulated
+# settlement outcomes (FR-7.3 / Doina Sep 17). Mirrors the `settlementPositions.outcome`
+# enum declared in the consolidated spec. Sourced from the spec, not memory.
+SettlementOutcomeLiteral = Literal["MATCHED", "UNMATCHED", "DELAYED", "EXCEPTION"]
+
 # Stage 2 (BIAN PartyAuthentication, SD 38917). NOT from the `payments` spec — no
 # authentication field exists there. This is the channel's assertion about an
 # authentication IT performed; the payments hub only verifies and records it
@@ -199,6 +204,14 @@ class PaymentOrderInitiateRequest(BaseModel):
     achDetails: Optional[AchDetailsBody] = None
     internalDetails: Optional[InternalDetailsBody] = None
 
+    # Stage 7 demo simulation lever (FR-7.3). Only meaningful for an EXTERNAL wire, whose
+    # settlement is deferred to stage 7 (an internal transfer settles atomically in stage 5
+    # and ignores this). Defaults to MATCHED, preserving the happy path. The back-office
+    # wizard exposes it so all four outcomes are drivable from the screen; an API caller can
+    # set it to exercise UNMATCHED/DELAYED/EXCEPTION and their distinct downstream effects.
+    # NOT a BIAN initiation field — a simulation control; see `payments.notes[]`.
+    simulatedSettlementOutcome: Optional[SettlementOutcomeLiteral] = None
+
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
@@ -311,5 +324,5 @@ class PaymentSettlementInitiateRequest(BaseModel):
     unmatched, or exception. When omitted, the saga's own default (matched) applies.
     """
     paymentId: str = Field(min_length=1)
-    outcome: Optional[str] = Field(default=None)
+    outcome: Optional[SettlementOutcomeLiteral] = Field(default=None)
     model_config = ConfigDict(extra="forbid")

@@ -25,9 +25,13 @@ logger = logging.getLogger(__name__)
 MAPPING_VERSION = "1.2.0"
 
 # eventType — subset of the spec's ledgerEvents.eventType enum exercised in Phase 1.
+# Values are verbatim from the spec enum (`SETTLEMENT`, `FEE`, `PAYMENT_PRINCIPAL`) — the
+# 2026-04-28 enum-drift rule. The settlement event is the SECOND accounting event of a wire
+# (Dr clearing / Cr nostro), named `SETTLEMENT` to read as the external-settlement posting
+# (FR-7.1 / Doina Sep 18).
 EVENT_PAYMENT_PRINCIPAL = "PAYMENT_PRINCIPAL"
-EVENT_PAYMENT_FEE = "PAYMENT_FEE"
-EVENT_PAYMENT_SETTLEMENT = "PAYMENT_SETTLEMENT"
+EVENT_PAYMENT_FEE = "FEE"
+EVENT_PAYMENT_SETTLEMENT = "SETTLEMENT"
 
 # Accounting sides.
 SIDE_DEBIT = "DEBIT"

@@ -51,7 +51,7 @@ def test_an_internal_transfer_is_already_settled_when_settle_runs(service, db):
 
 def test_matched_outcome_settles_the_payment(service, db):
     """B4 matched → settlementStatus SETTLED, currentState SETTLED, settlementPositions written."""
-    _initiate_external(service, settlement_outcome="matched")
+    _initiate_external(service, settlement_outcome="MATCHED")
 
     payment = _payment(db)
     assert payment["lifecycle"]["currentState"] == "SETTLED"
@@ -61,14 +61,14 @@ def test_matched_outcome_settles_the_payment(service, db):
 
     positions = _settlement_positions(db)
     assert len(positions) == 1
-    assert positions[0]["outcome"] == "matched"
+    assert positions[0]["outcome"] == "MATCHED"
     assert positions[0]["settlementStatus"] == "SETTLED"
     assert positions[0]["simulated"] is True
 
 
 def test_delayed_outcome_holds_at_in_progress(service, db):
     """B4 delayed → settlementStatus PENDING, currentState stays IN_PROGRESS, saga halts."""
-    _initiate_external(service, settlement_outcome="delayed")
+    _initiate_external(service, settlement_outcome="DELAYED")
 
     payment = _payment(db)
     assert payment["lifecycle"]["currentState"] == "IN_PROGRESS"
@@ -78,29 +78,36 @@ def test_delayed_outcome_holds_at_in_progress(service, db):
 
     positions = _settlement_positions(db)
     assert len(positions) == 1, "FR-7.4: a position is written for every outcome, including delayed"
-    assert positions[0]["outcome"] == "delayed"
+    assert positions[0]["outcome"] == "DELAYED"
     assert positions[0]["actualAmount"] is None, "delayed: actual settlement not yet known"
     assert positions[0]["expectedAmount"] is not None
 
 
 def test_unmatched_outcome_fails_the_payment(service, db):
-    """B4 unmatched → settlementStatus FAILED, currentState FAILED, saga halts."""
-    _initiate_external(service, settlement_outcome="unmatched")
+    """B4 unmatched → settlementStatus FAILED, currentState FAILED, saga halts.
+
+    FR-7.3 / Doina (Sep 17): UNMATCHED stamps a specific discrepancy amount + reason on
+    `clearing`, ready for the (deferred) Stage 9 exception queue — not just a FAILED label.
+    """
+    _initiate_external(service, settlement_outcome="UNMATCHED")
 
     payment = _payment(db)
     assert payment["lifecycle"]["currentState"] == "FAILED"
     assert payment["lifecycle"]["settlementStatus"] == "FAILED"
     assert payment["clearing"]["rejectionCode"] is not None
+    # The discrepancy amount = expected (the clearing amount) minus actual (0 settled).
+    assert payment["clearing"]["discrepancyAmount"] == payment["amount"]
+    assert payment["clearing"]["discrepancyReason"] == payment["clearing"]["rejectionCode"]
 
     positions = _settlement_positions(db)
     assert len(positions) == 1, "FR-7.4: a position is written even for a rejected settlement"
-    assert positions[0]["outcome"] == "unmatched"
+    assert positions[0]["outcome"] == "UNMATCHED"
     assert positions[0]["actualAmount"] == 0, "unmatched: nothing settled"
 
 
 def test_exception_outcome_returns_the_payment(service, db):
     """B4 exception → settlementStatus RETURNED, currentState RETURNED, saga halts."""
-    _initiate_external(service, settlement_outcome="exception")
+    _initiate_external(service, settlement_outcome="EXCEPTION")
 
     payment = _payment(db)
     assert payment["lifecycle"]["currentState"] == "RETURNED"
@@ -109,7 +116,7 @@ def test_exception_outcome_returns_the_payment(service, db):
 
     positions = _settlement_positions(db)
     assert len(positions) == 1, "FR-7.4: a position is written even for a returned settlement"
-    assert positions[0]["outcome"] == "exception"
+    assert positions[0]["outcome"] == "EXCEPTION"
     assert positions[0]["actualAmount"] == 0, "exception: nothing settled"
 
 
@@ -119,10 +126,10 @@ _SPEC_SETTLEMENT_STATUS_ENUM = {"PENDING", "SETTLED", "FAILED", "RETURNED", None
 
 
 @pytest.mark.parametrize("outcome,expected_status", [
-    ("matched", "SETTLED"),
-    ("delayed", "PENDING"),
-    ("unmatched", "FAILED"),
-    ("exception", "RETURNED"),
+    ("MATCHED", "SETTLED"),
+    ("DELAYED", "PENDING"),
+    ("UNMATCHED", "FAILED"),
+    ("EXCEPTION", "RETURNED"),
 ])
 def test_every_settlement_status_is_in_the_spec_enum(service, db, outcome, expected_status):
     """The 2026-04-28 enum-drift rule: every value sourced from the spec's enum array."""
@@ -130,6 +137,50 @@ def test_every_settlement_status_is_in_the_spec_enum(service, db, outcome, expec
     status = _payment(db)["lifecycle"]["settlementStatus"]
     assert status in _SPEC_SETTLEMENT_STATUS_ENUM
     assert status == expected_status
+
+
+# --- FR-7.3: the outcome is an enum, not a free string (Doina Sep 17) -----------
+
+def test_an_unknown_settlement_outcome_is_rejected_at_the_contract():
+    """Doina: "defined as string in the db - shouldn't it be as enums". The request boundary
+    admits only MATCHED/UNMATCHED/DELAYED/EXCEPTION — a free string 422's here, instead of
+    reaching `_OUTCOME_TO_STATUS` and raising KeyError → HTTP 500 as it did before.
+    """
+    from pydantic import ValidationError
+
+    from api_models import PaymentSettlementInitiateRequest
+
+    for bad in ("bogus", "matched", "Settled", ""):
+        with pytest.raises(ValidationError):
+            PaymentSettlementInitiateRequest(paymentId="PAY-1", outcome=bad)
+
+    # The four legal values construct cleanly.
+    for ok in ("MATCHED", "UNMATCHED", "DELAYED", "EXCEPTION", None):
+        PaymentSettlementInitiateRequest(paymentId="PAY-1", outcome=ok)
+
+
+def test_the_initiate_request_accepts_the_simulation_outcome():
+    """The wizard control threads through `simulatedSettlementOutcome` on the Initiate
+    contract (default None → MATCHED happy path)."""
+    from api_models import PaymentOrderInitiateRequest
+
+    # A minimal valid external-wire request carrying the simulation lever.
+    req = PaymentOrderInitiateRequest(
+        customerId="CUST-1", type="CREDIT_TRANSFER", rail="WIRE",
+        debtor={"accountId": "ACC-1"},
+        creditor={"accountNo": "9999", "name": "Acme", "bic": "BARCGB22"},
+        instructedAmount=100.0, instructedCurrency="USD",
+        simulatedSettlementOutcome="UNMATCHED",
+    )
+    assert req.simulatedSettlementOutcome == "UNMATCHED"
+    # Default is None — the saga treats that as MATCHED.
+    plain = PaymentOrderInitiateRequest(
+        customerId="CUST-1", type="CREDIT_TRANSFER", rail="WIRE",
+        debtor={"accountId": "ACC-1"},
+        creditor={"accountNo": "9999", "name": "Acme", "bic": "BARCGB22"},
+        instructedAmount=100.0, instructedCurrency="USD",
+    )
+    assert plain.simulatedSettlementOutcome is None
 
 
 # --- B5: settlement model selection -------------------------------------------

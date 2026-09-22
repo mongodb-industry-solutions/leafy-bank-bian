@@ -137,6 +137,9 @@ def _initiate_kwargs(body) -> dict:
         "wire_details": body.wireDetails.model_dump() if body.wireDetails else None,
         "ach_details": body.achDetails.model_dump() if body.achDetails else None,
         "internal_details": body.internalDetails.model_dump() if body.internalDetails else None,
+        # Stage 7 simulation lever (FR-7.3). Only affects an external wire (deferred
+        # settlement); ignored for internal transfers. Defaults to MATCHED → happy path.
+        "settlement_outcome": body.simulatedSettlementOutcome,
     }
 
 
