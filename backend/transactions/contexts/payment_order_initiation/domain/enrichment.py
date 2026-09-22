@@ -74,6 +74,14 @@ def run(ctx: PaymentContext) -> None:
     for report in plan.updates.get("correspondent.regulatoryReports", []):
         report["assessedAt"] = now
 
+    # FR-3.14 — the `fx{}` object is planned pure (rateTimestamp/quoteId null); stamp both
+    # from `now` here, same discipline. quoteId is deterministic-per-payment so a re-run
+    # restates the same quote rather than minting a new one.
+    fx = plan.updates.get("fx")
+    if isinstance(fx, dict):
+        fx["rateTimestamp"] = now
+        fx["quoteId"] = f"FXQ-{now:%Y%m%d}-{payment.get('paymentId', 'unknown')[-12:]}"
+
     update: dict = dict(plan.updates)
     update["enrichment"] = {
         # Taken from the persisted document, before anything below is applied — which is
@@ -142,13 +150,17 @@ def _final_validate(ctx: PaymentContext, now: datetime) -> None:
     payment = payments.find_one({"_id": ctx.payment_oid}) or {}
     recorded: list = []
 
-    def record(name: str, result: str, detail: str) -> None:
+    def record(name: str, result: str, detail: str, *,
+               field: str | None = None, code: str | None = None) -> None:
         recorded.append(
-            checks.check(FINAL_STAGE, name, result, mode=checks.SYNC, detail=detail, at=now)
+            checks.check(FINAL_STAGE, name, result, mode=checks.SYNC, detail=detail,
+                         field=field, code=code, at=now)
         )
 
-    def refuse(name: str, detail: str) -> None:
-        record(name, checks.FAIL, detail)
+    def refuse(name: str, detail: str, *, field: str | None = None,
+               code: str | None = None) -> None:
+        record(name, checks.FAIL, detail, field=field, code=code)
+        checks.stamp_validation_summary(payments, ctx.payment_oid, recorded)
         checks.append_checks(payments, ctx.payment_oid, recorded)
         raise ValueError(detail)
 
@@ -170,6 +182,8 @@ def _final_validate(ctx: PaymentContext, now: datetime) -> None:
                 "wire_agents_complete",
                 f"A WIRE requires a BIC on both agents; {' and '.join(missing)} has none "
                 "after enrichment. The beneficiary bank could not be resolved.",
+                field=", ".join(f"{s}.bic" for s in missing),
+                code="WIRE_BIC_MISSING",
             )
 
         domestic = (
@@ -190,6 +204,7 @@ def _final_validate(ctx: PaymentContext, now: datetime) -> None:
                 "spec constrains only the BICs, and a thin directory is our gap. Stage 5 "
                 "cannot address this wire as it stands.",
             )
+            checks.stamp_validation_summary(payments, ctx.payment_oid, recorded)
             checks.append_checks(payments, ctx.payment_oid, recorded)
             lifecycle.advance_ctx(
                 ctx, lifecycle.FINAL_VALIDATED,
@@ -206,6 +221,7 @@ def _final_validate(ctx: PaymentContext, now: datetime) -> None:
             + f" — {'DOMESTIC' if domestic else 'INTERNATIONAL'} wire, agents complete.",
         )
 
+    checks.stamp_validation_summary(payments, ctx.payment_oid, recorded)
     checks.append_checks(payments, ctx.payment_oid, recorded)
 
     lifecycle.advance_ctx(

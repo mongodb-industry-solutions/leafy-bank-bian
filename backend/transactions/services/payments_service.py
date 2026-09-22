@@ -273,6 +273,79 @@ class PaymentsService:
         ctx.now = datetime.now(timezone.utc)
         return ctx
 
+    def resolve_review(
+        self, payment_id: str, *, decision: str, actor: str = "operator-review"
+    ) -> dict:
+        """Resolve a payment HELD at MANUAL_FRAUD_REVIEW by an operator's manual-review decision.
+
+        FR-4.13. `decision` is "APPROVED" or "REJECTED".
+
+        APPROVED re-enters the saga at stage 4b (authorize) with a review override: the
+        model's REVIEW assessment stays on the document, the operator's approval commits the
+        authorisation the model withheld, and the payment continues through stage 5 (execute)
+        to settlement. Same document, same id.
+
+        REJECTED terminates the payment to REJECTED — a pre-execution terminal, no money has
+        moved — with an operator-review check and reason.
+        """
+        payment = self.payments.find_one({"paymentId": payment_id})
+        if payment is None:
+            raise ValueError(f"Payment {payment_id} not found.")
+        if payment.get("status") != lifecycle.MANUAL_FRAUD_REVIEW:
+            raise ValueError(
+                f"Payment {payment_id} is at {payment.get('status')}, not MANUAL_FRAUD_REVIEW — "
+                "only a payment held for manual review can be resolved."
+            )
+
+        if decision == "REJECTED":
+            checks.append_checks(self.payments, payment["_id"], [
+                checks.check(
+                    "4 authorize", "manual_review_declined", checks.FAIL,
+                    detail="Operator declined a payment held for manual review.",
+                    actor=actor, at=datetime.now(timezone.utc),
+                )
+            ])
+            updated = lifecycle.reject(
+                self.payments, payment["_id"],
+                reason="Declined by operator manual review.", actor=actor,
+            )
+            return updated or self.payments.find_one({"paymentId": payment_id})
+
+        if decision != "APPROVED":
+            raise ValueError(
+                f"Unknown review decision {decision!r} (expected APPROVED or REJECTED)."
+            )
+
+        # Rebuild the capture-time context, then re-attach stage 4a's outputs from the
+        # persisted routing snapshot — a resume rebuilds capture-time fields, not the
+        # strategy that orchestrate decided, so the order commit has nothing to read
+        # otherwise. Same reconstruction shape as `settle_payment`.
+        ctx = self._context_from_doc(
+            payment, customer_ref=payment.get("customerId", ""), authentication=None,
+        )
+        from contexts.payment_orchestration.domain.routing import ExecutionStrategy
+        routing_id = (payment.get("refs") or {}).get("routingSnapshotId")
+        snap = (
+            self.routing_snapshots.find_one({"routingSnapshotId": routing_id})
+            if routing_id else None
+        )
+        if snap:
+            corr = snap.get("correspondent") or {}
+            ctx.execution_strategy = ExecutionStrategy(
+                strategy=snap.get("executionStrategy"),
+                network=snap.get("clearingNetwork"),
+                cost_rank=snap.get("costRank"),
+                requires_correspondent=bool(corr.get("required")),
+                correspondent_bic=corr.get("bic"),
+                cutoff_hour_et=snap.get("cutoffHourET"),
+                within_cutoff=bool(snap.get("withinCutoff", True)),
+                value_date=snap.get("valueDate"),
+                rationale=snap.get("rationale"),
+            )
+        ctx.routing_snapshot_id = routing_id
+        ctx.review_override = "APPROVED"
+        return payment_lifecycle.run(ctx, start_index=5)
+
     def retrieve_payment(self, payment_ref: str) -> Optional[dict]:
         """Retrieve a payment plus its single transaction doc (v4_21)."""
         payment = self.payments.find_one({"paymentId": payment_ref})

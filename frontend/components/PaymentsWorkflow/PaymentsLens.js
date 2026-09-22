@@ -25,7 +25,7 @@ const RAILS = ["INTERNAL", "WIRE", "ACH", "CARD", "RTP"];
 
 const STATUSES = [
   "DRAFT", "INITIATED", "VALIDATED", "ENRICHED", "FINAL_VALIDATED", "ROUTED",
-  "PENDING_REVIEW", "AUTHORISED", "APPROVED", "SUBMITTED", "IN_PROGRESS", "POSTED", "SETTLED",
+  "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED", "SUBMITTED", "IN_PROGRESS", "POSTED", "SETTLED",
   "RECONCILED", "REJECTED", "FAILED", "RETURNED", "CANCELLED", "REVERSED", "REFUNDED",
 ];
 
@@ -179,6 +179,20 @@ function beneficiaryOf(p) {
   };
 }
 
+// The three status axes are independent (defect 2026-09-08 `discriminator-conflation`):
+// `status` = money moved, `postingStatus` = accounting (lags via the async GL batch),
+// `settlementStatus` = external settlement. The list's single `status` pill reads as
+// "done" when the other two lag — Doina (Sep 17): "many transactions show SETTLED before
+// settlement is even initiated." Surface posting + settlement as a muted subline so a
+// settled-but-unposted payment reads "posting pending · settlement —" instead of just
+// SETTLED. Reconciliation stays in the deep-dive (terminal, not a scan axis).
+function axisLabel(v) {
+  return v ? String(v).toLowerCase() : "—";
+}
+function statusAxes(p) {
+  return `posting ${axisLabel(p.lifecycle?.postingStatus)} · settlement ${axisLabel(p.lifecycle?.settlementStatus)}`;
+}
+
 function PaymentsTable({ items, selectedPaymentId, onSelect }) {
   return (
     <div className={styles.tableWrap}>
@@ -236,7 +250,10 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                   {fmtAmount(p.amount, p.currency)}
                 </td>
                 <td><span className={styles.railTag}>{p.rail || "—"}</span></td>
-                <td><StatusPill status={p.status} /></td>
+                <td>
+                  <StatusPill status={p.status} />
+                  <div className={styles.statusAxes}>{statusAxes(p)}</div>
+                </td>
               </tr>
             );
           })}

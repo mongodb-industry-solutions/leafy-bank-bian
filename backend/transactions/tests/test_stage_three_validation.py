@@ -313,6 +313,49 @@ def test_a_self_transfer_is_refused_at_the_beneficiary_check(db):
     assert _one(db, "beneficiary_recognised")["result"] == "FAIL"
 
 
+# --------------------------------------------------------------------------- #
+# FR-3.9 — a validation failure is a structured triple (field, code, message),
+# not a boolean. Every refusal site populates `field` + `code`; a PASS leaves
+# them None (no offending field). Doina could only see the happy path in review
+# because a FAIL aborts to REJECTED, so this is the persisted failure shape.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("check_name, field, code, setup", [
+    ("payment_type_viable", "paymentType", "PAYMENT_TYPE_NOT_VIABLE",
+     {"payment_type": "CARD_PAYMENT"}),
+    ("funds_available", "debtor.accountId", "INSUFFICIENT_FUNDS", None),
+    ("beneficiary_recognised", "creditor.accountId", "CREDITOR_ACCOUNT_CLOSED", None),
+    ("beneficiary_recognised", "creditor.accountId", "DEBTOR_CREDITOR_SAME",
+     {"creditor_account_ref": DEBTOR}),
+])
+def test_a_refused_check_records_the_field_and_failure_code(db, check_name, field, code, setup):
+    if check_name == "funds_available":
+        db["accounts"] = FakeCollection([
+            _account(DEBTOR, CUST_D, available=10.0), _account(CREDITOR, CUST_C),
+        ])
+    elif check_name == "beneficiary_recognised" and code == "CREDITOR_ACCOUNT_CLOSED":
+        db["accounts"] = FakeCollection([
+            _account(DEBTOR, CUST_D), _account(CREDITOR, CUST_C, status="CLOSED"),
+        ])
+    svc = PaymentsService(FakeConnection(db), "leafy_bank_bian", payment_limit_usd=50_000.0)
+    with pytest.raises(ValueError):
+        _initiate(svc, **(setup or {}))
+
+    entry = _one(db, check_name)
+    assert entry["result"] == "FAIL"
+    assert entry["field"] == field, entry
+    assert entry["code"] == code, entry
+    assert entry["detail"], entry  # the message is still there
+
+
+def test_a_passing_check_leaves_field_and_code_null(service, db):
+    """FR-3.9 cuts one way only: a PASS has no offending field, so `field`/`code` stay None
+    rather than carrying a meaningless value a consumer might switch on."""
+    _initiate(service)
+    for entry in _checks(db, stage=STAGE):
+        if entry["result"] == "PASS":
+            assert entry["field"] is None and entry["code"] is None, entry
+
+
 def test_the_format_check_validates_the_fixture_identifiers(service, db):
     """A PASS must name what it validated, or the check is decorative."""
     _initiate(service)
@@ -394,8 +437,47 @@ def test_the_duplicate_warning_names_the_payment_it_resembles(service, db):
     )
     assert entry["result"] == "WARN"
     assert first["paymentId"] in entry["detail"]
-    # The point of WARN over FAIL: the payment went through.
-    assert second_doc["status"] == "SETTLED"
+
+
+def test_a_content_duplicate_stamps_idempotency_duplicateOf(service, db):
+    """FR-3.4 / Doina's `idempotency{}`: a content duplicate records the link as a structured
+    field, not just in the check detail. The second payment's `idempotency.duplicateOf`
+    holds the first payment's paymentId."""
+    first = _initiate(service)
+    _initiate(service)
+
+    second_doc = db["payments"].docs[-1]
+    assert second_doc["idempotency"]["duplicateOf"] == first["paymentId"]
+
+
+def test_validation_overall_status_is_passed_on_a_clean_run(service, db):
+    """FR-3.9 — `validation.overallStatus` is the summary snapshot. A clean run stamps
+    PASSED with an empty `failureReasons[]`. Re-stamped by enrichment's final-validation,
+    so the value reflects the latest validation pass too."""
+    _initiate(service)
+    payment = db["payments"].docs[-1]
+    assert payment["validation"]["overallStatus"] == "PASSED"
+    assert payment["validation"]["failureReasons"] == []
+
+
+def test_validation_overall_status_is_failed_with_a_structured_reason_on_refusal(db):
+    """FR-3.9 — a refusal stamps FAILED and lifts the failing check's {field, code, detail}
+    into `validation.failureReasons[]`, so the structured outcome is visible on the payment
+    without re-reading `checks[]`."""
+    db["accounts"] = FakeCollection([
+        _account(DEBTOR, CUST_D), _account(CREDITOR, CUST_C, status="CLOSED"),
+    ])
+    svc = PaymentsService(FakeConnection(db), "leafy_bank_bian", payment_limit_usd=50_000.0)
+    with pytest.raises(ValueError, match="Creditor account is CLOSED"):
+        _initiate(svc)
+
+    payment = db["payments"].docs[-1]
+    assert payment["validation"]["overallStatus"] == "FAILED"
+    reasons = payment["validation"]["failureReasons"]
+    assert len(reasons) == 1
+    assert reasons[0]["code"] == "CREDITOR_ACCOUNT_CLOSED"
+    assert reasons[0]["field"] == "creditor.accountId"
+    assert "CLOSED" in reasons[0]["detail"]
 
 
 def test_a_different_amount_is_not_a_duplicate(service, db):

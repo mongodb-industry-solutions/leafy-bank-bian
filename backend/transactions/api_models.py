@@ -214,6 +214,21 @@ class PaymentOrderInitiateRequest(BaseModel):
                 f"{_ENVELOPE_RAIL[supplied[0]]}; rail is {self.rail}."
             )
 
+        # An "on-us wire" — WIRE/ACH to a creditor whose account THIS bank holds — is
+        # disallowed at the contract (defect 2026-09-08 `discriminator-conflation`). Such a
+        # payment takes the wire's rail path but the internal's settlement path: it settles
+        # atomically inside stage 5's ACID block and `settle.py` no-ops, so
+        # `settlementStatus`/`settlementPositions` are never written and reconciliation legs
+        # 2 and 3 sit at PENDING forever with no failure signal. A move to a held account is
+        # a book transfer — use rail=INTERNAL. Doina (Sep 17): "wires should settle only when
+        # they reached and completed the clearing & settlement stage"; this rule makes that
+        # true for every wire the contract accepts.
+        if self.rail in ("WIRE", "ACH") and self.creditor.accountId is not None:
+            raise ValueError(
+                f"{self.rail} to a creditor held at this bank is not supported — "
+                "use rail=INTERNAL for a move to a held account."
+            )
+
         # The spec's validator requires debtor.bic AND creditor.bic to be non-null when
         # rail == WIRE (`validator.$and[1]`). For a creditor we hold, the snapshot resolves
         # the BIC server-side, so demanding it from the caller would reject a perfectly
@@ -255,6 +270,18 @@ class PaymentOrderResumeRequest(BaseModel):
     document — one id end to end (Kiran, 2026-09-09).
     """
     paymentId: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
+class TransactionAuthorizationResolveRequest(BaseModel):
+    """`POST /TransactionAuthorization/Resolve` — an operator's manual-review decision on a
+    payment HELD at MANUAL_FRAUD_REVIEW (FR-4.13).
+
+    `decision` is "APPROVED" (commit the authorisation the fraud model withheld; the payment
+    continues to settlement) or "REJECTED" (terminate to REJECTED — no money has moved).
+    """
+    paymentId: str = Field(min_length=1)
+    decision: str = Field(min_length=1)
     model_config = ConfigDict(extra="forbid")
 
 

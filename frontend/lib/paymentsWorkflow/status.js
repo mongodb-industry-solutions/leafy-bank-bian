@@ -22,8 +22,8 @@ export const statusBadgeVariant = (status) => {
     case "IN_PROGRESS":
     case "SUBMITTED":
       return "yellow";
-    // Held for manual review (FR-4.13) — needs an operator action, not yet authorised
-    case "PENDING_REVIEW":
+    // Held for manual fraud review (FR-4.13 / DR-4.2) — needs an operator action, not yet authorised
+    case "MANUAL_FRAUD_REVIEW":
       return "yellow";
     // Failed or refused
     case "FAILED":
@@ -89,8 +89,8 @@ export const pillFamily = (status) => {
     case "IN_PROGRESS":
     case "SUBMITTED":
       return "yellow";
-    // Held for manual review (FR-4.13) — needs an operator action, not yet authorised
-    case "PENDING_REVIEW":
+    // Held for manual fraud review (FR-4.13 / DR-4.2) — needs an operator action, not yet authorised
+    case "MANUAL_FRAUD_REVIEW":
       return "yellow";
     // Failed or refused
     case "FAILED":

@@ -69,19 +69,26 @@ def run(ctx: PaymentContext) -> None:
     now = datetime.now(timezone.utc)
     recorded: list = []
 
-    def record(name: str, result: str, detail: str, *, mode: str = checks.SYNC) -> None:
+    def record(name: str, result: str, detail: str, *, mode: str = checks.SYNC,
+               field: str | None = None, code: str | None = None) -> None:
         recorded.append(
-            checks.check(STAGE, name, result, mode=mode, detail=detail, at=now)
+            checks.check(STAGE, name, result, mode=mode, detail=detail,
+                         field=field, code=code, at=now)
         )
 
-    def refuse(name: str, detail: str) -> None:
+    def refuse(name: str, detail: str, *, field: str | None = None,
+               code: str | None = None) -> None:
         """Record the failing check, flush the trail, and raise.
 
         The flush must precede the raise: the saga catches `ValueError` and marks the payment
         REJECTED, so a check written after that point would never exist. Same shape as stage
         2's `authenticate.refuse`.
+
+        `field` and `code` discharge FR-3.9: a failure is a structured triple (offending
+        field, failure code, message), not a boolean. Every refusal site names them.
         """
-        record(name, checks.FAIL, detail)
+        record(name, checks.FAIL, detail, field=field, code=code)
+        checks.stamp_validation_summary(ctx.collections.payments, ctx.payment_oid, recorded)
         _flush(ctx, recorded)
         raise ValueError(detail)
 
@@ -126,7 +133,8 @@ def run(ctx: PaymentContext) -> None:
     # `ctx.payment_type` was previously accepted and never compared to the rail.
     problem = rail_viability.viability_problem(ctx.payment_rail, ctx.payment_type)
     if problem:
-        refuse("payment_type_viable", problem)
+        refuse("payment_type_viable", problem,
+               field="paymentType", code="PAYMENT_TYPE_NOT_VIABLE")
     record(
         "payment_type_viable", checks.PASS,
         f"{ctx.payment_type} is viable on rail {ctx.payment_rail}"
@@ -174,11 +182,13 @@ def run(ctx: PaymentContext) -> None:
         )
     else:
         if creditor.get("status") == "CLOSED":
-            refuse("beneficiary_recognised", "Creditor account is CLOSED.")
+            refuse("beneficiary_recognised", "Creditor account is CLOSED.",
+                   field="creditor.accountId", code="CREDITOR_ACCOUNT_CLOSED")
         if ctx.debtor_account_ref == ctx.creditor_account_ref:
             refuse(
                 "beneficiary_recognised",
                 "Debtor and creditor accounts must differ.",
+                field="creditor.accountId", code="DEBTOR_CREDITOR_SAME",
             )
         record(
             "beneficiary_recognised", checks.PASS,
@@ -204,6 +214,7 @@ def run(ctx: PaymentContext) -> None:
             "funds_available",
             f"Insufficient available balance: {available:,.2f} "
             f"{debtor_currency} available, {ctx.instructed_amount:,.2f} required.",
+            field="debtor.accountId", code="INSUFFICIENT_FUNDS",
         )
     record(
         "funds_available", checks.PASS,
@@ -211,6 +222,7 @@ def run(ctx: PaymentContext) -> None:
         f"{ctx.instructed_amount:,.2f}. Re-checked atomically at settlement.",
     )
 
+    checks.stamp_validation_summary(ctx.collections.payments, ctx.payment_oid, recorded)
     _flush(ctx, recorded)
 
     lifecycle.advance_ctx(
@@ -241,6 +253,14 @@ def _record_duplicate(record, ctx, now) -> None:
     )
     if match:
         record("duplicate_detection", checks.WARN, duplicate_detection.describe(match, now=now))
+        # FR-3.4 / Doina's `idempotency{}`: record the link as a structured field, not just
+        # in the check detail prose. `duplicateOf` = the matched prior paymentId. Written
+        # directly (like `validation.determinedCategory`) so it survives even a later
+        # refusal. `idempotency` is initialised at build with `duplicateOf: None`.
+        ctx.collections.payments.update_one(
+            {"_id": ctx.payment_oid},
+            {"$set": {"idempotency.duplicateOf": match.get("paymentId")}},
+        )
         return
     record(
         "duplicate_detection", checks.PASS,
@@ -321,7 +341,12 @@ def _validate_identifiers(refuse, record, ctx, external: bool, creditor_party: d
             problems.append(problem) if problem else validated.append("creditor IBAN")
 
     if problems:
-        refuse("account_format_valid", " ".join(problems))
+        # `field` is None here because this check aggregates several structured
+        # identifiers (our BIC/ABA, debtor IBAN, beneficiary BIC/IBAN, clearing-member id)
+        # and a single offending field is not meaningful. The per-identifier field is
+        # named in `detail`; `code` still gives a consumer something stable to switch on.
+        refuse("account_format_valid", " ".join(problems),
+               field=None, code="IDENTIFIER_FORMAT")
     record(
         "account_format_valid", checks.PASS,
         ("Validated " + ", ".join(validated) + ".") if validated

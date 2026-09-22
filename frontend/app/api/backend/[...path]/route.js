@@ -39,6 +39,10 @@ const BACKEND_BY_PREFIX = {
   // RESUME lives here (`POST /PaymentOrderProcedure/Resume`, 2026-09-09): the wizard resumes
   // the same held payment rather than creating a second one.
   PaymentOrderProcedure: TRANSACTIONS_BACKEND,
+  // BIAN TransactionAuthorization (SD 43343). The operator manual-review RESUME lives here
+  // (`POST /TransactionAuthorization/Resolve`, FR-4.13): an operator approves or declines a
+  // payment held at PENDING_REVIEW, on the transactions service that owns the saga.
+  TransactionAuthorization: TRANSACTIONS_BACKEND,
   // BIAN PaymentSettlement (SD 40033, doc 21 B6). Settlement trigger lives on transactions
   // — it owns `payments` and the `settle.run` stage. Scoped to this prefix only (defect
   // 2026-07-06: blanket-applying a prefix convention broke every BIAN call).

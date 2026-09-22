@@ -66,6 +66,14 @@ _LIST_PROJECTION = {
     # Written by the LEDGER service (doc 20 B1), not by anything in this service.
     "lifecycle.postingStatus": 1,
     "refs.journalEntryId": 1,
+    # Stage 7 / 8. `settlementStatus` and `reconciliationStatus` are the other two
+    # independent axes (defect 2026-09-08 `discriminator-conflation`, Doina Sep 17). A
+    # payment whose `status` is SETTLED may have `settlementStatus` absent (an internal
+    # book transfer — no external settlement) or `postingStatus` still PENDING (the GL
+    # batch hasn't run). Surfacing all three lets the list read "settled, posting pending"
+    # instead of the misleading single pill Doina flagged.
+    "lifecycle.settlementStatus": 1,
+    "lifecycle.reconciliationStatus": 1,
 }
 
 
@@ -179,6 +187,15 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
         .find({"paymentId": payment_id}, {"_id": 0})
         .sort("createdAt", 1)
     )
+    # Stage 4's routingSnapshots — the immutable execution-strategy decision (doc 18 R7).
+    # One per payment (insert-only, written at the ROUTED transition). Attached here so the
+    # stage-4 panel can render the strategy, network, correspondent, cut-off and rationale
+    # Doina's FR-4.1 asks to be visible — the payment doc carries only the network + the
+    # snapshot id; the full decision lives on the snapshot. None for a pre-stage-4 payment.
+    snap = connection.get_collection(db_name, "routingSnapshots").find_one(
+        {"paymentId": payment_id}, {"_id": 0}
+    )
+    payment["routingSnapshot"] = snap
     return payment
 
 

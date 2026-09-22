@@ -140,6 +140,11 @@ class PaymentContext:
     # BIAN route `POST /PaymentSettlement/Initiate` can set this to drive a demo scenario
     # that needs unmatched/delayed/exception outcomes (doc 21 B4, step 7).
     settlement_outcome: Optional[str] = None
+    # Stage 4b operator-review override (FR-4.13 resume). Set by `resolve_review` when an
+    # operator approves/declines a payment held at MANUAL_FRAUD_REVIEW. "APPROVED" makes
+    # `evaluate.run` skip the fraud re-score and commit the authorisation the model withheld;
+    # "REJECTED" makes it raise so the saga marks the payment REJECTED. None = normal path.
+    review_override: Optional[str] = None
     checkpoints: list = field(default_factory=list)
 
     # --- control -------------------------------------------------------------

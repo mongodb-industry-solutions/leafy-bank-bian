@@ -18,6 +18,7 @@ from api_models import (
     PaymentOrderInitiateRequest,
     PaymentOrderResumeRequest,
     PaymentSettlementInitiateRequest,
+    TransactionAuthorizationResolveRequest,
 )
 from shared import party_authentication_token as party_auth
 from database.connection import MongoDBConnection
@@ -356,6 +357,40 @@ async def transaction_authorization_retrieve(transactionauthorizationid: str):
     except Exception as e:
         logging.error("TransactionAuthorization/Retrieve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+@app.post("/TransactionAuthorization/Resolve")
+async def transaction_authorization_resolve(
+    body: TransactionAuthorizationResolveRequest,
+):
+    """An operator's manual-review decision on a payment HELD at MANUAL_FRAUD_REVIEW (FR-4.13).
+
+    `decision: "APPROVED"` commits the authorisation the fraud model withheld and continues
+    the SAME payment through stage 5 to settlement — one document, one id. `"REJECTED"`
+    terminates it to REJECTED (no money has moved). Only a payment at MANUAL_FRAUD_REVIEW can be
+    resolved; anything else is a 400.
+    """
+    if body.decision not in ("APPROVED", "REJECTED"):
+        raise HTTPException(
+            status_code=400,
+            detail="decision must be APPROVED or REJECTED.",
+        )
+    try:
+        payment_doc = payments_service.resolve_review(
+            body.paymentId, decision=body.decision
+        )
+        return _bian_response({
+            "paymentId": payment_doc["paymentId"],
+            "status": payment_doc["status"],
+            "payment": _strip(payment_doc),
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("TransactionAuthorization/Resolve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal authorization error.")
 
 
 # --- Stage 5: PaymentRail (SD 47741) ---------------------------------------

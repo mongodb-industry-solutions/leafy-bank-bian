@@ -89,7 +89,7 @@ def rich_db():
 
 @pytest.fixture
 def rich_service(rich_db):
-    rich_db["payments"].unique_on = "idempotencyKey"
+    rich_db["payments"].unique_on = "idempotency.idempotencyKey"
     return PaymentsService(
         FakeConnection(rich_db), "leafy_bank_bian", payment_limit_usd=5_000_000.0
     )
@@ -661,23 +661,23 @@ def test_a_declined_payment_is_rejected_and_never_passes_through_authorised(rich
 
 
 def test_a_reviewed_payment_holds_at_pending_review_and_commits_nothing(rich_service, rich_db):
-    """R21's *hold*, now at its own status. A REVIEW decision advances to PENDING_REVIEW
+    """R21's *hold*, now at its own status. A REVIEW decision advances to MANUAL_FRAUD_REVIEW
     (FR-4.13 / Q33 resolved 2026-09-11) — not AUTHORISED, because the bank has not authorised
     a payment still under manual review. No order is committed and `authorisedAt` is not
     written; money does not move."""
     payment = _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
 
     assert payment["fraud"]["decision"] == "REVIEW"
-    assert payment["lifecycle"]["currentState"] == "PENDING_REVIEW"
+    assert payment["lifecycle"]["currentState"] == "MANUAL_FRAUD_REVIEW"
     # The status mirror follows currentState, never leads it (D1) — so it is queryable on the
     # top-level `status` field too, which is what an operational dashboard indexes on.
-    assert payment["status"] == "PENDING_REVIEW"
+    assert payment["status"] == "MANUAL_FRAUD_REVIEW"
     assert payment["order"] is None
     assert payment["clearing"].get("authorisedAt") is None, "a reviewed payment is not authorised"
     assert rich_db["transactions"].inserted == [], "money must not move on a held payment"
-    # The PENDING_REVIEW transition is recorded in the event trail with its reason.
+    # The MANUAL_FRAUD_REVIEW transition is recorded in the event trail with its reason.
     review_event = next(e for e in payment["lifecycle"]["events"]
-                        if e["state"] == "PENDING_REVIEW")
+                        if e["state"] == "MANUAL_FRAUD_REVIEW")
     assert "manual review" in review_event["reason"]
 
 
@@ -685,9 +685,84 @@ def test_a_pending_review_payment_is_queryable_by_status(rich_service, rich_db):
     """FR-4.13 — 'queryable and visible on operational dashboards.' The held payment is
     findable by a status query against the collection, the way an operations dashboard would."""
     _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
-    held = rich_db["payments"].find({"status": "PENDING_REVIEW"})
+    held = rich_db["payments"].find({"status": "MANUAL_FRAUD_REVIEW"})
     assert len(held) == 1
     assert held[0]["fraud"]["decision"] == "REVIEW"
+
+
+def test_operator_approve_resolves_pending_review_and_commits_the_authorisation(rich_service, rich_db):
+    """FR-4.13 resume — an operator's APPROVE commits the authorisation the fraud model
+    withheld and continues the SAME payment through stage 5. The model's REVIEW assessment
+    stays on the document (the score and the rules that triggered review are not rewritten);
+    the operator's decision is recorded on `order.authorization` with `reviewOverride: true`."""
+    held = _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
+    pid = held["paymentId"]
+    assert held["status"] == "MANUAL_FRAUD_REVIEW"
+
+    resolved = rich_service.resolve_review(pid, decision="APPROVED")
+
+    # The payment left MANUAL_FRAUD_REVIEW and was authorised + approved, then stage 5 ran. An
+    # external wire halts at IN_PROGRESS (settlement is stage 7's separate trigger), so the
+    # final state is IN_PROGRESS — not MANUAL_FRAUD_REVIEW, never REJECTED.
+    assert resolved["status"] == "IN_PROGRESS", "approve must move the payment past review into execution"
+    assert resolved["lifecycle"]["currentState"] == "IN_PROGRESS"
+    assert resolved["order"] is not None, "the operator approval commits the payment order"
+    assert resolved["order"]["authorization"]["decision"] == "APPROVED"
+    assert resolved["order"]["authorization"]["reviewOverride"] is True
+    assert resolved["order"]["authorization"]["authorisedBy"] == "operator-review"
+    assert resolved["clearing"]["authorisedAt"] is not None, "authorised at operator approval"
+    assert resolved["confirmation"] is not None, "FR-4.4 confirmation is written at APPROVED"
+    # The model's REVIEW assessment is preserved — the operator overrode it, not erased it.
+    assert resolved["fraud"]["decision"] == "REVIEW"
+    assert resolved["fraud"]["score"] == held["fraud"]["score"]
+    # Same document, one id end to end — no second payment created.
+    assert len(rich_db["payments"].docs) == 1
+    # The operator decision is in the check trail.
+    approve_checks = [c for c in resolved.get("checks", [])
+                      if c["name"] == "manual_review_approved"]
+    assert len(approve_checks) == 1
+    assert approve_checks[0]["actor"] == "operator-review"
+
+
+def test_operator_approve_moves_money_for_an_external_wire(rich_service, rich_db):
+    """The approve resume runs stage 5, so the debit lands — the payment is not just marked
+    approved, it actually executes. An external wire debits the customer and credits the
+    clearing account (the boundary doc), proving the saga continued past the authorisation."""
+    held = _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
+    rich_service.resolve_review(held["paymentId"], decision="APPROVED")
+    # Stage 5 wrote a transactions doc — money moved.
+    assert len(rich_db["transactions"].inserted) >= 1, "approve must execute the payment, not just mark it"
+
+
+def test_operator_decline_terminates_pending_review_to_rejected(rich_service, rich_db):
+    """FR-4.13 resume — an operator's DECLINE terminates the held payment to REJECTED. No
+    order is committed, no money moves (a pre-execution terminal)."""
+    held = _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
+    pid = held["paymentId"]
+
+    resolved = rich_service.resolve_review(pid, decision="REJECTED")
+
+    assert resolved["status"] == "REJECTED"
+    assert resolved["lifecycle"]["currentState"] == "REJECTED"
+    assert resolved.get("order") is None, "a declined payment commits nothing"
+    assert resolved["clearing"].get("authorisedAt") is None
+    assert rich_db["transactions"].inserted == [], "money must not move on a decline"
+    decline_checks = [c for c in resolved.get("checks", [])
+                      if c["name"] == "manual_review_declined"]
+    assert len(decline_checks) == 1
+    assert decline_checks[0]["actor"] == "operator-review"
+    reject_event = next(e for e in resolved["lifecycle"]["events"]
+                        if e["state"] == "REJECTED")
+    assert "operator" in reject_event["reason"].lower()
+
+
+def test_resolve_review_refuses_a_payment_not_awaiting_review(rich_service, rich_db):
+    """Only a MANUAL_FRAUD_REVIEW payment can be resolved — anything else is a guard violation,
+    not a silent no-op. A SETTLED internal transfer is the clearest non-held case."""
+    settled = _initiate(rich_service)  # internal transfer settles outright
+    assert settled["status"] != "MANUAL_FRAUD_REVIEW"
+    with pytest.raises(ValueError, match="not MANUAL_FRAUD_REVIEW"):
+        rich_service.resolve_review(settled["paymentId"], decision="APPROVED")
 
 
 def test_a_sanctions_hit_refuses_and_records_the_screening_result(service, db):
@@ -867,7 +942,7 @@ def test_payment_confirmation_refuses_when_nothing_is_committed(rich_service, ri
     """A confirmation for a payment with no execution path would be a false statement to the
     customer — her L502 ties the confirmation to the commitment."""
     payment = _international(rich_service, instructed_amount=300_000.0, priority="URGENT")
-    assert payment["lifecycle"]["currentState"] == "PENDING_REVIEW"  # held for review
+    assert payment["lifecycle"]["currentState"] == "MANUAL_FRAUD_REVIEW"  # held for review
 
     with pytest.raises(ValueError, match="no committed execution path"):
         rich_service.confirm_to_originator(payment["paymentId"])

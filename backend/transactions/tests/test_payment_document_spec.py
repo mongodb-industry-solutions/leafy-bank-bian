@@ -125,9 +125,6 @@ _KNOWN_EXTRAS = {
     # contract ID), distinct from endToEndId. Doina's Aug 27 research doc asks for
     # it explicitly; the canonical `payments` spec does not declare it.
     "clientReference",
-    # Stage 3 (doc L404): corridor category audit snapshot — "computed outcome
-    # snapshot, not new instruction data." The EIGHTH; argued for the same way.
-    "validation",
     # 2026-09-09 (Kiran): the step-up hold. Stage 2 leaves an over-threshold payment at
     # INITIATED with these set, so the channel can resume the SAME document after a second
     # factor. The NINTH and TENTH; argued for in the resume work, not slipped in.
@@ -148,17 +145,17 @@ _KNOWN_EXTRAS = {
 # admitted explicitly so the guard stays honest about what it allows, rather than silently
 # passing an out-of-enum value (the 2026-04-24 `bian-mapping` anti-pattern).
 #
-# `PENDING_REVIEW` (Kiran, 2026-09-11, Q33 resolved): a REVIEW fraud decision holds the
-# payment at this status (FR-4.13). The canonical `status` / `lifecycle.currentState` /
-# `lifecycle.events[].state` enum declares `PENDING` (the sanctions/initiation status, a
-# different thing) but not `PENDING_REVIEW`. Pending Doina's ratification into the canonical
-# spec (`doinas-research/propose_payments.json` + the consolidated v35 model) — that edit
-# lives outside this repo and is tracked as an out-of-repo follow-up. When it lands, remove
-# this map and the guard reverts to the spec alone.
+# `MANUAL_FRAUD_REVIEW` (FR-4.13 / DR-4.2): a REVIEW fraud decision holds the payment at
+# this status. Originally added 2026-09-11 as `PENDING_REVIEW` (Q33) while the value was not
+# in the canonical enum, so the guard admitted it via this map. Doina's DR-4.2 (Sep 15) names
+# it `MANUAL_FRAUD_REVIEW` and adds it to the canonical `status` / `lifecycle.currentState` /
+# `lifecycle.events[].state` enums (`doinas-research/propose_payments.json` + the consolidated
+# v35 model), so the admission is retired — the map is empty and the guard reverts to the spec
+# alone. Kept (empty) as the documented seam for any future enum extension.
 _ENUM_EXTENSIONS = {
-    "status": {"PENDING_REVIEW"},
-    "lifecycle.currentState": {"PENDING_REVIEW"},
-    "lifecycle.events[].state": {"PENDING_REVIEW"},
+    "status": set(),
+    "lifecycle.currentState": set(),
+    "lifecycle.events[].state": set(),
 }
 
 
@@ -181,7 +178,25 @@ def test_stage_two_slots_are_empty_at_creation():
     assert doc["enrichment"] is None
     assert doc["validation"] == {}
     assert doc["fxRate"] is None
+    assert doc["fx"] is None
     assert doc["clientReference"] is None
+
+
+def test_idempotency_object_holds_the_key_and_a_null_duplicateOf_at_build():
+    """Doina Stage 3 (2026-09-22): request-level dedupe metadata is a nested `idempotency{}`
+    object, not a flat field. `idempotencyKey` carries the caller's retry key; `duplicateOf`
+    is null until stage 3 detects a content duplicate."""
+    doc = payment_document.build(_ctx(idempotency_key="caller-retry-key-9"))
+    assert doc["idempotency"]["idempotencyKey"] == "caller-retry-key-9"
+    assert doc["idempotency"]["duplicateOf"] is None
+
+
+def test_fx_provenance_object_is_null_at_build():
+    """FR-3.14 — the `fx{}` provenance object opens null; enrichment `$set`s it on a real
+    currency mismatch. The scalar `fxRate` mirror is also null at build."""
+    doc = payment_document.build(_ctx())
+    assert doc["fx"] is None
+    assert doc["fxRate"] is None
 
 
 def test_a_wire_always_carries_its_pain001_mandatory_envelope_fields():
@@ -314,30 +329,31 @@ def test_enum_values_are_legal_after_every_stage_that_writes_them():
     _assert_enum_values_legal(schema, doc, "after stages 3 and 4")
 
 
-def test_pending_review_is_admitted_as_a_documented_enum_extension():
-    """FR-4.13 / Q33 (resolved 2026-09-11). PENDING_REVIEW is a Kiran-added lifecycle status
-    the canonical enum does not declare. The guard admits it via _ENUM_EXTENSIONS so the
-    addition is auditable rather than smuggled past (the 2026-04-24 anti-pattern). This pins
-    both halves: the value is NOT in the spec enum, and the guard still accepts a document
-    carrying it on all three enum-checked paths (status, currentState, events[].state).
-
-    Self-destructs when the canonical spec is updated: if PENDING_REVIEW lands in the spec
-    enum, the first assert fails and tells the next reader to drop it from _ENUM_EXTENSIONS
-    and let the guard revert to the spec alone."""
+def test_manual_fraud_review_is_declared_in_the_canonical_enum():
+    """FR-4.13 / DR-4.2. MANUAL_FRAUD_REVIEW is the manual-fraud-review status, named by
+    Doina (Sep 15) and added to the canonical `status` / `lifecycle.currentState` /
+    `lifecycle.events[].state` enums. This pins that the value IS in all three spec enums —
+    so the guard accepts it directly and the `_ENUM_EXTENSIONS` admission it needed while
+    unratified (as `PENDING_REVIEW`, Q33) is retired. If a future spec edit drops the value,
+    the asserts fail and tell the next reader to re-add it to `_ENUM_EXTENSIONS`."""
     schema = _schema()
-    assert "PENDING_REVIEW" not in schema["properties"]["status"]["enum"], (
-        "PENDING_REVIEW is now in the canonical spec enum — remove it from "
-        "_ENUM_EXTENSIONS and delete this test; the guard should revert to the spec alone."
+    assert "MANUAL_FRAUD_REVIEW" in schema["properties"]["status"]["enum"], (
+        "MANUAL_FRAUD_REVIEW must stay in the canonical status enum — if it is removed, "
+        "re-add it to _ENUM_EXTENSIONS so the guard keeps accepting it."
     )
+    cs = schema["properties"]["lifecycle"]["properties"]["currentState"]["enum"]
+    assert "MANUAL_FRAUD_REVIEW" in cs, "MANUAL_FRAUD_REVIEW must stay in currentState enum"
+    ev = schema["properties"]["lifecycle"]["properties"]["events"]["items"]["properties"]["state"]["enum"]
+    assert "MANUAL_FRAUD_REVIEW" in ev, "MANUAL_FRAUD_REVIEW must stay in events[].state enum"
+    # And a document carrying it passes the guard on all three paths, with no extension.
     doc = payment_document.build(_ctx(payment_rail="WIRE"))
-    doc["lifecycle"]["currentState"] = "PENDING_REVIEW"
-    doc["status"] = "PENDING_REVIEW"
+    doc["lifecycle"]["currentState"] = "MANUAL_FRAUD_REVIEW"
+    doc["status"] = "MANUAL_FRAUD_REVIEW"
     doc["lifecycle"]["events"].append({
-        "state": "PENDING_REVIEW", "at": doc["createdAt"],
+        "state": "MANUAL_FRAUD_REVIEW", "at": doc["createdAt"],
         "actor": "fraud-service", "actorType": "SERVICE", "reason": "held for review",
     })
-    # No AssertionError => PENDING_REVIEW is admitted on all three paths.
-    _assert_enum_values_legal(schema, doc, "at PENDING_REVIEW hold")
+    _assert_enum_values_legal(schema, doc, "at MANUAL_FRAUD_REVIEW hold")
 
 
 def test_the_fee_type_the_code_writes_is_in_the_spec_enum():
@@ -396,7 +412,7 @@ def test_requested_execution_date_is_an_iso_date_string():
 def test_end_to_end_id_and_idempotency_key_are_separate_fields():
     """R7 — the caller's retry key must not become the payment's public identity."""
     doc = payment_document.build(_ctx(idempotency_key="caller-retry-key-1"))
-    assert doc["idempotencyKey"] == "caller-retry-key-1"
+    assert doc["idempotency"]["idempotencyKey"] == "caller-retry-key-1"
     assert doc["endToEndId"] == "E2E-567890abcd"
 
 

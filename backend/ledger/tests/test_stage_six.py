@@ -114,6 +114,35 @@ def test_all_four_spec_fields_are_written():
     assert p["refs"]["transactionId"] == "TXN-0001"
 
 
+def test_the_journal_id_is_written_back_to_the_original_transaction_record():
+    """Doina (Sep 17): 'the journal identifier written back to the original transaction record
+    once posting completes.' The ledger stamps `journalEntryId` + `postedAt` on the `transactions`
+    doc alongside the `payments` write-back — the original movement fact carries the journal that
+    posted it. Safe from the ingest change-stream because `ingest_worker` watches inserts only
+    (`ingest_worker.py:286`), so this update cannot re-trigger ingestion."""
+    c = _with_payment("IN_PROGRESS")
+    journal = _post(c)
+    txn = c.get_collection("db", "transactions").docs[0]
+    assert txn["journalEntryId"] == journal["journalId"]
+    assert txn["postedAt"] is not None
+
+
+def test_no_transactions_doc_means_no_stamp_and_no_raise():
+    """A fee/settlement event carries `{paymentId}-FEE`/`-SETTLEMENT` as its idempotencyKey, so
+    no `transactions` doc matches and the stamp no-ops (those legs have no separate transactions
+    record). The write-back must skip cleanly, not raise — the journal stays committed."""
+    c = FakeConnection()
+    c.seed("glAccounts", [_GL_2110])
+    c.seed("ledgerEvents", [{"eventId": _EVENT, "idempotencyKey": f"{_PAY}-FEE"}])
+    c.seed("payments", [{
+        "paymentId": _PAY, "status": "IN_PROGRESS",
+        "lifecycle": {"currentState": "IN_PROGRESS", "events": []},
+        "refs": {"journalEntryId": None, "ledgerEventId": None, "transactionId": None},
+    }])
+    _post(c)  # must not raise
+    assert c.get_collection("db", "transactions").docs == []
+
+
 def test_a_replayed_batch_appends_no_second_lifecycle_event():
     c = _with_payment("IN_PROGRESS")
     _post(c)

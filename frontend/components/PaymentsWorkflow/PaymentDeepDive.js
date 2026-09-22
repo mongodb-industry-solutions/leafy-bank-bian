@@ -133,7 +133,7 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
 }
 
 /** Zone 2 — vertical spine of expandable rows; the selected row expands to its full detail. */
-function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove }) {
+function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve }) {
   const failedIdx = states.indexOf("failed");
   return (
     <div className={styles.timeline}>
@@ -181,6 +181,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                     stage={s}
                     payment={payment}
                     onApprove={onApprove}
+                    onResolve={onResolve}
                   />
                 </div>
               )}
@@ -938,6 +939,10 @@ function summaryRows(stage, payment) {
         ["From", d?.payer ? `${d.payer.name || "—"} (${d.payer.accountId || "—"})` : null],
         ["To", d?.payee ? `${d.payee.name || "—"} (${d.payee.accountId || "—"})` : null],
         ["Value date", d?.valueDate],
+        // Stage 6 back-pointer (Doina Sep 17): the journal entry that posted this
+        // transaction, stamped by the ledger after the GL batch runs. null until posted.
+        ["Journal entry", d?.journalEntryId],
+        ["Posted", d?.postedAt ? fmtWhen(d.postedAt) : null],
         ["Created", fmtWhen(d?.createdAt)],
       ];
     case "ledgerEvent":
@@ -1075,7 +1080,62 @@ function DetailCard({ label, tag, rows }) {
   );
 }
 
-function StageDetailBody({ stage, payment, onApprove }) {
+/**
+ * FR-4.1 — the stage-4 execution-strategy decision, rendered from the immutable
+ * `routingSnapshots` record. The payment doc carries only `wireDetails.network` + the
+ * snapshot id; the strategy label, cost rank, correspondent, cut-off and rationale all live
+ * on the snapshot, so without this block the determination is invisible in the UI (Doina:
+ * "Cannot test in the UI"). The snapshot is null for a pre-stage-4 payment.
+ */
+function RoutingDecision({ snapshot }) {
+  if (!snapshot) {
+    return (
+      <div className={styles.detailBlock}>
+        <div className={styles.detailBlockTitle}>Routing decision</div>
+        <Body className={styles.muted}>
+          No routing decision yet — this payment has not reached orchestration (stage 4).
+        </Body>
+      </div>
+    );
+  }
+  const corr = snapshot.correspondent || {};
+  const cutoff =
+    snapshot.cutoffHourET == null
+      ? "no cut-off"
+      : `${String(snapshot.cutoffHourET).padStart(2, "0")}:00 ET`;
+  const withinCutoff =
+    snapshot.cutoffHourET == null
+      ? null
+      : snapshot.withinCutoff
+        ? "within cut-off"
+        : "past cut-off — value date rolled";
+  const rows = [
+    ["Execution strategy", snapshot.executionStrategy],
+    ["Clearing network", snapshot.clearingNetwork],
+    ["Cost rank", snapshot.costRank],
+    ["Value date", snapshot.valueDate],
+    ["Cut-off", cutoff],
+    ["Cut-off status", withinCutoff],
+    ["Rail", snapshot.rail],
+    ["Wire type", snapshot.wireType],
+    ["Correspondent", corr.required
+      ? [corr.bic, corr.bankName, corr.country].filter(Boolean).join(" · ")
+          + (corr.simulated ? " (SIMULATED)" : "")
+      : "none — domestic/intrabank"],
+    ["Correspondent resolved", corr.required
+      ? (corr.resolved ? "Yes" : "No — recorded as unresolved")
+      : null],
+    ["Rationale", snapshot.rationale],
+  ].filter(([, v]) => v != null);
+  return (
+    <div className={styles.detailBlockWide}>
+      <div className={styles.detailBlockTitle}>Routing decision</div>
+      <KeyValues rows={rows} />
+    </div>
+  );
+}
+
+function StageDetailBody({ stage, payment, onApprove, onResolve }) {
   // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
   // must sit above the early returns (rules of hooks).
   const [showRaw, setShowRaw] = useState(false);
@@ -1224,6 +1284,44 @@ function StageDetailBody({ stage, payment, onApprove }) {
           </div>
         )}
 
+        {/* FR-4.1 — the execution-strategy decision from the immutable routing snapshot.
+            Rendered for stage 4 so the determination (strategy, network, correspondent,
+            cut-off, value date, rationale) is visible in the UI, not just the snapshot id. */}
+        {showAuthorization && (
+          <RoutingDecision snapshot={stage.data?.routingSnapshot} />
+        )}
+
+        {/* FR-4.13 — the operator manual-review resolve. A payment held at PENDING_REVIEW
+            is approved (commits the authorisation, continues to execution) or declined
+            (terminates to REJECTED) here. Mirrors the stage-2 step-up callout above. */}
+        {showAuthorization && stage.data?.reviewActionRequired && onResolve && (
+          <div className={styles.stepUpCallout}>
+            <div className={styles.stepUpCalloutTitle}>
+              <Icon glyph="Diagram3" />
+              <span>Manual review required here</span>
+            </div>
+            <Body>
+              Fraud scoring held this payment for manual review. Approve to commit the
+              execution path and continue it through the lifecycle, or decline to reject it.
+              No money has moved yet.
+            </Body>
+            <div className={styles.resolveActions}>
+              <Button
+                variant="primary"
+                onClick={() => onResolve("APPROVED")}
+              >
+                Approve &amp; continue
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => onResolve("REJECTED")}
+              >
+                Decline
+              </Button>
+            </div>
+          </div>
+        )}
+
         {showInitiation && (
           <div className={styles.detailBlockWide}>
             <div className={styles.detailBlockTitle}>Immutable parties</div>
@@ -1349,6 +1447,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
   const [nudge, setNudge] = useState(0);
   const [stepUpOpen, setStepUpOpen] = useState(false);
   const [stepUpError, setStepUpError] = useState(null);
+  const [resolveError, setResolveError] = useState(null);
   const { payment, loading, error } = usePaymentWorkflow(
     paymentId,
     (refreshKey || 0) + nudge
@@ -1371,6 +1470,23 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
     });
     if (err) {
       setStepUpError(err);
+      return;
+    }
+    setNudge((n) => n + 1);
+  }
+
+  // FR-4.13 — an operator's manual-review decision on a payment held at PENDING_REVIEW.
+  // Approve commits the authorisation and continues the payment to execution; decline
+  // terminates it to REJECTED. `nudge` refreshes the lifecycle once the saga advances.
+  async function resolveReview(decision) {
+    if (!paymentId) return;
+    setResolveError(null);
+    const { error: err } = await coreApi("TransactionAuthorization/Resolve", {
+      method: "POST",
+      body: { paymentId, decision },
+    });
+    if (err) {
+      setResolveError(err);
       return;
     }
     setNudge((n) => n + 1);
@@ -1467,6 +1583,9 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
       <div className={styles.panelBody}>
         {error && <Banner variant="danger">Could not load payment — {error}</Banner>}
         {stepUpError && <Banner variant="danger">{stepUpError}</Banner>}
+        {resolveError && (
+          <Banner variant="danger">Could not resolve review — {resolveError}</Banner>
+        )}
         {loading && <div className={styles.emptyState}>Loading…</div>}
         {!loading && !error && !payment && (
           <div className={styles.emptyState}>Payment not found: {paymentId}</div>
@@ -1489,6 +1608,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
               payment={payment}
               setRowRef={setRowRef}
               onApprove={() => setStepUpOpen(true)}
+              onResolve={resolveReview}
             />
           </>
         )}

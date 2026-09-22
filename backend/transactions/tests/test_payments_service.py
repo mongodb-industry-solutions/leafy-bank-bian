@@ -57,9 +57,9 @@ class FakeCollection:
     # -- writes
     def insert_one(self, doc, *a, **kw):
         if self.unique_on:
-            val = doc.get(self.unique_on)
+            val = self._get(doc, self.unique_on)
             # SPARSE: a null carries no uniqueness, matching idx_idempotency_key_unique.
-            if val is not None and any(d.get(self.unique_on) == val for d in self.docs):
+            if val is not None and any(self._get(d, self.unique_on) == val for d in self.docs):
                 raise DuplicateKeyError(f"dup {self.unique_on}={val}")
         self.docs.append(copy.deepcopy(doc))
         self.inserted.append(copy.deepcopy(doc))
@@ -303,7 +303,7 @@ def db():
 
 @pytest.fixture
 def service(db):
-    db["payments"].unique_on = "idempotencyKey"  # mirrors idx_idempotency_key_unique
+    db["payments"].unique_on = "idempotency.idempotencyKey"  # mirrors idx_idempotency_key_unique
     return PaymentsService(FakeConnection(db), "leafy_bank_bian", payment_limit_usd=50_000.0)
 
 
@@ -415,8 +415,20 @@ def test_currency_mismatch_warns_and_proceeds(db, debtor_ccy, creditor_ccy, inst
         assert payment["fxRate"] is not None
         assert payment["amount"] != payment["instructedAmount"]
         assert payment["currency"] == debtor_ccy
+        # FR-3.14 / Doina's `fx{}` provenance object — the scalar is a mirror of fx.fxRate;
+        # the object carries the leg, that the rate is SIMULATED, when it was applied, and a
+        # quote id. rateTimestamp/quoteId are stamped by enrichment.run (owns `now`).
+        fx = payment["fx"]
+        assert fx is not None
+        assert fx["sourceCurrency"] == instructed
+        assert fx["targetCurrency"] == debtor_ccy
+        assert fx["fxRate"] == payment["fxRate"]
+        assert fx["rateSource"] == "SIMULATED"
+        assert fx["rateTimestamp"] is not None
+        assert fx["quoteId"].startswith("FXQ-")
     else:
         assert payment["fxRate"] is None
+        assert payment["fx"] is None
 
 
 # --- 3. closed account --------------------------------------------------------
@@ -468,7 +480,7 @@ def test_concurrent_duplicate_loses_race_and_returns_the_winner(service, db, mon
     bypassing the pre-check, so `insert_one` raises DuplicateKeyError.
     """
     winner = {"_id": "oid-winner", "paymentId": "PAY-winner1",
-              "idempotencyKey": "E2E-raced", "status": "SETTLED"}
+              "idempotency": {"idempotencyKey": "E2E-raced", "duplicateOf": None}, "status": "SETTLED"}
 
     real_find_one = db["payments"].find_one
     calls = {"n": 0}
@@ -802,7 +814,7 @@ def _one(db, name):
 
 
 def _service_for(db, **over):
-    db["payments"].unique_on = "idempotencyKey"
+    db["payments"].unique_on = "idempotency.idempotencyKey"
     return PaymentsService(FakeConnection(db), "leafy_bank_bian",
                            payment_limit_usd=over.get("payment_limit_usd", 50_000.0))
 

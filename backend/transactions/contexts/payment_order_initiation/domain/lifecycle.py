@@ -68,12 +68,12 @@ ROUTED = "ROUTED"
 AUTHORISED = "AUTHORISED"
 APPROVED = "APPROVED"
 # A REVIEW fraud decision (stage 4b) diverts here from ROUTED instead of advancing to
-# AUTHORISED — the bank has not authorised a payment still under manual review (FR-4.13).
-# Kiran-added 2026-09-11 (Q33 resolved): the canonical `status` / `currentState` enum does
-# not declare it, so the conformance guard admits it via an explicit, documented extension
-# (test_payment_document_spec._ENUM_EXTENSIONS) rather than smuggling it past. Pending
-# Doina's ratification into the canonical spec — tracked as an out-of-repo follow-up.
-PENDING_REVIEW = "PENDING_REVIEW"
+# AUTHORISED — the bank has not authorised a payment still under manual review (FR-4.13 /
+# DR-4.2). Originally added 2026-09-11 as `PENDING_REVIEW` (Q33); renamed to Doina's own
+# `MANUAL_FRAUD_REVIEW` per her DR-4.2 (Sep 15), which also adds it to the canonical
+# `status` / `currentState` / `events[].state` enums — so the conformance guard no longer
+# needs the `_ENUM_EXTENSIONS` admission it used while the value was unratified.
+MANUAL_FRAUD_REVIEW = "MANUAL_FRAUD_REVIEW"
 SUBMITTED = "SUBMITTED"
 IN_PROGRESS = "IN_PROGRESS"
 POSTED = "POSTED"
@@ -106,13 +106,13 @@ _IN_FLIGHT_FROM = HAPPY_PATH.index(SUBMITTED)
 
 _FORWARD = {a: {b} for a, b in zip(HAPPY_PATH, HAPPY_PATH[1:])}
 _FORWARD[RECONCILED] = set()
-# PENDING_REVIEW is a side state off the happy path: a REVIEW decision (stage 4b) diverts
-# ROUTED -> PENDING_REVIEW instead of ROUTED -> AUTHORISED. An operator's later approve
-# resumes PENDING_REVIEW -> AUTHORISED -> APPROVED; a manual decline sends it to REJECTED
+# MANUAL_FRAUD_REVIEW is a side state off the happy path: a REVIEW decision (stage 4b) diverts
+# ROUTED -> MANUAL_FRAUD_REVIEW instead of ROUTED -> AUTHORISED. An operator's later approve
+# resumes MANUAL_FRAUD_REVIEW -> AUTHORISED -> APPROVED; a manual decline sends it to REJECTED
 # (a pre-execution terminal — no money has moved). Not in HAPPY_PATH on purpose, so the
 # happy-path ordering and the _IN_FLIGHT_FROM index stay unchanged.
-_FORWARD[ROUTED] = {AUTHORISED, PENDING_REVIEW}
-_FORWARD[PENDING_REVIEW] = {AUTHORISED}
+_FORWARD[ROUTED] = {AUTHORISED, MANUAL_FRAUD_REVIEW}
+_FORWARD[MANUAL_FRAUD_REVIEW] = {AUTHORISED}
 
 # POSTED is stamped by the ledger service, asynchronously, and may arrive after SETTLED —
 # the posting axis is independent (D1). Allow IN_PROGRESS -> SETTLED to skip it.
@@ -121,7 +121,7 @@ _FORWARD[IN_PROGRESS] = {POSTED, SETTLED}
 
 def _terminals_for(state: str) -> frozenset:
     if state not in HAPPY_PATH:
-        # Side states off the happy path (PENDING_REVIEW) sit before SUBMITTED — no money
+        # Side states off the happy path (MANUAL_FRAUD_REVIEW) sit before SUBMITTED — no money
         # has moved — so their legal terminals are the pre-execution ones.
         return _PRE_EXECUTION_TERMINALS
     idx = HAPPY_PATH.index(state)

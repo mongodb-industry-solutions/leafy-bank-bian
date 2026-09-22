@@ -60,6 +60,8 @@ def check(
     *,
     mode: str = SYNC,
     detail: str = "",
+    field: Optional[str] = None,
+    code: Optional[str] = None,
     actor: str = "transactions-service",
     at: Optional[datetime] = None,
 ) -> dict:
@@ -67,6 +69,14 @@ def check(
 
     `at` is accepted so a stage recording several checks can stamp them all with one
     instant, which is what makes the array's order meaningful rather than incidental.
+
+    `field` and `code` discharge FR-3.9 — on a validation failure the outcome is a
+    structured triple (offending field, machine-readable failure code, human message)
+    rather than a single boolean. They are `None` for non-FAIL outcomes (a PASS/WARN/SKIP
+    has no offending field); a reader filters `result == "FAIL"` to see the structured
+    failures. `field` is the dotted path on the payment instruction (e.g.
+    `creditor.bic`); `code` is a stable identifier a consumer can switch on (e.g.
+    `IDENTIFIER_FORMAT`), independent of the prose in `detail`.
     """
     if result not in RESULTS:
         raise ValueError(f"unknown check result {result!r}")
@@ -78,6 +88,8 @@ def check(
         "result": result,
         "mode": mode,
         "detail": detail,
+        "field": field,
+        "code": code,
         "at": at or datetime.now(timezone.utc),
         "actor": actor,
     }
@@ -104,4 +116,37 @@ def append_checks(payments, payment_oid, entries, *, session=None) -> None:
             "$set": {"updatedAt": datetime.now(timezone.utc)},
         },
         session=session,
+    )
+
+
+def stamp_validation_summary(payments, payment_oid, recorded: list) -> None:
+    """FR-3.9 — write the `validation{}` summary snapshot: `overallStatus` + `failureReasons[]`.
+
+    A summary of the per-check trail in `checks[]` (which stays the append-only detail).
+    `overallStatus` is FAILED if any recorded check failed, PENDING if any is unresolved,
+    else PASSED. `failureReasons[]` is the FAIL entries' `{field, code, detail}` — the
+    structured triple FR-3.9 names, lifted out of the per-check array into a summary.
+
+    Call this BEFORE `append_checks`/`_flush` clears `recorded`, in both the success path
+    and a `refuse` (so a rejection still records FAILED + the reason). Enrichment's
+    final-validation re-stamps it with its own verdict — `validation{}` holds the latest
+    validation pass's outcome. Dotted `$set` paths, so `validation.determinedCategory`
+    (and any sibling) survives.
+    """
+    failures = [c for c in recorded if c["result"] == FAIL]
+    if failures:
+        overall = "FAILED"
+    elif any(c["result"] == PENDING for c in recorded):
+        overall = "PENDING"
+    else:
+        overall = "PASSED"
+    payments.update_one(
+        {"_id": payment_oid},
+        {"$set": {
+            "validation.overallStatus": overall,
+            "validation.failureReasons": [
+                {"field": c["field"], "code": c["code"], "detail": c["detail"]}
+                for c in failures
+            ],
+        }},
     )

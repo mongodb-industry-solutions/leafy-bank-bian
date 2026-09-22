@@ -55,10 +55,10 @@ def run(ctx: PaymentContext) -> None:
     _check_requested_execution_date(ctx.requested_execution_date)
 
     # Idempotent replay. This pre-check is a courtesy, not the guarantee — the unique
-    # sparse index on `idempotencyKey` is what enforces idempotency, honoured by the
-    # DuplicateKeyError branch below.
+    # sparse index on `idempotency.idempotencyKey` is what enforces idempotency, honoured
+    # by the DuplicateKeyError branch below.
     if ctx.idempotency_key:
-        existing = c.payments.find_one({"idempotencyKey": ctx.idempotency_key})
+        existing = c.payments.find_one({"idempotency.idempotencyKey": ctx.idempotency_key})
         if existing:
             logger.info(
                 "Idempotent replay for endToEndId=%s — returning existing paymentId=%s",
@@ -102,7 +102,7 @@ def run(ctx: PaymentContext) -> None:
     ctx.payment_id = derive_ref("PAY", ctx.payment_oid)
     # R7 — provenance and idempotency are two concerns. `endToEndId` is the ISO 20022
     # EndToEndIdentification and is always ours; the caller's retry key rides on
-    # `idempotencyKey` and never becomes part of the payment's public identity.
+    # `idempotency.idempotencyKey` and never becomes part of the payment's public identity.
     ctx.end_to_end_id = derive_ref("E2E", ctx.payment_oid, last_n=12)
     # ISO 20022 BankTransactionCode derived from rail.
     ctx.txn_code = "PMNT-ICDT-BOOK" if ctx.payment_rail == "INTERNAL" else "PMNT-ICDT-ESCT"
@@ -131,7 +131,7 @@ def run(ctx: PaymentContext) -> None:
         # idempotency, and this is the path that honours it. Return the winner's document so
         # both callers see the same payment rather than failing the loser with a spurious 400.
         existing = (
-            c.payments.find_one({"idempotencyKey": ctx.idempotency_key})
+            c.payments.find_one({"idempotency.idempotencyKey": ctx.idempotency_key})
             if ctx.idempotency_key
             else None
         )

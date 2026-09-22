@@ -13,6 +13,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+import pytest
+
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
     _initiate,
     _initiate_external,
@@ -33,22 +35,29 @@ def _payment(db):
 
 # --- the fee crosses the boundary (step 5) -----------------------------------
 
-def test_an_on_us_wire_carries_the_fee_across_the_boundary(service, db):  # noqa: F811
+def test_an_external_wire_carries_the_fee_across_the_boundary(service, db):  # noqa: F811
     """⚠️ THE reachability test for the whole fee rule (B3(d)).
 
-    Of the three payment shapes, only this one exercises a fee leg:
+    Of the three payment shapes, only a wire exercises a fee leg:
       * internal transfer — stage 3 levies a charge on `rail == "WIRE"` only, so no fee
-      * external wire     — has a fee, but `execute.py:351` halts it before any
-                            `transactions` doc exists, so the ledger never sees the payment
-      * on-us wire        — `rail: WIRE` with a creditor account on a *different* Leafy Bank
-                            customer. Not external (`capture.py:76`), not own-account
-                            (`:96` — "same customer, NOT same bank"), so it settles AND
-                            carries the charge.
+      * external wire      — `rail: WIRE`, so stage 3 levies the charge, AND stage 7 (landed
+                             2026-09-03) makes it write a `transactions` doc (payee = the
+                             clearing account) and settle via `settle.py`. So the boundary
+                             document exists and the fee reaches the ledger.
 
-    If this test ever stops passing, the fee posting rule in the ledger is dead code and
-    doc 20 B3 has to be re-decided, not patched.
+    The on-us wire (`WIRE` to a held creditor) was once the *only* shape that both settled
+    and carried a fee, because the pre-stage-7 halt kept an external wire from writing a
+    `transactions` doc. That halt is gone and the on-us wire is now disallowed at the
+    contract (`api_models.py` — defect 2026-09-08 `discriminator-conflation`), so the
+    external wire is the fee path. If this test ever stops passing, the fee posting rule in
+    the ledger is dead code and doc 20 B3 has to be re-decided, not patched.
+
+    Reads from the DB, not the value returned by `initiate_payment`: for an external wire
+    `ctx.result` is the stage-5 IN_PROGRESS snapshot, and `settle.run` advances the stored
+    document to SETTLED without refreshing `ctx.result` (defect class: the returned payment
+    is a stale snapshot once settlement is deferred).
     """
-    _initiate(service, payment_rail="WIRE")
+    _initiate_external(service)
     payment = _payment(db)
     assert payment["fees"] == [
         {"type": "WIRE_FEE", "amount": 25.00, "currency": "USD", "chargedTo": "DEBTOR"}
@@ -80,7 +89,7 @@ def test_the_fee_does_not_change_the_settlement_amount(service, db):  # noqa: F8
     """⚠️ The boundary guard. `enrichment_plan.py:264` — *"`amount` must not change. It is the
     settlement amount and the ledger's primary input."* A fee that moved `amount` would be a
     boundary retype disguised as a fee, and the GL would post the wrong principal."""
-    _initiate(service, payment_rail="WIRE", instructed_amount=250.0)
+    _initiate_external(service, instructed_amount=250.0)
     txn = _txn(db)
     assert txn["amount"] == 250.0
     assert txn["baseAmount"] == 250.0
@@ -90,7 +99,7 @@ def test_the_fee_does_not_change_the_settlement_amount(service, db):  # noqa: F8
 def test_the_transaction_doc_gained_only_the_two_fee_fields(service, db):  # noqa: F811
     """§7 — stage 6's single boundary change, additive only. Every field the ledger's
     `ingest_worker` reads (doc 12 §1) is still present and unrenamed."""
-    _initiate(service, payment_rail="WIRE")
+    _initiate_external(service)
     txn = _txn(db)
     for field in ("amount", "paymentId", "currency", "paymentType", "rail", "sourceSystem"):
         assert field in txn
@@ -98,6 +107,52 @@ def test_the_transaction_doc_gained_only_the_two_fee_fields(service, db):  # noq
     assert "feeAmount" in txn and "feeCurrency" in txn
     # Stage 5's boundary field is untouched by stage 6.
     assert "paymentExecutionId" in txn
+
+
+def test_an_on_us_wire_is_rejected_at_the_contract():
+    """A WIRE to a creditor held at this bank (an 'on-us wire') is disallowed at the request
+    contract (defect 2026-09-08 `discriminator-conflation`) — it would settle atomically inside
+    stage 5 and skip clearing & settlement, leaving `settlementStatus`/`settlementPositions`
+    unwritten and reconciliation legs 2/3 pending forever. A held-creditor move must use
+    rail=INTERNAL; the fee path is an external wire (see
+    `test_an_external_wire_carries_the_fee_across...`).
+
+    The rule lives in the Pydantic `PaymentOrderInitiateRequest` validator — the HTTP
+    boundary. `PaymentsService.initiate_payment` builds a `PaymentContext` directly and does
+    not re-check it, so this test constructs the model the way the router does.
+    """
+    from api_models import PaymentOrderInitiateRequest
+
+    with pytest.raises(ValueError, match="use rail=INTERNAL"):
+        PaymentOrderInitiateRequest(
+            customerId="CUST-1",
+            type="CREDIT_TRANSFER",
+            rail="WIRE",
+            debtor={"accountId": "ACC-debtor"},
+            creditor={"accountId": "ACC-creditor"},  # held → on-us wire
+            instructedAmount=100.0,
+            instructedCurrency="USD",
+        )
+
+
+def test_an_external_wire_and_an_internal_transfer_are_accepted(service, db):
+    """The on-us wire disallow must not over-fire: an external wire (no accountId) and an
+    internal transfer (rail=INTERNAL + accountId) are both legitimate and must still pass the
+    contract. Pinning the scope so a future tightening can't silently reject the happy paths."""
+    from api_models import PaymentOrderInitiateRequest
+
+    PaymentOrderInitiateRequest(
+        customerId="CUST-1", type="CREDIT_TRANSFER", rail="WIRE",
+        debtor={"accountId": "ACC-debtor"},
+        creditor={"accountNo": "123", "name": "Acme", "bic": "CHASUS33"},
+        instructedAmount=100.0, instructedCurrency="USD",
+    )
+    PaymentOrderInitiateRequest(
+        customerId="CUST-1", type="CREDIT_TRANSFER", rail="INTERNAL",
+        debtor={"accountId": "ACC-debtor"},
+        creditor={"accountId": "ACC-creditor"},
+        instructedAmount=100.0, instructedCurrency="USD",
+    )
 
 
 def test_a_creditor_borne_fee_is_not_carried(service, db):  # noqa: F811

@@ -44,9 +44,11 @@ function accountingMeta(payment, jn) {
   if (posting === "POSTED" && journalRef) return journalRef;
   if (posting) return posting.toLowerCase();
   if (jn) return jn.periodCode;
-  // An external wire halts at IN_PROGRESS and writes no `transactions` doc, so it reaches
-  // no ledgerEvent at all (execute.py:351). Say that, rather than rendering an empty panel
-  // that reads like a bug.
+  // An external wire writes a `transactions` doc (payee = the clearing account) and reaches
+  // the ledger, but settlement is deferred to stage 7 — so before settle.py runs the payment
+  // is at IN_PROGRESS and the GL batch has not posted it yet. Say that, rather than rendering
+  // an empty panel that reads like a bug. (Pre-stage-7 this was "writes no transactions doc,
+  // reaches no ledgerEvent" — stale after doc 21 step 3 removed the halt.)
   if (payment?.creditor?.accountId == null && payment?.rail && payment.rail !== "INTERNAL") {
     return "not yet posted — settlement pending (stage 7)";
   }
@@ -66,9 +68,9 @@ function stageFourMeta(payment, reached) {
   const decision = payment?.fraud?.decision;
   const network = payment?.wireDetails?.network;
 
-  // A REVIEW decision holds at PENDING_REVIEW (FR-4.13 / Q33 resolved 2026-09-11) — its own
+  // A REVIEW decision holds at MANUAL_FRAUD_REVIEW (FR-4.13 / Q33 resolved 2026-09-11) — its own
   // status now, read directly rather than inferred from "AUTHORISED but not APPROVED".
-  if (payment?.lifecycle?.currentState === "PENDING_REVIEW") return "pending review";
+  if (payment?.lifecycle?.currentState === "MANUAL_FRAUD_REVIEW") return "manual fraud review";
   // Fallback for docs written before the state existed (a REVIEW held at AUTHORISED).
   if (decision === "REVIEW" && !reached("APPROVED")) return "held for review";
   if (decision === "DECLINED") return "declined";
@@ -217,18 +219,18 @@ export function buildLifecycleStages(payment, trace) {
       },
     },
     {
-      // Stage 4 owns ROUTED -> (PENDING_REVIEW | AUTHORISED) -> APPROVED and four kinds of
+      // Stage 4 owns ROUTED -> (MANUAL_FRAUD_REVIEW | AUTHORISED) -> APPROVED and four kinds of
       // output: the routing decision, the fraud assessment, the sanctions result and the
       // authorization decision. `kind: "authorization"` renders Doina's L508-515 display —
       // "Risk assessment completed", "Sanctions and AML screening passed", "Fraud risk score
       // within threshold", "Decision: APPROVED" — straight off `checks[]`, which is why the
-      // backend check NAMES match her four lines one-for-one. PENDING_REVIEW is the REVIEW
+      // backend check NAMES match her four lines one-for-one. MANUAL_FRAUD_REVIEW is the REVIEW
       // hold (FR-4.13): the payment is routed but not yet authorised.
       key: "authorization",
       label: "Orchestration & authorization",
       icon: "Diagram3",
       stage: 4,
-      reached: reached("ROUTED", "PENDING_REVIEW", "AUTHORISED", "APPROVED"),
+      reached: reached("ROUTED", "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED"),
       meta: stageFourMeta(payment, reached),
       intro:
         "Chooses the execution path within the already-selected rail, writes the immutable " +
@@ -237,10 +239,20 @@ export function buildLifecycleStages(payment, trace) {
         "decline, or hold.",
       kind: "authorization",
       data: {
-        events: eventsFor("ROUTED", "PENDING_REVIEW", "AUTHORISED", "APPROVED"),
+        events: eventsFor("ROUTED", "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED"),
         fraud: payment?.fraud || null,
         sanctions: payment?.correspondent?.sanctionsCheck || null,
         network: payment?.wireDetails?.network || null,
+        // FR-4.13 — an operator can resolve a payment held here for manual review. The
+        // resolve buttons render in the stage-4 panel only while the payment is actually at
+        // MANUAL_FRAUD_REVIEW; once resolved (APPROVED → IN_PROGRESS, or REJECTED) this is false.
+        reviewActionRequired: payment?.lifecycle?.currentState === "MANUAL_FRAUD_REVIEW",
+        // FR-4.1 — the execution-strategy decision (strategy, network, correspondent,
+        // cost, cut-off, value date, rationale). Joined onto the payment read from
+        // `routingSnapshots` (workflow_read_service.get_payment). The payment doc itself
+        // carries only `wireDetails.network` + the snapshot id; the full decision lives on
+        // the immutable snapshot, so it is surfaced here for the stage-4 panel to render.
+        routingSnapshot: payment?.routingSnapshot || null,
         // Forward pointers to stage 4's artifacts. `routingSnapshots` is a separate
         // collection; the commitment was folded into `payments.order` per Doina's Aug 27
         // target model (L427-429), so `paymentOrderId` now points within the same document

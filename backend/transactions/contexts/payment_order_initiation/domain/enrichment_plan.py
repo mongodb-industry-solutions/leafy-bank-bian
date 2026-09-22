@@ -448,7 +448,20 @@ def _plan_fx(p: EnrichmentPlan, payment: dict,
     instructed_amount = payment.get("instructedAmount", 0)
     settlement_amount = round(instructed_amount * rate, 2)
 
+    # The scalar stays as a denormalised mirror of `fx.fxRate` — several readers
+    # (evaluate.py FR-4.12 reconfirmation, settle.py FR-7.6 position, the routing
+    # snapshot doc, the UI summary row) read it, and replacing it is high blast radius
+    # for no model gain. The `fx{}` object is the authoritative provenance: which leg
+    # (source→target), that the rate is SIMULATED, when it was applied, and a quote id.
     p._set("fxRate", rate, before=payment.get("fxRate"), source="simulated-fx-table")
+    p._set("fx", {
+        "sourceCurrency": instructed_currency,
+        "targetCurrency": debtor_account_currency,
+        "fxRate": rate,
+        "rateTimestamp": None,   # stamped by enrichment.run, which owns `now`
+        "rateSource": "SIMULATED",
+        "quoteId": None,         # stamped by enrichment.run
+    }, before=payment.get("fx"), source="simulated-fx-table")
     p._set("amount", settlement_amount, before=payment.get("amount"), source="simulated-fx")
     p._set("currency", debtor_account_currency,
            before=payment.get("currency"), source="simulated-fx")

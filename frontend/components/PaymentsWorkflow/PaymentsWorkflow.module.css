@@ -725,6 +725,12 @@
 .stepUpCallout .stepUpCalloutTitle svg {
   color: var(--pw-accent);
 }
+/* FR-4.13 — the Approve / Decline row in the manual-review callout. */
+.resolveActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
 
 /* Stage 2: the two gates beside the checks, so the panel uses the width instead of a tall
    narrow column. Checks get slightly more room than the gate cards. */
@@ -1386,6 +1392,20 @@
   border-color: #c1c7c6;   /* gray.light1 */
   background: #f9fbfa;     /* gray.light3 */
   color: #3d4f58;          /* gray.dark2 */
+}
+
+/* Muted subline under the list's status pill — the posting + settlement axes (Doina
+   Sep 17). Smaller and fainter than the pill so the primary `status` stays the lead,
+   with the two lagging axes as supporting context ("posting pending · settlement —"). */
+.statusAxes {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--pw-faint);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: lowercase;
 }
 
 /* ── independent axes row (research §1.4 / §4) ──

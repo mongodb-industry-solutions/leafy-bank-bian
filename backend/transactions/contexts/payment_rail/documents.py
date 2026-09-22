@@ -37,7 +37,10 @@ def transaction_doc(
     fee_currency: Optional[str] = None,
 ) -> dict:
     """One v4_21 transactions doc: the confirmed payer->payee movement. NOT an accounting record
-    (no legs, no gl) — the ledger service derives DR/CR ledgerEvents from this via CDC."""
+    (no legs, no gl) — the ledger service derives DR/CR ledgerEvents from this via CDC. The ledger
+    stamps a `journalEntryId` back-pointer on this doc after the GL batch posts (stage 6), so the
+    original transaction record carries the journal that posted it; that pointer is a convenience
+    reference, not accounting data."""
     debtor_name = (debtor_customer.get("identification") or {}).get("legalName")
     # An external creditor has no customer record — the name lives in the payment's payee
     # snapshot, not in a `customers` lookup. The clearing account (stage 7 B1) is the
@@ -115,6 +118,15 @@ def transaction_doc(
         # 0.0 on an internal transfer: stage 3 levies a charge on `rail == "WIRE"` only.
         "feeAmount": fee_amount,
         "feeCurrency": fee_currency or currency,
+        # Stage 6 — a back-pointer to the journal entry that posted this transaction,
+        # stamped by the ledger's `posting_writeback_service` after the GL batch runs
+        # (Doina Sep 17: "the journal identifier written back to the original transaction
+        # record once posting completes"). `null` at build; the ledger fills it. NOT an
+        # accounting record (still no legs, no gl) — this is a convenience pointer, the
+        # same one `payments.refs.journalEntryId` carries. Safe from the change-stream
+        # feedback loop because `ingest_worker` watches inserts only.
+        "journalEntryId": None,
+        "postedAt": None,
     }
 
 

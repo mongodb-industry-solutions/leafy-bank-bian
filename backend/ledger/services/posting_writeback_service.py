@@ -145,6 +145,22 @@ def _write_back(
                 "left unset", payment_id,
             )
 
+        # Stamp the journal id back onto the original `transactions` record too (Doina
+        # Sep 17: "the journal identifier written back to the original transaction record
+        # once posting completes"). Safe because `ingest_worker`'s change stream filters
+        # on `operationType: "insert"` (`ingest_worker.py:286`), so this update cannot
+        # re-trigger ingestion — no feedback loop. Only the principal event reaches here
+        # with a `paymentId` that matches a `transactions` doc; the fee/settlement events
+        # carry `{paymentId}-FEE`/`-SETTLEMENT` and `txn` is None for them, so they no-op
+        # (correct: those legs have no separate `transactions` record). Like the `payments`
+        # write-back, this is a convenience pointer stamped outside the journal's ACID; a
+        # failure leaves a stale pointer, never a lost journal.
+        if txn is not None:
+            txn_coll.update_one(
+                {"paymentId": payment_id},
+                {"$set": {"journalEntryId": journal_id, "postedAt": now}},
+            )
+
         # Two writes, deliberately separate. The first is unconditional: the posting axis
         # advances regardless of where the payment sits in the pipeline, which is the whole
         # point of `postingStatus` being a second axis (spec: "advances independently of

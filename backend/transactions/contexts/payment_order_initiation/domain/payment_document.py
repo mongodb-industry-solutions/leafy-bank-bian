@@ -155,7 +155,15 @@ def build(ctx) -> dict:
         # conflating the two (R7) made a caller's retry key part of the payment's public
         # identity.
         "endToEndId": ctx.end_to_end_id,
-        "idempotencyKey": ctx.idempotency_key,
+        # Request-level dedupe metadata (Doina's proposed `idempotency{}` object, distinct
+        # from the content-based `duplicate_detection` WARN). `idempotencyKey` is the caller's
+        # retry key (header or body); `duplicateOf` is stamped by stage 3 when a content
+        # duplicate is detected. Enforcement (the unique sparse index) is still deferred to
+        # the end of the stage sequence — see `_state.md` standing precondition.
+        "idempotency": {
+            "idempotencyKey": ctx.idempotency_key,
+            "duplicateOf": None,
+        },
         # DR-1.1: customer's own internal tracking reference, distinct from endToEndId.
         # Not in the canonical `payments` spec — see `test_payment_document_spec._KNOWN_EXTRAS`.
         "clientReference": ctx.client_reference,
@@ -184,6 +192,12 @@ def build(ctx) -> dict:
         # `fraud`/`enrichment`/`authentication`. Enrichment writes the simulated rate
         # and diverges `amount` when the instructed currency differs (FR-3.14).
         "fxRate": None,
+        # FR-3.14 — the full FX provenance object (Doina's proposed `fx{}`: sourceCurrency,
+        # targetCurrency, fxRate, rateTimestamp, rateSource, quoteId). A single scalar can't
+        # carry which leg it applies to or that the rate is SIMULATED, so enrichment writes
+        # this object alongside the scalar (which stays as a denormalised mirror of
+        # `fx.fxRate` for existing readers). Null at build; enrichment `$set`s it.
+        "fx": None,
         "chargeBearer": ctx.charge_bearer,
         "categoryPurpose": ctx.category_purpose,
         # R8 — captured at the entry screen for EVERY rail. Single source of truth: the

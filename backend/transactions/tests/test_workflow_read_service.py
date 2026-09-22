@@ -134,13 +134,16 @@ class FakeArtifacts:
 
 
 class FakeConnection:
-    def __init__(self, coll, executions=None, messages=None, notifications=None):
+    def __init__(self, coll, executions=None, messages=None, notifications=None,
+                 routing_snapshot=None):
         self.coll = coll
         self.artifacts = {
             "paymentExecutions": FakeArtifacts(executions),
             "paymentMessages": FakeArtifacts(messages),
             "settlementPositions": FakeArtifacts(None),  # stage 7 — empty by default
             "notifications": FakeArtifacts(notifications),
+            "routingSnapshots": FakeArtifacts(  # stage 4 — one doc, or none pre-stage-4
+                [routing_snapshot] if routing_snapshot else None),
         }
 
     def get_collection(self, db_name, name):
@@ -210,6 +213,21 @@ def test_total_counts_the_filter_not_the_page(conn):
     assert out["total"] == 3
 
 
+def test_list_projection_carries_all_three_status_axes():
+    """Doina (Sep 17): a single `status=SETTLED` pill reads as 'everything done' when the
+    posting/settlement axes lag. The list must carry all three so the UI can show them.
+    The fake collection ignores projection, so this pins the allowlist directly — a later
+    stage's axis is invisible here until it is named (the inclusion-allowlist rule)."""
+    for key in (
+        "status",
+        "lifecycle.currentState",
+        "lifecycle.postingStatus",
+        "lifecycle.settlementStatus",
+        "lifecycle.reconciliationStatus",
+    ):
+        assert key in svc._LIST_PROJECTION, f"{key} dropped from the list projection"
+
+
 # --- deep dive ----------------------------------------------------------------
 
 def test_get_payment_returns_lifecycle_events(conn):
@@ -231,6 +249,27 @@ def test_get_payment_never_leaks_object_id():
     """Echoing a raw ObjectId into a response is the 2026-06-11 defect."""
     conn = FakeConnection(FakePayments([{**_payment("PAY-9"), "_id": object()}]))
     assert "_id" not in svc.get_payment(conn, "db", "PAY-9")
+
+
+def test_get_payment_attaches_the_routing_snapshot_when_present():
+    """FR-4.1: the stage-4 execution-strategy decision must reach the UI. The payment doc
+    carries only `wireDetails.network` + `refs.routingSnapshotId`; the full decision
+    (strategy, cost, correspondent, cut-off, value date, rationale) lives on the snapshot,
+    so `get_payment` joins it so the deep-dive can render it."""
+    snap = {"routingSnapshotId": "RS-abc", "paymentId": "PAY-1",
+            "executionStrategy": "FEDWIRE_RTGS", "clearingNetwork": "FEDWIRE",
+            "rationale": "domestic urgent"}
+    conn = FakeConnection(FakePayments([_payment("PAY-1")]), routing_snapshot=snap)
+    payment = svc.get_payment(conn, "db", "PAY-1")
+    assert payment["routingSnapshot"]["executionStrategy"] == "FEDWIRE_RTGS"
+    assert payment["routingSnapshot"]["routingSnapshotId"] == "RS-abc"
+
+
+def test_get_payment_attaches_none_when_no_routing_snapshot(conn):
+    """A pre-stage-4 payment (INITIATED, never routed) has no snapshot — `None`, not absent,
+    so the UI reads 'no routing decision yet' rather than branching on undefined."""
+    payment = svc.get_payment(conn, "db", "PAY-3")
+    assert payment["routingSnapshot"] is None
 
 
 # --- exceptions ---------------------------------------------------------------

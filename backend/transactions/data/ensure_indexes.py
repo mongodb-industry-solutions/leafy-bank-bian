@@ -37,8 +37,8 @@ PAYMENTS_INDEXES = [
         "name": "idx_payments_createdAt_status",
         "keys": [("createdAt", DESCENDING), ("status", ASCENDING)],
     },
-    # idempotencyKey is the caller's retry key, and UNIQUE here is load-bearing, not an
-    # optimisation: capture's find_one pre-check cannot serialise concurrent identical
+    # idempotency.idempotencyKey is the caller's retry key, and UNIQUE here is load-bearing,
+    # not an optimisation: capture's find_one pre-check cannot serialise concurrent identical
     # requests on its own, so without this constraint two racing callers both pass the
     # check and both move money. The DuplicateKeyError handler in capture.py is what
     # makes the second caller an idempotent replay — and it can only fire if this index
@@ -46,7 +46,9 @@ PAYMENTS_INDEXES = [
     # without a retry key; a plain unique index would let exactly one such payment exist.
     #
     # Stage 1 (R7) moved this off `endToEndId`, which now carries the ISO 20022
-    # EndToEndIdentification and nothing else.
+    # EndToEndIdentification and nothing else. The 2026-09-22 Doina review relocated the
+    # field from flat `idempotencyKey` to nested `idempotency.idempotencyKey` (her proposed
+    # `idempotency{}` object) — the index path moved with it.
     #
     # ⚠️ NOT YET APPLIED ON ATLAS — deferred to the end of the stage sequence by decision
     # (2026-08-30, doc 13 §6). Safe only because the index is INERT today: no caller sends
@@ -64,7 +66,7 @@ PAYMENTS_INDEXES = [
     # server-derived and unique per payment) but dead weight — drop it then.
     {
         "name": "idx_idempotency_key_unique",
-        "keys": [("idempotencyKey", ASCENDING)],
+        "keys": [("idempotency.idempotencyKey", ASCENDING)],
         "unique": True,
         "sparse": True,
     },

@@ -12,7 +12,7 @@ it is on the Q1 naming-correction list.
 Reads  ctx: payment_doc, execution_strategy, routing_snapshot_id, warehoused,
             is_external_creditor, debtor_account_ref, creditor_*, payment_oid,
             current_state, collections
-Writes ctx: fraud; current_state -> AUTHORISED (-> APPROVED), or PENDING_REVIEW on a
+Writes ctx: fraud; current_state -> AUTHORISED (-> APPROVED), or MANUAL_FRAUD_REVIEW on a
             REVIEW hold; `payments.fraud`, `payments.correspondent.sanctionsCheck`,
             `payments.clearing.authorisedAt` (APPROVED only), `payments.order`,
             `payments.confirmation` (APPROVED only — FR-4.4), `payments.refs.paymentOrderId`;
@@ -38,18 +38,18 @@ already *legal*; they were simply unreachable behind a hardcoded literal.
 * **DECLINED** — raise. The saga marks the payment REJECTED (`payment_lifecycle._mark_rejected`)
   and re-raises, so stage 5 can never run on an unapproved payment. This activates code that
   sat commented out since the stage was scaffolded.
-* **REVIEW** — advance to **PENDING_REVIEW** and stop there via `ctx.stop()`. The payment
+* **REVIEW** — advance to **MANUAL_FRAUD_REVIEW** and stop there via `ctx.stop()`. The payment
   never reaches AUTHORISED or APPROVED and **no payment order is written** — the bank has
   not committed. `clearing.authorisedAt` is not written either: a payment under manual
   review has not been authorised.
 
-`PENDING_REVIEW` is a Kiran-added lifecycle state (Q33 resolved 2026-09-11), not in the
-canonical `status` / `currentState` enum. The conformance guard admits it via an explicit,
-documented extension (`test_payment_document_spec._ENUM_EXTENSIONS`) so the addition is
-auditable rather than a value smuggled past the guard — the 2026-04-24 `bian-mapping`
-anti-pattern. Pending Doina's ratification into the canonical spec (out-of-repo follow-up);
-until then an operator resolve route (PENDING_REVIEW -> AUTHORISED -> APPROVED, or ->
-REJECTED) is wired in the transition graph but not yet exposed as a route.
+`MANUAL_FRAUD_REVIEW` is the manual-fraud-review state (FR-4.13 / DR-4.2). Originally added
+2026-09-11 as `PENDING_REVIEW` (Q33); renamed to Doina's `MANUAL_FRAUD_REVIEW` per her DR-4
+(Sep 15), which also adds it to the canonical `status` / `currentState` / `events[].state`
+enums — so the conformance guard reverted to the spec alone (the `_ENUM_EXTENSIONS` admission
+it used while unratified is retired). The operator resolve route
+(`POST /TransactionAuthorization/Resolve`) advances MANUAL_FRAUD_REVIEW -> AUTHORISED ->
+APPROVED (approve) or -> REJECTED (decline).
 
 ## The payment order lands here, not in 4a
 
@@ -89,6 +89,55 @@ def run(ctx: PaymentContext) -> None:
         record(name, checks.FAIL, detail)
         _flush(ctx, recorded)
         raise ValueError(detail)
+
+    # --- operator manual-review override (FR-4.13 resume) -------------------
+    # An operator approved or declined a payment held at MANUAL_FRAUD_REVIEW. The model's REVIEW
+    # assessment and the sanctions result are already on the document from the hold, so this
+    # branch does NOT re-score and does NOT re-screen — it commits the authorisation the model
+    # withheld (APPROVED) or raises so the saga marks the payment REJECTED. `ctx.review_override`
+    # is set only by `PaymentsService.resolve_review`, which re-enters the saga at this stage.
+    if ctx.review_override == "APPROVED":
+        persisted_fraud = payment.get("fraud") or {}
+        persisted_sanctions = (payment.get("correspondent") or {}).get("sanctionsCheck") or {}
+        recorded.append(checks.check(
+            STAGE, "manual_review_approved", checks.PASS,
+            detail=(
+                f"Operator approved a payment held for manual review. Model score "
+                f"{persisted_fraud.get('score')}/100 (decision REVIEW) overridden by "
+                f"operator review."
+            ),
+            actor="operator-review", at=now,
+        ))
+        ctx.fraud = persisted_fraud
+        _flush(ctx, recorded)
+        _commit_approval(
+            ctx, payment=payment, sanctions_block=persisted_sanctions, now=now,
+            authorised_actor="operator-review",
+            authorised_reason=(
+                f"Operator manual-review approval; model score "
+                f"{persisted_fraud.get('score')}/100 (decision REVIEW) overridden."
+            ),
+            approval_reason="Approved by operator manual review.",
+            authorization={
+                "decision": fraud_rules.APPROVED,
+                "fraudScore": persisted_fraud.get("score"),
+                "sanctionsStatus": persisted_sanctions.get("status"),
+                "authorisedAt": now,
+                "authorisedBy": "operator-review",
+                "serviceDomain": "TransactionAuthorization",
+                "reviewOverride": True,
+            },
+        )
+        return
+
+    if ctx.review_override == "REJECTED":
+        recorded.append(checks.check(
+            STAGE, "manual_review_declined", checks.FAIL,
+            detail="Operator declined a payment held for manual review.",
+            actor="operator-review", at=now,
+        ))
+        _flush(ctx, recorded)
+        raise ValueError("Payment declined by operator manual review.")
 
     creditor = payment.get("creditor") or {}
     wire = payment.get("wireDetails") or {}
@@ -221,16 +270,16 @@ def run(ctx: PaymentContext) -> None:
         )
 
     if assessment.holds:
-        # REVIEW — held at PENDING_REVIEW, not AUTHORISED (FR-4.13). The bank has NOT
+        # REVIEW — held at MANUAL_FRAUD_REVIEW, not AUTHORISED (FR-4.13). The bank has NOT
         # authorised a payment still under manual review, so `clearing.authorisedAt` is not
         # written and no order is committed (`payments.order` stays null). The fraud block
         # and screening result land in the same write as the transition — the score and the
         # state that attests to it are one fact (§11). Queryable on `status ==
-        # PENDING_REVIEW` and visible on the operations dashboard. An operator's later
-        # approve resumes PENDING_REVIEW -> AUTHORISED -> APPROVED (transition wired; the
+        # MANUAL_FRAUD_REVIEW` and visible on the operations dashboard. An operator's later
+        # approve resumes MANUAL_FRAUD_REVIEW -> AUTHORISED -> APPROVED (transition wired; the
         # resume route itself is a follow-on, not built here).
         lifecycle.advance_ctx(
-            ctx, lifecycle.PENDING_REVIEW,
+            ctx, lifecycle.MANUAL_FRAUD_REVIEW,
             actor="fraud-service",
             reason=(
                 f"Fraud score {assessment.score}/100, decision {assessment.decision}; "
@@ -246,30 +295,17 @@ def run(ctx: PaymentContext) -> None:
 
     # The fraud block, the screening result and the authorisation timestamp land in the SAME
     # write as the AUTHORISED transition — the score and the state that attests to it are one
-    # fact, and splitting them would let a reader see one without the other (§11).
-    lifecycle.advance_ctx(
-        ctx, lifecycle.AUTHORISED,
-        actor="fraud-service",
-        reason=(
+    # fact, and splitting them would let a reader see one without the other (§11). The
+    # commitment (order + confirmation) lands in the SAME write as APPROVED, for the same
+    # reason. Both are in `_commit_approval`, shared with the operator-review override above.
+    _commit_approval(
+        ctx, payment=payment, sanctions_block=sanctions_block, now=now,
+        authorised_actor="fraud-service",
+        authorised_reason=(
             f"Fraud score {assessment.score}/100, decision {assessment.decision}; "
             f"sanctions {screening.status}"
         ),
-        extra={
-            "fraud": ctx.fraud,
-            "correspondent.sanctionsCheck": sanctions_block,
-            "clearing.authorisedAt": now,
-        },
-    )
-
-    # --- the commitment ------------------------------------------------------
-    # Folded into `payments.order` per Doina's Aug 27 target model (L427-429): the
-    # `paymentOrders` collection is struck through, the commitment lives as a sub-document.
-    # Written in the SAME transition as APPROVED — the commitment and the state that
-    # attests to it are one fact (§11), so a reader can't see one without the other.
-    order = documents.payment_order(
-        payment=ctx.payment_doc or payment,
-        strategy=ctx.execution_strategy,
-        routing_snapshot_id=ctx.routing_snapshot_id,
+        approval_reason=_approval_reason(ctx),
         authorization={
             "decision": assessment.decision,
             "fraudScore": assessment.score,
@@ -278,22 +314,58 @@ def run(ctx: PaymentContext) -> None:
             "authorisedBy": "fraud-service",
             "serviceDomain": "TransactionAuthorization",
         },
+    )
+
+
+# --------------------------------------------------------------------------- #
+
+def _commit_approval(
+    ctx, *, payment, sanctions_block, now, authorised_actor, authorised_reason,
+    approval_reason, authorization,
+):
+    """The AUTHORISED -> APPROVED transition + the commitment it attests to.
+
+    Shared by the normal fraud-APPROVED path and the operator-review override. The fraud
+    block, the screening result and `clearing.authorisedAt` land in the AUTHORISED write; the
+    `order` sub-doc, the `confirmation` sub-doc and `refs.paymentOrderId` land in the APPROVED
+    write — each state change carries the facts it attests to in one update (§11). The
+    `originator_confirmed` check is appended after the commitment exists, ASYNC because a
+    confirmation is a notification, not an inline answer (FR-4.4).
+
+    `authorization` is the record stamped on `order.authorization` — the normal path writes the
+    model's decision; the override writes the operator's, with `reviewOverride: true`.
+    """
+    lifecycle.advance_ctx(
+        ctx, lifecycle.AUTHORISED,
+        actor=authorised_actor,
+        reason=authorised_reason,
+        extra={
+            "fraud": ctx.fraud,
+            "correspondent.sanctionsCheck": sanctions_block,
+            "clearing.authorisedAt": now,
+        },
+    )
+
+    # Folded into `payments.order` per Doina's Aug 27 target model (L427-429): the
+    # `paymentOrders` collection is struck through; the commitment lives as a sub-document.
+    order = documents.payment_order(
+        payment=ctx.payment_doc or payment,
+        strategy=ctx.execution_strategy,
+        routing_snapshot_id=ctx.routing_snapshot_id,
+        authorization=authorization,
         now=now,
         warehoused=ctx.warehoused,
     )
 
-    # FR-4.4 — the originator confirmation (BIAN PaymentConfirmation, SD 47766). A persisted
-    # artifact, not just an attested check: the confirmation sub-doc lands in the SAME APPROVED
-    # write as the order — the commitment, the confirmation of it, and the state that attests
-    # to both are one fact (§11). Distinct from stage 5's `notifications` (the sender-side
-    # "you paid $X" record, exactly one per payment): this says "on track, execution path
-    # committed," earlier and independent of settlement. See `documents.confirmation`.
+    # FR-4.4 — the originator confirmation (BIAN PaymentConfirmation, SD 47766). Distinct from
+    # stage 5's `notifications`: this says "on track, execution path committed," earlier and
+    # independent of settlement.
     confirmation = documents.confirmation(order=order, now=now)
 
     lifecycle.advance_ctx(
         ctx, lifecycle.APPROVED,
         actor="transactions-service",
-        reason=_approval_reason(ctx),
+        reason=approval_reason,
         extra={
             "order": order,
             "confirmation": confirmation,
@@ -301,20 +373,6 @@ def run(ctx: PaymentContext) -> None:
         },
     )
 
-    # --- 6. originator_confirmed (R8) — BIAN PaymentConfirmation, SD 47766 ---
-    # Her L502: PaymentConfirmation *"sends confirmation feedback to the customer/originator
-    # once orchestration has committed to an execution path, independent of the final
-    # settlement confirmation much later."* So it fires HERE — after the payment order
-    # exists — and not at settlement.
-    #
-    # A second flush, deliberately: this check attests to something that only becomes true
-    # once the commitment is written, so it cannot travel with the flush above. ASYNC,
-    # because a confirmation to the originator is a notification, not an inline answer.
-    #
-    # The confirmation is now a persisted sub-doc (`payments.confirmation`, written in the
-    # APPROVED transition above), so this check attests a real artifact rather than a vacuum.
-    # It is NOT a `notifications` document: stage 5 owns that collection and its "exactly 1
-    # per payment" invariant, and the confirmation is a different message at a different time.
     checks.append_checks(ctx.collections.payments, ctx.payment_oid, [
         checks.check(
             STAGE, "originator_confirmed", checks.PASS, mode=checks.ASYNC,
@@ -331,8 +389,6 @@ def run(ctx: PaymentContext) -> None:
         )
     ])
 
-
-# --------------------------------------------------------------------------- #
 
 def _record_fee_reconfirmation(record, refuse, payment: dict) -> None:
     """R17 / FR-4.12 — re-derive the fee from the same schedule stage 3 used and compare.

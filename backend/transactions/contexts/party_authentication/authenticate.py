@@ -72,19 +72,23 @@ def run(ctx: PaymentContext) -> None:
     now = datetime.now(timezone.utc)
     recorded: list = []
 
-    def record(name: str, result: str, detail: str, *, actor: str = "transactions-service") -> None:
+    def record(name: str, result: str, detail: str, *, actor: str = "transactions-service",
+               field: str | None = None, code: str | None = None) -> None:
         recorded.append(
-            checks.check(STAGE, name, result, mode=checks.SYNC, detail=detail, actor=actor, at=now)
+            checks.check(STAGE, name, result, mode=checks.SYNC, detail=detail,
+                         field=field, code=code, actor=actor, at=now)
         )
 
-    def refuse(name: str, detail: str) -> None:
+    def refuse(name: str, detail: str, *, field: str | None = None,
+               code: str | None = None) -> None:
         """Record the failing check, flush the trail, and raise.
 
         The flush has to happen before the raise: the saga catches `ValueError` and marks
         the payment REJECTED, so a check written after that point would never exist. What
-        the demo needs from a refusal is *which* check refused it.
+        the demo needs from a refusal is *which* check refused it, and — per FR-3.9 — the
+        offending field and a stable failure code alongside the message.
         """
-        record(name, checks.FAIL, detail)
+        record(name, checks.FAIL, detail, field=field, code=code)
         _flush(ctx, recorded)
         raise ValueError(detail)
 
@@ -122,7 +126,8 @@ def run(ctx: PaymentContext) -> None:
     # --- 2. account_active (R4) ---------------------------------------------
     status = account.get("status")
     if status in _UNUSABLE_ACCOUNT_STATES:
-        refuse("account_active", f"Debtor account is {status}.")
+        refuse("account_active", f"Debtor account is {status}.",
+               field="debtor.accountId", code="DEBTOR_ACCOUNT_NOT_ACTIVE")
     record("account_active", checks.PASS, f"Debtor account status {status}.")
 
     # --- 3. account_unrestricted (R6) ---------------------------------------
@@ -130,7 +135,8 @@ def run(ctx: PaymentContext) -> None:
     if blocking:
         types = ", ".join(sorted({r["type"] for r in blocking}))
         reasons = "; ".join(r.get("reason") or "no reason recorded" for r in blocking)
-        refuse("account_unrestricted", f"Debtor account carries an active {types} ({reasons}).")
+        refuse("account_unrestricted", f"Debtor account carries an active {types} ({reasons}).",
+               field="debtor.accountId", code="DEBTOR_ACCOUNT_RESTRICTED")
     record("account_unrestricted", checks.PASS, "No active debit restriction on the debtor account.")
 
     # --- 4. customer_entitled (R2/R5) ---------------------------------------
@@ -140,18 +146,22 @@ def run(ctx: PaymentContext) -> None:
         refuse(
             "customer_entitled",
             f"Debtor account {ctx.debtor_account_ref} is not owned by {ctx.customer_ref}.",
+            field="debtor.accountId", code="DEBTOR_NOT_OWNED",
         )
     signatory = policy.signatory_for(account.get("signatories"), ctx.customer_ref)
     if signatory is None:
         refuse(
             "customer_entitled",
             f"{ctx.customer_ref} is not a signatory on account {ctx.debtor_account_ref}.",
+            field="customerId", code="NOT_SIGNATORY",
         )
     if customer.get("status") != "ACTIVE":
-        refuse("customer_entitled", f"Customer {ctx.customer_ref} is {customer.get('status')}.")
+        refuse("customer_entitled", f"Customer {ctx.customer_ref} is {customer.get('status')}.",
+               field="customerId", code="CUSTOMER_NOT_ACTIVE")
     kyc_status = (customer.get("kyc") or {}).get("status")
     if kyc_status != "VERIFIED":
-        refuse("customer_entitled", f"Customer {ctx.customer_ref} KYC status is {kyc_status}.")
+        refuse("customer_entitled", f"Customer {ctx.customer_ref} KYC status is {kyc_status}.",
+               field="customerId", code="KYC_NOT_VERIFIED")
     signing_rule = signatory.get("signingRule")
     record(
         "customer_entitled", checks.PASS,
@@ -166,6 +176,7 @@ def run(ctx: PaymentContext) -> None:
             "payment_limit_available",
             f"{amount:,.2f} exceeds the {segment or 'default'} per-payment entitlement "
             f"of {limits['perPaymentLimit']:,.2f}.",
+            field="amount", code="PAYMENT_LIMIT_EXCEEDED",
         )
     record(
         "payment_limit_available", checks.PASS,
