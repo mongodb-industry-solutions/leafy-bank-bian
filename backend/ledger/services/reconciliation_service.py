@@ -324,13 +324,17 @@ def compute_reconciliation(
     # Evidence pointers for the reconciliationItems doc and the payments refs.
     journal_entry_id = None
     if settlement_event is not None:
-        # The settlement event's journal id is stamped on its subLedgerEntries by the batch.
-        sl_coll = connection.get_collection(db_name, "subLedgerEntries")
-        sl = sl_coll.find_one(
-            {"sourceReference.sourceId": settlement_event.get("eventId")},
-            {"_id": 0, "journalEntryId": 1},
-        )
-        journal_entry_id = (sl or {}).get("journalEntryId") or None
+        # DR-7.3: reference the settlement-leg journal entry from `settlementPositions`
+        # (written back by the ledger when the settlement event posts). Fall back to the
+        # settlement event's subLedgerEntries for pre-DR-7.3 records that predate the write-back.
+        journal_entry_id = (position or {}).get("journalEntryId")
+        if not journal_entry_id:
+            sl_coll = connection.get_collection(db_name, "subLedgerEntries")
+            sl = sl_coll.find_one(
+                {"sourceReference.sourceId": settlement_event.get("eventId")},
+                {"_id": 0, "journalEntryId": 1},
+            )
+            journal_entry_id = (sl or {}).get("journalEntryId") or None
     elif principal_event is not None:
         journal_entry_id = (payment.get("refs") or {}).get("journalEntryId")
 

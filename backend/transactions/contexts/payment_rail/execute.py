@@ -316,6 +316,17 @@ def _execute_rail_bound(ctx: PaymentContext, record, recorded: list,
     )
     _acknowledge(ctx, execution_oid, ack, now)
 
+    # DR-8.2 — the rail's status response is a message too: stored as an INBOUND
+    # paymentMessages doc, additive to `paymentExecutions.railStatus` (which reconciliation
+    # FR-8.1 still reads). Written before the refusal check so a rejection (RJCT) is recorded
+    # as a status response as well. `execution` carries the request id it answers.
+    _insert(
+        ctx, "payment_messages", execution_documents.PAYMENT_MESSAGES,
+        execution_documents.status_message(
+            payment=payment, execution=execution, ack=ack, now=now,
+        ),
+    )
+
     if not ack.accepted:
         # The rail refused the message. Not the caller's error and not a fraud decision, so
         # it terminates the payment as FAILED rather than REJECTED — and the attempt survives

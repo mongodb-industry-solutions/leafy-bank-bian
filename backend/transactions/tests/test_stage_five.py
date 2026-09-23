@@ -277,10 +277,13 @@ def test_the_skipped_checks_say_why(service, db):  # noqa: F811
 def test_an_external_wire_reaches_in_progress_with_both_artifacts(wire_payment, db):  # noqa: F811
     assert wire_payment["status"] == "IN_PROGRESS"
     assert len(db["paymentExecutions"].docs) == 1
-    assert len(db["paymentMessages"].docs) == 1
+    # Two messages: the OUTBOUND pacs.008 request (docs[0]) + the INBOUND status response
+    # (DR-8.2, docs[1]).
+    assert len(db["paymentMessages"].docs) == 2
 
     execution = db["paymentExecutions"].docs[0]
     message = db["paymentMessages"].docs[0]
+    assert message["direction"] == execution_documents.OUTBOUND
     assert wire_payment["refs"]["paymentExecutionIds"] == [execution["paymentExecutionId"]]
     assert wire_payment["refs"]["canonicalJsonId"] == message["paymentMessageId"]
 
@@ -435,6 +438,31 @@ def test_the_message_and_execution_reference_each_other_at_insert(wire_payment, 
     message = db["paymentMessages"].docs[0]
     assert execution["paymentMessageId"] == message["paymentMessageId"]
     assert message["paymentExecutionId"] == execution["paymentExecutionId"]
+
+
+def test_the_confirmation_is_stored_as_an_inbound_message(wire_payment, db):  # noqa: F811
+    """DR-8.2 — the rail's status response is recorded via the message collection as an
+    INBOUND doc, additive to `paymentExecutions.railStatus` (reconciliation FR-8.1 still
+    reads that). The OUTBOUND request stays docs[0]; the status response is the INBOUND one,
+    linked back by `originalMessageRef`."""
+    inbound = [m for m in db["paymentMessages"].docs
+               if m["direction"] == execution_documents.INBOUND]
+    assert len(inbound) == 1
+    status = inbound[0]
+    request = db["paymentMessages"].docs[0]
+
+    assert status["direction"] == execution_documents.INBOUND
+    assert status["messageFormat"] == execution_documents.STATUS_MESSAGE_FORMAT
+    assert status["statusCode"] == "ACSP"
+    assert status["reason"]
+    assert status["messageRef"]
+    assert status["accepted"] is True
+    assert status["paymentId"] == wire_payment["paymentId"]
+    assert status["paymentExecutionId"] == request["paymentExecutionId"]
+    assert status["originalMessageRef"] == request["paymentMessageId"]
+    # Not a second canonical payment: none of these on the status message either.
+    for forbidden in ("status", "lifecycle", "balance"):
+        assert forbidden not in status, f"{forbidden} would make this a second payment record"
 
 
 def test_nothing_in_the_backend_touches_canonical_json_storage():

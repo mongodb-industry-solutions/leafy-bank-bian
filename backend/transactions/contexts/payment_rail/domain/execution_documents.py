@@ -197,6 +197,64 @@ def payment_message(
     }
 
 
+# The INBOUND confirmation message (DR-8.2). pacs.002 is the ISO 20022 payment-status
+# message the rail returns; the values parallel pacs008.MESSAGE_* for the OUTBOUND request.
+# No serialised body is built (the rail is simulated) — this identifies the message type.
+STATUS_MESSAGE_STANDARD = "ISO20022"
+STATUS_MESSAGE_FORMAT = "pacs.002.001.08"
+
+
+def status_message(
+    *,
+    payment: dict,
+    execution: dict,
+    ack: Any,
+    now: datetime,
+    oid: Optional[ObjectId] = None,
+) -> dict:
+    """The rail's confirmation/status response, stored as an INBOUND message (DR-8.2).
+
+    The message collection carries both directions: the OUTBOUND pacs.008 request and, now,
+    the INBOUND status response the rail returns for it. Same discipline as
+    `payment_message()` — no `status`, `balance` or `lifecycle` (a message is never a second
+    canonical payment — `test_the_payment_message_is_not_a_second_canonical_payment` holds),
+    and no serialised wire body (the request likewise carries `rawMessageRef: None`). What
+    distinguishes a status response is that no canonical mapping occurred: it carries the
+    acknowledgement fields (`statusCode`, `reason`, `messageRef`, ...) instead of a `payload`
+    / `transformationAudit`.
+
+    `paymentExecutions.railStatus` stays the source for reconciliation FR-8.1 — this is the
+    stored-response half, additive. `originalMessageRef` links back to the request message it
+    answers. Written even on a refusal (RJCT): a rejection is a status response too.
+    """
+    oid = oid or ObjectId()
+    return {
+        "_id": oid,
+        "paymentMessageId": derive_ref("PM", oid),
+        "paymentId": payment.get("paymentId"),
+        "paymentExecutionId": execution.get("paymentExecutionId"),
+        "direction": INBOUND,
+        "messageStandard": STATUS_MESSAGE_STANDARD,
+        "messageFormat": STATUS_MESSAGE_FORMAT,
+        # the rail's answer (RailAck) --------------------------------------------
+        "statusCode": ack.status_code,
+        "reason": ack.reason,
+        "messageRef": ack.message_ref,
+        "networkRef": ack.network_ref,
+        "settlementDate": ack.settlement_date,
+        "accepted": ack.accepted,
+        "acknowledgedAt": now,
+        # the OUTBOUND request this response answers ----------------------------
+        "originalMessageRef": execution.get("paymentMessageId"),
+        # no serialised wire body — see the module docstring ---------------------
+        "rawMessageRef": None,
+        # provenance -------------------------------------------------------------
+        "simulated": True,
+        "sourceSystem": SOURCE_SYSTEM,
+        "createdAt": now,
+    }
+
+
 def canonical_payload(payment: dict) -> dict:
     """The normalised canonical payload — the BUSINESS VIEW half of her two tabs.
 

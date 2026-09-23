@@ -958,20 +958,31 @@ function summaryRows(stage, payment) {
       const first = d?.[0];
       return [
         ["Entries", d?.length],
+        // The accounting-leg identity carried from the ledger event (DR-7.3 / Doina Sep 18) —
+        // SETTLEMENT (external settlement posting) vs PAYMENT_PRINCIPAL (initial posting).
+        ["Leg type", first?.eventType || "—"],
         ["Journal entry", first?.journalEntryId || "—"],
         ["Period", first?.periodCode],
         ["Posting date", fmtWhen(first?.postingDate)],
       ];
     }
-    case "journal":
+    case "journal": {
+      // Distinct accounting-leg identities across the merged lines (DR-7.3 / Doina Sep 18) —
+      // SETTLEMENT vs PAYMENT_PRINCIPAL — so the merged period journal's lines read as the
+      // settlement-leg vs posting-leg aggregation.
+      const sourceLegs = [...new Set(
+        (d?.entries ?? []).flatMap((e) => e?.sourceEventTypes ?? [])
+      )];
       return [
         ["Journal ID", d?.journalId],
         ["Journal type", d?.journalType],
+        ["Source legs", sourceLegs.length ? sourceLegs.join(", ") : "—"],
         ["Period", d?.periodCode],
         ["Txn count", d?.sourceReference?.txnCount],
         ["Created by", d?.createdBy],
         ["Created", fmtWhen(d?.createdAt)],
       ];
+    }
     case "reconciliation": {
       // Stage 8 — the three-way tie-out summary. The five-row dashboard itself renders in
       // ReconciliationTieOut (below); these rows are the supporting facts: the reconciliation

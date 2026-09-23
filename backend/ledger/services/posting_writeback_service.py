@@ -49,6 +49,8 @@ _IN_PROGRESS = "IN_PROGRESS"
 _POSTED = "POSTED"
 _ACTOR = "ledger-service"
 _ACTOR_TYPE = "SERVICE"
+# The settlement event's idempotencyKey suffix (`{paymentId}-SETTLEMENT`, settlement_worker).
+_SETTLEMENT_SUFFIX = "-SETTLEMENT"
 
 
 def _now_utc() -> datetime:
@@ -159,6 +161,25 @@ def _write_back(
             txn_coll.update_one(
                 {"paymentId": payment_id},
                 {"$set": {"journalEntryId": journal_id, "postedAt": now}},
+            )
+
+        # DR-7.3 (Doina Sep 18): `settlementPositions` must reference the settlement-leg
+        # journal entry — the reference field kept distinct from the posting-leg journal
+        # entry on `transactions.journalEntryId` (DR-6.3). The settlement event's
+        # `idempotencyKey` is `{paymentId}-SETTLEMENT` (bare paymentId + the suffix), so the
+        # `payments`/`transactions` writes above no-op for it by design; stamp the journal
+        # id onto `settlementPositions` here instead. ⚠️ This is a within-doc pointer like the
+        # transactions write-back: it is NOT inside the journal's ACID and can only go stale,
+        # never lose a journal. The value currently coincides with the period journal that
+        # `transactions.journalEntryId` points at (the GL batch writes ONE journal per period,
+        # merging both legs) — the fields are structurally distinct per DR-7.3; per-leg
+        # journals would make the VALUES distinct too (see DOINA-REVIEW-HANDOVER §7.3).
+        if payment_id.endswith(_SETTLEMENT_SUFFIX):
+            bare_payment_id = payment_id[: -len(_SETTLEMENT_SUFFIX)]
+            sp_coll = connection.get_collection(db_name, "settlementPositions")
+            sp_coll.update_one(
+                {"paymentId": bare_payment_id},
+                {"$set": {"journalEntryId": journal_id, "updatedAt": now}},
             )
 
         # Two writes, deliberately separate. The first is unconditional: the posting axis

@@ -143,6 +143,32 @@ def test_no_transactions_doc_means_no_stamp_and_no_raise():
     assert c.get_collection("db", "transactions").docs == []
 
 
+def test_the_settlement_position_references_the_settlement_leg_journal_entry():
+    """DR-7.3 (Doina Sep 18): `settlementPositions` shall reference the settlement-leg journal
+    entry, kept distinct from the posting-leg journal entry on `transactions.journalEntryId`
+    (DR-6.3). The ledger stamps `journalEntryId` onto the settlementPositions doc when the
+    settlement event's journal posts — the settlement event's `idempotencyKey` is
+    `{paymentId}-SETTLEMENT`, so the `payments`/`transactions` writes no-op for it and this is
+    the reference that carries the pointer."""
+    c = FakeConnection()
+    c.seed("glAccounts", [_GL_2110])
+    # A settlement ledger event (idempotencyKey = {paymentId}-SETTLEMENT), not the principal.
+    c.seed("ledgerEvents", [{"eventId": _EVENT, "idempotencyKey": f"{_PAY}-SETTLEMENT"}])
+    c.seed("settlementPositions", [{
+        "settlementPositionId": "SP-1",
+        "paymentId": _PAY,
+        "model": "CORRESPONDENT",
+        "settlementStatus": "SETTLED",
+        "grossAmount": 25000,
+        "currency": "USD",
+        "outcome": "MATCHED",
+        "journalEntryId": None,
+    }])
+    journal = _post(c)
+    sp = c.get_collection("db", "settlementPositions").docs[0]
+    assert sp["journalEntryId"] == journal["journalId"]
+
+
 def test_a_replayed_batch_appends_no_second_lifecycle_event():
     c = _with_payment("IN_PROGRESS")
     _post(c)

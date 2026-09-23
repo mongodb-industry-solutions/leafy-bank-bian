@@ -129,6 +129,23 @@ def test_journal_lines_have_line_description_starting_with_sum():
         assert line["lineDescription"].startswith("Sum of ")
 
 
+def test_journal_lines_carry_the_source_leg_types():
+    """DR-7.3 / Doina Sep 18 — each merged-period line carries the distinct eventTypes that fed
+    it, so the journal reads as settlement-leg vs posting-leg aggregation. Absent eventTypes
+    (pre-DR-7.3 rows) default to []."""
+    rows = [
+        {**_agg("2110", "DEBIT", 25000), "eventTypes": ["PAYMENT_PRINCIPAL"]},
+        {**_agg("2120", "CREDIT", 25000), "eventTypes": ["SETTLEMENT"]},
+    ]
+    journal, _, _ = build_journal_entry(_BATCH_ID, _PERIOD, rows)
+    by_code = {line["accountCode"]: line for line in journal["entries"]}
+    assert by_code["2110"]["sourceEventTypes"] == ["PAYMENT_PRINCIPAL"]
+    assert by_code["2120"]["sourceEventTypes"] == ["SETTLEMENT"]
+    # Pre-DR-7.3 agg rows (no eventTypes) default cleanly to [].
+    legacy, _, _ = build_journal_entry(_BATCH_ID, _PERIOD, _balanced_agg_rows())
+    assert all(line["sourceEventTypes"] == [] for line in legacy["entries"])
+
+
 def test_journal_lines_line_description_includes_count():
     rows = [_agg("2110", "DEBIT", 75000, count=3), _agg("2120", "CREDIT", 75000, count=3)]
     journal, _, _ = build_journal_entry(_BATCH_ID, _PERIOD, rows)

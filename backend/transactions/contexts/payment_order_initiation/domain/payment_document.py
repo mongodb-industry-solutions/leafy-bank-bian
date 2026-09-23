@@ -272,6 +272,10 @@ def build(ctx) -> dict:
             "statusCode": None,
             "rejectionCode": None,
             "returnCode": None,
+            # FR-7.3 (Doina Sep 17/18) — stamped at stage 7 on an UNMATCHED settlement; present
+            # here as None so the `clearing` block declares them from the start.
+            "discrepancyAmount": None,
+            "discrepancyReason": None,
         },
         # Written by stage 4b, after the instruction exists (decision §11).
         "fraud": None,

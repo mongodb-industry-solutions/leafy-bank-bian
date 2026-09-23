@@ -64,7 +64,8 @@ def build_journal_entry(
     Batch path: one line per (controlAccountCode, side) summarizing many txns.
     Realtime path: same shape with count=1 rows — one journal per transaction.
 
-    agg_rows: list of {_id:{controlAccountCode,side}, amount, currency, count, subLedgerIds, eventIds}.
+    agg_rows: list of {_id:{controlAccountCode,side}, amount, currency, count, subLedgerIds,
+                       eventIds, eventTypes}.
     idempotency_key / source_type / source_id default to the batch values.
     Returns (journal_doc, all_subLedgerIds, all_eventIds).
     """
@@ -94,6 +95,9 @@ def build_journal_entry(
             "currency": r.get("currency") or "USD",
             "functionalAmount": amount,
             "lineDescription": f"Sum of {r['count']} {side.lower()} postings to control account {code} — {label}",
+            # The source accounting-leg identities (SETTLEMENT / PAYMENT_PRINCIPAL) feeding this
+            # line. Labels the merged-period line as "settlement" vs "posting" legs (DR-7.3).
+            "sourceEventTypes": r.get("eventTypes") or [],
         })
         sub_ids.extend(r["subLedgerIds"])
         event_ids.extend(r["eventIds"])
@@ -251,6 +255,11 @@ def run_batch(
             "count": {"$sum": 1},
             "subLedgerIds": {"$push": "$subLedgerId"},
             "eventIds": {"$addToSet": "$sourceReference.sourceId"},
+            # The source accounting-leg identities feeding this line (SETTLEMENT vs
+            # PAYMENT_PRINCIPAL) — carried so a journal line can be labelled "settlement" vs
+            # "posting" (DR-7.3 / Doina Sep 18). A line groups by (period, controlAccount,
+            # side), which in practice is homogeneous per eventType for wires.
+            "eventTypes": {"$addToSet": "$eventType"},
         }},
     ]
     rows = list(sl_coll.aggregate(pipeline))
