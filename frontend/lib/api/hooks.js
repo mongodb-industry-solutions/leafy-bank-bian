@@ -2,7 +2,7 @@
 
 import { useUser } from "@/lib/context/UserContext";
 import { useEffect, useState } from "react";
-import { coreApi, pipelineApi } from "./client";
+import { coreApi, pipelineApi, workflowApi } from "./client";
 
 // BIAN backend field names differ from what composed hooks expect.
 // These helpers normalize the wire shape once so composed hooks need no changes.
@@ -698,19 +698,18 @@ export function useBatchTick(enabled = true, intervalMs = 30000) {
 
 /**
  * GL dashboard snapshot — one call feeds all dashboard blocks (KPI tiles,
- * journal-status donut, reconciliation roll-up, top control accounts).
+ * journal-status donut, reconciliation roll-up, control accounts).
  * Monthly granularity. Pass a periodCode for a single month, or omit it to
  * roll up the last `months` months (default 3, including the current month).
  * Amounts are minor units (int) — divide by 100 for display.
  *
  * @param {string|null} periodCode - "YYYY-MM" for a single month, or null for the rolling window
  * @param {boolean} enabled - gate the fetch (e.g. only when the page is shown)
- * @param {number} [topN=5] - number of top control accounts to return
  * @param {number} [months=3] - window size when periodCode is null
  * @param {*} [refreshKey] - change this to force a refetch (e.g. useBatchTick())
  * @returns {{dashboard: object|null, loading: boolean, error: string|null}}
  */
-export function useGlDashboard(periodCode, enabled, topN = 5, months = 3, refreshKey) {
+export function useGlDashboard(periodCode, enabled, months = 3, refreshKey) {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -722,7 +721,7 @@ export function useGlDashboard(periodCode, enabled, topN = 5, months = 3, refres
     setLoading(true);
     setError(null);
     // Only send months for the rolling-window case; a fixed periodCode ignores it.
-    const params = periodCode ? { periodCode, topN } : { topN, months };
+    const params = periodCode ? { periodCode } : { months };
     pipelineApi("gl-dashboard", params).then(({ data, error: err }) => {
       if (cancelled) return;
       if (err) {
@@ -736,7 +735,170 @@ export function useGlDashboard(periodCode, enabled, topN = 5, months = 3, refres
     return () => {
       cancelled = true;
     };
-  }, [periodCode, enabled, topN, months, refreshKey]);
+  }, [periodCode, enabled, months, refreshKey]);
 
   return { dashboard, loading, error };
+}
+
+/**
+ * Back-office payments list. One fetch per filter/refresh change — no polling.
+ *
+ * Deliberately not a poller: the list is a working surface an analyst reads and filters,
+ * and a 2s refresh under a cursor is hostile. The page's single poll (per
+ * GlPipelineView's one-owner rule) belongs to the selected payment's trace, which is the
+ * only thing that actually changes while you watch it.
+ *
+ * `filters` is destructured into the dependency list rather than passed whole, so a caller
+ * re-creating the object literal each render does not refetch forever.
+ */
+export function usePaymentsList({ status, rail, customerId, from, to, limit = 25, skip = 0 } = {}, refreshKey = 0) {
+  const [data, setData] = useState({ items: [], total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    workflowApi("payments", { status, rail, customerId, from, to, limit, skip }).then(
+      ({ data: d, error: err }) => {
+        if (cancelled) return;
+        if (err) setError(err);
+        else {
+          setData({ items: d?.items ?? [], total: d?.total ?? 0 });
+          setError(null);
+        }
+        setLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [status, rail, customerId, from, to, limit, skip, refreshKey]);
+
+  return { ...data, loading, error };
+}
+
+/** Payments that ended in a terminal state — the Operations lens. */
+export function useWorkflowExceptions({ limit = 25, skip = 0 } = {}, refreshKey = 0) {
+  const [data, setData] = useState({ items: [], total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    workflowApi("exceptions", { limit, skip }).then(({ data: d, error: err }) => {
+      if (cancelled) return;
+      if (err) setError(err);
+      else {
+        setData({ items: d?.items ?? [], total: d?.total ?? 0 });
+        setError(null);
+      }
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [limit, skip, refreshKey]);
+
+  return { ...data, loading, error };
+}
+
+/**
+ * One payment's stage-1..4 record: lifecycle.events[], checks[], envelopes.
+ *
+ * The stages-5..8 half of the trace comes from usePipelineTrace against the ledger. The
+ * UI composes them; neither service reads the other's collections (doc 16 B2).
+ *
+ * A 404 is not an error here — it is the empty state before a payment is selected or
+ * after one is deleted, and rendering a red banner for it would be wrong.
+ */
+export function usePaymentWorkflow(paymentId, refreshKey = 0) {
+  const [payment, setPayment] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!paymentId) {
+      setPayment(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    workflowApi(`payments/${encodeURIComponent(paymentId)}`).then(({ data, error: err }) => {
+      if (cancelled) return;
+      if (err) {
+        setPayment(null);
+        setError(err.startsWith("404") ? null : err);
+      } else {
+        setPayment(data);
+        setError(null);
+      }
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [paymentId, refreshKey]);
+
+  return { payment, loading, error };
+}
+
+
+/**
+ * Customers and their accounts, for the bank-assisted initiation wizard.
+ *
+ * Bank-assisted initiation needs the whole directory, not the logged-in user's own
+ * accounts: the employee picks who they are acting for first. Reuses the two BIAN
+ * directory calls useBeneficiaryAccounts already makes, but keeps the customer→accounts
+ * grouping the wizard's step 1 needs rather than flattening to a picker list.
+ *
+ * GL/NOSTRO/VOSTRO accounts are excluded — internal ledger accounts are not payment
+ * counterparties. Same filter as useBeneficiaryAccounts.
+ */
+export function useBankAssistedParties() {
+  const [customers, setCustomers] = useState([]);
+  const [allAccounts, setAllAccounts] = useState([]);
+  const [accountsByCustomer, setAccountsByCustomer] = useState(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      coreApi("CurrentAccount/Request", { method: "POST", body: {} }),
+      coreApi("PartyReferenceDataDirectory/Request", { method: "POST", body: {} }),
+    ]).then(([accountsRes, customersRes]) => {
+      if (cancelled) return;
+      const custs = customersRes.data?.customers ?? [];
+      const nameById = new Map(custs.map((c) => [c.customerId, c.identification?.legalName]));
+
+      const accts = (accountsRes.data?.accounts ?? [])
+        .filter((a) => a.type === "CURRENT" || a.type === "SAVINGS")
+        .map((a) => ({
+          ...a,
+          customerId: a.customerSnapshot?.customerId ?? null,
+          ownerName: nameById.get(a.customerSnapshot?.customerId) ?? null,
+        }));
+
+      const grouped = new Map();
+      for (const a of accts) {
+        if (!a.customerId) continue;
+        if (!grouped.has(a.customerId)) grouped.set(a.customerId, []);
+        grouped.get(a.customerId).push(a);
+      }
+
+      // Only customers we can actually debit are offerable.
+      setCustomers(custs.filter((c) => grouped.has(c.customerId)));
+      setAllAccounts(accts);
+      setAccountsByCustomer(grouped);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { customers, allAccounts, accountsByCustomer, loading };
 }

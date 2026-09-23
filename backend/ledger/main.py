@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 
 from database.connection import MongoDBConnection
 from shared.coa_cache import ChartOfAccounts
-from workers import gl_batch, ingest_worker, projection_worker
+from workers import gl_batch, ingest_worker, projection_worker, settlement_worker
 
 from routers.financial_accounting import router as fa_router
 from routers.pipeline import router as pipeline_router
@@ -62,6 +62,10 @@ async def lifespan(app: FastAPI):
     change_stream_workers = [
         ("ingest_worker",     ingest_worker.run,     (connection, DB_NAME, coa)),
         ("projection_worker", projection_worker.run, (connection, DB_NAME, coa)),
+        # Stage 7 (doc 21 B2): watches `payments` for settlement transitions and produces
+        # the settlement ledgerEvent (Dr clearing / Cr nostro or reserves). The second
+        # change-stream worker on the ledger, alongside ingest_worker on `transactions`.
+        ("settlement_worker", settlement_worker.run, (connection, DB_NAME, coa)),
     ]
     # Shared with the /pipeline/health route so the monitor can render an exact
     # countdown; the gl_batch thread publishes nextRunAt into it each cycle.

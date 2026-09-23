@@ -19,4 +19,7 @@ COPY backend/ledger/ .
 
 EXPOSE 8080
 
-CMD ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Shell form so the port can be overridden via $PORT (defaults to 8080). The
+# multicontainer dev preview sets PORT=8003 so ledger doesn't collide with the
+# frontend (8080) or the other sidecars in the shared pod network namespace.
+CMD poetry run uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}

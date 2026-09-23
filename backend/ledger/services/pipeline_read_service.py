@@ -263,7 +263,6 @@ def get_gl_dashboard(
     *,
     period_code: Optional[str] = None,
     months: int = 3,
-    top_n: int = 5,
 ) -> dict:
     """Aggregate every GL dashboard block in a single response.
 
@@ -366,7 +365,6 @@ def get_gl_dashboard(
             "activity": {"$add": ["$debit", "$credit"]},
         }},
         {"$sort": {"activity": -1, "_id": 1}},
-        {"$limit": top_n},
         {"$lookup": {
             "from": "glAccounts",
             "localField": "_id",
@@ -409,6 +407,18 @@ def get_gl_dashboard(
 # Trace
 # ---------------------------------------------------------------------------
 
+def _reconciliation_block(payment_id: str, connection: MongoDBConnection, db_name: str) -> Optional[dict]:
+    """Stage 8 — the three-way reconciliation result for the trace join (doc 22 step 5).
+
+    Returns the check as a dict, or None if the payment is gone. A payment whose legs are not
+    all checkable yet returns a dict with `overallResult: "PENDING"` — the UI reads that as
+    "awaiting the GL batch" rather than reading null as a crash.
+    """
+    from services.reconciliation_service import compute_reconciliation
+    check = compute_reconciliation(payment_id, connection, db_name)
+    return check.as_dict() if check is not None else None
+
+
 def trace_payment(
     payment_id: str,
     connection: MongoDBConnection,
@@ -434,8 +444,29 @@ def trace_payment(
     # the transactions service). Not a pipeline stage; the initiation record.
     payment = payment_coll.find_one({"paymentId": payment_id}, {"_id": 0})
 
-    # Stage 2 — ledgerEvent (idempotencyKey == paymentId, set by ingest_worker).
-    ledger_event = le_coll.find_one({"idempotencyKey": payment_id}, {"_id": 0})
+    # Stage 2 — ledgerEvents. A payment can produce up to three:
+    #   - principal: idempotencyKey == paymentId (ingest_worker, from transactions insert)
+    #   - fee:       idempotencyKey == {paymentId}-FEE (ingest_worker, stage 6)
+    #   - settlement: idempotencyKey == {paymentId}-SETTLEMENT (settlement_worker, stage 7)
+    # The principal is the one `trace_payment` always returned; the fee and settlement
+    # events were invisible until this fix (doc 21 step 8, B2's known consequence).
+    all_events = list(le_coll.find(
+        {"idempotencyKey": {"$in": [
+            payment_id,
+            f"{payment_id}-FEE",
+            f"{payment_id}-SETTLEMENT",
+        ]}},
+        {"_id": 0},
+    ))
+    ledger_event = next(
+        (e for e in all_events if e.get("idempotencyKey") == payment_id), None
+    )
+    fee_event = next(
+        (e for e in all_events if e.get("idempotencyKey") == f"{payment_id}-FEE"), None
+    )
+    settlement_event = next(
+        (e for e in all_events if e.get("idempotencyKey") == f"{payment_id}-SETTLEMENT"), None
+    )
 
     # Stage 3 — subLedgerEntries (sourceReference.sourceId == eventId).
     subledger_entries = None
@@ -457,16 +488,14 @@ def trace_payment(
     # Returned as a sibling map (not injected into the stored docs) so the raw
     # "View JSON" still shows the documents exactly as persisted.
     codes: set = set()
-    if ledger_event:
-        for leg in (ledger_event.get("debitLeg"), ledger_event.get("creditLeg")):
-            if leg:
-                codes.add(leg.get("glAccountCode"))
-                codes.add(leg.get("controlAccountCode"))
+    for evt in (ledger_event, fee_event, settlement_event):
+        if evt:
+            for leg in (evt.get("debitLeg"), evt.get("creditLeg")):
+                if leg:
+                    codes.add(leg.get("glAccountCode"))
+                    codes.add(leg.get("controlAccountCode"))
     for row in (subledger_entries or []):
         codes.add(row.get("controlAccountCode"))
-    if journal_entry:
-        for entry in journal_entry.get("entries", []):
-            codes.add(entry.get("accountCode"))
     codes.discard(None)
     codes.discard("")
     account_names: dict = {}
@@ -485,6 +514,16 @@ def trace_payment(
         "ledgerEvent": ledger_event,
         "subLedgerEntries": subledger_entries,
         "journalEntry": journal_entry,
+        # Stage 6's fee event and stage 7's settlement event were invisible until
+        # this fix (doc 21 step 8). Each has its own subledger/journal trace, but
+        # the UI renders them in their own panels, not in the principal's pipeline.
+        "feeEvent": fee_event,
+        "settlementEvent": settlement_event,
+        "allLedgerEvents": all_events,
         "postingMode": posting_mode,
         "accountNames": account_names,
+        # Stage 8 — the three-way reconciliation result (doc 22 step 5). null for a payment
+        # whose downstream artifacts are not all present yet (PENDING), and for any payment
+        # written before stage 8. The UI panel reads this block to render the L646-653 tie-out.
+        "reconciliation": _reconciliation_block(payment_id, connection, db_name),
     }

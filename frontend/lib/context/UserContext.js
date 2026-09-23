@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
-import { coreApi } from "@/lib/api/client";
+import { coreApi, setSessionToken } from "@/lib/api/client";
 import { USER_MAP } from "@/lib/constants";
 
 const UserContext = createContext(null);
@@ -14,6 +14,48 @@ let runtimeMounted = false;
 // (e.g. jumping to a backoffice route, or switching back from one). Its presence
 // on the next full load distinguishes that navigation from a genuine refresh.
 const INTENTIONAL_NAV_KEY = "leafy_intentional_nav";
+
+// --- BIAN PartyAuthentication (SD 38917) -----------------------------------
+//
+// Authenticating a persona now means asking the accounts service for a signed, expiring
+// assessment token, instead of writing an identity into localStorage and having the
+// backend trust it. `customerId` used to be a body field this app chose freely.
+//
+// It is still a SIMULATION of a login — selecting a persona IS the credential, and
+// nothing verifies a secret. What is real: the token is server-issued, signed, expires,
+// and the transactions service refuses a payment whose `customerId` disagrees with it.
+//
+// A back-office persona is staff, not a bank customer, so it has no `customers` document
+// and authenticates as an OPERATOR. That distinction is what lets an operator initiate a
+// payment FOR a customer while a customer token cannot initiate for anybody else.
+const partyReferenceFor = (user) =>
+  user.section === "backoffice"
+    ? `OPS-${user.bankUsername || user.name}`
+    : `CUST-${String(user.id).slice(-8)}`;
+
+const callerTypeFor = (user) => (user.section === "backoffice" ? "OPERATOR" : "CUSTOMER");
+
+async function authenticateParty(user) {
+  const { data, error } = await coreApi("PartyAuthentication/Evaluate", {
+    method: "POST",
+    body: { partyReference: partyReferenceFor(user), callerType: callerTypeFor(user) },
+  });
+  if (error) {
+    // Deliberately not fatal. `REQUIRE_AUTHENTICATION` is off during the rollout, so a
+    // failed Evaluate degrades to the pre-token behaviour: the payment still goes through
+    // and stage 2 records `customer_authenticated` as SKIP — which is the honest reading
+    // of "nothing authenticated". Flipping that flag to "true" is what makes this fatal,
+    // and it should not be flipped until this call is reliable.
+    console.warn("PartyAuthentication/Evaluate failed:", error);
+    return [null, null];
+  }
+  // The assessment id travels with the token: a step-up above the entitlement threshold
+  // has to name the session it is strengthening.
+  return [data?.accessToken ?? null, data?.partyAuthenticationId ?? null];
+}
+
+// setSessionToken takes (token, ref); authenticateParty resolves to that pair.
+const applySession = ([token, ref]) => setSessionToken(token, ref);
 
 export function UserProvider({ children }) {
   const [selectedUser, setSelectedUser] = useState(null);
@@ -47,6 +89,10 @@ export function UserProvider({ children }) {
           parsed.bankUsername = details?.BankUserName ?? details?.UserName ?? parsed.name;
         }
         setSelectedUser(parsed);
+        // The token lives in module scope, so a full page load loses it while the persona
+        // survives in localStorage. Re-issue rather than persist it: a stored token would
+        // outlive its own `exp` and be indistinguishable from a live one.
+        authenticateParty(parsed).then(applySession);
       } catch {
         localStorage.removeItem("selectedUser");
       }
@@ -62,9 +108,17 @@ export function UserProvider({ children }) {
     // Set new user
     setSelectedUser(user);
     localStorage.setItem("selectedUser", JSON.stringify(user));
+
+    // Not awaited, so login and its data prefetch are not held up by it. The window
+    // between selecting a persona and the token arriving is a few hundred ms; a payment
+    // initiated inside it records the authentication check as SKIP rather than failing,
+    // because the token is optional during the rollout.
+    setSessionToken(null);
+    authenticateParty(user).then(applySession);
   }, []);
 
   const clearUser = useCallback(() => {
+    setSessionToken(null);
     localStorage.removeItem("selectedUser");
     setSelectedUser(null);
     setConsents(new Map());

@@ -18,6 +18,16 @@ logger = logging.getLogger(__name__)
 # writes at runtime — filtering on only the latter hides all seed data.
 LEAFY_BANK_SOURCE_SYSTEMS = ["leafy-bank-legacy-migration", "leafy-bank-payments-service"]
 
+# The account types a customer can hold. `accounts` also stores bank-internal accounts —
+# NOSTRO / VOSTRO / GL_ACCOUNT — which are real rows (the spec's `required` list omits
+# `customerId`) but are not payment counterparties. Stated positively for the same reason
+# as LEAFY_BANK_SOURCE_SYSTEMS above: equality is selective and index-usable, $nin is not.
+#
+# ⚠️ `workers/eod_topup_worker.py:35` carries the same pair as a literal, deliberately: it
+# is the balance-corrupting path (defect 2026-06-29) and must not depend on an import from
+# `services/`. Change both together.
+CUSTOMER_FACING_ACCOUNT_TYPES = ("CURRENT", "SAVINGS")
+
 # get_recent_activity's customer fan-out needs the customer's accountIds before it can
 # query transactions — two sequential round trips. Measured against this demo's Atlas
 # cluster, one round trip costs ~267ms while server-side executionTimeMillis is 0, so
@@ -96,13 +106,28 @@ class AccountsService:
         return self.accounts.find_one({"accountNumber": account_number})
 
     def list_accounts(self, filters: dict) -> list[dict]:
+        """Directory query over `accounts`. Customer-facing types only, by default.
+
+        `accounts` also holds bank-internal accounts — the NOSTRO clearing accounts a wire
+        settles through (stage 7). They are legitimate rows (the spec's `required` list omits
+        `customerId`), but they are not payment counterparties, so an unfiltered directory
+        query must not return them: callers reading this route render account pickers.
+
+        An explicit `type` filter still reaches them, which is how the settlement UI reads a
+        clearing position. Asking for `NOSTRO` gets `NOSTRO`; asking for nothing gets
+        customer accounts.
+
+        Server-side, not client-side: `useBeneficiaryAccounts` already filters to
+        CURRENT/SAVINGS in the frontend, but this collection is shared across demos and a
+        client-side filter is not a contract (defect 2026-08-31, the 37 MB unprojected
+        `list_customers`).
+        """
         query = {}
         if (customer_ref := filters.get("customerId")):
             query["customerSnapshot.customerId"] = customer_ref
         if (status := filters.get("status")):
             query["status"] = status
-        if (acct_type := filters.get("type")):
-            query["type"] = acct_type
+        query["type"] = filters.get("type") or {"$in": list(CUSTOMER_FACING_ACCOUNT_TYPES)}
         return list(self.accounts.find(query))
 
     def get_balance(self, account_ref: str) -> Optional[dict]:

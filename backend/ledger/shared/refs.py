@@ -18,6 +18,7 @@ PREFIX_LEDGER_EVENT = "LE"
 PREFIX_SUBLEDGER_ENTRY = "SL"
 PREFIX_JOURNAL_ENTRY = "JNL"
 PREFIX_GROUP = "GRP"
+PREFIX_RECONCILIATION_ITEM = "RI"   # stage 8 — reconciliationItems (one per payment per run)
 
 
 def derive_ref(prefix: str, oid: ObjectId | str, last_n: int = 8) -> str:

@@ -1,0 +1,7 @@
+# False positives — example `partyAuthenticationId` values in the API catalog
+# (backend/accounts/bian/api_catalog.py), flagged as `generic-api-key` by entropy.
+# These are documentation/example response bodies, not real session secrets.
+# Suppressed in current source by replacing the value with "<example session id — redacted>";
+# these fingerprints cover the historical commit where the high-entropy example originated.
+edd6b53ec728a4a52e0e1bc321e57deb91639916:backend/accounts/bian/api_catalog.py:generic-api-key:116
+edd6b53ec728a4a52e0e1bc321e57deb91639916:backend/accounts/bian/api_catalog.py:generic-api-key:162

@@ -31,6 +31,40 @@ class PartyReferenceRequestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# ---------- PartyAuthentication ----------
+
+CallerTypeEnum = Literal["CUSTOMER", "OPERATOR", "API"]
+
+
+class PartyAuthenticationEvaluateRequest(BaseModel):
+    """`POST /PartyAuthentication/Evaluate` — BIAN SD 38917.
+
+    `partyReference` is the `customers.customerId` for a CUSTOMER, and a staff identifier
+    for an OPERATOR / API caller (who has no `customers` document). No credential field:
+    Level 1 verifies that the party exists and is ACTIVE, not that it holds a secret. When
+    `Password/Evaluate` lands, the credential goes on its own request model, not this one —
+    a secret must never be optional on the request that also works without it.
+    """
+
+    partyReference: str = Field(min_length=1)
+    callerType: CallerTypeEnum = "CUSTOMER"
+    model_config = ConfigDict(extra="forbid")
+
+
+class PartyAuthenticationQuestionEvaluateRequest(BaseModel):
+    """`POST /PartyAuthentication/{partyauthenticationid}/Question/Evaluate` — SD 38917.
+
+    The step-up factor stage 2's `authentication_sufficient` demands above a segment's
+    threshold. No `partyReference`: who is stepping up comes from the bearer token, never
+    from the body — a step-up that took the party's identity from the request would let a
+    caller mint a two-factor assessment for anyone.
+    """
+
+    challengeResponse: str = Field(min_length=1, max_length=32)
+    questionId: str = "otp"
+    model_config = ConfigDict(extra="forbid")
+
+
 # ---------- CurrentAccount ----------
 # Retrieve / CurrentAccountBalanceRecord Retrieve are GET (query params), no request model.
 
