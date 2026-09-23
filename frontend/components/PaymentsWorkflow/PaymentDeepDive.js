@@ -27,7 +27,7 @@ import { Body } from "@leafygreen-ui/typography";
 import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
-import { buildLifecycleStages, legTotals } from "./lifecycleStages";
+import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
 import { usePaymentWorkflow, usePipelineTrace } from "@/lib/api/hooks";
 import { coreApi } from "@/lib/api/client";
 import {
@@ -43,13 +43,13 @@ const SUCCESS_TERMINAL = new Set(["SETTLED", "RECONCILED", "POSTED", "COMPLETED"
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-// The ✓ belongs to the LINEAR saga (stages 1-5), where order is the fact. An independent-axis
-// stage (6-8: posting / settlement / reconciliation) that reaches its own terminal state
-// renders as a plain filled circle — no ✓ — so settlement finishing before posting doesn't
-// drop a lone check in the middle of the sequence (research §1.4: these axes advance
-// alongside the saga, not in order).
-const nodeGlyph = (stage, state) =>
-  state === "failed" ? "×" : state === "completed" ? (stage >= 6 ? "" : "✓") : "";
+// A completed stage gets a ✓ whether it is a linear-saga stage (1-5, where reaching a later
+// stage proves the order) or an independent axis (6-8, where completion is the stage's OWN
+// terminal fact). The two progress models differ in nodeStates, not in the glyph: an axis that
+// settles or reconciles early shows a ✓ while the neighbouring axis is still in flight, which
+// reads as "this axis is done" — not as a sequencing claim about the stage beside it.
+const nodeGlyph = (state) =>
+  state === "failed" ? "×" : state === "completed" ? "✓" : "";
 
 /**
  * Per-stage node state for the mini-stepper and the vertical timeline.
@@ -121,7 +121,7 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
               title={s.label}
             >
               <span className={`${styles.miniCircle} ${styles[`mini${cap(states[i])}`]}`}>
-                {nodeGlyph(s.stage, states[i])}
+                {nodeGlyph(states[i])}
               </span>
               <span className={styles.miniLabel}>{s.label}</span>
             </button>
@@ -149,7 +149,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
           >
             <div className={styles.spine}>
               <span className={`${styles.timelineNode} ${styles[`node${cap(nodeState)}`]}`}>
-                {nodeGlyph(s.stage, nodeState)}
+                {nodeGlyph(nodeState)}
               </span>
               {i < stages.length - 1 && (
                 <span
@@ -177,18 +177,63 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
               )}
               {expanded && (
                 <div className={styles.timelineRowBody}>
-                  <StageDetailBody
-                    stage={s}
-                    payment={payment}
-                    onApprove={onApprove}
-                    onResolve={onResolve}
-                  />
+                  {s.children?.length > 1 ? (
+                    <GroupStageBody
+                      group={s}
+                      payment={payment}
+                      onApprove={onApprove}
+                      onResolve={onResolve}
+                    />
+                  ) : (
+                    <StageDetailBody
+                      stage={s}
+                      payment={payment}
+                      onApprove={onApprove}
+                      onResolve={onResolve}
+                    />
+                  )}
                 </div>
               )}
             </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The grouped stage body — stage 6 (Accounting & posting) renders as ONE rail node whose
+ * expanded body stacks the four panels (ledger event, fee ledger event, sub-ledger, general
+ * ledger). The group's composite intro is shown once, then each panel as its own titled
+ * sub-block: label + its own status pill + its own intro + its full detail. Keeping the
+ * per-panel heads lets the reader name each accounting fact before its legs, instead of six
+ * anonymous columns that read as separate top-level stages.
+ */
+function GroupStageBody({ group, payment, onApprove, onResolve }) {
+  return (
+    <div className={styles.groupBody}>
+      {group.intro && (
+        <div className={styles.stageIntro}>
+          <div className={styles.stageIntroLabel}>What this stage does</div>
+          <div className={styles.stageIntroText}>{group.intro}</div>
+        </div>
+      )}
+      {group.children.map((c) => (
+        <section className={styles.groupPanel} key={c.key}>
+          <div className={styles.groupPanelHead}>
+            <span className={styles.timelineStageLabel}>{c.label}</span>
+            {c.status && <StatusPill status={c.status} />}
+            {c.meta && <span className={styles.groupPanelMeta}>{c.meta}</span>}
+          </div>
+          <StageDetailBody
+            stage={c}
+            payment={payment}
+            onApprove={onApprove}
+            onResolve={onResolve}
+          />
+        </section>
+      ))}
     </div>
   );
 }
@@ -1547,8 +1592,10 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
     autoExpandedFor.current = null;
   }, [paymentId]);
 
+  // Group first so the rail/timeline reads as Doina's 8 stages — stage 6 as one
+  // "Accounting & posting" node with the four panels nested — rather than ~12 nodes.
   const stages = useMemo(
-    () => (payment ? buildLifecycleStages(payment, trace) : null),
+    () => (payment ? groupLifecycleStages(buildLifecycleStages(payment, trace)) : null),
     [payment, trace]
   );
   const states = useMemo(

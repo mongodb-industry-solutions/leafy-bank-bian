@@ -586,6 +586,42 @@
   animation: pwExpand 200ms ease;
 }
 
+/* ── grouped stage body (stage 6 Accounting & posting) ──
+   One rail node whose expanded body stacks the four accounting panels. Each panel is a
+   titled sub-block, not its own top-level stage, so the reader sees the group's single
+   story ("one stage, four panels") rather than four independent rows. Lighter than a full
+   card: a hairline rule above each panel, the panel head (label + status + meta) carrying
+   the identity once, the detail below. */
+.groupBody {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.groupPanel {
+  padding-top: 12px;
+  border-top: 1px solid var(--pw-border-light);
+}
+
+.groupPanel:first-of-type {
+  /* The group intro already opens with a rule; don't double it under the first panel. */
+  padding-top: 0;
+  border-top: none;
+}
+
+.groupPanelHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.groupPanelMeta {
+  font-size: 12px;
+  color: var(--pw-faint);
+  margin-left: auto;
+}
+
 @keyframes pwPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(8, 60, 144, .35); }
   50%      { box-shadow: 0 0 0 4px rgba(8, 60, 144, 0); }

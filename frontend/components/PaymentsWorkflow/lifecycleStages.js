@@ -116,10 +116,16 @@ export function buildLifecycleStages(payment, trace) {
   const feeEvent = trace?.feeEvent ?? null;
   // A fee is levied only on a wire (enrichment _plan_fees SKIPs rail != WIRE), so the
   // fee ledger-event stage is structurally empty for internal transfers and no-fee
-  // wires. Key the hide on whether stage 3 levied a charge (payment.fees), not on
-  // trace.feeEvent — a wire with a fee may briefly show feeEvent null before the
-  // worker ingests it, and that transient should still render as "pending", not vanish.
-  const hasFee = (payment?.fees?.length ?? 0) > 0;
+  // wires. But a recorded fee is NOT the same as a posted one: `_debtor_borne_fee`
+  // (stage 5) carries only a DEBTOR/SHARED (or SLEV→DEBTOR) charge to the ledger and
+  // skips a CREDITOR-borne one (Q44) — which `chargeBearer: CRED` produces. Key the
+  // hide on whether the ledger will actually post a fee leg, not on `fees` being
+  // non-empty, or a creditor-borne wire shows an empty "Fee ledger event" panel that
+  // will never fill. A fee that IS debtor-borne may briefly show feeEvent null before
+  // the worker ingests it — that transient should still render as "pending", not vanish.
+  const hasFee = (payment?.fees ?? []).some((f) =>
+    ["DEBTOR", "SHARED"].includes((f ?? {}).chargedTo)
+  );
 
   // Stage 7 — settlement event and position (doc 21 step 8).
   const se = trace?.settlementEvent ?? null;
@@ -480,6 +486,71 @@ export function buildLifecycleStages(payment, trace) {
       },
     },
   ].filter((s) => s.key !== "feeLedgerEvent" || hasFee);
+}
+
+/**
+ * Presentational grouping of `buildLifecycleStages` output: collapse every panel that shares a
+ * `group` into ONE rail node, so the lifecycle reads as Doina's eight stages — not as ~12 nodes
+ * with stage 6 fragmented across "Ledger event" / "Sub-ledger" / "General ledger".
+ *
+ * Stages 1-5, 7, 8 own a single panel (no `group`), so each passes through as its own node.
+ * Stage 6's four accounting panels share `group: "Accounting & posting"` and merge into one
+ * node whose expanded body stacks the four. `reached` / `status` / `meta` are lifted off the
+ * most-informative child so the node's state (nodeStates, stage >= 6 = independent axis) still
+ * reflects the axis's OWN terminal fact: the accounting group completes when the general-ledger
+ * journal posts, not when any one panel fills.
+ *
+ * A later multi-panel stage (e.g. stage 9 Exceptions) just gives its panels a shared `group` —
+ * this function needs no change. Kept as a pure function so the rail, the timeline and the
+ * grouping stay testable without a component tree.
+ */
+export function groupLifecycleStages(stages) {
+  if (!stages?.length) return [];
+  const groups = [];       // { key, label, stage, group?, children[] }
+  const byLabel = new Map();
+  for (const s of stages) {
+    const label = s.group || s.label;
+    if (byLabel.has(label)) {
+      groups[byLabel.get(label)].children.push(s);
+    } else {
+      byLabel.set(label, groups.length);
+      groups.push({
+        key: s.group ? `g:${label}` : s.key,
+        label,
+        stage: s.stage,
+        group: s.group,
+        children: [s],
+      });
+    }
+  }
+  return groups.map((g) => {
+    // A single-panel stage is the group: return it unchanged, so the existing single-detail
+    // render path treats it exactly as before (its own key/label/status/reached survive).
+    if (g.children.length === 1) return g.children[0];
+    const children = g.children;
+    const anyReached = children.some((c) => c.reached);
+    const reachedCount = children.filter((c) => c.reached).length;
+    // The journal panel carries the stage-6 terminal fact (jn.status: POSTED). Before it posts
+    // the group is in flight, so lift `status` from the journal and leave it undefined otherwise
+    // — nodeStates keys off that, exactly as the other independent axes do.
+    const jn = children.find((c) => c.kind === "journal");
+    return {
+      key: g.key,
+      label: g.label,
+      stage: g.stage,
+      group: g.group,
+      reached: anyReached,
+      status: jn?.status ?? undefined,
+      meta: reachedCount ? `${reachedCount} of ${children.length} reached` : undefined,
+      intro:
+        "One stage (Doina's 6: Accounting & posting) around four panels — the balanced " +
+        "debit/credit event, a second event for any wire fee, the paired sub-ledger entries, " +
+        "and the aggregated journal. The panels advance together: posting can finish before " +
+        "settlement and vice-versa without the panels disagreeing on what or how much was " +
+        "posted, since each carries the same accounting fact at a different grain.",
+      children,
+    };
+  });
 }
 
 export const legTotals = (legs) => {
