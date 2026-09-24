@@ -230,6 +230,25 @@ def test_total_counts_the_filter_not_the_page(conn):
     assert out["total"] == 3
 
 
+def test_list_payments_joins_the_exception_so_activity_surfaces_it():
+    """The Activity list shows the exception reason + discrepancy subline for failed/returned
+    payments (the former Operations queue folded in), so list_payments joins each row with its
+    open (or latest resolved) exception — null for a payment with none."""
+    conn = FakeConnection(
+        FakePayments([
+            _payment("PAY-1", status=lifecycle.SETTLED, amount=25000.0),
+            _payment("PAY-2", status=lifecycle.FAILED, amount=25000.0),
+        ]),
+        exceptions=[_exc_doc("PAY-2")],
+    )
+    out = svc.list_payments(conn, "db")
+    by_id = {p["paymentId"]: p for p in out["items"]}
+    # The failed payment carries its OPEN exception; the settled one has none.
+    assert by_id["PAY-2"]["exception"]["exceptionId"] == "EXC-aaaa0001"
+    assert by_id["PAY-2"]["exception"]["status"] == "OPEN"
+    assert by_id["PAY-1"]["exception"] is None
+
+
 def test_list_projection_carries_all_three_status_axes():
     """Doina (Sep 17): a single `status=SETTLED` pill reads as 'everything done' when the
     posting/settlement axes lag. The list must carry all three so the UI can show them.

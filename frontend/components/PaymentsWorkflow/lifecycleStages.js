@@ -136,11 +136,22 @@ export function buildLifecycleStages(payment, trace) {
   const reached = (...states) => events.some((e) => states.includes(e.state));
   const eventsFor = (...states) => events.filter((e) => states.includes(e.state));
 
-  // Stage 9 — the payment's exception occurrences (joined by `get_payment`, doc 24 §3
-  // step 8). `exceptions` is always a list (empty for the common case); `openExc` is the
-  // first OPEN one, which drives the panel's status + the resolve CTAs.
+  // The payment's exception occurrences (joined by `get_payment`, doc 24 §3 step 8).
+  // Rather than a separate stage-9 panel, each exception is routed to the stage that
+  // produced it — its `source.stage` carries the originating stage number (e.g.
+  // "7 settle", "8 reconcile", "3 validate"). Doina's own framing supports this:
+  // exceptions have no BIAN service domain and are "modeled within the originating
+  // domain", so the remedy belongs at the failure site, not a peer timeline node.
   const exceptions = payment?.exceptions || [];
-  const openExc = exceptions.find((e) => e?.status === "OPEN");
+  // Group exceptions by their originating stage number, so each stage node carries
+  // only the exceptions it raised. Keyed by the leading integer of `source.stage`.
+  const exceptionsByStage = {};
+  for (const e of exceptions) {
+    const n = parseInt(String(e?.source?.stage || ""), 10);
+    if (Number.isInteger(n)) {
+      (exceptionsByStage[n] ||= []).push(e);
+    }
+  }
 
   // 2026-09-09 (Kiran): a payment HELD at the step-up gate sits at INITIATED with
   // `stepUpRequired` set — stage 2 has evaluated the (insufficient) assertion but recorded
@@ -491,33 +502,29 @@ export function buildLifecycleStages(payment, trace) {
         position,
       },
     },
-    {
-      // Stage 9 — exceptions, repairs, and returns (doc 24). The panel renders the
-      // payment's exception occurrences (joined by `get_payment`), the resolution log, and
-      // — for an OPEN exception — the resolve CTAs modeled on the stage-4 review CTA. The
-      // acceptance text is Doina's verbatim L1314.
-      key: "exceptions",
-      label: "Exceptions",
-      icon: "Warning",
-      stage: 9,
-      reached:
-        reached("FAILED", "RETURNED", "REVERSED", "REFUNDED") || exceptions.length > 0,
-      status: openExc?.status || undefined,
-      meta: openExc
-        ? (openExc.status === "OPEN" ? openExc.category : openExc.status.toLowerCase())
-        : (exceptions.length > 0 ? "resolved" : undefined),
-      intro:
-        "The demo will show the exception queue, the reason, the retry or repair action, " +
-        "and how idempotency prevents duplicate financial effects. A failed or returned " +
-        "settlement is reversed with a compensating movement — never a balance rewrite — " +
-        "so the books stay balanced.",
-      kind: "exceptions",
-      data: {
-        exceptions,
-        events: eventsFor("FAILED", "RETURNED", "REVERSED", "REFUNDED"),
-      },
-    },
-  ].filter((s) => s.key !== "feeLedgerEvent" || hasFee);
+  ]
+    // Route each exception to its originating stage so the resolve CTAs render at the
+    // failure site rather than a separate stage-9 panel. `exceptionsByStage` is keyed by
+    // the leading integer of the exception's `source.stage`. A RETURN_FUNDS resolution
+    // also carries the reversal ledger event (trace.reversalEvent) so the panel can show
+    // "compensating movement posted" once the GL batch journals it.
+    .map((s) => {
+      const ex = exceptionsByStage[s.stage] || [];
+      const hasReturn = ex.some((e) => e?.resolution?.action === "RETURN_FUNDS");
+      const rev = hasReturn ? (trace?.reversalEvent ?? null) : null;
+      // Build the reversal's double-entry legs (Dr 1131 clearing / Cr customer deposit)
+      // so the ExceptionsPanel can render the compensating movement in detail — the visual
+      // confirmation the posting landed. Same shape as the fee event's `legs`.
+      const reversalLegs = rev && rev.debitLeg && rev.creditLeg
+        ? {
+            currency: rev.debitLeg.currency || rev.creditLeg.currency || "USD",
+            debits: [leg(rev.debitLeg.glAccountCode, names[rev.debitLeg.glAccountCode] || "", rev.debitLeg.amount)],
+            credits: [leg(rev.creditLeg.glAccountCode, names[rev.creditLeg.glAccountCode] || "", rev.creditLeg.amount)],
+          }
+        : null;
+      return { ...s, exceptions: ex, reversalEvent: rev, reversalLegs };
+    })
+    .filter((s) => s.key !== "feeLedgerEvent" || hasFee);
 }
 
 /**

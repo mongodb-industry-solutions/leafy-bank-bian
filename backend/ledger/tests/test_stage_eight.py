@@ -65,6 +65,21 @@ def _settlement_event(amount_minors: int = _MIN, posting_status: str = "POSTED",
     }
 
 
+def _reversal_event(amount_minors: int = _MIN, posting_status: str = "POSTED",
+                    journal_id: str = _JNL) -> dict:
+    """A reversal ledgerEvent (stage 9 RETURN_FUNDS): the principal's legs swapped —
+    Dr 1131 clearing / Cr 2111 customer deposit — keyed `{paymentId}-REV`."""
+    return {
+        "eventId": "LE-REV",
+        "idempotencyKey": f"{_PAY}-REV",
+        "postingStatus": posting_status,
+        "reversalOf": "TXN-0001",
+        "postingResult": {"journalEntryId": journal_id} if posting_status == "POSTED" else {},
+        "debitLeg": {"glAccountCode": "1131", "amount": amount_minors, "currency": "USD"},
+        "creditLeg": {"glAccountCode": "2111", "amount": amount_minors, "currency": "USD"},
+    }
+
+
 def _payment(*, rail: str = "INTERNAL", amount: float = 25000.0, state: str = "POSTED",
              journal_ref: str | None = _JNL) -> dict:
     return {
@@ -542,3 +557,38 @@ def test_trace_reconciliation_block_is_pending_for_a_payment_with_no_journal_yet
     trace = pipeline_read_service.trace_payment(_PAY, c, "db")
 
     assert trace["reconciliation"]["overallResult"] == "PENDING"
+
+
+def test_trace_payment_includes_the_reversal_event_from_return_of_funds():
+    """Stage 9 — /pipeline/trace/{id} carries `reversalEvent` (idempotencyKey {paymentId}-REV)
+    so the UI can show "compensating movement posted" once the GL batch journals it. Without
+    this, a returned-funds payment shows the exception RESOLVED but no accounting evidence."""
+    c = FakeConnection()
+    c.seed("payments", [_payment_with_recon(rail="WIRE", state="FAILED", journal_ref=_JNL)])
+    c.seed("transactions", [{"paymentId": _PAY, "txnId": "TXN-0001"}])
+    c.seed(
+        "ledgerEvents",
+        [_principal_event(credit_code="1131"), _reversal_event(posting_status="POSTED")],
+    )
+
+    trace = pipeline_read_service.trace_payment(_PAY, c, "db")
+
+    assert trace["reversalEvent"] is not None
+    assert trace["reversalEvent"]["idempotencyKey"] == f"{_PAY}-REV"
+    assert trace["reversalEvent"]["postingStatus"] == "POSTED"
+    assert trace["reversalEvent"]["postingResult"]["journalEntryId"] == _JNL
+    # The principal is still the principal — the reversal is a sibling, not a replacement.
+    assert trace["ledgerEvent"]["idempotencyKey"] == _PAY
+
+
+def test_trace_payment_reversal_event_is_null_when_no_return_of_funds():
+    """A payment that was not reversed has no `{paymentId}-REV` event — `reversalEvent` is
+    null, not missing, so the UI can branch on falsiness without a KeyError."""
+    c = FakeConnection()
+    c.seed("payments", [_payment_with_recon(rail="WIRE", state="SETTLED", journal_ref=_JNL)])
+    c.seed("transactions", [{"paymentId": _PAY, "txnId": "TXN-0001"}])
+    c.seed("ledgerEvents", [_principal_event(credit_code="1131"), _settlement_event()])
+
+    trace = pipeline_read_service.trace_payment(_PAY, c, "db")
+
+    assert trace["reversalEvent"] is None

@@ -616,7 +616,7 @@ export function useLoansPageData() {
  * pipeline is incomplete (journal not yet posted). Stops once the journal entry
  * lands, on a 404, or when disabled.
  */
-export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
+export function usePipelineTrace(paymentId, enabled, intervalMs = 2000, resumeKey = 0) {
   const [trace, setTrace] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -644,8 +644,14 @@ export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
       setTrace(data);
       setLoading(false);
 
-      // Keep polling until the journal entry is posted.
-      if (!data?.journalEntry) {
+      // Keep polling until the principal journal has posted AND every ledger event so far
+      // is POSTED. Stopping at the first journal hid later events (the stage-7 settlement
+      // event, the stage-9 reversal) which post on subsequent GL batches — the accounting
+      // panel would go stale until a manual refresh. A brand-new event can still appear
+      // after all current ones are POSTED; the deep-dive's batch-tick re-arm catches that.
+      const events = data?.allLedgerEvents || [];
+      const allPosted = events.length > 0 && events.every((e) => e?.postingStatus === "POSTED");
+      if (!data?.journalEntry || !allPosted) {
         timer = setTimeout(poll, intervalMs);
       }
     };
@@ -658,7 +664,7 @@ export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [paymentId, enabled, intervalMs]);
+  }, [paymentId, enabled, intervalMs, resumeKey]);
 
   return { trace, loading, error };
 }

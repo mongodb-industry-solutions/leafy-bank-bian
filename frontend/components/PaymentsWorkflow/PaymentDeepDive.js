@@ -30,7 +30,7 @@ import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
-import { usePaymentWorkflow, usePipelineTrace } from "@/lib/api/hooks";
+import { usePaymentWorkflow, usePipelineTrace, useBatchTick } from "@/lib/api/hooks";
 import { coreApi } from "@/lib/api/client";
 import {
   checkPillFamily,
@@ -141,7 +141,13 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
     <div className={styles.timeline}>
       {stages.map((s, i) => {
         const expanded = selectedKey === s.key;
-        const dimmed = failedIdx >= 0 && i > failedIdx;
+        // A terminal failure dims the downstream LINEAR-SAGA stages (1-5) — the payment did
+        // not advance past the failure, so later linear steps never ran. Independent axes
+        // (stages 6-8: posting / settlement / reconciliation) are parallel, not downstream —
+        // they carry their own reached/pending/failed state and render without the extra dim
+        // layer. Greying reconciliation on a FAILED settlement read as "broken" when it is
+        // really "not applicable" — the plain pending node conveys that without the dim.
+        const dimmed = failedIdx >= 0 && i > failedIdx && s.stage < 6;
         const nodeState = states[i];
         return (
           <div
@@ -1252,7 +1258,6 @@ function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveExcept
   const showAuthorization = stage.kind === "authorization";
   const showRailExecution = stage.kind === "railExecution";
   const showReconciliation = stage.kind === "reconciliation";
-  const showExceptions = stage.kind === "exceptions";
   // Stages 3 and 4 render checks too, but their `data` is an object rather than the bare
   // array stage 2 passes, so the shapes are resolved separately.
   const showChecks =
@@ -1476,8 +1481,13 @@ function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveExcept
           </div>
         )}
 
-        {showExceptions && (
-          <ExceptionsPanel stage={stage} onResolve={onResolveException} />
+        {(stage.exceptions || []).length > 0 && (
+          <ExceptionsPanel
+            exceptions={stage.exceptions}
+            onResolve={onResolveException}
+            reversalEvent={stage.reversalEvent}
+            reversalLegs={stage.reversalLegs}
+          />
         )}
 
         {showLegs && (
@@ -1540,6 +1550,24 @@ const SEVERITY_LABEL = {
   ACTION_REQUIRED: "Action required",
   INFORMATIONAL: "Informational",
 };
+// Plain-language explanation of what each exception category means — so the operator sees
+// what actually happened, not just a category pill. Rendered as a line under the detail.
+const EXCEPTION_EXPLANATION = {
+  SETTLEMENT_DELAYED:
+    "The rail accepted the payment but settlement is scheduled for a future value date — " +
+    "the money has not moved yet. Retry settlement once the value date arrives, or hold.",
+  SETTLEMENT_UNMATCHED:
+    "The rail settled for less than the expected amount — a partial short-pay. The bank " +
+    "treats this as a failed settlement: return the full funds, or accept the discrepancy.",
+  SETTLEMENT_RETURNED:
+    "The rail returned the payment and no settlement occurred. Return the funds to the debtor.",
+  RECONCILIATION_DISCREPANCY:
+    "The three-way reconciliation — payment to rail, rail to settlement, settlement to GL — " +
+    "found a mismatch. Accept the discrepancy, or investigate before accepting.",
+  DUPLICATE_SIGNAL:
+    "This payment resembles an earlier one — a possible duplicate submission. Dismiss if " +
+    "the duplication is intentional.",
+};
 
 function exceptionDetailText(exc) {
   const d = exc?.detail || {};
@@ -1554,8 +1582,7 @@ function exceptionDetailText(exc) {
   return "—";
 }
 
-function ExceptionsPanel({ stage, onResolve }) {
-  const exceptions = stage.data?.exceptions || [];
+function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs }) {
   const open = exceptions.find((e) => e?.status === "OPEN");
   const [note, setNote] = useState("");
   const [outcome, setOutcome] = useState("MATCHED");
@@ -1581,6 +1608,18 @@ function ExceptionsPanel({ stage, onResolve }) {
 
   return (
     <div className={styles.exceptionsPanel}>
+      {/* The "why we stopped here" banner — the stage-level explanation of what happened.
+          The exception category names a failure mode; this line tells the operator what that
+          failure mode *means* in plain language, right at the stage where the payment halted. */}
+      {(open || exceptions[0]) && EXCEPTION_EXPLANATION[(open || exceptions[0]).category] && (
+        <div className={styles.resolveCallout}>
+          <div className={styles.resolveCalloutTitle}>
+            <Icon glyph="InfoWithCircle" />
+            <span>What happened here</span>
+          </div>
+          <Body>{EXCEPTION_EXPLANATION[(open || exceptions[0]).category]}</Body>
+        </div>
+      )}
       {exceptions.map((e) => (
         <div key={e.exceptionId} className={styles.exceptionRow}>
           <div className={styles.exceptionRowHead}>
@@ -1630,7 +1669,8 @@ function ExceptionsPanel({ stage, onResolve }) {
               >
                 <Option value="MATCHED">Matched — settle</Option>
                 <Option value="UNMATCHED">Unmatched — fail again</Option>
-                <Option value="DELAYED">Delayed — hold again</Option>
+                {/* DELAYED disabled — no external rail to wait on; re-enable with a re-query hook. */}
+                {/* <Option value="DELAYED">Delayed — hold again</Option> */}
                 <Option value="EXCEPTION">Exception — return</Option>
               </Select>
             </div>
@@ -1658,6 +1698,31 @@ function ExceptionsPanel({ stage, onResolve }) {
               </Button>
             ))}
           </div>
+        </div>
+      )}
+
+      {reversalEvent && (
+        <div className={styles.exceptionRow}>
+          <div className={styles.exceptionRowHead}>
+            <StatusPill status="REVERSAL" />
+            <span className={styles.exceptionSeverity}>Compensating movement</span>
+            <span className={styles.exceptionStatus}>{reversalEvent.postingStatus}</span>
+          </div>
+          <div className={styles.exceptionDetail}>
+            {reversalEvent.postingStatus === "POSTED"
+              ? `Funds returned — posted${
+                  reversalEvent.postingResult?.journalEntryId
+                    ? ` · ${reversalEvent.postingResult.journalEntryId}`
+                    : ""
+                }`
+              : "Funds returned — in the GL pipeline, awaiting the batch"}
+          </div>
+          {reversalLegs && (
+            <div className={styles.detailBlock}>
+              <div className={styles.detailBlockTitle}>Reversal posting</div>
+              <Legs legs={reversalLegs} />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1703,8 +1768,19 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
     paymentId,
     (refreshKey || 0) + nudge
   );
-  // Ledger half. Self-terminating poll — stops once the journal entry lands.
-  const { trace } = usePipelineTrace(paymentId, !!paymentId);
+  // Batch tick — re-fetch the payment + re-arm the trace when the GL batch actually posts,
+  // so a RETURN_FUNDS reversal (async via CDC + batch) surfaces in the accounting panels
+  // without a manual refresh. `lastBatchAt` only changes when a batch runs, so this is not
+  // a busy poll. Bumping `nudge` feeds both the payment refresh key above and the trace's
+  // `resumeKey` below.
+  const lastBatchAt = useBatchTick(!!paymentId, 10000);
+  useEffect(() => {
+    if (lastBatchAt) setNudge((n) => n + 1);
+  }, [lastBatchAt]);
+  // Ledger half. Self-terminating poll — stops once the journal entry lands. `nudge` as the
+  // resume key re-arms it after a resolve/review/resume and after each batch post, so the
+  // reversal event (idempotencyKey {paymentId}-REV) is picked up once the batch journals it.
+  const { trace } = usePipelineTrace(paymentId, !!paymentId, 2000, (refreshKey || 0) + nudge);
   const [selectedKey, setSelectedKey] = useState("initiation");
 
   async function resumePayment() {
@@ -1800,8 +1876,18 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
   // reason are visible without a click. Runs once per payment, after stages first arrive.
   useEffect(() => {
     if (!stages || autoExpandedFor.current === paymentId) return;
+    // Auto-expand the stage that owns an OPEN exception — that is where the resolve CTAs
+    // now render (the remedy lives at the failure site). Fall back to the failing stage's
+    // red banner when a payment failed without producing an exception doc. Runs once per
+    // payment.
     const failedIdx = states.indexOf("failed");
-    if (failedIdx >= 0) {
+    const openExcStage = stages.find((s) =>
+      (s.exceptions || []).some((e) => e?.status === "OPEN")
+    );
+    if (openExcStage) {
+      setSelectedKey(openExcStage.key);
+      autoExpandedFor.current = paymentId;
+    } else if (failedIdx >= 0) {
       setSelectedKey(stages[failedIdx].key);
       autoExpandedFor.current = paymentId;
     }

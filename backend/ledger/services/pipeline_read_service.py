@@ -444,17 +444,21 @@ def trace_payment(
     # the transactions service). Not a pipeline stage; the initiation record.
     payment = payment_coll.find_one({"paymentId": payment_id}, {"_id": 0})
 
-    # Stage 2 — ledgerEvents. A payment can produce up to three:
+    # Stage 2 — ledgerEvents. A payment can produce up to four:
     #   - principal: idempotencyKey == paymentId (ingest_worker, from transactions insert)
     #   - fee:       idempotencyKey == {paymentId}-FEE (ingest_worker, stage 6)
     #   - settlement: idempotencyKey == {paymentId}-SETTLEMENT (settlement_worker, stage 7)
+    #   - reversal:  idempotencyKey == {paymentId}-REV (ingest_worker, stage 9 RETURN_FUNDS)
     # The principal is the one `trace_payment` always returned; the fee and settlement
-    # events were invisible until this fix (doc 21 step 8, B2's known consequence).
+    # events were invisible until this fix (doc 21 step 8, B2's known consequence). The
+    # reversal event is the async confirmation that RETURN_FUNDS landed in the GL — without
+    # it the operator sees the exception flip to RESOLVED but no accounting evidence.
     all_events = list(le_coll.find(
         {"idempotencyKey": {"$in": [
             payment_id,
             f"{payment_id}-FEE",
             f"{payment_id}-SETTLEMENT",
+            f"{payment_id}-REV",
         ]}},
         {"_id": 0},
     ))
@@ -466,6 +470,9 @@ def trace_payment(
     )
     settlement_event = next(
         (e for e in all_events if e.get("idempotencyKey") == f"{payment_id}-SETTLEMENT"), None
+    )
+    reversal_event = next(
+        (e for e in all_events if e.get("idempotencyKey") == f"{payment_id}-REV"), None
     )
 
     # Stage 3 — subLedgerEntries (sourceReference.sourceId == eventId).
@@ -488,7 +495,7 @@ def trace_payment(
     # Returned as a sibling map (not injected into the stored docs) so the raw
     # "View JSON" still shows the documents exactly as persisted.
     codes: set = set()
-    for evt in (ledger_event, fee_event, settlement_event):
+    for evt in (ledger_event, fee_event, settlement_event, reversal_event):
         if evt:
             for leg in (evt.get("debitLeg"), evt.get("creditLeg")):
                 if leg:
@@ -519,6 +526,9 @@ def trace_payment(
         # the UI renders them in their own panels, not in the principal's pipeline.
         "feeEvent": fee_event,
         "settlementEvent": settlement_event,
+        # Stage 9's reversal event (RETURN_FUNDS). `postingStatus` flips to POSTED once the
+        # GL batch journals it — the visible "the reversal landed in the books" signal.
+        "reversalEvent": reversal_event,
         "allLedgerEvents": all_events,
         "postingMode": posting_mode,
         "accountNames": account_names,

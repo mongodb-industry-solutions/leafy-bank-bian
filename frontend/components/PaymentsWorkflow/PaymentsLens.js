@@ -13,7 +13,7 @@ import { Select, Option } from "@leafygreen-ui/select";
 import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
 import PaymentDeepDive from "./PaymentDeepDive";
-import { usePaymentsList, useWorkflowExceptions } from "@/lib/api/hooks";
+import { usePaymentsList } from "@/lib/api/hooks";
 import { workflowApi } from "@/lib/api/client";
 import { fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
 
@@ -153,7 +153,7 @@ function CommandSearch({ onJump, onFilterCustomer }) {
     <div className={styles.commandSearch}>
       <form className={styles.commandForm} onSubmit={submit}>
         <span className={styles.commandIcon}>
-          <Icon glyph="Search" size={16} />
+          <Icon glyph="MagnifyingGlass" size={16} />
         </span>
         <input
           className={styles.commandInput}
@@ -315,7 +315,6 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
 }
 
 export default function PaymentsLens({
-  exceptionsOnly,
   refreshKey,
   onRefresh,
   selectedPaymentId,
@@ -325,14 +324,14 @@ export default function PaymentsLens({
     status: "", rail: "", customerId: "", from: "", to: "", skip: 0,
   });
 
-  // Two hooks, one used — the Operations lens has its own endpoint (terminal states are
-  // derived from the state machine server-side, not restated as a client filter).
-  const listed = usePaymentsList(
+  // The Activity list — every payment, newest first. Rows carry their joined exception
+  // (open or latest resolved) so failed/returned payments show the reason + discrepancy
+  // subline inline, the way the retired Operations queue did. The deep-dive owns the
+  // resolve actions; this list is the scan surface.
+  const { items, total, loading, error } = usePaymentsList(
     { ...filters, limit: PAGE_SIZE, skip: filters.skip },
     refreshKey
   );
-  const excepted = useWorkflowExceptions({ limit: PAGE_SIZE, skip: filters.skip }, refreshKey);
-  const { items, total, loading, error } = exceptionsOnly ? excepted : listed;
 
   const move = (delta) =>
     setFilters((f) => ({ ...f, skip: Math.max(0, f.skip + delta * PAGE_SIZE) }));
@@ -372,15 +371,11 @@ export default function PaymentsLens({
         <div className={styles.panelHeader}>
           <div className={styles.panelHead}>
             <div className={styles.panelTitleRow}>
-              <Icon glyph={exceptionsOnly ? "Warning" : "List"} size={16} />
-              <span className={styles.panelTitle}>
-                {exceptionsOnly ? "Exceptions" : "Payments"}
-              </span>
+              <Icon glyph="List" size={16} />
+              <span className={styles.panelTitle}>Payments</span>
             </div>
             <span className={styles.panelDesc}>
-              {exceptionsOnly
-                ? "Payments stopped in a terminal state that need intervention."
-                : "Payment orders initiated and moving through the lifecycle."}
+              Payment orders initiated and moving through the lifecycle.
             </span>
           </div>
           <div className={styles.panelHeadRight}>
@@ -393,24 +388,22 @@ export default function PaymentsLens({
           </div>
         </div>
 
-        {!exceptionsOnly && (
-          <div className={styles.panelBody}>
-            <CommandSearch
-              onJump={onSelect}
-              onFilterCustomer={(v) =>
-                setFilters((f) => ({ ...f, customerId: v, skip: 0 }))
-              }
-            />
-            <div className={styles.filterBar}>
-              <Filters value={filters} onChange={setFilters} />
-              {activeFilterCount > 0 && (
-                <Button size="xsmall" onClick={clearFilters}>
-                  Clear filters
-                </Button>
-              )}
-            </div>
+        <div className={styles.panelBody}>
+          <CommandSearch
+            onJump={onSelect}
+            onFilterCustomer={(v) =>
+              setFilters((f) => ({ ...f, customerId: v, skip: 0 }))
+            }
+          />
+          <div className={styles.filterBar}>
+            <Filters value={filters} onChange={setFilters} />
+            {activeFilterCount > 0 && (
+              <Button size="xsmall" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
           </div>
-        )}
+        </div>
 
         {error && (
           <div className={styles.panelBody}>
@@ -421,11 +414,7 @@ export default function PaymentsLens({
         {!error && loading && <div className={styles.emptyState}>Loading payments…</div>}
 
         {!error && !loading && items.length === 0 && (
-          <div className={styles.emptyState}>
-            {exceptionsOnly
-              ? "No payments need intervention."
-              : "No payments match these filters."}
-          </div>
+          <div className={styles.emptyState}>No payments match these filters.</div>
         )}
 
         {!error && !loading && items.length > 0 && (

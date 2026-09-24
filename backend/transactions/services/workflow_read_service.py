@@ -137,6 +137,14 @@ def list_payments(
         .limit(limit)
     )
     items = list(cursor)
+    # Join each row with its open (or latest resolved) exception occurrence, so the Activity
+    # list surfaces the exception reason + discrepancy subline for failed/returned payments
+    # — the same row rendering the Operations queue used. Per-payment join (not batch $in) to
+    # match list_exceptions and keep the FakeDb suite hermetic. Null for a payment with no
+    # exception doc (the common case).
+    exc_coll = connection.get_collection(db_name, "exceptions")
+    for item in items:
+        item["exception"] = _join_exception(exc_coll, item.get("paymentId"))
     return {
         "items": items,
         "total": coll.count_documents(query),

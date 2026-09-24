@@ -69,7 +69,9 @@ const PRIORITIES = ["NORMAL", "HIGH", "URGENT"];
 // Internal transfers settle atomically in stage 5 and ignore this — the control is wire-only.
 const SETTLEMENT_OUTCOMES = [
   { value: "MATCHED", label: "Matched", description: "Response confirms expected amount/account — SETTLED" },
-  { value: "DELAYED", label: "Delayed", description: "No confirmation yet within the window — PENDING" },
+  // DELAYED disabled — no real external rail to wait on, so a PENDING hold with no path to
+  // resolve it reads as a stuck payment in the demo. Re-enable when a rail re-query hook lands.
+  // { value: "DELAYED", label: "Delayed", description: "No confirmation yet within the window — PENDING" },
   { value: "UNMATCHED", label: "Unmatched", description: "Response disagrees — FAILED + discrepancy flag" },
   { value: "EXCEPTION", label: "Exception", description: "Network/correspondent rejected — RETURNED" },
 ];
