@@ -177,9 +177,9 @@ function buildPayload(form) {
     // WireDetailsBody contract (extra="forbid") — flat placement 422's.
     if (Object.keys(pti).length) payload.wireDetails = { paymentTypeInformation: pti };
 
-    // Stage 7 simulation lever (FR-7.3) — DISABLED 2026-09-22. Doina's ask was the `outcome`
-    // enum on the schema, not a demo driver. Left commented so the lever can be re-enabled.
-    // payload.simulatedSettlementOutcome = form.simulatedSettlementOutcome;
+    // Stage 7 simulation lever (FR-7.3) — re-enabled for stage 9 (doc 24 §3 step 8): the
+    // exceptions queue needs the non-happy settlement paths reachable from the wizard.
+    payload.simulatedSettlementOutcome = form.simulatedSettlementOutcome;
   } else {
     // An account we hold — name, BIC and address resolve from the snapshot server-side.
     payload.creditor = { accountId: form.creditorAccountId };
@@ -333,6 +333,11 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
     clientReference: `INV-${digits(6)}`,
     chargeBearer: pick(CHARGE_BEARERS)[0],
     priority: pick(PRIORITIES),
+    // B3: preserve the operator's settlement-outcome selection. autofill rebuilds from
+    // EMPTY (which defaults this to MATCHED), so without carrying the current value through,
+    // picking Unmatched then Autopopulate silently reverts to MATCHED → the wire settles
+    // happy-path and the exception queue never fires (defect `autofill-incoherence` class).
+    simulatedSettlementOutcome: form.simulatedSettlementOutcome,
   };
 
   if (isWire(next)) {
@@ -529,10 +534,10 @@ export default function InitiateWizard({ onInitiated }) {
       ["Client reference", form.clientReference || "—"],
       ["Charges", form.chargeBearer],
       ["Priority", form.priority],
-      // Stage 7 outcome row — disabled with the selector (2026-09-22).
-      // ...(isWire(form)
-      //   ? [["Settlement outcome", form.simulatedSettlementOutcome]]
-      //   : []),
+      // Stage 7 outcome row — re-enabled for stage 9 (doc 24 §3 step 8).
+      ...(isWire(form)
+        ? [["Settlement outcome", form.simulatedSettlementOutcome]]
+        : []),
       ["Channel", "BRANCH (bank-assisted)"],
     ];
     return (
@@ -916,12 +921,10 @@ export default function InitiateWizard({ onInitiated }) {
 
                     {isWire(form) && (
                       <>
-                        {/* Stage 7 FR-7.3 — settlement-outcome selector DISABLED for now
-                            (commented out 2026-09-22). Doina's ask was the `outcome` enum on
-                            the schema, not a demo driver. The backend plumbing
-                            (`simulatedSettlementOutcome` on the request, the SettlementOutcome
-                            Literal, the settle.py branches) stays in place so this can be
-                            re-enabled by uncommenting when a demo needs the non-happy paths.
+                        {/* Stage 9 — settlement-outcome selector, re-enabled for the exceptions
+                            demo (doc 24 §3 step 8). Was commented out 2026-09-22 (stage 7's enum ask
+                            was schema, not driver); stage 9 needs the non-happy paths reachable to
+                            populate the exception queue. Backend plumbing stayed in place. */}
                         <Select
                           label="Simulated settlement outcome"
                           description="Stage 7 demo control — picks the simulated external settlement response."
@@ -946,7 +949,6 @@ export default function InitiateWizard({ onInitiated }) {
                             — for demoing the distinct downstream outcomes (FR-7.3).
                           </div>
                         )}
-                        */}
                         <button
                           type="button"
                           className={styles.disclosure}

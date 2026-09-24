@@ -209,7 +209,8 @@ class PaymentOrderInitiateRequest(BaseModel):
     # and ignores this). Defaults to MATCHED, preserving the happy path. The back-office
     # wizard exposes it so all four outcomes are drivable from the screen; an API caller can
     # set it to exercise UNMATCHED/DELAYED/EXCEPTION and their distinct downstream effects.
-    # NOT a BIAN initiation field — a simulation control; see `payments.notes[]`.
+    # NOT a BIAN initiation field — a simulation control, persisted on the payment doc as
+    # `simulatedSettlementOutcome` so it survives a step-up / manual-review hold and resume.
     simulatedSettlementOutcome: Optional[SettlementOutcomeLiteral] = None
 
     model_config = ConfigDict(extra="forbid")
@@ -295,6 +296,34 @@ class TransactionAuthorizationResolveRequest(BaseModel):
     """
     paymentId: str = Field(min_length=1)
     decision: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
+# Stage 9 — `POST /workflow/exceptions/{exceptionId}/resolve` (doc 24 B4/B6). No BIAN
+# service domain (row 9: modeled within the originating domain), so the resolve endpoint rides
+# the /workflow ops namespace, sanctioned by the `POST /pipeline/batch/trigger` precedent.
+#
+# The action enum is the OUTGOING subset of the authored `exceptions` stub's
+# `resolution.action` enum — REPAIR/RETURN are reserved for the incoming UTA flow
+# (FR-9.IN2) and never legal this stage, so they are absent here and 422 at the boundary.
+# `newSettlementOutcome` is only meaningful for RETRY_SETTLEMENT (the operator-chosen
+# simulated outcome to re-drive settlement with); it reuses the stage-7 settlement enum.
+ResolveActionLiteral = Literal[
+    "RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS",
+]
+
+
+class ExceptionResolveRequest(BaseModel):
+    """`POST /workflow/exceptions/{exceptionId}/resolve` — an operator's resolution of one
+    queued exception (doc 24 B4). Resolution is evidence alongside the payment's terminal
+    state, never a state change: FAILED stays FAILED even after RETURN_FUNDS restores the
+    debtor (B4)."""
+
+    action: ResolveActionLiteral
+    note: Optional[str] = None
+    # RETRY_SETTLEMENT only — the operator-chosen simulated outcome to re-drive settlement.
+    # Ignored for the other actions.
+    newSettlementOutcome: Optional[SettlementOutcomeLiteral] = None
     model_config = ConfigDict(extra="forbid")
 
 

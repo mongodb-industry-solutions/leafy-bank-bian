@@ -22,7 +22,11 @@ logger = logging.getLogger(__name__)
 # Bump on any rule change. Stamped on each emitted event as a provenance/version marker.
 # 1.1.0 — stage 6 added the fee rule (doc 20 B3).
 # 1.2.0 — stage 7 added the settlement rule (doc 21 B2): Dr clearing / Cr nostro or reserves.
-MAPPING_VERSION = "1.2.0"
+# 1.3.0 — stage 9 added the reversal rule (doc 24 B5): return-of-funds swaps the principal
+#          legs (Dr clearing / Cr customer deposit) so 1131 nets back to zero. The mirror-drift
+#          prevention rule requires the bump on every rule change; the conformance test
+#          asserts the stamp.
+MAPPING_VERSION = "1.3.0"
 
 # eventType — subset of the spec's ledgerEvents.eventType enum exercised in Phase 1.
 # Values are verbatim from the spec enum (`SETTLEMENT`, `FEE`, `PAYMENT_PRINCIPAL`) — the
@@ -135,6 +139,36 @@ def decompose_principal_payment(
     ]
     assert_balanced(legs)
     return legs
+
+
+def decompose_reversal(
+    *,
+    amount: float | str | Decimal,
+    currency: str,
+    debtor_account: dict,
+    creditor_account: dict,
+    coa: ChartOfAccounts,
+) -> list[PostingLeg]:
+    """Decompose a return-of-funds (reversal) into a balanced leg pair with the principal's
+    sides SWAPPED: Dr the creditor's GL (the clearing account, 1131) / Cr the debtor's GL
+    (customer deposit control). This is ``decompose_principal_payment`` with debtor and
+    creditor exchanged — the reversal posts the mirror image, so 1131 nets back to zero and
+    the customer deposit liability is restored (doc 24 B5). ``assert_balanced`` still applies.
+
+    The eventType stays ``PAYMENT_PRINCIPAL`` (a reversal is the same accounting event type,
+    reversed — no new enum value is invented, per the 2026-04-24 rule). The ``reversalOf``
+    field on the emitted ledgerEvent carries the reversal semantics; ``ingest_worker`` sets
+    it from the compensating ``transactions`` doc.
+    """
+    return decompose_principal_payment(
+        amount=amount,
+        currency=currency,
+        # Swap: the original creditor (clearing, 1131) is now DEBITED; the original debtor
+        # (customer deposit) is now CREDITED — money returns to the customer.
+        debtor_account=creditor_account,
+        creditor_account=debtor_account,
+        coa=coa,
+    )
 
 
 def fee_gl_account(coa: ChartOfAccounts) -> Optional[str]:

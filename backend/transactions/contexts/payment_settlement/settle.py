@@ -48,6 +48,13 @@ from typing import Optional
 from bson import ObjectId
 
 from contexts.payment_order_initiation.domain import checks, lifecycle
+from process.exceptions import (
+    CATEGORY_SETTLEMENT_DELAYED,
+    CATEGORY_SETTLEMENT_RETURNED,
+    CATEGORY_SETTLEMENT_UNMATCHED,
+    SERVICE_TRANSACTIONS,
+    record_exception,
+)
 from process.payment_context import PaymentContext
 from shared.refs import derive_ref
 
@@ -82,6 +89,14 @@ _SETTLEMENT_MODELS: dict[str, dict] = {
 
 # The clearing account code for wire ( seeded in step 1).
 _WIRE_CLEARING_CODE = "1131"
+
+# The simulated "unmatched" shortfall — the correspondent-fee-style delta the rail settles
+# short by on an UNMATCHED outcome. Doina's Sep 17 mockup (L1307-1313) is "$25,000 expected /
+# $24,975 received / $25 discrepancy" — a PARTIAL short-pay, not a full rejection. The
+# discrepancy shown to the operator is this delta, not the whole payment amount. Capped at
+# the expected amount so a sub-$25 payment degrades to a full rejection (actual = 0) rather
+# than a negative settlement.
+_UNMATCHED_DELTA_USD = 25.0
 
 # --- her four outcomes (B4, L630, FR-7.3) → spec settlementStatus enum -------
 # delayed is PENDING with a future settlementDate — a timing property, not a state
@@ -123,12 +138,20 @@ def _select_model(ctx: PaymentContext) -> str:
     return "CENTRAL_BANK"
 
 
-def _simulated_response(payment_id: str, model: str, outcome: str) -> dict:
+def _simulated_response(payment_id: str, model: str, outcome: str, expected_amount: float = 0.0) -> dict:
     """R8/R9 — a simulated settlement response, labelled SIMULATED.
 
     The demo does not connect to a real payment network (her L629, her own bold). The
     response carries the batch reference, the settlement date, and the outcome-specific
     status/rejection/return code — all written to `payments.clearing.*` by the caller.
+
+    UNMATCHED is a PARTIAL short-pay (Doina's mockup, L1307-1313): the rail settles for less
+    than expected — ``actualAmount = expected − delta`` — and the ``delta`` is the
+    discrepancy the operator investigates. The bank treats the partial settlement as FAILED
+    (it did not complete for the full amount), so ``settlementStatus`` stays FAILED, the
+    settlement ledgerEvent does NOT post (the worker only fires on SETTLED), and the full
+    expected amount remains returnable via RETURN_FUNDS. The "received" figure is the rail's
+    claimed partial settlement — informational on the position, not posted to the GL.
     """
     now = datetime.now(timezone.utc)
     batch_ref = f"SIM-SETT-{uuid.uuid4().hex[:8].upper()}"
@@ -152,8 +175,13 @@ def _simulated_response(payment_id: str, model: str, outcome: str) -> dict:
         resp["settlementDate"] = (now + timedelta(days=1)).date().isoformat()
         resp["statusCode"] = "ACSP"  # Accepted - Settlement In Progress
     elif outcome == UNMATCHED:
-        resp["statusCode"] = "RJCT"  # Rejected
+        expected = float(expected_amount or 0.0)
+        delta = min(_UNMATCHED_DELTA_USD, expected)
+        actual = expected - delta
+        resp["statusCode"] = "RJCT"  # the settlement did not complete for the full amount
         resp["rejectionCode"] = "UNMATCHED_AMOUNT"
+        resp["actualAmount"] = actual
+        resp["discrepancyAmount"] = delta
     elif outcome == EXCEPTION:
         resp["statusCode"] = "RJCT"
         resp["returnCode"] = "RETURNED_EXCEPTION"
@@ -204,7 +232,13 @@ def _write_settlement_position(ctx: PaymentContext, response: dict, model: str) 
     if outcome == MATCHED:
         actual_amount = expected_amount
         actual_currency = expected_currency
-    elif outcome in (UNMATCHED, EXCEPTION):
+    elif outcome == UNMATCHED:
+        # Partial short-pay: the rail settled for `actualAmount = expected − delta`
+        # (Doina's mockup). The discrepancy (delta) is the unmatched portion; the "received"
+        # figure is the rail's claimed partial settlement, informational on the position.
+        actual_amount = response.get("actualAmount", 0)
+        actual_currency = expected_currency
+    elif outcome == EXCEPTION:
         actual_amount = 0
         actual_currency = expected_currency
     else:  # DELAYED — settlement not yet confirmed
@@ -328,7 +362,8 @@ def run(ctx: PaymentContext) -> None:
     # Default outcome is MATCHED. The BIAN route (step 7) can override this for demo
     # scenarios that need unmatched/delayed/exception outcomes.
     outcome = ctx.settlement_outcome or MATCHED
-    response = _simulated_response(ctx.payment_id, model, outcome)
+    expected_amount = (ctx.payment_doc or {}).get("amount", 0)
+    response = _simulated_response(ctx.payment_id, model, outcome, expected_amount=expected_amount)
 
     _record_check(
         ctx, "settlement_response_received", checks.PASS,
@@ -383,16 +418,34 @@ def run(ctx: PaymentContext) -> None:
             f"Settlement delayed — value date {response.get('settlementDate')} is in the future. "
             f"Payment stays at IN_PROGRESS with settlementStatus PENDING.",
         )
+        # Stage 9 — queue the delay so the Operations lens + RETRY_SETTLEMENT action can
+        # reach it (doc 24 B3 site 3). The payment stays IN_PROGRESS; the exception is OPEN.
+        record_exception(
+            ctx.collections, ctx.payment_doc or {},
+            CATEGORY_SETTLEMENT_DELAYED,
+            detail={
+                "expectedAmount": (ctx.payment_doc or {}).get("amount", 0),
+                "actualAmount": None,  # still pending
+                "discrepancyAmount": None,
+                "discrepancyReason": None,
+                "returnCode": None,
+                "duplicateOf": None,
+            },
+            source={"stage": STAGE, "service": SERVICE_TRANSACTIONS},
+        )
         ctx.stop(ctx.payment_doc)
         return
     elif outcome == UNMATCHED:
         extra["clearing.rejectionCode"] = response.get("rejectionCode")
         # FR-7.3 / Doina (Sep 17): UNMATCHED feeds Stage 8's mismatch flag with a specific
-        # discrepancy amount and routes toward Stage 9's exception queue. The queue itself is
-        # deferred (stage 9 roadmap); stamp the discrepancy here so the routing is data-ready —
-        # expected (the clearing amount) minus actual (0 — nothing settled back).
-        expected_amount = (ctx.payment_doc or {}).get("amount", 0)
-        extra["clearing.discrepancyAmount"] = expected_amount
+        # discrepancy amount and routes toward Stage 9's exception queue. Per her mockup
+        # (L1307-1313) UNMATCHED is a PARTIAL short-pay — the rail settled for less than
+        # expected — so the discrepancy is the delta (the unmatched portion), NOT the whole
+        # payment amount. The bank treats the partial settlement as FAILED (it did not
+        # complete for the full amount); the full expected remains returnable via RETURN_FUNDS.
+        delta = response.get("discrepancyAmount", expected_amount)
+        actual_amount = response.get("actualAmount", 0)
+        extra["clearing.discrepancyAmount"] = delta
         extra["clearing.discrepancyReason"] = response.get("rejectionCode")
         lifecycle.advance_ctx(
             ctx, lifecycle.FAILED,
@@ -403,8 +456,23 @@ def run(ctx: PaymentContext) -> None:
         _record_check(
             ctx, "settlement_rejected", checks.FAIL,
             f"Settlement rejected — {response.get('rejectionCode')}. Payment FAILED. "
-            f"Discrepancy {expected_amount} (expected {expected_amount}, received 0). "
+            f"Discrepancy {delta} (expected {expected_amount}, received {actual_amount}). "
             f"The clearing position must be reversed (stage 9).",
+        )
+        # Stage 9 — queue the unmatched settlement (doc 24 B3 site 1). The discrepancy
+        # values mirror the clearing.* stamps above so the queue row and the payment agree.
+        record_exception(
+            ctx.collections, ctx.payment_doc or {},
+            CATEGORY_SETTLEMENT_UNMATCHED,
+            detail={
+                "discrepancyAmount": delta,
+                "discrepancyReason": response.get("rejectionCode"),
+                "expectedAmount": expected_amount,
+                "actualAmount": actual_amount,
+                "returnCode": None,
+                "duplicateOf": None,
+            },
+            source={"stage": STAGE, "service": SERVICE_TRANSACTIONS},
         )
         ctx.stop(ctx.payment_doc)
         return
@@ -420,6 +488,21 @@ def run(ctx: PaymentContext) -> None:
             ctx, "settlement_returned", checks.FAIL,
             f"Settlement returned — {response.get('returnCode')}. Payment RETURNED. "
             f"The clearing position must be reversed (stage 9).",
+        )
+        # Stage 9 — queue the returned settlement (doc 24 B3 site 2). RETURN_FUNDS resolves
+        # it via the compensation path (step 6); the clearing position reversal lives there.
+        record_exception(
+            ctx.collections, ctx.payment_doc or {},
+            CATEGORY_SETTLEMENT_RETURNED,
+            detail={
+                "returnCode": response.get("returnCode"),
+                "expectedAmount": (ctx.payment_doc or {}).get("amount", 0),
+                "actualAmount": 0,  # nothing settled back
+                "discrepancyAmount": None,
+                "discrepancyReason": None,
+                "duplicateOf": None,
+            },
+            source={"stage": STAGE, "service": SERVICE_TRANSACTIONS},
         )
         ctx.stop(ctx.payment_doc)
         return

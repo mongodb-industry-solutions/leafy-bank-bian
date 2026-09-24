@@ -255,6 +255,21 @@
   box-shadow: inset 2px 0 0 var(--pw-accent);
 }
 
+/* B6: a resolved/dismissed exception dims its row so an operator scanning the Operations
+ * queue can tell open work from closed history at a glance. */
+.rowResolved {
+  opacity: 0.6;
+}
+
+.exceptionResolved {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pw-muted, #9ca3af);
+  margin-top: 2px;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 600;
@@ -1457,6 +1472,100 @@
   overflow: hidden;
   text-overflow: ellipsis;
   text-transform: lowercase;
+}
+
+/* Stage 9 — the Operations queue row's exception reason (R15's $25-discrepancy line).
+   Warn-toned so it reads as the WHY the row is queued, distinct from the neutral axis subline. */
+.exceptionReason {
+  font-size: 11px;
+  line-height: 14px;
+  color: #b86c00; /* LeafyGreen amber dark2 — warning, palette-only */
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+/* ── Stage 9 Exceptions panel (doc 24 §3 step 8) ── */
+.exceptionsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.exceptionRow {
+  border: 1px solid var(--pw-hairline);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.exceptionRowHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.exceptionSeverity,
+.exceptionStatus {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--pw-faint);
+}
+.exceptionStatus {
+  margin-left: auto;
+}
+.exceptionDetail {
+  font-size: 13px;
+  color: var(--pw-ink);
+  margin-top: 6px;
+}
+.resolutionLog {
+  font-size: 12px;
+  color: var(--pw-faint);
+  margin-top: 6px;
+}
+.resolutionLabel {
+  font-weight: 600;
+  color: var(--pw-green-dark2);
+}
+.resolutionNote {
+  color: var(--pw-faint);
+}
+.resolveCallout {
+  border: 1px solid var(--pw-hairline);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--pw-accent-light, #c0fae6);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.resolveCalloutTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--pw-green-dark2);
+}
+.resolveField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.resolveFieldLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pw-faint);
+  font-weight: 600;
+}
+.resolveActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* ── independent axes row (research §1.4 / §4) ──

@@ -22,6 +22,8 @@ import { Tab, Tabs } from "@leafygreen-ui/tabs";
 import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 import Tooltip from "@leafygreen-ui/tooltip";
+import TextInput from "@leafygreen-ui/text-input";
+import { Select, Option } from "@leafygreen-ui/select";
 import { Body } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
@@ -133,7 +135,7 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
 }
 
 /** Zone 2 — vertical spine of expandable rows; the selected row expands to its full detail. */
-function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve }) {
+function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve, onResolveException }) {
   const failedIdx = states.indexOf("failed");
   return (
     <div className={styles.timeline}>
@@ -183,6 +185,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                       payment={payment}
                       onApprove={onApprove}
                       onResolve={onResolve}
+                      onResolveException={onResolveException}
                     />
                   ) : (
                     <StageDetailBody
@@ -190,6 +193,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                       payment={payment}
                       onApprove={onApprove}
                       onResolve={onResolve}
+                      onResolveException={onResolveException}
                     />
                   )}
                 </div>
@@ -210,7 +214,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
  * per-panel heads lets the reader name each accounting fact before its legs, instead of six
  * anonymous columns that read as separate top-level stages.
  */
-function GroupStageBody({ group, payment, onApprove, onResolve }) {
+function GroupStageBody({ group, payment, onApprove, onResolve, onResolveException }) {
   return (
     <div className={styles.groupBody}>
       {group.intro && (
@@ -231,6 +235,7 @@ function GroupStageBody({ group, payment, onApprove, onResolve }) {
             payment={payment}
             onApprove={onApprove}
             onResolve={onResolve}
+            onResolveException={onResolveException}
           />
         </section>
       ))}
@@ -1063,8 +1068,15 @@ function summaryRows(stage, payment) {
         ["Batch", pos?.batchRef],
       ];
       if (outcome === "UNMATCHED") {
+        const ccy = pos?.currency || payment?.currency;
+        // Doina's mockup (Sep 17 L1307-1313): "Payment $25,000 / Settlement $24,975 /
+        // $25 discrepancy" — show all three so the operator sees WHAT differs, not just a
+        // bare delta. Expected = the clearing amount sent; Received = the rail's claimed
+        // partial settlement; Discrepancy = the unmatched portion (the correspondent fee).
         rows.push(
-          ["Discrepancy amount", clr?.discrepancyAmount != null ? fmtAmount(clr.discrepancyAmount, pos?.currency || payment?.currency) : null],
+          ["Expected", pos?.expectedAmount != null ? fmtAmount(pos.expectedAmount, ccy) : null],
+          ["Received", pos?.actualAmount != null ? fmtAmount(pos.actualAmount, ccy) : null],
+          ["Discrepancy", clr?.discrepancyAmount != null ? fmtAmount(clr.discrepancyAmount, ccy) : null],
           ["Discrepancy reason", clr?.discrepancyReason],
         );
       }
@@ -1219,7 +1231,7 @@ function RoutingDecision({ snapshot }) {
   );
 }
 
-function StageDetailBody({ stage, payment, onApprove, onResolve }) {
+function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveException }) {
   // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
   // must sit above the early returns (rules of hooks).
   const [showRaw, setShowRaw] = useState(false);
@@ -1240,6 +1252,7 @@ function StageDetailBody({ stage, payment, onApprove, onResolve }) {
   const showAuthorization = stage.kind === "authorization";
   const showRailExecution = stage.kind === "railExecution";
   const showReconciliation = stage.kind === "reconciliation";
+  const showExceptions = stage.kind === "exceptions";
   // Stages 3 and 4 render checks too, but their `data` is an object rather than the bare
   // array stage 2 passes, so the shapes are resolved separately.
   const showChecks =
@@ -1463,6 +1476,10 @@ function StageDetailBody({ stage, payment, onApprove, onResolve }) {
           </div>
         )}
 
+        {showExceptions && (
+          <ExceptionsPanel stage={stage} onResolve={onResolveException} />
+        )}
+
         {showLegs && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Double-entry</div>
@@ -1498,6 +1515,156 @@ function StageDetailBody({ stage, payment, onApprove, onResolve }) {
 }
 
 /**
+ * Stage 9 — the Exceptions panel (doc 24 §3 step 8). Renders the payment's exception
+ * occurrences (joined by `get_payment`), the resolution log for a closed one, and — for an
+ * OPEN exception — the per-category resolve CTAs modeled on the stage-4 review callout.
+ *
+ * The action set per category mirrors the backend `_LEGAL` map (B4's table). The payment's
+ * terminal state is never changed by a resolve (B4) — the copy says so. RETRY_SETTLEMENT is
+ * the only action that needs a secondary input (the simulated settlement outcome to re-drive).
+ */
+const EXCEPTION_ACTIONS = {
+  SETTLEMENT_DELAYED: ["RETRY_SETTLEMENT"],
+  SETTLEMENT_UNMATCHED: ["RETURN_FUNDS", "ACCEPT_DISCREPANCY"],
+  SETTLEMENT_RETURNED: ["RETURN_FUNDS"],
+  RECONCILIATION_DISCREPANCY: ["ACCEPT_DISCREPANCY"],
+  DUPLICATE_SIGNAL: ["DISMISS"],
+};
+const ACTION_LABELS = {
+  RETRY_SETTLEMENT: "Retry settlement",
+  RETURN_FUNDS: "Return funds",
+  ACCEPT_DISCREPANCY: "Accept with cause",
+  DISMISS: "Dismiss",
+};
+const SEVERITY_LABEL = {
+  ACTION_REQUIRED: "Action required",
+  INFORMATIONAL: "Informational",
+};
+
+function exceptionDetailText(exc) {
+  const d = exc?.detail || {};
+  if (exc?.category === "DUPLICATE_SIGNAL" && d.duplicateOf) return `Resembles ${d.duplicateOf}`;
+  const disc = d.discrepancyAmount;
+  if (disc != null) {
+    const n = Number(disc);
+    const s = Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+    return `${s} discrepancy${d.discrepancyReason ? ` — ${d.discrepancyReason}` : ""}`;
+  }
+  if (d.returnCode) return `Return code ${d.returnCode}`;
+  return "—";
+}
+
+function ExceptionsPanel({ stage, onResolve }) {
+  const exceptions = stage.data?.exceptions || [];
+  const open = exceptions.find((e) => e?.status === "OPEN");
+  const [note, setNote] = useState("");
+  const [outcome, setOutcome] = useState("MATCHED");
+  const [busy, setBusy] = useState(false);
+
+  if (!exceptions.length) {
+    return <Body className={styles.muted}>No exceptions recorded for this payment.</Body>;
+  }
+
+  const actions = open ? EXCEPTION_ACTIONS[open.category] || [] : [];
+  const needsOutcome = actions.includes("RETRY_SETTLEMENT");
+
+  async function doResolve(action) {
+    if (!open || !onResolve) return;
+    setBusy(true);
+    await onResolve(open.exceptionId, action, {
+      note: note || undefined,
+      newSettlementOutcome: action === "RETRY_SETTLEMENT" ? outcome : undefined,
+    });
+    setBusy(false);
+    setNote("");
+  }
+
+  return (
+    <div className={styles.exceptionsPanel}>
+      {exceptions.map((e) => (
+        <div key={e.exceptionId} className={styles.exceptionRow}>
+          <div className={styles.exceptionRowHead}>
+            <StatusPill status={e.category} />
+            <span className={styles.exceptionSeverity}>
+              {SEVERITY_LABEL[e.severity] || e.severity}
+            </span>
+            <span className={styles.exceptionStatus}>{e.status}</span>
+          </div>
+          <div className={styles.exceptionDetail}>{exceptionDetailText(e)}</div>
+          {e.resolution && (
+            <div className={styles.resolutionLog}>
+              <span className={styles.resolutionLabel}>Resolved:</span>
+              <span>
+                {ACTION_LABELS[e.resolution.action] || e.resolution.action} by {e.resolution.by}
+              </span>
+              {e.resolution.note && (
+                <span className={styles.resolutionNote}> — {e.resolution.note}</span>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {open && onResolve && actions.length > 0 && (
+        <div className={styles.resolveCallout}>
+          <div className={styles.resolveCalloutTitle}>
+            <Icon glyph="Diagram3" />
+            <span>Resolve this exception</span>
+          </div>
+          <Body>
+            Select an action. The payment&apos;s terminal state is not changed — resolution is
+            evidence alongside it. A return of funds posts a compensating movement that
+            restores the debtor and clears the clearing account.
+          </Body>
+          {needsOutcome && (
+            <div className={styles.resolveField}>
+              <label className={styles.resolveFieldLabel} htmlFor="exc-settlement-outcome">
+                Simulated settlement outcome
+              </label>
+              <Select
+                id="exc-settlement-outcome"
+                size="small"
+                value={outcome}
+                onChange={setOutcome}
+                allowDeselect={false}
+              >
+                <Option value="MATCHED">Matched — settle</Option>
+                <Option value="UNMATCHED">Unmatched — fail again</Option>
+                <Option value="DELAYED">Delayed — hold again</Option>
+                <Option value="EXCEPTION">Exception — return</Option>
+              </Select>
+            </div>
+          )}
+          <div className={styles.resolveField}>
+            <label className={styles.resolveFieldLabel} htmlFor="exc-note">Note</label>
+            <TextInput
+              id="exc-note"
+              size="small"
+              placeholder="e.g. Correspondent fee — accepted with cause"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+          <div className={styles.resolveActions}>
+            {actions.map((a) => (
+              <Button
+                key={a}
+                size="small"
+                variant={a === "DISMISS" ? "default" : "primary"}
+                disabled={busy}
+                onClick={() => doResolve(a)}
+              >
+                {ACTION_LABELS[a] || a}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * The three independent fact axes — posting, settlement, reconciliation — that advance
  * alongside `currentState` but not in lockstep with it (research §1.4). A journal's legs
  * can post at different times than the payment settles, so these cannot be folded into the
@@ -1524,7 +1691,7 @@ function AxesRow({ payment }) {
   );
 }
 
-export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
+export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataChanged }) {
   // 2026-09-09 (Kiran): the step-up approval happens HERE, at stage 2, not at initiate. A held
   // payment is resumed from this view; `nudge` bumps into the hook's refresh key so the
   // lifecycle re-renders once the resume advances it past INITIATED.
@@ -1557,6 +1724,10 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
       return;
     }
     setNudge((n) => n + 1);
+    // B6: the list (Operations/Activity) must refetch on Back so a resumed payment's new
+    // state shows — `nudge` only refreshes this deep-dive. `onDataChanged` bumps the shared
+    // refreshKey the list hooks depend on.
+    if (onDataChanged) onDataChanged();
   }
 
   // FR-4.13 — an operator's manual-review decision on a payment held at PENDING_REVIEW.
@@ -1574,6 +1745,28 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
       return;
     }
     setNudge((n) => n + 1);
+    if (onDataChanged) onDataChanged();
+  }
+
+  // Stage 9 — resolve a queued exception (doc 24 B4). The action + optional note + optional
+  // settlement outcome POST to the one /workflow write route. `nudge` refreshes the lifecycle
+  // so the resolution log + the compensation evidence (for RETURN_FUNDS) appear.
+  async function resolveException(excId, action, { note, newSettlementOutcome } = {}) {
+    if (!excId) return;
+    setResolveError(null);
+    const { error: err } = await coreApi(
+      `workflow/exceptions/${excId}/resolve`,
+      { method: "POST", body: { action, note, newSettlementOutcome } }
+    );
+    if (err) {
+      setResolveError(err);
+      return;
+    }
+    setNudge((n) => n + 1);
+    // B6: bump the shared refreshKey so the Operations queue refetches — without this, hitting
+    // Back after a resolve shows the stale OPEN row (the list hooks never re-ran). The
+    // exception is now RESOLVED/DISMISSED server-side; the queue row must reflect that.
+    if (onDataChanged) onDataChanged();
   }
   const rowRefs = useRef({});
   const setRowRef = useCallback(
@@ -1695,6 +1888,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack }) {
               setRowRef={setRowRef}
               onApprove={() => setStepUpOpen(true)}
               onResolve={resolveReview}
+              onResolveException={resolveException}
             />
           </>
         )}

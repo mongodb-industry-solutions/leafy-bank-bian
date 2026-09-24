@@ -60,6 +60,11 @@ from contexts.payment_order_initiation.domain import (
     lifecycle,
     rail_viability,
 )
+from process.exceptions import (
+    CATEGORY_DUPLICATE_SIGNAL,
+    SERVICE_TRANSACTIONS,
+    record_exception,
+)
 from process.payment_context import PaymentContext
 
 STAGE = "3 validate"
@@ -260,6 +265,22 @@ def _record_duplicate(record, ctx, now) -> None:
         ctx.collections.payments.update_one(
             {"_id": ctx.payment_oid},
             {"$set": {"idempotency.duplicateOf": match.get("paymentId")}},
+        )
+        # Stage 9 — queue the duplicate signal (doc 24 B3 site 5). INFORMATIONAL: the
+        # payment proceeds; this is a queue row for the Operations lens, not a hold. The
+        # `duplicateOf` carries the matched prior paymentId so the analyst can see the pair.
+        record_exception(
+            ctx.collections, ctx.payment_doc or {},
+            CATEGORY_DUPLICATE_SIGNAL,
+            detail={
+                "duplicateOf": match.get("paymentId"),
+                "discrepancyAmount": None,
+                "discrepancyReason": None,
+                "returnCode": None,
+                "expectedAmount": None,
+                "actualAmount": None,
+            },
+            source={"stage": STAGE, "service": SERVICE_TRANSACTIONS},
         )
         return
     record(

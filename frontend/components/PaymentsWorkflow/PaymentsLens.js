@@ -193,6 +193,42 @@ function statusAxes(p) {
   return `posting ${axisLabel(p.lifecycle?.postingStatus)} · settlement ${axisLabel(p.lifecycle?.settlementStatus)}`;
 }
 
+// Stage 9 — the Operations queue row shows the exception reason + the discrepancy line
+// (R15's mockup: "Payment $25,000 / Settlement $24,975 — $25 discrepancy"). The joined
+// `exception` doc (doc 24 §3 step 7) carries the category + detail; render it as a subline
+// under the status pill so the analyst sees WHY the payment is queued at a glance.
+function fmtDiscrepancy(amount) {
+  if (amount == null) return "";
+  // detail amounts are major units (float dollars) — show whole-dollar when integral
+  const n = Number(amount);
+  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+}
+function exceptionLine(exc) {
+  if (!exc) return "";
+  const d = exc.detail || {};
+  if (exc.category === "DUPLICATE_SIGNAL" && d.duplicateOf) {
+    return `DUPLICATE_SIGNAL · resembles ${d.duplicateOf}`;
+  }
+  const disc = fmtDiscrepancy(d.discrepancyAmount);
+  if (disc) {
+    return `${exc.category} · ${disc} discrepancy`;
+  }
+  if (d.returnCode) {
+    return `${exc.category} · return ${d.returnCode}`;
+  }
+  return exc.category;
+}
+
+// Friendly labels for a resolved exception's action — mirrors the map in PaymentDeepDive.
+const ACTION_LABELS = {
+  RETRY_SETTLEMENT: "Retry settlement",
+  RETURN_FUNDS: "Return funds",
+  ACCEPT_DISCREPANCY: "Accept discrepancy",
+  DISMISS: "Dismiss",
+  REPAIR: "Repair",
+  RETURN: "Return",
+};
+
 function PaymentsTable({ items, selectedPaymentId, onSelect }) {
   return (
     <div className={styles.tableWrap}>
@@ -219,10 +255,12 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
           {items.map((p) => {
             const active = p.paymentId === selectedPaymentId;
             const beneficiary = beneficiaryOf(p);
+            const excOpen = p.exception && p.exception.status === "OPEN";
+            const excClosed = p.exception && p.exception.status !== "OPEN";
             return (
               <tr
                 key={p.paymentId}
-                className={`${styles.row} ${active ? styles.rowActive : ""}`}
+                className={`${styles.row} ${active ? styles.rowActive : ""} ${excClosed ? styles.rowResolved : ""}`}
                 onClick={() => onSelect(p.paymentId)}
                 // Keyboard parity: the row is the control, so it must be reachable and
                 // activatable without a pointer.
@@ -253,6 +291,19 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                 <td>
                   <StatusPill status={p.status} />
                   <div className={styles.statusAxes}>{statusAxes(p)}</div>
+                  {p.exception && excOpen && (
+                    <div className={styles.exceptionReason} title={exceptionLine(p.exception)}>
+                      {exceptionLine(p.exception)}
+                    </div>
+                  )}
+                  {p.exception && excClosed && (
+                    <div className={styles.exceptionResolved}>
+                      {p.exception.status === "DISMISSED" ? "Dismissed" : "Resolved"}
+                      {p.exception.resolution?.action
+                        ? ` · ${ACTION_LABELS[p.exception.resolution.action] || p.exception.resolution.action}`
+                        : ""}
+                    </div>
+                  )}
                 </td>
               </tr>
             );
@@ -301,7 +352,15 @@ export default function PaymentsLens({
         <PaymentDeepDive
           paymentId={selectedPaymentId}
           refreshKey={refreshKey}
-          onBack={() => onSelect(null)}
+          // B6: refresh the queue on Back so a resolved/closed exception's row is current,
+          // not the pre-resolve snapshot the list hook is still holding. `onDataChanged`
+          // also fires from inside the deep-dive right after a resolve/review/resume, so
+          // the queue is fresh the moment the operator returns to it.
+          onDataChanged={onRefresh}
+          onBack={() => {
+            if (onRefresh) onRefresh();
+            onSelect(null);
+          }}
         />
       </div>
     );

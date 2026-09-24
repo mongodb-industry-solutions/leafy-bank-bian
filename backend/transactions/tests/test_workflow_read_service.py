@@ -110,32 +110,48 @@ class FakePayments:
 
 
 class FakeArtifacts:
-    """Stands in for `paymentExecutions` / `paymentMessages` — stage 5's two collections.
+    """Stands in for `paymentExecutions` / `paymentMessages` / `exceptions` — the
+    collections `get_payment` / `list_exceptions` join onto a payment.
 
-    Empty by default: every test in this module predates stage 5, and the point of the
-    fixture is that `get_payment` still returns a document when a payment has no execution
-    artifacts (an internal transfer never has any — doc 19 B4).
+    Empty by default: every test in this module predates stage 5/9, and the point of the
+    fixture is that `get_payment` still returns a document when a payment has no
+    artifacts (an internal transfer never has any — doc 19 B4) and no exception (the
+    common case — doc 24 §3 step 7).
     """
 
     def __init__(self, docs=None):
         self.docs = docs or []
 
     def find(self, query, projection=None):
-        payment_id = query.get("paymentId")
-        return FakeCursor([d for d in self.docs if d.get("paymentId") == payment_id])
+        query = query or {}
+        return FakeCursor([d for d in self.docs if self._matches(d, query)])
 
     def find_one(self, query, projection=None):
         for d in self.docs:
-            if all(d.get(k) == v for k, v in query.items()):
+            if self._matches(d, query):
                 out = copy.deepcopy(d)
                 out.pop("_id", None)
                 return out
         return None
 
+    def _matches(self, doc, flt):
+        for k, v in flt.items():
+            actual = doc.get(k)
+            if isinstance(v, dict):
+                if "$in" in v and actual not in v["$in"]:
+                    return False
+                if "$ne" in v and actual == v["$ne"]:
+                    return False
+                if "$nin" in v and actual in v["$nin"]:
+                    return False
+            elif actual != v:
+                return False
+        return True
+
 
 class FakeConnection:
     def __init__(self, coll, executions=None, messages=None, notifications=None,
-                 routing_snapshot=None):
+                 routing_snapshot=None, exceptions=None):
         self.coll = coll
         self.artifacts = {
             "paymentExecutions": FakeArtifacts(executions),
@@ -144,6 +160,7 @@ class FakeConnection:
             "notifications": FakeArtifacts(notifications),
             "routingSnapshots": FakeArtifacts(  # stage 4 — one doc, or none pre-stage-4
                 [routing_snapshot] if routing_snapshot else None),
+            "exceptions": FakeArtifacts(exceptions),  # stage 9 — empty by default
         }
 
     def get_collection(self, db_name, name):
@@ -282,6 +299,118 @@ def test_exceptions_lists_only_terminal_states(conn):
 def test_intervention_states_track_the_state_machine():
     """Derived from lifecycle.TERMINALS, so a new terminal cannot fall out of the lens."""
     assert set(svc.INTERVENTION_STATES) == set(lifecycle.TERMINALS)
+
+
+# --- Stage 9: the exceptions join (doc 24 §3 step 7) --------------------------
+
+from bson import ObjectId  # noqa: E402 - local import keeps the fixture block above clean
+
+_NOW = datetime(2026, 9, 23, 14, 0, tzinfo=timezone.utc)
+
+
+def _exc_doc(pid, *, category="SETTLEMENT_UNMATCHED", status="OPEN", exc_id="EXC-aaaa0001"):
+    return {
+        "_id": ObjectId(),
+        "exceptionId": exc_id,
+        "paymentId": pid,
+        "category": category,
+        "status": status,
+        "severity": "ACTION_REQUIRED",
+        "source": {"stage": "7 settle", "service": "transactions-service"},
+        "detail": {"discrepancyAmount": 25.0, "expectedAmount": 25000.0, "actualAmount": 24975.0},
+        "resolution": None,
+        "agent": None,
+        "createdAt": _NOW,
+        "updatedAt": _NOW,
+        "sourceSystem": "transactions-service",
+    }
+
+
+def test_list_exceptions_joins_the_open_exception_per_payment():
+    conn = FakeConnection(
+        FakePayments([_payment("PAY-9", status=lifecycle.FAILED, amount=25000.0)]),
+        exceptions=[_exc_doc("PAY-9")],
+    )
+    out = svc.list_exceptions(conn, "db")
+    assert len(out["items"]) == 1
+    row = out["items"][0]
+    assert row["paymentId"] == "PAY-9"
+    assert row["exception"]["exceptionId"] == "EXC-aaaa0001"
+    assert row["exception"]["category"] == "SETTLEMENT_UNMATCHED"
+    assert row["exception"]["status"] == "OPEN"
+
+
+def test_list_exceptions_joins_null_when_a_terminal_payment_has_no_exception():
+    """A legacy terminal payment (pre-stage-9) renders with `exception: None` — the
+    stage-8 trace precedent: empty-tolerant, no error."""
+    conn = FakeConnection(
+        FakePayments([_payment("PAY-2", status=lifecycle.REJECTED)]),
+        exceptions=None,
+    )
+    out = svc.list_exceptions(conn, "db")
+    assert len(out["items"]) == 1
+    assert out["items"][0]["exception"] is None
+
+
+def test_list_exceptions_falls_back_to_the_latest_resolved_when_no_open():
+    """A closed exception still carries its history — the latest resolved/dismissed doc is
+    attached when no OPEN one exists."""
+    conn = FakeConnection(
+        FakePayments([_payment("PAY-7", status=lifecycle.FAILED)]),
+        exceptions=[_exc_doc("PAY-7", status="RESOLVED", exc_id="EXC-old00007",
+                             category="RECONCILIATION_DISCREPANCY")],
+    )
+    out = svc.list_exceptions(conn, "db")
+    row = out["items"][0]
+    assert row["exception"]["exceptionId"] == "EXC-old00007"
+    assert row["exception"]["status"] == "RESOLVED"
+
+
+def test_list_exceptions_empty_queue_renders_without_error():
+    conn = FakeConnection(FakePayments([
+        _payment("PAY-1", status=lifecycle.SETTLED),  # not terminal
+    ]))
+    out = svc.list_exceptions(conn, "db")
+    assert out["items"] == []
+    assert out["total"] == 0
+
+
+def test_the_joined_exception_serializes_objectid_and_datetime():
+    """defect 2026-06-11 — a raw ObjectId/datetime on the joined exception must encode,
+    not 500. The queue response runs through `to_json_response` (MyJSONEncoder)."""
+    from routers._util import to_json_response
+    conn = FakeConnection(
+        FakePayments([_payment("PAY-9", status=lifecycle.FAILED)]),
+        exceptions=[_exc_doc("PAY-9")],
+    )
+    out = svc.list_exceptions(conn, "db")
+    # encodes without raising — the ObjectId _id and the datetime fields both pass through
+    resp = to_json_response(out)
+    assert resp.status_code == 200
+
+
+def test_list_exceptions_surfaces_a_settled_payment_with_an_open_discrepancy():
+    """A RECONCILIATION_DISCREPANCY exception (site 4) is stamped on a SETTLED payment —
+    which is NOT a terminal state. A terminal-only queue would hide it; the exception is
+    the intervention signal, so the queue surfaces the payment via its OPEN exception
+    (doc 24 §3 step 7)."""
+    conn = FakeConnection(
+        FakePayments([
+            _payment("PAY-7", status=lifecycle.SETTLED, amount=25000.0),
+            _payment("PAY-2", status=lifecycle.REJECTED, amount=500.0, days_ago=1),
+        ]),
+        exceptions=[_exc_doc("PAY-7", category="RECONCILIATION_DISCREPANCY",
+                             status="OPEN", exc_id="EXC-7")],
+    )
+    out = svc.list_exceptions(conn, "db")
+    ids = [p["paymentId"] for p in out["items"]]
+    # PAY-7 surfaces via its OPEN discrepancy (not its terminal state — SETTLED isn't terminal);
+    # PAY-2 surfaces via its terminal state (REJECTED).
+    assert set(ids) == {"PAY-7", "PAY-2"}
+    seven = next(p for p in out["items"] if p["paymentId"] == "PAY-7")
+    assert seven["exception"]["category"] == "RECONCILIATION_DISCREPANCY"
+    assert seven["exception"]["status"] == "OPEN"
+
 
 
 # --- stats --------------------------------------------------------------------

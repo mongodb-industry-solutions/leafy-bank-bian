@@ -33,11 +33,13 @@ from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
-from contexts.payment_order_initiation.domain import lifecycle, payment_document
+from contexts.payment_order_initiation.domain import checks, lifecycle, payment_document
 from process.payment_context import PaymentContext
 from shared.refs import derive_ref
 
 logger = logging.getLogger(__name__)
+
+STAGE = "1 initiate"
 
 
 def run(ctx: PaymentContext) -> None:
@@ -65,6 +67,7 @@ def run(ctx: PaymentContext) -> None:
                 ctx.idempotency_key,
                 existing["paymentId"],
             )
+            _stamp_replay_evidence(c, existing, ctx.idempotency_key)
             ctx.stop(existing)
             return
 
@@ -142,6 +145,7 @@ def run(ctx: PaymentContext) -> None:
             ctx.idempotency_key,
             existing["paymentId"],
         )
+        _stamp_replay_evidence(c, existing, ctx.idempotency_key)
         ctx.stop(existing)
         return
 
@@ -179,3 +183,28 @@ def _check_requested_execution_date(requested) -> None:
             "PaymentRequestedExecutionDate is more than "
             f"{_MAX_FORWARD_DATING_DAYS} days ahead."
         )
+
+
+def _stamp_replay_evidence(c, winner: dict, key: str) -> None:
+    """R3 (doc 24 §0 item 1 / step 3) — leave visible evidence on the winning payment that
+    an idempotent replay was absorbed. Without this a same-key second submission returns
+    the winner with no trace that the duplicate was caught — the queue and the timeline
+    would show nothing, and the demo beat ("idempotency prevents duplicate financial
+    effects") would be invisible. Append-only `checks[]`: a correction is a new entry,
+    never an edit (same contract as `lifecycle.events[]`).
+
+    Both replay paths land here — the `find_one` pre-check (sequential replay) and the
+    `DuplicateKeyError` handler (concurrent race the index caught). The plan names only
+    the second; both leave the winner untouched today, so both get the stamp.
+    """
+    entry = checks.check(
+        STAGE, "idempotent_replay_absorbed", checks.PASS,
+        mode=checks.SYNC,
+        detail=(
+            f"Idempotency key {key} absorbed a replay — returning existing payment "
+            f"{winner.get('paymentId')}. No second financial effect."
+        ),
+        actor="transactions-service",
+        at=datetime.now(timezone.utc),
+    )
+    checks.append_checks(c.payments, winner["_id"], [entry])

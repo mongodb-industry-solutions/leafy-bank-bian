@@ -196,6 +196,14 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
         {"paymentId": payment_id}, {"_id": 0}
     )
     payment["routingSnapshot"] = snap
+    # Stage 9's exceptions — every occurrence for this payment (doc 24 §3 step 8). Empty
+    # list for a payment with no exceptions (the common case), so the stage-9 panel reads
+    # "no exceptions" rather than branching on undefined. Oldest first; the panel sorts.
+    payment["exceptions"] = list(
+        connection.get_collection(db_name, "exceptions")
+        .find({"paymentId": payment_id}, {"_id": 0})
+        .sort("updatedAt", 1)
+    )
     return payment
 
 
@@ -217,15 +225,57 @@ def _with_xml(execution: dict) -> dict:
     return execution
 
 
+def _join_exception(exc_coll, payment_id: Optional[str]) -> Optional[dict]:
+    """The open exception for a payment, or the latest resolved/dismissed one if none is
+    open, or None when the payment has no exception doc at all (a legacy terminal payment
+    from before stage 9). The queue row renders this so the Operations lens shows the
+    reason + the discrepancy without a second fetch."""
+    if not payment_id:
+        return None
+    candidates = list(exc_coll.find({"paymentId": payment_id}))
+    if not candidates:
+        return None
+    open_excs = [e for e in candidates if e.get("status") == "OPEN"]
+    if open_excs:
+        return open_excs[0]
+    # No OPEN one — show the most-recently-updated resolved/dismissed exception so a closed
+    # row still carries its history. `updatedAt` is tz-aware; fall back to a tz-aware epoch.
+    return max(
+        candidates,
+        key=lambda e: e.get("updatedAt") or e.get("createdAt")
+        or datetime(1970, 1, 1, tzinfo=timezone.utc),
+    )
+
+
 def list_exceptions(
     connection: MongoDBConnection, db_name: str, *, limit: int = 25, skip: int = 0
 ) -> dict:
-    """Payments that ended in a terminal state — the Operations lens."""
+    """Payments that need intervention — the Operations lens (doc 24 §3 step 7).
+
+    A payment belongs here if it ended in a terminal state (FAILED/RETURNED/…) OR
+    carries an OPEN exception. The second case matters because a reconciliation
+    discrepancy (`RECONCILIATION_DISCREPANCY`, site 4) is stamped on a SETTLED/POSTED
+    payment — which is NOT a terminal state, so a terminal-only query would hide it.
+    The exception is the intervention signal, not the state.
+
+    Each row is joined with its open (or latest) `exceptions` occurrence as `exception`
+    (null for a legacy terminal payment with none — empty-tolerant, the stage-8 trace
+    precedent). The join is per-payment; the `$or`/`$in` filter is handled by both
+    pymongo and the FakeDb suite (`FakeCollection._matches` supports `$in`/`$or`)."""
     coll = _payments(connection, db_name)
-    query = {"status": {"$in": INTERVENTION_STATES}}
+    exc_coll = connection.get_collection(db_name, "exceptions")
+    open_pids = [e["paymentId"] for e in exc_coll.find({"status": "OPEN"}, {"_id": 0, "paymentId": 1})]
+    query = {
+        "$or": [
+            {"status": {"$in": INTERVENTION_STATES}},
+            {"paymentId": {"$in": open_pids}},
+        ]
+    }
     items = list(
         coll.find(query, _LIST_PROJECTION).sort("createdAt", -1).skip(skip).limit(limit)
     )
+    for item in items:
+        item["exception"] = _join_exception(exc_coll, item.get("paymentId"))
     return {
         "items": items,
         "total": coll.count_documents(query),

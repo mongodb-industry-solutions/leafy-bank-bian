@@ -27,6 +27,7 @@ from shared.posting_rules import (
     SIDE_DEBIT,
     decompose_fee,
     decompose_principal_payment,
+    decompose_reversal,
 )
 from shared.refs import PREFIX_GROUP, PREFIX_LEDGER_EVENT, derive_ref
 
@@ -53,7 +54,29 @@ def build_ledger_event(
     payee_account: dict,
     coa: ChartOfAccounts,
 ) -> dict:
-    """Pure: assemble the one-doc ledgerEvent from a transaction and its two accounts."""
+    """Pure: assemble the one-doc ledgerEvent from a transaction and its two accounts.
+
+    Stage 9 reversal branch (doc 24 B5): a compensating ``transactions`` doc carries
+    ``reversalOf`` pointing at the original txnId. When set, the legs are decomposed with
+    debtor/creditor swapped (Dr clearing / Cr customer deposit) so 1131 nets back to zero,
+    and the event's ``reversalOf`` is stamped. The idempotency key is ``{paymentId}-REV`` —
+    distinct from the principal (``paymentId``), fee (``-FEE``) and settlement
+    (``-SETTLEMENT``) events, so a reversal is a second accounting event, not a collision.
+    """
+    reversal_of = txn.get("reversalOf")
+    if reversal_of:
+        legs = decompose_reversal(
+            amount=txn["amount"],
+            currency=txn.get("currency", "USD"),
+            debtor_account=payer_account,
+            creditor_account=payee_account,
+            coa=coa,
+        )
+        return _event_from_legs(
+            txn, legs, coa,
+            idempotency_suffix="-REV",
+            reversal_of=reversal_of,
+        )
     legs = decompose_principal_payment(
         amount=txn["amount"],
         currency=txn.get("currency", "USD"),
@@ -107,6 +130,7 @@ def _event_from_legs(
     *,
     idempotency_suffix: str = "",
     sub_ledger_type: str = "CUSTOMER_DEPOSITS",
+    reversal_of: str | None = None,
 ) -> dict:
     """The shared ledgerEvent envelope: one debit leg, one credit leg, per the document grain.
 
@@ -114,6 +138,10 @@ def _event_from_legs(
     onto every `subLedgerEntries` row (`:33`). Left at `CUSTOMER_DEPOSITS` a fee event would
     file its revenue credit under customer deposits — a mislabelled sub-ledger, silent, and
     only visible to someone reading the rows.
+
+    `reversal_of` (stage 9) stamps the event's `reversalOf` with the original txnId when the
+    source `transactions` doc is a compensating reversal — the field already exists in the
+    emitted shape as `None`, so this fills a declared slot, not a new field.
     """
     debit_leg = next(l for l in legs if l.side == SIDE_DEBIT)
     credit_leg = next(l for l in legs if l.side == SIDE_CREDIT)
@@ -124,6 +152,9 @@ def _event_from_legs(
     if isinstance(occurred_at, str):
         occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
     period_code = occurred_at.strftime("%Y-%m")
+    description = f"{debit_leg.event_type}: {payment_id}"
+    if reversal_of:
+        description += f" (reversal of {reversal_of})"
 
     return {
         "_id": oid,
@@ -133,7 +164,7 @@ def _event_from_legs(
         "occurredAt": occurred_at,
         "valueDate": occurred_at,
         "periodName": occurred_at.strftime("%B %Y"),
-        "description": f"{debit_leg.event_type}: {payment_id}",
+        "description": description,
         "meta": {
             "subLedgerType": sub_ledger_type,
             "periodCode": period_code,
@@ -172,7 +203,7 @@ def _event_from_legs(
         "paymentType": txn.get("paymentType"),
         # All events settle via the scheduled gl_batch sweep; no realtime path.
         "postingMode": {"type": "BATCH"},
-        "reversalOf": None,
+        "reversalOf": reversal_of,
         "postingStatus": "PENDING",
         "postingResult": None,
         "mappingVersion": MAPPING_VERSION,

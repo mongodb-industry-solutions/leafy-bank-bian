@@ -25,6 +25,20 @@ from typing import Optional
 
 from database.connection import MongoDBConnection
 from process import payment_lifecycle
+from process.exceptions import (
+    ACTION_ACCEPT_DISCREPANCY,
+    ACTION_DISMISS,
+    ACTION_RETRY_SETTLEMENT,
+    ACTION_RETURN_FUNDS,
+    CATEGORY_DUPLICATE_SIGNAL,
+    CATEGORY_RECONCILIATION_DISCREPANCY,
+    CATEGORY_SETTLEMENT_DELAYED,
+    CATEGORY_SETTLEMENT_RETURNED,
+    CATEGORY_SETTLEMENT_UNMATCHED,
+    STATUS_DISMISSED,
+    STATUS_OPEN,
+    STATUS_RESOLVED,
+)
 from contexts.payment_order_initiation.adapters.mongo_reference_data import (
     MongoReferenceData,
 )
@@ -255,6 +269,10 @@ class PaymentsService:
             payment_limit_usd=self.payment_limit_usd,
             reference_data=self.reference_data,
             rail_gateway=self.rail_gateway,
+            # B4: restore the stage-7 simulation lever so a resumed wire does not reset
+            # UNMATCHED/DELAYED/EXCEPTION to MATCHED. Persisted at initiation; read by
+            # settle.run. None for non-wire or pre-B4 docs (→ MATCHED, the safe default).
+            settlement_outcome=payment.get("simulatedSettlementOutcome"),
         )
         ctx.payment_oid = payment["_id"]
         ctx.payment_id = payment["paymentId"]
@@ -522,3 +540,152 @@ class PaymentsService:
 
         settle.run(ctx)
         return ctx.payment_doc
+
+    # --- Stage 9: exceptions resolve (doc 24 B4/B6) --------------------------
+
+    def resolve_exception(
+        self,
+        exception_id: str,
+        *,
+        action: str,
+        note: Optional[str] = None,
+        new_settlement_outcome: Optional[str] = None,
+    ) -> dict:
+        """Resolve one queued exception (doc 24 B4). Resolution is evidence alongside the
+        payment's terminal state, never a state change — FAILED stays FAILED even after
+        RETURN_FUNDS restores the debtor (B4). The one exception is RETRY_SETTLEMENT on a
+        DELAYED payment (still IN_PROGRESS, not terminal): re-driving settlement is a
+        legitimate forward transition, not a reopened terminal.
+
+        Guard chain (mirrors `resolve_review`): exception exists → status OPEN (409
+        otherwise) → action legal for the category (422 otherwise) → run the action → write
+        `resolution{}` + status RESOLVED|DISMISSED → append a `checks[]` entry on the payment.
+
+        Returns the updated exception doc. Raises `ValueError` for not-found / not-OPEN /
+        action-not-legal; the router maps those to 404 / 409 / 422.
+        """
+        from process.compensation import return_of_funds
+
+        # B4's table — which action is legal for which category. RETRY on a FAILED payment
+        # is deliberately NOT offered: FAILED is final; the correction is accept or return.
+        _LEGAL = {
+            CATEGORY_SETTLEMENT_DELAYED: {ACTION_RETRY_SETTLEMENT},
+            CATEGORY_SETTLEMENT_UNMATCHED: {ACTION_RETURN_FUNDS, ACTION_ACCEPT_DISCREPANCY},
+            CATEGORY_SETTLEMENT_RETURNED: {ACTION_RETURN_FUNDS},
+            CATEGORY_RECONCILIATION_DISCREPANCY: {ACTION_ACCEPT_DISCREPANCY},
+            CATEGORY_DUPLICATE_SIGNAL: {ACTION_DISMISS},
+        }
+
+        exc = self.db["exceptions"].find_one({"exceptionId": exception_id})
+        if exc is None:
+            raise ValueError(f"Exception {exception_id} not found.")
+        if exc["status"] != STATUS_OPEN:
+            raise ValueError(
+                f"Exception {exception_id} is {exc['status']}, not OPEN — only an open "
+                "exception can be resolved."
+            )
+        category = exc["category"]
+        legal = _LEGAL.get(category, set())
+        if action not in legal:
+            raise ValueError(
+                f"Action {action} is not legal for a {category} exception "
+                f"(legal: {sorted(legal)})."
+            )
+
+        payment = self.payments.find_one({"paymentId": exc["paymentId"]})
+        if payment is None:
+            raise ValueError(
+                f"Payment {exc['paymentId']} for exception {exception_id} not found."
+            )
+
+        now = datetime.now(timezone.utc)
+
+        if action == ACTION_RETRY_SETTLEMENT:
+            # Resolve the held exception BEFORE re-driving settlement (B5). A DELAYED re-run
+            # that lands DELAYED again calls record_exception, which dedupes on
+            # (paymentId, category, OPEN) — if this row were still OPEN, the new occurrence
+            # would collapse into it and then be marked RESOLVED by the tail, leaving the
+            # payment stuck at IN_PROGRESS with no OPEN exception to re-trigger a retry.
+            # Resolving first means a re-delay writes a FRESH occurrence (occurrence-per-doc,
+            # B2), and a MATCHED re-run writes none.
+            self._mark_exception_resolved(exc, action, note, now)
+            # Re-drive settlement with the operator-chosen outcome. The payment is at
+            # IN_PROGRESS (DELAYED holds there, not terminal), so settle_payment is a
+            # legitimate forward transition. If it lands MATCHED → SETTLED.
+            self.settle_payment(
+                exc["paymentId"], outcome=new_settlement_outcome or "MATCHED",
+            )
+        elif action == ACTION_RETURN_FUNDS:
+            # return_of_funds flips the exception OPEN→RESOLVED *inside* its ACID txn
+            # (conditional on OPEN) — the money move and the status claim are one atomic
+            # operation, so a concurrent resolver or a double-click can never double-compensate
+            # (B2). Do NOT run the generic flip here; return_of_funds owns it.
+            return_of_funds(self._collections(), payment, exc, note=note)
+        elif action == ACTION_ACCEPT_DISCREPANCY:
+            # ACCEPT_DISCREPANCY moves no money — the resolution log is the only exception write.
+            self._mark_exception_resolved(exc, action, note, now)
+            # B1: a RECONCILIATION_DISCREPANCY exception lives on a SETTLED/POSTED payment that
+            # the post-batch sweep re-checks every cycle (eligibility = currentState in
+            # {SETTLED, POSTED} AND reconciliationStatus != RECONCILED). Accepting the
+            # discrepancy without flipping the axis leaves the mismatch re-detectable, so
+            # _stamp_discrepant opens a FRESH OPEN exception next batch — an infinite queue
+            # loop where the only legal action (accept) never sticks. Flipping
+            # reconciliationStatus to RECONCILED makes the operator's accept the final word on
+            # this axis; the discrepancy itself is preserved in the exception's detail + the
+            # resolution note (the cause, e.g. "correspondent fee"). The state axis (SETTLED)
+            # is untouched — this is an axis flip, not a state transition.
+            if category == CATEGORY_RECONCILIATION_DISCREPANCY:
+                self.payments.update_one(
+                    {"paymentId": exc["paymentId"]},
+                    {"$set": {
+                        "lifecycle.reconciliationStatus": "RECONCILED",
+                        "updatedAt": now,
+                    }},
+                )
+        else:  # ACTION_DISMISS — no money, no axis flip; the resolution log is the only write.
+            self._mark_exception_resolved(exc, action, note, now)
+
+        checks.append_checks(self.payments, payment["_id"], [
+            checks.check(
+                "9 exceptions", "exception_resolved", checks.PASS,
+                mode=checks.SYNC,
+                detail=(
+                    f"Exception {exception_id} ({category}) resolved by payments-operations "
+                    f"via {action}."
+                ),
+                actor="payments-operations", at=now,
+            )
+        ])
+
+        updated = self.db["exceptions"].find_one({"exceptionId": exception_id})
+        return updated
+
+    def _mark_exception_resolved(
+        self, exc: dict, action: str, note: Optional[str], now: datetime,
+    ) -> None:
+        """Flip an OPEN exception to RESOLVED/DISMISSED + stamp the resolution log.
+
+        Conditional on ``status == OPEN`` so a concurrent resolver loses the race loudly
+        (matched 0 → the caller's next read sees the other resolver's status) rather than
+        silently double-writing. Used by every action except RETURN_FUNDS, whose flip lives
+        inside return_of_funds' ACID txn (B2).
+        """
+        new_status = STATUS_DISMISSED if action == ACTION_DISMISS else STATUS_RESOLVED
+        result = self.db["exceptions"].update_one(
+            {"_id": exc["_id"], "status": STATUS_OPEN},
+            {"$set": {
+                "status": new_status,
+                "resolution": {
+                    "action": action,
+                    "by": "payments-operations",
+                    "at": now,
+                    "note": note,
+                },
+                "updatedAt": now,
+            }},
+        )
+        if result.matched_count == 0:
+            raise ValueError(
+                f"Exception {exc.get('exceptionId')} is no longer OPEN — another resolver "
+                "already acted."
+            )

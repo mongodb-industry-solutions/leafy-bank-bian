@@ -200,6 +200,14 @@ def build(ctx) -> dict:
         "fx": None,
         "chargeBearer": ctx.charge_bearer,
         "categoryPurpose": ctx.category_purpose,
+        # Stage 7 simulation lever (FR-7.3). Persisted at initiation so it survives any saga
+        # interruption — a wire initiated UNMATCHED that hits a step-up hold (stage 2) or
+        # MANUAL_FRAUD_REVIEW (stage 4b) and is then resumed must NOT reset to MATCHED, or the
+        # controlled-failure demo silently becomes a happy path (defect B4). `_context_from_doc`
+        # restores it onto the rebuilt context; `settle.run` reads `ctx.settlement_outcome`.
+        # None for non-wire rails (settlement is atomic in stage 5, the lever is inert). Not in
+        # the canonical `payments` spec — see `test_payment_document_spec._KNOWN_EXTRAS`.
+        "simulatedSettlementOutcome": ctx.settlement_outcome,
         # R8 — captured at the entry screen for EVERY rail. Single source of truth: the
         # rail mappers project it outward (pain.001 ReqdExctnDt, NACHA effectiveEntryDate)
         # rather than each envelope holding its own copy.

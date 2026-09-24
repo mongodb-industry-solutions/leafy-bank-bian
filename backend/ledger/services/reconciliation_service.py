@@ -27,6 +27,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database.connection import MongoDBConnection
+from services.exceptions_service import (
+    CATEGORY_RECONCILIATION_DISCREPANCY,
+    SERVICE_LEDGER,
+    SOURCE_STAGE_RECONCILE,
+    record_exception,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -425,9 +431,9 @@ def _stamp_reconciled(payments, payment_id: str, check: ReconciliationCheck, ri_
     )
 
 
-def _stamp_discrepant(payments, payment_id: str, check: ReconciliationCheck, ri_coll) -> None:
+def _stamp_discrepant(payments, payment_id: str, check: ReconciliationCheck, ri_coll, exc_coll) -> None:
     """Record a discrepancy without advancing state. The payment stays at SETTLED/POSTED and
-    feeds stage 9's exception queue."""
+    feeds stage 9's exception queue (doc 24 B3 site 4)."""
     item = _reconciliation_item_doc(check)
     ri_coll.insert_one(item)
 
@@ -442,6 +448,37 @@ def _stamp_discrepant(payments, payment_id: str, check: ReconciliationCheck, ri_
         },
     )
 
+    # Stage 9 — queue the discrepancy. The mismatched leg's leftAmount/rightAmount (minor
+    # units, the pipeline convention) become the exception detail in MAJOR units, so the
+    # Operations queue row shows the $25 short-pay exactly as the tie-out saw it. Idempotent
+    # on (paymentId, category, OPEN) — a DISCREPANT payment re-checked next batch does not
+    # double-insert (B3).
+    mismatch = next((lg for lg in check.legs if lg.result == LEG_MISMATCH), None)
+    if mismatch is not None:
+        expected_min = int(mismatch.left_amount or 0)
+        actual_min = int(mismatch.right_amount or 0)
+        detail = {
+            "discrepancyAmount": (expected_min - actual_min) / 100.0,
+            "discrepancyReason": mismatch.detail or f"Leg {mismatch.leg} MISMATCH",
+            "expectedAmount": expected_min / 100.0,
+            "actualAmount": actual_min / 100.0,
+            "returnCode": None,
+            "duplicateOf": None,
+        }
+    else:
+        detail = {
+            "discrepancyAmount": None,
+            "discrepancyReason": "DISCREPANT (no single mismatched leg)",
+            "expectedAmount": None,
+            "actualAmount": None,
+            "returnCode": None,
+            "duplicateOf": None,
+        }
+    record_exception(
+        exc_coll, payment_id, CATEGORY_RECONCILIATION_DISCREPANCY, detail,
+        source={"stage": SOURCE_STAGE_RECONCILE, "service": SERVICE_LEDGER},
+    )
+
 
 def reconcile_settled_payments(connection: MongoDBConnection, db_name: str) -> dict:
     """Post-batch: reconcile every eligible payment. Returns a counts dict.
@@ -452,6 +489,7 @@ def reconcile_settled_payments(connection: MongoDBConnection, db_name: str) -> d
     """
     payments = connection.get_collection(db_name, "payments")
     ri_coll = connection.get_collection(db_name, "reconciliationItems")
+    exc_coll = connection.get_collection(db_name, "exceptions")
 
     eligible = list(payments.find(
         {
@@ -476,7 +514,7 @@ def reconcile_settled_payments(connection: MongoDBConnection, db_name: str) -> d
             reconciled += 1
             logger.info("reconciliation RECONCILED paymentId=%s", payment_id)
         elif check.overall == DISCREPANT:
-            _stamp_discrepant(payments, payment_id, check, ri_coll)
+            _stamp_discrepant(payments, payment_id, check, ri_coll, exc_coll)
             discrepant += 1
             logger.warning(
                 "reconciliation DISCREPANT paymentId=%s — legs: %s",

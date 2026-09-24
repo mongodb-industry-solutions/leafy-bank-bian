@@ -42,18 +42,29 @@ PAYMENTS_INDEXES = [
     # requests on its own, so without this constraint two racing callers both pass the
     # check and both move money. The DuplicateKeyError handler in capture.py is what
     # makes the second caller an idempotent replay — and it can only fire if this index
-    # exists. SPARSE because the field is legitimately null for any payment initiated
-    # without a retry key; a plain unique index would let exactly one such payment exist.
+    # exists.
     #
     # Stage 1 (R7) moved this off `endToEndId`, which now carries the ISO 20022
     # EndToEndIdentification and nothing else. The 2026-09-22 Doina review relocated the
     # field from flat `idempotencyKey` to nested `idempotency.idempotencyKey` (her proposed
     # `idempotency{}` object) — the index path moved with it.
     #
+    # ⚠️ PARTIAL, not sparse. `payment_document.build` initialises `idempotency:
+    # {idempotencyKey: null, duplicateOf: null}` — the subdoc is PRESENT with a null leaf.
+    # A unique *sparse* index on a nested path treats the path as present (the parent exists)
+    # and indexes the null, so two payments with an unset key collide on the unique
+    # constraint — the E11000 we hit on the first live Initiate after applying the sparse
+    # index (2026-09-23). The FakeCollection `unique_on` emulation skips `None` (it checks
+    # `val is not None`), so the hermetic suite did NOT catch this — a hermetic-vs-live
+    # divergence. A partialFilterExpression on `$type: "string"` indexes only docs where
+    # the key is an actual string, excluding both null and missing, which is the correct
+    # shape for an optional nested retry key. (Same lesson as defects.md `fixture-fidelity` /
+    # `repo-is-not-the-database`: the fake and the real server are not the same type system.)
+    #
     # ⚠️ NOT YET APPLIED ON ATLAS — deferred to the end of the stage sequence by decision
     # (2026-08-30, doc 13 §6). Safe only because the index is INERT today: no caller sends
     # an `Idempotency-Key` header or an `idempotencyKey` field, so the value is always
-    # null, both idempotency paths in capture.py are gated on it, and a sparse index
+    # null, both idempotency paths in capture.py are gated on it, and this partial index
     # constrains nothing.
     #
     # **Precondition — do not make any caller send an idempotency key before running this.**
@@ -68,7 +79,7 @@ PAYMENTS_INDEXES = [
         "name": "idx_idempotency_key_unique",
         "keys": [("idempotency.idempotencyKey", ASCENDING)],
         "unique": True,
-        "sparse": True,
+        "partialFilterExpression": {"idempotency.idempotencyKey": {"$type": "string"}},
     },
 ]
 
@@ -151,6 +162,25 @@ PAYMENT_MESSAGES_INDEXES = [
     {"name": "idx_payment_messages_payment_id", "keys": [("paymentId", ASCENDING)]},
 ]
 
+# Stage 9 — the `exceptions` queue. One OPEN occurrence per (paymentId, category) is the
+# invariant `record_exception`'s dedupe relies on (doc 24 B3). A unique PARTIAL index on
+# `(paymentId, category, status)` filtered to `status == "OPEN"` enforces it at the server:
+# a concurrent writer that slips past the find_one pre-check (two reconciliation workers, or
+# a duplicate-content race) hits E11000 and the catch in `record_exception` re-reads the
+# winner. RESOLVED/DISMISSED rows are excluded from the partial filter, so a payment can
+# accumulate resolved history (occurrence-per-doc, B2) without colliding on the unique key.
+# Same partial-not-sparse lesson as `idx_idempotency_key_unique`: a `sparse` index on a
+# present-nullable field would index the nulls and collide; the partialFilterExpression on
+# the literal "OPEN" is the correct shape.
+EXCEPTIONS_INDEXES = [
+    {
+        "name": "idx_exception_open_unique",
+        "keys": [("paymentId", ASCENDING), ("category", ASCENDING), ("status", ASCENDING)],
+        "unique": True,
+        "partialFilterExpression": {"status": {"$eq": "OPEN"}},
+    },
+]
+
 
 def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs: list[dict]) -> list[str]:
     coll = connection.get_collection(db_name, collection)
@@ -176,6 +206,7 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
         "paymentMessages": _ensure(
             connection, db_name, "paymentMessages", PAYMENT_MESSAGES_INDEXES
         ),
+        "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
     }
 
 

@@ -90,6 +90,14 @@ const NavBarContent = ({ bianModelUrl }) => {
                         >
                             <Body weight="medium" className={workflowLens === WORKFLOW_LENS.ACTIVITY ? styles.navLinkActive : ""}>Activity</Body>
                         </button>
+                        <button
+                            type="button"
+                            className={styles.navLink}
+                            onClick={() => setWorkflowLens(WORKFLOW_LENS.OPERATIONS)}
+                            aria-pressed={workflowLens === WORKFLOW_LENS.OPERATIONS}
+                        >
+                            <Body weight="medium" className={workflowLens === WORKFLOW_LENS.OPERATIONS ? styles.navLinkActive : ""}>Operations</Body>
+                        </button>
                     </>
                 )}
             </nav>

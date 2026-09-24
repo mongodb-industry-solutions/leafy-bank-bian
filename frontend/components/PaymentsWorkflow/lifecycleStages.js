@@ -136,6 +136,12 @@ export function buildLifecycleStages(payment, trace) {
   const reached = (...states) => events.some((e) => states.includes(e.state));
   const eventsFor = (...states) => events.filter((e) => states.includes(e.state));
 
+  // Stage 9 — the payment's exception occurrences (joined by `get_payment`, doc 24 §3
+  // step 8). `exceptions` is always a list (empty for the common case); `openExc` is the
+  // first OPEN one, which drives the panel's status + the resolve CTAs.
+  const exceptions = payment?.exceptions || [];
+  const openExc = exceptions.find((e) => e?.status === "OPEN");
+
   // 2026-09-09 (Kiran): a payment HELD at the step-up gate sits at INITIATED with
   // `stepUpRequired` set — stage 2 has evaluated the (insufficient) assertion but recorded
   // no `checks[]` yet, so it must NOT render as "not reached". It is exactly where the
@@ -483,6 +489,32 @@ export function buildLifecycleStages(payment, trace) {
         check: trace?.reconciliation ?? null,
         events: eventsFor("RECONCILED"),
         position,
+      },
+    },
+    {
+      // Stage 9 — exceptions, repairs, and returns (doc 24). The panel renders the
+      // payment's exception occurrences (joined by `get_payment`), the resolution log, and
+      // — for an OPEN exception — the resolve CTAs modeled on the stage-4 review CTA. The
+      // acceptance text is Doina's verbatim L1314.
+      key: "exceptions",
+      label: "Exceptions",
+      icon: "Warning",
+      stage: 9,
+      reached:
+        reached("FAILED", "RETURNED", "REVERSED", "REFUNDED") || exceptions.length > 0,
+      status: openExc?.status || undefined,
+      meta: openExc
+        ? (openExc.status === "OPEN" ? openExc.category : openExc.status.toLowerCase())
+        : (exceptions.length > 0 ? "resolved" : undefined),
+      intro:
+        "The demo will show the exception queue, the reason, the retry or repair action, " +
+        "and how idempotency prevents duplicate financial effects. A failed or returned " +
+        "settlement is reversed with a compensating movement — never a balance rewrite — " +
+        "so the books stay balanced.",
+      kind: "exceptions",
+      data: {
+        exceptions,
+        events: eventsFor("FAILED", "RETURNED", "REVERSED", "REFUNDED"),
       },
     },
   ].filter((s) => s.key !== "feeLedgerEvent" || hasFee);

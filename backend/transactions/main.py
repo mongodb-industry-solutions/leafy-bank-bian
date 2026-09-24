@@ -58,6 +58,9 @@ transactions_service = TransactionsService(connection, DB_NAME)
 # the module globals, matching the ledger service's router convention.
 app.state.connection = connection
 app.state.db_name = DB_NAME
+# Stage 9 — the /workflow exception-resolve route reaches the saga-owning service through
+# app.state (the workflow router stays free of module globals, per the ledger convention).
+app.state.payments_service = payments_service
 
 app.include_router(workflow_router)
 

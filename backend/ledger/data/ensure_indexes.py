@@ -81,6 +81,23 @@ STREAM_TOKENS_INDEXES = [
     {"name": "idx_worker_id_unique", "keys": [("workerId", ASCENDING)], "unique": True},
 ]
 
+# Stage 9 — `exceptions` is written from BOTH services (transactions + ledger site 4). The
+# ledger writes RECONCILIATION_DISCREPANCY from `_stamp_discrepant` every batch pass, so the
+# one-OPEN-occurrence-per-(paymentId, category) invariant must be enforced at the server, not
+# just in the writer's find_one pre-check (defects.md: check-then-insert cannot serialise
+# concurrent writers). This unique partial index mirrors the transactions service's
+# `idx_exception_open_unique`; `create_index` is idempotent, so both services declaring it is
+# harmless and keeps each service self-sufficient. Partial on `status == "OPEN"` so resolved
+# history (occurrence-per-doc, B2) accumulates without colliding.
+EXCEPTIONS_INDEXES = [
+    {
+        "name": "idx_exception_open_unique",
+        "keys": [("paymentId", ASCENDING), ("category", ASCENDING), ("status", ASCENDING)],
+        "unique": True,
+        "partialFilterExpression": {"status": {"$eq": "OPEN"}},
+    },
+]
+
 _LEG_SCHEMA = {
     "bsonType": "object",
     "required": ["glAccountCode", "controlAccountCode", "amount", "currency", "entityReference"],
@@ -258,6 +275,7 @@ def ensure_ledger_indexes(connection: MongoDBConnection, db_name: str) -> dict[s
         "subLedgerEntries": _ensure(connection, db_name, "subLedgerEntries", SUBLEDGER_ENTRIES_INDEXES),
         "journalEntries": _ensure(connection, db_name, "journalEntries", JOURNAL_ENTRIES_INDEXES),
         "changeStreamTokens": _ensure(connection, db_name, "changeStreamTokens", STREAM_TOKENS_INDEXES),
+        "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
         "validators": ensure_validators(connection, db_name),
     }
 

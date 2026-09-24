@@ -2,12 +2,14 @@
 
 // Client shell for the Payments Workflow route (Payments Analyst persona).
 //
-// Two lenses, switched from the NavBar top bar (not a local toggle) via
+// Three lenses, switched from the NavBar top bar (not a local toggle) via
 // PaymentsWorkflowContext so the nav and this page share one source of truth:
-//   * Payments  — the initiation wizard. On submit, the wizard's "View lifecycle" action
+//   * Payments   — the initiation wizard. On submit, the wizard's "View lifecycle" action
 //     swaps in the PaymentDeepDive for the just-created payment *in this same lens*, so the
 //     analyst watches the saga without hopping to Activity. Back returns to a fresh form.
-//   * Activity  — the historical list; selecting a payment shows its lifecycle.
+//   * Activity   — the historical list; selecting a payment shows its lifecycle.
+//   * Operations — the Stage 9 exceptions queue (`PaymentsLens` with `exceptionsOnly`,
+//     doc 24 §3 step 8). Selecting a queued payment shows its lifecycle.
 //
 // Owns the per-lens selected payment and the single refresh key — the one-owner rule
 // GlPipelineView establishes. No page-level poll: the list is a surface an analyst reads and
@@ -68,6 +70,19 @@ export default function PaymentsWorkflowView() {
             // Remounting on lens change resets filters and paging, which is what entering
             // Activity should do.
             key={lens}
+            refreshKey={refreshKey}
+            onRefresh={refresh}
+            selectedPaymentId={selectedPaymentId}
+            onSelect={setSelectedPaymentId}
+          />
+        )}
+
+        {lens === WORKFLOW_LENS.OPERATIONS && (
+          <PaymentsLens
+            // The exceptions queue — `exceptionsOnly` flips the lens to terminal payments
+            // joined with their open exception (doc 24 §3 step 7/8). Same remount discipline.
+            key={lens}
+            exceptionsOnly
             refreshKey={refreshKey}
             onRefresh={refresh}
             selectedPaymentId={selectedPaymentId}

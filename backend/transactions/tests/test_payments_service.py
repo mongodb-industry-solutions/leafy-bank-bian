@@ -74,8 +74,8 @@ class FakeCollection:
         for d in self.docs:
             if self._matches(d, flt):
                 self._apply(d, update)
-                return type("R", (), {"modified_count": 1})()
-        return type("R", (), {"modified_count": 0})()
+                return type("R", (), {"modified_count": 1, "matched_count": 1})()
+        return type("R", (), {"modified_count": 0, "matched_count": 0})()
 
     def find_one_and_update(self, flt, update, *a, **kw):
         for d in self.docs:
@@ -94,6 +94,10 @@ class FakeCollection:
                 if "$ne" in v and actual == v["$ne"]:
                     return False
                 if "$nin" in v and actual in v["$nin"]:
+                    return False
+                if "$in" in v and actual not in v["$in"]:
+                    return False
+                if "$or" in v and not any(self._matches(doc, sub) for sub in v["$or"]):
                     return False
             elif actual != v:
                 return False

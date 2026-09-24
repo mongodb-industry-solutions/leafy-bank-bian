@@ -130,6 +130,53 @@ def transaction_doc(
     }
 
 
+def compensating_transaction_doc(
+    *,
+    original_txn: dict,
+    debtor_after: dict,
+    now: datetime,
+) -> dict:
+    """The return-of-funds transaction — a NEW ``transactions`` doc that reverses the
+    original (doc 24 B5, DR-5.1: never an overwrite). Inherits the original's production
+    shape (payer/payee/rail/amount/currency) so the ledger's ``ingest_worker`` sees a
+    familiar doc; ``reversalOf`` points at the original ``txnId`` and is what tells
+    ``ingest_worker`` to post swapped legs (Dr clearing / Cr customer deposit). The original
+    doc is byte-unchanged (R7) — the link lives here, on the new doc.
+
+    Built from the original txn (a production writer's output) per the fixture-fidelity
+    rule, rather than re-derived from accounts/customers. ``feeAmount`` is zeroed: a
+    return-of-funds moves the principal back only — the fee leg is not reversed this stage
+    (out of scope), and a non-zero fee would make ``ingest_worker`` post a second fee event.
+    ``paymentExecutionId`` is cleared: the reversal is not a rail execution.
+    """
+    oid = ObjectId()
+    return {
+        **original_txn,
+        "_id": oid,
+        "txnId": derive_ref("TXN", oid),
+        # The reversal marker — ingest_worker keys off this to swap the legs.
+        "reversalOf": original_txn["txnId"],
+        "isReversed": False,
+        "reversalTxnId": None,
+        "description": f"Return of funds — reversal of {original_txn['txnId']}",
+        "balanceAfter": (debtor_after.get("balance", {}) or {}).get("current"),
+        "valueDate": now.date().isoformat(),
+        "bookingDate": now.date().isoformat(),
+        "transactionDates": [
+            {"date": now, "type": "TransactionInitiatedDate"},
+            {"date": now, "type": "TransactionCompletedDate"},
+        ],
+        # Zeroed — see the docstring. The original's fee/execution refs do not carry.
+        "feeAmount": 0.0,
+        "feeCurrency": original_txn.get("currency", "USD"),
+        "paymentExecutionId": None,
+        "createdAt": now,
+        "updatedAt": now,
+        "journalEntryId": None,
+        "postedAt": None,
+    }
+
+
 def build_notifications(
     *,
     payment_oid: ObjectId,

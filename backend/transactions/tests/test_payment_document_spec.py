@@ -139,6 +139,12 @@ _KNOWN_EXTRAS = {
     # docstring — a 1:1 artifact distinct from stage 5's `notifications`, folded onto
     # `payments` the same way `order` is.
     "confirmation",
+    # 2026-09-23 (B4): the stage-7 settlement-outcome simulation lever, persisted at
+    # initiation so it survives a step-up / manual-fraud-review hold and resume. Without it,
+    # a wire initiated UNMATCHED that hits a hold re-enters with settlement_outcome=None →
+    # MATCHED → SETTLED, silently destroying the controlled-failure demo. None for non-wire
+    # rails. The THIRTEENTH; argued for in `payment_document.build`'s comment, not slipped in.
+    "simulatedSettlementOutcome",
 }
 
 # Enum values the code writes that are NOT in the canonical spec's enum for that field —

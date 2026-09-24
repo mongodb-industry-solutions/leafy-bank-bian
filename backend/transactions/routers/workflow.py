@@ -1,10 +1,13 @@
-"""Workflow UI routes — read-only reads over `payments` for the back-office surface.
+"""Workflow UI routes over `payments` for the back-office surface.
 
 Intentionally separate from the BIAN `/PaymentOrderInitiation/*` contract routes: these
 serve the Payments Workflow UI only. Same split, and the same rationale, as the ledger
 service's `routers/pipeline.py`.
 
-All routes:  GET-only, prefix /workflow
+Routes:  GET-only reads, prefix /workflow — PLUS the one operational write route
+`POST /workflow/exceptions/{exceptionId}/resolve` (doc 24 B6). No BIAN service domain for
+exceptions (row 9: modeled within the originating domain), so the resolve endpoint rides the
+ops namespace, sanctioned by the ledger's `POST /pipeline/batch/trigger` precedent.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from api_models import ExceptionResolveRequest
 from routers._util import to_json_response
 from services import workflow_read_service
 
@@ -54,6 +58,42 @@ def list_exceptions(
     connection, db_name = _deps(request)
     data = workflow_read_service.list_exceptions(connection, db_name, limit=limit, skip=skip)
     return to_json_response(data)
+
+
+# The one operational write route under /workflow (doc 24 B6). The guard chain (exception
+# exists → OPEN → action legal for category) lives in `payments_service.resolve_exception`,
+# which raises ValueError with a distinguishable message; the router maps those to the
+# 404 / 409 / 422 the plan's step-5 gate requires.
+@router.post("/exceptions/{exception_id}/resolve")
+def resolve_exception(
+    request: Request,
+    exception_id: str,
+    body: ExceptionResolveRequest,
+) -> JSONResponse:
+    svc = request.app.state.payments_service
+    try:
+        updated = svc.resolve_exception(
+            exception_id,
+            action=body.action,
+            note=body.note,
+            new_settlement_outcome=body.newSettlementOutcome,
+        )
+        return to_json_response(updated)
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg:
+            code = 404
+        elif "not OPEN" in msg or "is " in msg and "OPEN" in msg:
+            code = 409
+        elif "not legal" in msg:
+            code = 422
+        else:
+            code = 400
+        raise HTTPException(status_code=code, detail=msg)
+    except Exception as e:
+        import logging
+        logging.error("resolve_exception failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal exception resolution error.")
 
 
 @router.get("/stats")
