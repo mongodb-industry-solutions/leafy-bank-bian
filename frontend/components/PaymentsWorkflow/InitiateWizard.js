@@ -23,6 +23,7 @@ import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 import TextInput from "@leafygreen-ui/text-input";
 import { Select, Option } from "@leafygreen-ui/select";
+import { SegmentedControl, SegmentedControlOption } from "@leafygreen-ui/segmented-control";
 import Stepper, { Step } from "@leafygreen-ui/stepper";
 import { Body, H2 } from "@leafygreen-ui/typography";
 
@@ -112,6 +113,9 @@ const EMPTY = {
   transferType: "THIRD_PARTY",
   // stage 7 simulation lever (wire-only; default MATCHED = happy path)
   simulatedSettlementOutcome: "MATCHED",
+  // Enrichment Agent toggle (default on → agent owns beneficiary-bank enrichment +
+  // purpose-code/ref proposals). Off → Stage 3 runs fully deterministically.
+  enableEnrichmentAgent: true,
 };
 
 const isWire = (form) => form.rail === "WIRE";
@@ -182,6 +186,9 @@ function buildPayload(form) {
     // Stage 7 simulation lever (FR-7.3) — re-enabled for stage 9 (doc 24 §3 step 8): the
     // exceptions queue needs the non-happy settlement paths reachable from the wizard.
     payload.simulatedSettlementOutcome = form.simulatedSettlementOutcome;
+    // Per-payment Enrichment Agent toggle. Persisted server-side so a step-up / review
+    // resume honors it. Default true.
+    payload.enableEnrichmentAgent = form.enableEnrichmentAgent;
   } else {
     // An account we hold — name, BIC and address resolve from the snapshot server-side.
     payload.creditor = { accountId: form.creditorAccountId };
@@ -229,7 +236,13 @@ function validate(form) {
       const p = bicProblem(form.bic);
       if (p) e.bic = p;
     }
-    if (!form.beneficiaryBankName) e.beneficiaryBankName = "Required.";
+    // When the Enrichment Agent is ON, it owns beneficiary-bank enrichment from the BIC —
+    // bankName is intentionally left blank for the agent to resolve (see `autofill`). The
+    // backend does not require bankName (only BIC), and the deterministic fallback in
+    // `enrichment.run` fills it if the agent produces nothing, so relaxing this guard
+    // never endangers the money path.
+    if (!form.enableEnrichmentAgent && !form.beneficiaryBankName)
+      e.beneficiaryBankName = "Required.";
   } else {
     if (!form.creditorAccountId) e.creditorAccountId = "Select a recipient account.";
     else if (form.creditorAccountId === form.debtorAccountId) {
@@ -340,22 +353,35 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
     // picking Unmatched then Autopopulate silently reverts to MATCHED → the wire settles
     // happy-path and the exception queue never fires (defect `autofill-incoherence` class).
     simulatedSettlementOutcome: form.simulatedSettlementOutcome,
+    // Same class: preserve the Enrichment Agent toggle. EMPTY defaults it to true, so
+    // without carrying it through, switching the toggle off then Autopopulate reverts to
+    // the agent-on path.
+    enableEnrichmentAgent: form.enableEnrichmentAgent,
   };
 
   if (isWire(next)) {
     const bank = pick(EXTERNAL_BANKS);
     const payee = pick(EXTERNAL_PAYEES);
+    // When the Enrichment Agent is ON, it owns beneficiary-bank enrichment from the BIC
+    // (Doina Sep 17 L665-689). Autopopulate supplies only the BIC (+ country for display)
+    // and leaves bankName / clearingSystemCode / clearingSystemMemberId blank — otherwise
+    // those customer-supplied values win per-field at stage 3 (`_apply_agent_proposals`
+    // line 337), the agent's proposals are dropped, `applied` is empty, `agent_block` is
+    // None, and the AI-enrichment callout never renders. The agent resolves the bank from
+    // the BIC; if it fails/times out, the deterministic fallback in `enrichment.run` fills
+    // them, so the money path never depends on the agent.
+    const agentOwnsBank = next.enableEnrichmentAgent;
     return {
       ...next,
       beneficiaryName: payee.name,
       beneficiaryAddress: payee.address,
       beneficiaryAccountNo: digits(10),
       beneficiaryCountry: bank.country,
-      beneficiaryBankName: bank.bankName,
+      beneficiaryBankName: agentOwnsBank ? "" : bank.bankName,
       bic: bank.bic,
-      clearingSystemCode: bank.clearingSystemCode,
+      clearingSystemCode: agentOwnsBank ? "" : bank.clearingSystemCode,
       // The directory's real value, NOT `digits(9)` — see the note on EXTERNAL_BANKS.
-      clearingSystemMemberId: bank.clearingSystemMemberId,
+      clearingSystemMemberId: agentOwnsBank ? "" : bank.clearingSystemMemberId,
       accountNumberType: pick(ACCOUNT_TYPES),
     };
   }
@@ -540,6 +566,7 @@ export default function InitiateWizard({ onInitiated }) {
       ...(isWire(form)
         ? [["Settlement outcome", form.simulatedSettlementOutcome]]
         : []),
+      ["Enrichment Agent", form.enableEnrichmentAgent ? "AI agent" : "Deterministic"],
       ["Channel", "BRANCH (bank-assisted)"],
     ];
     return (
@@ -920,6 +947,30 @@ export default function InitiateWizard({ onInitiated }) {
                         <Option key={p} value={p}>{p}</Option>
                       ))}
                     </Select>
+
+                    {/* Enrichment Agent toggle (2026-09-26). On (default) → the Stage-3 AI
+                        agent owns beneficiary-bank enrichment from the BIC + purpose-code
+                        and remittance-reference proposals, surfaced in the deep-dive
+                        callout. Off → Stage 3 runs fully deterministically (planner owns
+                        the bank, no agent callout), the pre-agent behaviour. Persisted
+                        server-side so a step-up / review resume honors the choice. */}
+                    <div className={styles.toggleField}>
+                      <Body className={styles.toggleLabel}>
+                        Enrichment Agent
+                        <span className={styles.toggleHint}>
+                          {" "}— AI resolves the beneficiary bank, purpose code &amp; remittance refs at Stage 3.
+                        </span>
+                      </Body>
+                      <SegmentedControl
+                        size="xsmall"
+                        value={form.enableEnrichmentAgent ? "on" : "off"}
+                        onChange={(v) => set("enableEnrichmentAgent", v === "on")}
+                        aria-label="Toggle Enrichment Agent"
+                      >
+                        <SegmentedControlOption value="on">AI agent</SegmentedControlOption>
+                        <SegmentedControlOption value="off">Deterministic</SegmentedControlOption>
+                      </SegmentedControl>
+                    </div>
 
                     {isWire(form) && (
                       <>

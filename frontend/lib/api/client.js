@@ -171,6 +171,48 @@ export async function workflowApi(path, params = null) {
 }
 
 /**
+ * Payment Agent API client (the phase-1 AI agent service via the proxy).
+ *
+ * Mirrors pipelineApi (supports method + body). Kept separate from workflowApi/pipelineApi
+ * because it hits a different service; the UI composing a payment's trace + the agent's
+ * findings reads as separate reads, not one parameterised helper.
+ *
+ * @param {string} path - path after the prefix, e.g. "reconciliation/EXC-1" or "enrichment/propose"
+ * @param {object} [params] - query params as key-value pairs
+ * @param {object} [options]
+ * @param {string} [options.method="GET"]
+ * @param {object} [options.body]
+ * @returns {Promise<{data: any, error: string|null}>}
+ */
+export async function agentApi(path, params = null, { method = "GET", body = null } = {}) {
+  let url = `${CORE_BASE}/agent/${path}`;
+  if (params) {
+    const clean = Object.fromEntries(
+      Object.entries(params).filter(([, v]) => v !== null && v !== undefined)
+    );
+    const qs = new URLSearchParams(clean).toString();
+    if (qs) url += (url.includes("?") ? "&" : "?") + qs;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : null,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { data: null, error: `${res.status}: ${errText}` };
+    }
+
+    return { data: await res.json(), error: null };
+  } catch (e) {
+    return { data: null, error: e.message };
+  }
+}
+
+/**
  * Chatbot backend API client (non-streaming).
  * @param {string} path - path after root, e.g. "chat"
  * @param {object} options

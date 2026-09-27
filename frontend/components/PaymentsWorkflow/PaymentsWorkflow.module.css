@@ -1331,6 +1331,23 @@
   line-height: 20px;
 }
 
+/* Enrichment Agent toggle field in the InitiateWizard. A label row over a
+   SegmentedControl, matching the vertical rhythm of the surrounding Select fields. */
+.toggleField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.toggleLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pw-text, #3d4f58);
+}
+.toggleHint {
+  font-weight: 400;
+  color: var(--pw-muted);
+}
+
 .infoBoxTitle {
   font-weight: 600;
   margin-bottom: 4px;
@@ -1460,6 +1477,12 @@
   color: #3d4f58;          /* gray.dark2 */
 }
 
+.pillPurple {
+  border-color: #5b2a86;   /* purple.dark2 */
+  background: #e9d7fd;     /* purple.light2 */
+  color: #5b2a86;          /* purple.dark2 */
+}
+
 /* Muted subline under the list's status pill — the posting + settlement axes (Doina
    Sep 17). Smaller and fainter than the pill so the primary `status` stays the lead,
    with the two lagging axes as supporting context ("posting pending · settlement —"). */
@@ -1520,6 +1543,23 @@
   font-size: 13px;
   color: var(--pw-ink);
   margin-top: 6px;
+}
+.agentEvidence {
+  font-size: 12px;
+  color: var(--pw-faint);
+  margin: 4px 0 0 18px;
+  padding: 0;
+  list-style: disc;
+}
+.agentEvidence li {
+  margin: 2px 0;
+}
+/* One AI-enrichment proposal inside the Stage-3 callout: the field→value+reason line,
+   with the candidate-code list tucked beneath it. */
+.enrichmentProposal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .resolutionLog {
   font-size: 12px;

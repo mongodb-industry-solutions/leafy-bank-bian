@@ -208,6 +208,13 @@ def build(ctx) -> dict:
         # None for non-wire rails (settlement is atomic in stage 5, the lever is inert). Not in
         # the canonical `payments` spec — see `test_payment_document_spec._KNOWN_EXTRAS`.
         "simulatedSettlementOutcome": ctx.settlement_outcome,
+        # Demo toggle (2026-09-26): the operator's per-payment choice of whether the
+        # Enrichment Agent runs. Persisted at initiation so a step-up / manual-review hold
+        # and resume honors it — a payment initiated with the agent off must not flip back on
+        # when resumed (same persistence argument as `simulatedSettlementOutcome` above).
+        # `_context_from_doc` restores it; `PaymentsService` picks Null vs Http from it. Not
+        # in the canonical `payments` spec — see `test_payment_document_spec._KNOWN_EXTRAS`.
+        "enableEnrichmentAgent": ctx.enable_enrichment_agent,
         # R8 — captured at the entry screen for EVERY rail. Single source of truth: the
         # rail mappers project it outward (pain.001 ReqdExctnDt, NACHA effectiveEntryDate)
         # rather than each envelope holding its own copy.

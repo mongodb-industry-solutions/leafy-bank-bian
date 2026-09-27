@@ -42,6 +42,10 @@ from process.exceptions import (
 from contexts.payment_order_initiation.adapters.mongo_reference_data import (
     MongoReferenceData,
 )
+from contexts.payment_order_initiation.adapters.enrichment_agent_client import (
+    HttpEnrichmentAgent,
+)
+from contexts.payment_order_initiation.ports.enrichment_agent import NullEnrichmentAgent
 from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_rail.adapters.simulated_wire_rail import SimulatedWireRail
 from contexts.payment_order_initiation.domain import checks, lifecycle
@@ -78,6 +82,10 @@ class PaymentsService:
         # Stage 3's reference-data store (doc 17 §3 step 1). Read-only: seeding is
         # `backend/data/load_reference_seed.py`, run by hand, never by the service.
         self.reference_data = MongoReferenceData(self.db)
+        # Phase-1 Enrichment Agent (option B). A thin HTTP client to the separate
+        # payment-agent service — the LangGraph/Bedrock stack lives there, not here. Returns
+        # [] when AGENTS_BACKEND_URL is unset, so dev without the agent runs deterministically.
+        self.enrichment_agent = HttpEnrichmentAgent()
         # Stage 5's outbound rail (doc 19 §3 step 3). Simulated by design — *"the demo will
         # not connect to a real payment network"* — and every document it produces says so.
         self.rail_gateway = SimulatedWireRail()
@@ -146,6 +154,7 @@ class PaymentsService:
         ach_details: Optional[dict] = None,
         internal_details: Optional[dict] = None,
         settlement_outcome: Optional[str] = None,
+        enable_enrichment_agent: bool = True,
     ) -> dict:
         """Initiate a payment order. Returns the persisted payment document.
 
@@ -181,6 +190,14 @@ class PaymentsService:
             collections=self._collections(),
             payment_limit_usd=self.payment_limit_usd,
             reference_data=self.reference_data,
+            # Demo toggle: when off, a NullEnrichmentAgent is injected for this payment so
+            # Stage-3 enrichment runs deterministically (no agent call, planner owns the
+            # bank). `domain/enrichment.py` sees NullEnrichmentAgent → agent_configured=False
+            # → planner external branch runs normally.
+            enrichment_agent=(
+                self.enrichment_agent if enable_enrichment_agent else NullEnrichmentAgent()
+            ),
+            enable_enrichment_agent=enable_enrichment_agent,
             rail_gateway=self.rail_gateway,
             settlement_outcome=settlement_outcome,
         )
@@ -268,6 +285,16 @@ class PaymentsService:
             collections=colls,
             payment_limit_usd=self.payment_limit_usd,
             reference_data=self.reference_data,
+            # Honor the per-payment agent toggle across a step-up / manual-review hold and
+            # resume (same persistence pattern as `simulatedSettlementOutcome` below). A
+            # payment initiated with the agent off stays off on resume. Pre-toggle docs
+            # default True (agent on), preserving their original behavior.
+            enrichment_agent=(
+                self.enrichment_agent
+                if payment.get("enableEnrichmentAgent", True)
+                else NullEnrichmentAgent()
+            ),
+            enable_enrichment_agent=payment.get("enableEnrichmentAgent", True),
             rail_gateway=self.rail_gateway,
             # B4: restore the stage-7 simulation lever so a resumed wire does not reset
             # UNMATCHED/DELAYED/EXCEPTION to MATCHED. Persisted at initiation; read by

@@ -13,6 +13,7 @@ const FAMILY_CLASS = {
   yellow: styles.pillYellow,
   red: styles.pillRed,
   gray: styles.pillGray,
+  purple: styles.pillPurple,
 };
 
 /**

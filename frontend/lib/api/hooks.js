@@ -2,7 +2,7 @@
 
 import { useUser } from "@/lib/context/UserContext";
 import { useEffect, useState } from "react";
-import { coreApi, pipelineApi, workflowApi } from "./client";
+import { coreApi, pipelineApi, workflowApi, agentApi } from "./client";
 
 // BIAN backend field names differ from what composed hooks expect.
 // These helpers normalize the wire shape once so composed hooks need no changes.
@@ -808,6 +808,46 @@ export function useWorkflowExceptions({ limit = 25, skip = 0 } = {}, refreshKey 
   }, [limit, skip, refreshKey]);
 
   return { ...data, loading, error };
+}
+
+/**
+ * One exception's AI investigation — the `exceptions.agent{}` subdoc the Reconciliation
+ * Agent recorded (rootCause, evidence, confidence, recommendedResolution). Polled
+ * by the inline ExceptionsPanel so the operator sees the agent's findings alongside the
+ * discrepancy, and by the Activity list's exception subline. A 404/empty is the state
+ * where no investigation has run yet (agent unconfigured or not yet triggered).
+ */
+export function useReconciliationAgent(exceptionId, refreshKey = 0) {
+  const [agent, setAgent] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!exceptionId) {
+      setAgent(null);
+      setLoading(false);
+      setError(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setLoading(true);
+    agentApi(`reconciliation/${exceptionId}`).then(({ data: d, error: err }) => {
+      if (cancelled) return;
+      if (err) setError(err);
+      else {
+        setAgent(d?.agent ?? null);
+        setError(null);
+      }
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [exceptionId, refreshKey]);
+
+  return { agent, loading, error };
 }
 
 /**

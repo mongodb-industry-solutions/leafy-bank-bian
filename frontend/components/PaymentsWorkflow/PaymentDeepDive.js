@@ -30,8 +30,8 @@ import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
-import { usePaymentWorkflow, usePipelineTrace, useBatchTick } from "@/lib/api/hooks";
-import { coreApi } from "@/lib/api/client";
+import { usePaymentWorkflow, usePipelineTrace, useBatchTick, useReconciliationAgent } from "@/lib/api/hooks";
+import { coreApi, agentApi } from "@/lib/api/client";
 import {
   checkPillFamily,
   fmtAmount,
@@ -135,7 +135,7 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
 }
 
 /** Zone 2 — vertical spine of expandable rows; the selected row expands to its full detail. */
-function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve, onResolveException }) {
+function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve, onResolveException, onAcknowledgeAgent, refreshKey = 0 }) {
   const failedIdx = states.indexOf("failed");
   return (
     <div className={styles.timeline}>
@@ -192,6 +192,8 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                       onApprove={onApprove}
                       onResolve={onResolve}
                       onResolveException={onResolveException}
+                      onAcknowledgeAgent={onAcknowledgeAgent}
+                      refreshKey={refreshKey}
                     />
                   ) : (
                     <StageDetailBody
@@ -200,6 +202,8 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                       onApprove={onApprove}
                       onResolve={onResolve}
                       onResolveException={onResolveException}
+                      onAcknowledgeAgent={onAcknowledgeAgent}
+                      refreshKey={refreshKey}
                     />
                   )}
                 </div>
@@ -220,7 +224,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
  * per-panel heads lets the reader name each accounting fact before its legs, instead of six
  * anonymous columns that read as separate top-level stages.
  */
-function GroupStageBody({ group, payment, onApprove, onResolve, onResolveException }) {
+function GroupStageBody({ group, payment, onApprove, onResolve, onResolveException, onAcknowledgeAgent, refreshKey = 0 }) {
   return (
     <div className={styles.groupBody}>
       {group.intro && (
@@ -242,6 +246,7 @@ function GroupStageBody({ group, payment, onApprove, onResolve, onResolveExcepti
             onApprove={onApprove}
             onResolve={onResolve}
             onResolveException={onResolveException}
+            onAcknowledgeAgent={onAcknowledgeAgent}
           />
         </section>
       ))}
@@ -305,9 +310,74 @@ function EnrichmentDiff({ enrichment }) {
           </div>
           <div className={styles.legRow}>
             <span className={styles.legAmount}>{fmtEnriched(r.to)}</span>
-            <StatusPill family="gray">{r.source}</StatusPill>
+            {/* `family="purple"` now resolves to a real pillPurple class (StatusPill.js).
+                The wrapper span's `title` carries the agent's reason so the diff tells the
+                why-story even when the AI-enrichment callout above is collapsed. */}
+            <span {...(r.reason ? { title: r.reason } : {})}>
+              <StatusPill
+                family={r.source === "agent" ? "purple" : "gray"}
+                label={r.source === "agent" ? "AI agent" : r.source}
+              />
+            </span>
           </div>
         </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The Stage-3 "AI enrichment" callout — the Enrichment Agent's reasoning, surfaced.
+ *
+ * Mirrors the Reconciliation Agent's "AI investigation" callout in `ExceptionsPanel`: a
+ * titled callout with a confidence pill, the remittance text the agent reasoned over, and
+ * each applied proposal (field → value + reason). Purpose-code proposals also list the
+ * candidate codes the agent weighed with their real vector-search scores (`considered[]`),
+ * which is the transparency that makes the agentic step legible.
+ *
+ * Reads `payments.enrichment.agent{}`, written synchronously at stage 3 by
+ * `_apply_agent_proposals` — so unlike the recon agent (which writes async after the
+ * exception opens and needs a polling hook), this rides on the existing `usePaymentWorkflow`
+ * response as `stage.data.enrichment.agent`. No dedicated hook or endpoint.
+ */
+function EnrichmentAgentCallout({ enrichment }) {
+  const agent = enrichment?.agent;
+  if (!agent) return null;
+  const confidenceFamily =
+    agent.confidence === "HIGH" ? "green"
+    : agent.confidence === "MEDIUM" ? "yellow"
+    : "gray";
+  return (
+    <div className={styles.resolveCallout}>
+      <div className={styles.resolveCalloutTitle}>
+        <Icon glyph="InfoWithCircle" />
+        <span>AI enrichment</span>
+        {agent.confidence && (
+          <StatusPill family={confidenceFamily}>{agent.confidence}</StatusPill>
+        )}
+      </div>
+      {agent.remittanceText && (
+        <Body className={styles.muted}>
+          Reasoned over remittance: “{agent.remittanceText}”
+        </Body>
+      )}
+      {(agent.proposals || []).map((p) => (
+        <div key={p.field} className={styles.enrichmentProposal}>
+          <Body>
+            <strong>{p.field}</strong> → {fmtEnriched(p.to)}
+            {p.reason && <span className={styles.muted}> — {p.reason}</span>}
+          </Body>
+          {p.considered && p.considered.length > 0 && (
+            <ul className={styles.agentEvidence}>
+              {p.considered.map((c) => (
+                <li key={c.code}>
+                  {c.code} — {c.name}
+                  {c.score != null && ` (score ${Number(c.score).toFixed(2)})`}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       ))}
     </div>
   );
@@ -339,6 +409,7 @@ function EnrichmentBody({ stage, payment, checkList }) {
       </div>
       <div className={styles.detailBlockWide}>
         <div className={styles.detailBlockTitle}>Progressive enrichment</div>
+        <EnrichmentAgentCallout enrichment={stage.data?.enrichment} />
         <EnrichmentDiff enrichment={stage.data?.enrichment} />
       </div>
     </div>
@@ -1237,7 +1308,7 @@ function RoutingDecision({ snapshot }) {
   );
 }
 
-function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveException }) {
+function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveException, onAcknowledgeAgent, refreshKey = 0 }) {
   // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
   // must sit above the early returns (rules of hooks).
   const [showRaw, setShowRaw] = useState(false);
@@ -1485,8 +1556,10 @@ function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveExcept
           <ExceptionsPanel
             exceptions={stage.exceptions}
             onResolve={onResolveException}
+            onAcknowledgeAgent={onAcknowledgeAgent}
             reversalEvent={stage.reversalEvent}
             reversalLegs={stage.reversalLegs}
+            refreshKey={refreshKey}
           />
         )}
 
@@ -1582,11 +1655,17 @@ function exceptionDetailText(exc) {
   return "—";
 }
 
-function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs }) {
-  const open = exceptions.find((e) => e?.status === "OPEN");
+function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs, refreshKey = 0, onAcknowledgeAgent }) {
+  const baseOpen = exceptions.find((e) => e?.status === "OPEN");
+  // The Reconciliation Agent writes `exceptions.agent{}` asynchronously, after the exception
+  // opens. Fetch it on a dedicated refresh so the operator sees the agent's findings appear
+  // without waiting for the 10s batch tick to re-pull the whole workflow.
+  const { agent: agentBlock } = useReconciliationAgent(baseOpen?.exceptionId, refreshKey);
+  const open = baseOpen && agentBlock ? { ...baseOpen, agent: agentBlock } : baseOpen;
   const [note, setNote] = useState("");
   const [outcome, setOutcome] = useState("MATCHED");
   const [busy, setBusy] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   if (!exceptions.length) {
     return <Body className={styles.muted}>No exceptions recorded for this payment.</Body>;
@@ -1630,6 +1709,54 @@ function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs })
             <span className={styles.exceptionStatus}>{e.status}</span>
           </div>
           <div className={styles.exceptionDetail}>{exceptionDetailText(e)}</div>
+          {e.agent && (
+            <div className={styles.resolveCallout}>
+              <div className={styles.resolveCalloutTitle}>
+                <Icon glyph="InfoWithCircle" />
+                <span>AI investigation</span>
+                <StatusPill
+                  family={
+                    e.agent.confidence === "HIGH"
+                      ? "green"
+                      : e.agent.confidence === "MEDIUM"
+                        ? "yellow"
+                        : "gray"
+                  }
+                >
+                  {e.agent.confidence}
+                </StatusPill>
+              </div>
+              <Body>{e.agent.rootCause}</Body>
+              {e.agent.recommendedResolution && (
+                <Body className={styles.muted}>
+                  Recommend: {e.agent.recommendedResolution}
+                </Body>
+              )}
+              {e.agent.evidence && e.agent.evidence.length > 0 && (
+                <ul className={styles.agentEvidence}>
+                  {e.agent.evidence.map((ev, i) => (
+                    <li key={i}>{ev}</li>
+                  ))}
+                </ul>
+              )}
+              {onAcknowledgeAgent && (
+                <div className={styles.resolveActions}>
+                  <Button
+                    size="xsmall"
+                    variant="primary"
+                    disabled={approving}
+                    onClick={async () => {
+                      setApproving(true);
+                      await onAcknowledgeAgent(e.exceptionId);
+                      setApproving(false);
+                    }}
+                  >
+                    Acknowledge AI recommendation
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
           {e.resolution && (
             <div className={styles.resolutionLog}>
               <span className={styles.resolutionLabel}>Resolved:</span>
@@ -1844,6 +1971,27 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
     // exception is now RESOLVED/DISMISSED server-side; the queue row must reflect that.
     if (onDataChanged) onDataChanged();
   }
+
+  // HITL approval gate (Phase 2.5): the Reconciliation Agent's graph paused at its `approval`
+  // node via `interrupt()`, surfacing its AI investigation for operator review. This
+  // resumes the graph with the operator's acknowledgement. The operator THEN resolves
+  // through the existing transactions UI above — this gate reviews, it does not execute,
+  // so there is no duplicate resolve path (spec L1323).
+  async function acknowledgeAgent(excId) {
+    if (!excId) return;
+    const { error: err } = await agentApi(
+      `reconciliation/${excId}/approve`,
+      { method: "POST" }
+    );
+    if (err) {
+      setResolveError(err);
+      return;
+    }
+    // Bump the dedicated agent-investigation refresh so the callout re-renders resolved,
+    // and the shared refresh so the queue reflects the acknowledged state.
+    setNudge((n) => n + 1);
+    if (onDataChanged) onDataChanged();
+  }
   const rowRefs = useRef({});
   const setRowRef = useCallback(
     (key) => (el) => {
@@ -1975,6 +2123,8 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
               onApprove={() => setStepUpOpen(true)}
               onResolve={resolveReview}
               onResolveException={resolveException}
+              onAcknowledgeAgent={acknowledgeAgent}
+              refreshKey={nudge}
             />
           </>
         )}

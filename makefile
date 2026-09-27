@@ -54,6 +54,9 @@ dev-transactions:
 dev-ledger:
 	cd backend/ledger && $(UVICORN) main:app --reload --host 0.0.0.0 --port 8003
 
+dev-agent:
+	cd backend/payment_agent && $(UVICORN) main:app --reload --host 0.0.0.0 --port 8004
+
 dev-frontend:
 	cd frontend && npm run dev
 
@@ -61,7 +64,7 @@ ensure-indexes:
 	cd backend/ledger && poetry run python -m data.ensure_indexes
 
 kill-ports:
-	@for port in 3000 8001 8002 8003; do \
+	@for port in 3000 8001 8002 8003 8004; do \
 		pids=$$(lsof -ti :$$port 2>/dev/null); \
 		if [ -n "$$pids" ]; then \
 			echo "Killing process on port $$port (PID $$pids)"; \
@@ -74,6 +77,7 @@ dev: kill-ports
 	(cd backend/accounts && $(UVICORN) main:app --reload --host 0.0.0.0 --port 8001) & \
 	(cd backend/transactions && $(UVICORN) main:app --reload --host 0.0.0.0 --port 8002) & \
 	(cd backend/ledger && $(UVICORN) main:app --reload --host 0.0.0.0 --port 8003) & \
+	(cd backend/payment_agent && $(UVICORN) main:app --reload --host 0.0.0.0 --port 8004) & \
 	(cd frontend && npm run dev) & \
 	wait
 
@@ -87,16 +91,20 @@ install-transactions:
 install-ledger:
 	cd backend/ledger && poetry config virtualenvs.in-project true && poetry install --no-interaction --no-root
 
+install-agent:
+	cd backend/payment_agent && poetry config virtualenvs.in-project true && poetry install --no-interaction --no-root
+
 install-frontend:
 	cd frontend && npm install --no-audit
 
-setup: install-accounts install-transactions install-ledger install-frontend
+setup: install-accounts install-transactions install-ledger install-agent install-frontend
 
 # ---------- Sanity: do the backend apps import? ----------
 check:
 	cd backend/accounts && poetry run python -c "from main import app; print('OK accounts')"
 	cd backend/transactions && poetry run python -c "from main import app; print('OK transactions')"
 	cd backend/ledger && poetry run python -c "from main import app; print('OK ledger')"
+	cd backend/payment_agent && poetry run python -c "from main import app; print('OK payment_agent')"
 
 .PHONY: build up start stop down logs clean \
 	kill-ports dev dev-accounts dev-transactions dev-ledger dev-frontend \

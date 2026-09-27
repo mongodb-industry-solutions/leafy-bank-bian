@@ -213,6 +213,14 @@ class PaymentOrderInitiateRequest(BaseModel):
     # `simulatedSettlementOutcome` so it survives a step-up / manual-review hold and resume.
     simulatedSettlementOutcome: Optional[SettlementOutcomeLiteral] = None
 
+    # Demo toggle (2026-09-26): when False, this payment's Stage-3 enrichment runs fully
+    # deterministically — the Enrichment Agent is NOT consulted (a NullEnrichmentAgent is
+    # injected), so the planner owns beneficiary-bank resolution and no purpose-code/ref
+    # proposals are made. Persisted on the doc as `enableEnrichmentAgent` so a step-up /
+    # manual-review hold and resume honors the operator's initiation choice (same pattern as
+    # `simulatedSettlementOutcome`). Defaults True — the agent demo story works by default.
+    enableEnrichmentAgent: bool = True
+
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
