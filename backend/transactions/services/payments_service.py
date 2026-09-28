@@ -565,7 +565,9 @@ class PaymentsService:
         ctx.current_state = state
         ctx.is_external_creditor = (payment.get("creditor") or {}).get("accountId") is None
 
-        settle.run(ctx)
+        # defer=False: an operator-triggered settlement (or retry of a DELAYED wire) settles
+        # immediately — the deferred window is for the saga's automatic default-wire path only.
+        settle.run(ctx, defer=False)
         return ctx.payment_doc
 
     # --- Stage 9: exceptions resolve (doc 24 B4/B6) --------------------------

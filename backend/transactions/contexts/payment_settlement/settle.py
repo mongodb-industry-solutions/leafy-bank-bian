@@ -23,19 +23,30 @@ service's** `settlement_worker` via CDC on `payments` — never by the transacti
 
 ## Her four outcomes (B4, L630, FR-7.3)
 
-MATCHED → `SETTLED` · DELAYED → `PENDING` (stays at `IN_PROGRESS`) · UNMATCHED → `FAILED`
-· EXCEPTION → `RETURNED`. Every value comes from the spec's `settlementStatus` enum — no
-invented states. The `outcome` classification itself is an enum on `settlementPositions`
-(`MATCHED`/`UNMATCHED`/`DELAYED`/`EXCEPTION`), matched to the spec's `settlementStatus` enum
-via `_OUTCOME_TO_STATUS`. Doina (Sep 17): the four outcomes must be reachable and trigger
-distinct downstream behaviour, not just label the same result — UNMATCHED stamps a
-discrepancy amount + reason on `clearing` for the (deferred) Stage 9 exception queue.
+MATCHED → captured at `PENDING`, then flipped to `SETTLED` by `complete_due` after a short
+deferred window (default 30s) · DELAYED → `PENDING` (stays at `IN_PROGRESS`, operator-retried)
+· UNMATCHED → `FAILED` · EXCEPTION → `RETURNED`. Every value comes from the spec's
+`settlementStatus` enum — no invented states. The `outcome` classification itself is an enum on
+`settlementPositions` (`MATCHED`/`UNMATCHED`/`DELAYED`/`EXCEPTION`), matched to the spec's
+`settlementStatus` enum via `_OUTCOME_TO_STATUS`. Doina (Sep 17): the four outcomes must be
+reachable and trigger distinct downstream behaviour, not just label the same result — UNMATCHED
+stamps a discrepancy amount + reason on `clearing` for the (deferred) Stage 9 exception queue.
+
+## Why MATCHED is deferred (Doina Sep 17)
+
+She flagged payments reading `SETTLED` "before settlement is even initiated." The settlement is
+simulated, so it *can* complete instantly — but applying `SETTLED` synchronously in the same
+request that initiated the wire erased the clearing-and-settlement stage from the screen. `run`
+now captures at `PENDING` and `complete_due` (driven by `settlement_completion_worker`) flips to
+`SETTLED` after `SETTLEMENT_COMPLETION_DELAY_SECONDS`. The ledger's `settlement_worker` then
+produces the settlement `ledgerEvent` from the flip, unchanged.
 
 Reads  ctx: current_state, payment_doc, payment_id, payment_rail, is_external_creditor,
             execution_strategy, collections
-Writes ctx: current_state -> SETTLED | FAILED | RETURNED (or stays IN_PROGRESS for delayed);
+Writes ctx: current_state -> FAILED | RETURNED (or stays IN_PROGRESS for matched/delayed);
             result; `payments.lifecycle.settlementStatus`, `payments.clearing.*`;
-            `settlementPositions` (one doc per run)
+            `settlementPositions` (one doc per run). The MATCHED `SETTLED` flip is NOT here —
+            `complete_due` writes it after the deferred window.
 """
 
 from __future__ import annotations
@@ -299,11 +310,17 @@ def _record_check(ctx: PaymentContext, name: str, result: str, detail: str) -> N
     checks.append_checks(ctx.collections.payments, ctx.payment_oid, [entry])
 
 
-def run(ctx: PaymentContext) -> None:
+def run(ctx: PaymentContext, defer: bool = True) -> None:
     """Settle a payment.
 
     No-op for internal transfers (already SETTLED in stage 5's ACID block). For external
     wires, generates a SIMULATED settlement response and transitions the payment per B4.
+
+    `defer` (default True) applies only to the MATCHED outcome: the saga passes True so a
+    default wire is captured at `settlementStatus=PENDING` and flipped to SETTLED later by
+    `complete_due` (the visible clearing-and-settlement window). The operator
+    `settle_payment` route passes False — a manual retry should settle immediately, not wait
+    another deferred window. DELAYED/UNMATCHED/EXCEPTION are unaffected by `defer`.
     """
     # --- internal book transfer: already settled --------------------------------
     if ctx.current_state == lifecycle.SETTLED:
@@ -380,12 +397,52 @@ def run(ctx: PaymentContext) -> None:
 
     # --- B4: transition the payment per the outcome ------------------------------
     now_iso = datetime.now(timezone.utc).isoformat()
+    # `extra` carries the settlementStatus + clearing fields for the non-deferred outcomes
+    # (DELAYED / UNMATCHED / EXCEPTION). MATCHED defers and does its own capture write above.
     extra: dict = {
         "lifecycle.settlementStatus": _OUTCOME_TO_STATUS[outcome],
         "clearing.batchRef": response["batchRef"],
     }
 
     if outcome == MATCHED:
+        if defer:
+            # Deferred settlement (Doina Sep 17: "wires should settle only when they have
+            # reached and completed the clearing & settlement stage"). The settlement is
+            # simulated, but the SETTLED flip is NOT applied synchronously here — the payment
+            # stays at IN_PROGRESS with settlementStatus PENDING, and
+            # `settlement_completion_worker` flips it to SETTLED after
+            # SETTLEMENT_COMPLETION_DELAY_SECONDS (default 30s). That gives a visible
+            # "settlement pending -> settled" window on the list instead of an instant green
+            # SETTLED pill — the exact gap she flagged ("SETTLED before settlement is even
+            # initiated").
+            #
+            # The routing fields the ledger's `settlement_worker` needs (settlementAccountCode,
+            # batchRef, settlementDate) are stamped NOW, at capture, so they are already on the
+            # doc when the completion worker flips SETTLED and the CDC worker reads them.
+            # `clearing.settledAt` is stamped at COMPLETION (`complete_due`), when settlement
+            # actually confirms — never here. The `settlementPositions` doc records the expected
+            # settlement at capture.
+            ctx.collections.payments.update_one(
+                {"_id": ctx.payment_oid},
+                {"$set": {
+                    "lifecycle.settlementStatus": "PENDING",
+                    "clearing.batchRef": response["batchRef"],
+                    "clearing.settlementDate": response.get("settlementDate"),
+                    "clearing.settlementAccountCode": model_info["settlementAccountCode"],
+                    "updatedAt": datetime.now(timezone.utc),
+                }},
+            )
+            _record_check(
+                ctx, "settlement_initiated", checks.PASS,
+                f"Settlement initiated — {model_info['label']} "
+                f"({model_info['settlementAccountCode']}). Awaiting simulated confirmation; "
+                f"payment held at IN_PROGRESS with settlementStatus PENDING.",
+            )
+            updated = ctx.collections.payments.find_one({"_id": ctx.payment_oid})
+            ctx.stop(updated)
+            return
+        # `defer=False` — operator-triggered (settle_payment route): settle synchronously,
+        # as before the deferral. A manual retry should not wait another deferred window.
         extra["clearing.settledAt"] = now_iso
         extra["clearing.settlementDate"] = response.get("settlementDate")
         extra["clearing.settlementAccountCode"] = model_info["settlementAccountCode"]
@@ -506,3 +563,80 @@ def run(ctx: PaymentContext) -> None:
         )
         ctx.stop(ctx.payment_doc)
         return
+
+
+def complete_due(connection, db_name: str, delay_seconds: float = 30.0) -> int:
+    """Deferred-settlement completion — the second half of Stage 7 for a MATCHED wire.
+
+    `run` captures a default wire at `settlementStatus=PENDING` (instead of settling
+    synchronously). This function flips captured wires to `SETTLED` once their
+    `clearing.submittedAt` is older than `delay_seconds`, giving the visible "settlement
+    pending -> settled" progression on the list that Doina asked for (Sep 17: "wires should
+    settle only when they have reached and completed the clearing & settlement stage").
+
+    Selection — all four must hold:
+      * `lifecycle.settlementStatus == PENDING`
+      * `lifecycle.currentState == IN_PROGRESS`
+      * `clearing.batchRef` present and non-null  (excludes the VOSTRO stub, which sets it null)
+      * `simulatedSettlementOutcome in {None, MATCHED}`  (excludes DELAYED, operator-retried)
+      * `clearing.submittedAt <= now - delay_seconds`
+    UNMATCHED/EXCEPTION never reach here — `run` marks them FAILED/RETURNED (terminal), not PENDING.
+
+    Idempotent: completion flips `settlementStatus` to SETTLED, so a later cycle's query cannot
+    reselect the same payment. A race between two cycles is closed by `lifecycle.advance`'s
+    `from_state=IN_PROGRESS` guard — the loser's `find_one_and_update` matches nothing and raises
+    `IllegalTransition`, caught and treated as already-done. After the flip, the ledger's
+    `settlement_worker` (CDC on `settlementStatus=SETTLED`) produces the settlement `ledgerEvent`
+    — exactly as it did when `run` settled synchronously.
+
+    Returns the number of payments completed this cycle. Always returns a count (never raises
+    on an empty scan), so the periodic worker that calls this cannot busy-loop on "no work".
+    """
+    payments = connection.get_database(db_name)["payments"]
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=delay_seconds)
+    query = {
+        "lifecycle.settlementStatus": "PENDING",
+        "lifecycle.currentState": "IN_PROGRESS",
+        # `$ne: None` rather than `$exists` so this also excludes VOSTRO (batchRef is null on
+        # the stub) and any payment that never reached settlement capture. Missing -> None
+        # -> excluded, which is the intent.
+        "clearing.batchRef": {"$ne": None},
+        "simulatedSettlementOutcome": {"$in": [None, MATCHED]},
+        "clearing.submittedAt": {"$lte": cutoff},
+    }
+    completed = 0
+    for doc in payments.find(query, {"_id": 1, "paymentId": 1}):
+        payment_oid = doc["_id"]
+        payment_id = doc.get("paymentId")
+        now = datetime.now(timezone.utc)
+        try:
+            lifecycle.advance(
+                payments, payment_oid, lifecycle.SETTLED,
+                actor="payment-settlement-worker",
+                reason="SIMULATED settlement confirmed (deferred completion)",
+                from_state=lifecycle.IN_PROGRESS,
+                extra={
+                    "lifecycle.settlementStatus": "SETTLED",
+                    "clearing.settledAt": now.isoformat(),
+                },
+            )
+        except lifecycle.IllegalTransition:
+            logger.info(
+                "complete_due: payment %s no longer at IN_PROGRESS (race); skipping", payment_id,
+            )
+            continue
+        checks.append_checks(
+            payments, payment_oid,
+            [checks.check(
+                STAGE, "settlement_completed", checks.PASS,
+                mode=checks.SYNC,
+                detail=(
+                    f"Payment SETTLED (deferred). Clearing account {_WIRE_CLEARING_CODE} debited, "
+                    "settlement account credited by the ledger service via CDC."
+                ),
+                actor="payment-settlement-worker", at=now,
+            )],
+        )
+        completed += 1
+        logger.info("complete_due: settled payment %s after deferred window", payment_id)
+    return completed

@@ -859,7 +859,7 @@ export function useReconciliationAgent(exceptionId, refreshKey = 0) {
  * A 404 is not an error here — it is the empty state before a payment is selected or
  * after one is deleted, and rendering a red banner for it would be wrong.
  */
-export function usePaymentWorkflow(paymentId, refreshKey = 0) {
+export function usePaymentWorkflow(paymentId, refreshKey = 0, pollMs = 3000) {
   const [payment, setPayment] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -871,22 +871,51 @@ export function usePaymentWorkflow(paymentId, refreshKey = 0) {
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    workflowApi(`payments/${encodeURIComponent(paymentId)}`).then(({ data, error: err }) => {
+    let timer = null;
+
+    // Keep polling while ANY axis is still in flight: the money lifecycle hasn't reached a
+    // terminal state (RECONCILED or a hard reject/cancel/reverse/refund), OR posting is still
+    // PENDING, OR settlement is still PENDING. A payment at SETTLED with postingStatus PENDING
+    // (book transfer, GL batch pending) is NOT done — and a deferred wire at settlementStatus
+    // PENDING must keep polling or the SETTLED flip at ~30s is invisible (the bug that made
+    // stage 7 read "stuck"). Self-terminates once every axis is settled, like usePipelineTrace.
+    const TERMINAL_STATES = [
+      "RECONCILED", "REJECTED", "FAILED", "RETURNED", "CANCELLED", "REVERSED", "REFUNDED",
+    ];
+    const isDone = (p) => {
+      const lc = p?.lifecycle || {};
+      return (
+        TERMINAL_STATES.includes(lc.currentState) &&
+        lc.postingStatus !== "PENDING" &&
+        lc.settlementStatus !== "PENDING"
+      );
+    };
+
+    const poll = async () => {
+      const { data, error: err } = await workflowApi(`payments/${encodeURIComponent(paymentId)}`);
       if (cancelled) return;
       if (err) {
         setPayment(null);
         setError(err.startsWith("404") ? null : err);
-      } else {
-        setPayment(data);
-        setError(null);
+        setLoading(false);
+        return; // stop polling on error (incl. 404)
       }
+      setPayment(data);
+      setError(null);
       setLoading(false);
-    });
+      if (pollMs > 0 && !isDone(data)) {
+        timer = setTimeout(poll, pollMs);
+      }
+    };
+
+    setLoading(true);
+    poll();
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-  }, [paymentId, refreshKey]);
+  }, [paymentId, refreshKey, pollMs]);
 
   return { payment, loading, error };
 }

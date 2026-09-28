@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import threading
+import time
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -28,9 +30,11 @@ from routers.workflow import router as workflow_router
 from services.payments_service import PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
+from workers import settlement_completion_worker
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 MONGODB_URI = os.getenv("MONGODB_URI")
 DB_NAME = os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")
@@ -61,6 +65,44 @@ app.state.db_name = DB_NAME
 # Stage 9 — the /workflow exception-resolve route reaches the saga-owning service through
 # app.state (the workflow router stays free of module globals, per the ledger convention).
 app.state.payments_service = payments_service
+
+# Stage 7 deferred-settlement completion. `settle.run` captures a default wire at
+# `settlementStatus=PENDING`; this periodic worker flips it to SETTLED after
+# SETTLEMENT_COMPLETION_DELAY_SECONDS (default 30s) so the clearing-and-settlement stage is
+# visible on the list instead of an instant green SETTLED pill (Doina Sep 17). A periodic
+# scan, not a change stream — the trigger is time, not a write. Disable with
+# ENABLE_SETTLEMENT_COMPLETION=false (note: with the worker off, captured wires stay PENDING
+# until an operator re-triggers settlement via /PaymentSettlement/Initiate).
+ENABLE_SETTLEMENT_COMPLETION = os.getenv("ENABLE_SETTLEMENT_COMPLETION", "true").lower() == "true"
+
+
+def _restart_loop(name: str, fn, *args, restart_delay: int = 5) -> None:
+    while True:
+        try:
+            fn(*args)
+        except Exception:
+            logger.exception("%s crashed; restarting in %ds", name, restart_delay)
+            time.sleep(restart_delay)
+            continue
+        # fn returned without raising: it exited on purpose. Do NOT re-invoke — that would
+        # busy-loop with no sleep and flood the logs (the 2026-07-08 eod_topup_worker defect).
+        logger.info("%s exited; not restarting", name)
+        return
+
+
+if ENABLE_SETTLEMENT_COMPLETION:
+    _poll = int(os.getenv("SETTLEMENT_COMPLETION_POLL_SECONDS", str(settlement_completion_worker.DEFAULT_POLL_INTERVAL)))
+    _delay = float(os.getenv("SETTLEMENT_COMPLETION_DELAY_SECONDS", str(settlement_completion_worker.DEFAULT_DELAY)))
+    threading.Thread(
+        target=_restart_loop,
+        args=("settlement_completion_worker",
+              settlement_completion_worker.run, connection, DB_NAME, _poll, _delay),
+        daemon=True, name="settlement_completion_worker",
+    ).start()
+    logger.info(
+        "started background worker: settlement_completion_worker (poll=%ds, delay=%ss)",
+        _poll, _delay,
+    )
 
 app.include_router(workflow_router)
 

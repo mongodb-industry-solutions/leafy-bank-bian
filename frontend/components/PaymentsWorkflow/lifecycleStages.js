@@ -38,11 +38,11 @@ const leg = (code, name, amount) => ({ code, name, amount: minor(amount) });
  * `lifecycle.postingStatus` — written by the LEDGER service (doc 20 B1) — rather than
  * inferring posting from the pipeline state.
  */
-function accountingMeta(payment, jn) {
+function accountingMeta(payment, jn, le) {
   const posting = payment?.lifecycle?.postingStatus;
   const journalRef = payment?.refs?.journalEntryId;
   if (posting === "POSTED" && journalRef) return journalRef;
-  if (posting) return posting.toLowerCase();
+  if (le) return "captured — awaiting the GL batch";
   if (jn) return jn.periodCode;
   // An external wire writes a `transactions` doc (payee = the clearing account) and reaches
   // the ledger, but settlement is deferred to stage 7 — so before settle.py runs the payment
@@ -342,10 +342,15 @@ export function buildLifecycleStages(payment, trace) {
       stage: 6,
       group: "Accounting & posting",
       reached: !!le,
-      status: le?.postingStatus,
+      // "COMPLETED" (not le.postingStatus) so the panel goes green once the balanced event is
+      // CAPTURED — seconds after execution via CDC. le.postingStatus flips to POSTED only at
+      // the GL batch (10 min); keying the panel on it left the event "stuck on pending" for the
+      // whole batch window. The GL-post detail (journalEntryId, postedAt) still shows in the
+      // detail rows, so the batch wait remains visible — just no longer gating the green mark.
+      status: le ? "COMPLETED" : null,
       // The payment's own posting fact, not the event's postingMode (which was always
       // "BATCH" — a constant, so it told the reader nothing).
-      meta: accountingMeta(payment, jn),
+      meta: accountingMeta(payment, jn, le),
       intro:
         "Posts the balanced debit and credit legs at minor-unit precision — the payment's own " +
         "accounting fact, written by the ledger service — and captures the financial history as " +
@@ -377,7 +382,9 @@ export function buildLifecycleStages(payment, trace) {
       stage: 6,
       group: "Accounting & posting",
       reached: !!feeEvent,
-      status: feeEvent?.postingStatus,
+      // Same rationale as the principal ledger event: green when captured, not when the GL
+      // batch journals it.
+      status: feeEvent ? "COMPLETED" : null,
       meta: feeEvent
         ? (feeEvent.postingResult?.journalEntryId || "wire fee")
         : null,
@@ -406,7 +413,10 @@ export function buildLifecycleStages(payment, trace) {
       stage: 6,
       group: "Accounting & posting",
       reached: sls.length > 0,
-      status: sls.length ? (sls.every((e) => e.journalEntryId) ? "POSTED" : "PENDING") : null,
+      // "COMPLETED" when the paired entries exist (seconds, via the projection worker) — not
+      // gated on journalEntryId, which is stamped only at the GL batch. The batch wait is the
+      // General-ledger sub-panel's job, not this one.
+      status: sls.length ? "COMPLETED" : null,
       meta: sls.length ? `${sls.length} entries` : null,
       intro:
         "The paired control-account entry for each side of a posting — one debit, one credit, " +
@@ -449,21 +459,52 @@ export function buildLifecycleStages(payment, trace) {
           }
         : null,
     },
+    // Stage 7 — Clearing & settlement, split into two sub-steps so the rail shows the
+    // progression Doina's A.1 describes: external settlement is CONFIRMED first (independent
+    // of the GL batch), then the second accounting event is POSTED to the GL by the batch.
+    // The split makes the "external settlement has gone green, and only after the GL batch
+    // runs does the posting finally go green" story visible — instead of one pill that can't
+    // distinguish "confirmed" from "posted".
     {
-      key: "settlement",
-      label: "Clearing & settlement",
+      // Sub-step 7a: external settlement confirmation. settlementStatus PENDING -> SETTLED at
+      // the deferred window (~30s), independent of the GL batch. The position records the
+      // four-way outcome (FR-7.3) for stage-8 reconciliation.
+      key: "settlementConfirm",
+      label: "External settlement",
       icon: "ArrowLeftRight",
       stage: 7,
-      reached: reached("SETTLED", "FAILED", "RETURNED") || !!position,
+      group: "Clearing & settlement",
+      reached: !!position || !!payment?.lifecycle?.settlementStatus,
       status: payment?.lifecycle?.settlementStatus || undefined,
       meta: position?.modelLabel || (clearing.settledAt ? "settled" : "pending"),
       intro:
-        "Posts the credit to a clearing or correspondent account, simulates the external " +
-        "settlement response, and distinguishes internal posting from external settlement. " +
-        "Records the settlement position and the settlement event — SETTLED no longer happens " +
-        "inside the money move.",
+        "Simulates the external settlement response and confirms the outcome — matched, " +
+        "unmatched, delayed, or exception. The settlement status (PENDING -> SETTLED) advances " +
+        "here, independently of the GL batch (Doina A.1/A.3: once external settlement is " +
+        "confirmed, the second accounting event posts).",
       kind: "legs",
       data: { position, clearing, event: se },
+    },
+    {
+      // Sub-step 7b: the settlement accounting event (Dr Wire Clearing / Cr Nostro or Central
+      // Bank) and its posting to the GL. The event is created on the SETTLED flip via CDC, but
+      // its postingStatus flips to POSTED only when the GL batch journals it — so this sub-step
+      // is the one that goes green last, after the batch.
+      key: "settlementPosting",
+      label: "Settlement posting",
+      icon: "Copy",
+      stage: 7,
+      group: "Clearing & settlement",
+      reached: !!se,
+      status: se?.postingStatus,
+      meta: se?.postingResult?.journalEntryId || (se ? "pending journal" : null),
+      intro:
+        "The second, distinct accounting event (Doina A.1) — Dr Wire Clearing / Cr Nostro or " +
+        "Central Bank — posted once external settlement is confirmed. Its postingStatus flips " +
+        "to POSTED when the GL batch journals it, so this step goes green only after the batch " +
+        "runs, after the External settlement step has already gone green.",
+      kind: "ledgerEvent",
+      data: se,
       legs: se
         ? {
             currency: se.creditLeg?.currency || "USD",
@@ -569,17 +610,21 @@ export function groupLifecycleStages(stages) {
     const children = g.children;
     const anyReached = children.some((c) => c.reached);
     const reachedCount = children.filter((c) => c.reached).length;
-    // The journal panel carries the stage-6 terminal fact (jn.status: POSTED). Before it posts
-    // the group is in flight, so lift `status` from the journal and leave it undefined otherwise
-    // — nodeStates keys off that, exactly as the other independent axes do.
-    const jn = children.find((c) => c.kind === "journal");
+    // The group's terminal fact is its LAST NON-JOURNAL child's status: the sub-ledger for
+    // stage 6 (the journal is a trailing batch step that must NOT gate the group's green mark),
+    // the settlement posting for stage 7. Stage 6's "Accounting & posting" is complete once the
+    // balanced event and sub-ledger entries are captured (seconds, via CDC) — the general-ledger
+    // journal aggregation is a downstream batch artifact shown in its own sub-panel, not the
+    // gate on the stage's ✓. nodeStates keys off this, exactly as the other independent axes do.
+    const nonJournal = children.filter((c) => c.kind !== "journal");
+    const terminal = nonJournal[nonJournal.length - 1] ?? children[children.length - 1];
     return {
       key: g.key,
       label: g.label,
       stage: g.stage,
       group: g.group,
       reached: anyReached,
-      status: jn?.status ?? undefined,
+      status: terminal?.status ?? undefined,
       meta: reachedCount ? `${reachedCount} of ${children.length} reached` : undefined,
       intro:
         "One stage (Doina's 6: Accounting & posting) around four panels — the balanced " +

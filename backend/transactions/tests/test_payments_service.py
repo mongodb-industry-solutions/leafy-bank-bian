@@ -91,6 +91,8 @@ class FakeCollection:
             if isinstance(v, dict):
                 if "$gte" in v and not (actual is not None and actual >= v["$gte"]):
                     return False
+                if "$lte" in v and not (actual is not None and actual <= v["$lte"]):
+                    return False
                 if "$ne" in v and actual == v["$ne"]:
                     return False
                 if "$nin" in v and actual in v["$nin"]:
@@ -762,6 +764,59 @@ def test_external_wire_is_still_a_real_traceable_payment(service, db):
     # The rail acknowledged it, and the acknowledgement is on the payment (R10, R11).
     assert payment["clearing"]["statusCode"] == "ACSP"
     assert payment["clearing"]["networkRef"], "the rail's own reference is recorded"
+
+
+def test_deferred_settlement_completion_flips_a_matched_wire_to_settled(service, db):
+    """Stage 7 deferral — `settle.run` captures a default wire at settlementStatus=PENDING and
+    stops the saga; `settle.complete_due` flips it to SETTLED once the deferred window elapses.
+    This is the visible clearing-and-settlement stage Doina asked for (Sep 17: "wires should
+    settle only when they have reached and completed the clearing & settlement stage"), instead
+    of an instant green SETTLED pill at initiation.
+    """
+    from contexts.payment_settlement import settle
+
+    payment = _initiate_external(service)
+    pid = payment["paymentId"]
+
+    # Capture: still IN_PROGRESS, settlement PENDING, settledAt not yet stamped.
+    assert payment["lifecycle"]["currentState"] == "IN_PROGRESS"
+    assert payment["lifecycle"]["settlementStatus"] == "PENDING"
+    assert payment["clearing"]["settledAt"] is None
+    assert payment["clearing"]["batchRef"], "routing fields stamped at capture"
+    assert payment["clearing"]["settlementAccountCode"] in {"1111", "1121"}
+
+    # Completion (delay=0 so the window has elapsed) flips to SETTLED.
+    conn = FakeConnection(db)
+    completed = settle.complete_due(conn, "leafy_bank_bian", delay_seconds=0)
+    assert completed == 1
+
+    settled = db["payments"].find_one({"paymentId": pid})
+    assert settled["lifecycle"]["currentState"] == "SETTLED"
+    assert settled["status"] == "SETTLED", "top-level status mirrors currentState"
+    assert settled["lifecycle"]["settlementStatus"] == "SETTLED"
+    assert settled["clearing"]["settledAt"] is not None, "settledAt stamped at completion, not capture"
+
+    # Idempotent: a second run completes nothing — the query excludes SETTLED.
+    assert settle.complete_due(conn, "leafy_bank_bian", delay_seconds=0) == 0
+
+
+def test_deferred_completion_does_not_auto_settle_a_delayed_wire(service, db):
+    """A DELAYED wire is operator-retried, not auto-completed. `complete_due`'s outcome filter
+    (simulatedSettlementOutcome in {None, MATCHED}) must exclude DELAYED, or the Stage 9 hold
+    is silently undone and the exception queue reopens next cycle.
+    """
+    from contexts.payment_settlement import settle
+
+    payment = _initiate_external(service, simulatedSettlementOutcome="DELAYED")
+    pid = payment["paymentId"]
+    assert payment["lifecycle"]["settlementStatus"] == "PENDING"
+
+    conn = FakeConnection(db)
+    assert settle.complete_due(conn, "leafy_bank_bian", delay_seconds=0) == 0
+
+    still_pending = db["payments"].find_one({"paymentId": pid})
+    assert still_pending["lifecycle"]["currentState"] == "IN_PROGRESS"
+    assert still_pending["lifecycle"]["settlementStatus"] == "PENDING"
 
 
 def test_internal_payment_still_settles_alongside_the_guard(service, db):
