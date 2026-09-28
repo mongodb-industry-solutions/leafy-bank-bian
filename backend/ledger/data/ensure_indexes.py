@@ -13,7 +13,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from pymongo import ASCENDING
+from pymongo import ASCENDING, DESCENDING
 
 from database.connection import MongoDBConnection
 
@@ -95,6 +95,15 @@ EXCEPTIONS_INDEXES = [
         "keys": [("paymentId", ASCENDING), ("category", ASCENDING), ("status", ASCENDING)],
         "unique": True,
         "partialFilterExpression": {"status": {"$eq": "OPEN"}},
+    },
+    # The read path — declared here too so each service stays self-sufficient (`create_index`
+    # is idempotent). The transactions service's `_join_exception` does one
+    # `{"paymentId": …}` lookup per list row; the unique index above is partial on
+    # `status == "OPEN"` and cannot serve an unconstrained-status query, so without this
+    # every lookup collection-scans a collection that only grows.
+    {
+        "name": "idx_exception_payment_recent",
+        "keys": [("paymentId", ASCENDING), ("updatedAt", DESCENDING)],
     },
 ]
 

@@ -40,7 +40,10 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.types import interrupt
 from typing_extensions import Annotated
 
-import trace as trace_mod
+# `payment_trace`, not `trace` — the stdlib owns that name, and this service directory leads
+# sys.path, so a module called `trace.py` here shadows it for the whole process (including
+# any dependency that imports the stdlib one).
+import payment_trace as trace_mod
 
 logger = logging.getLogger(__name__)
 

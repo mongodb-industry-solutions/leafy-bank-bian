@@ -1671,6 +1671,14 @@ function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs, r
     return <Body className={styles.muted}>No exceptions recorded for this payment.</Body>;
   }
 
+  // The rows the panel renders. The open exception carries the freshly-fetched `agent{}`
+  // block: `get_payment`'s join only re-runs on the whole-workflow refetch, so without this
+  // substitution the dedicated `useReconciliationAgent` fetch above would have no effect on
+  // what is displayed and the AI investigation would appear minutes late.
+  const rows = open
+    ? exceptions.map((e) => (e.exceptionId === open.exceptionId ? open : e))
+    : exceptions;
+
   const actions = open ? EXCEPTION_ACTIONS[open.category] || [] : [];
   const needsOutcome = actions.includes("RETRY_SETTLEMENT");
 
@@ -1699,7 +1707,7 @@ function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs, r
           <Body>{EXCEPTION_EXPLANATION[(open || exceptions[0]).category]}</Body>
         </div>
       )}
-      {exceptions.map((e) => (
+      {rows.map((e) => (
         <div key={e.exceptionId} className={styles.exceptionRow}>
           <div className={styles.exceptionRowHead}>
             <StatusPill status={e.category} />

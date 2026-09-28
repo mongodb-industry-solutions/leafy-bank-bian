@@ -630,6 +630,18 @@ class PaymentsService:
         now = datetime.now(timezone.utc)
 
         if action == ACTION_RETRY_SETTLEMENT:
+            # Guard BEFORE the resolve write. `settle_payment` refuses a payment that is no
+            # longer IN_PROGRESS, and since B5 requires resolving first there is no rollback:
+            # a refusal would leave the exception RESOLVED with nothing having happened, and
+            # the row would silently leave the queue. Check the precondition here so the
+            # caller gets a 409 and the exception stays OPEN and retryable.
+            retry_state = (payment.get("lifecycle") or {}).get("currentState")
+            if retry_state != "IN_PROGRESS":
+                raise ValueError(
+                    f"Payment {exc['paymentId']} is {retry_state}, not OPEN to settlement — "
+                    "a retry is only possible while the payment is IN_PROGRESS. The "
+                    f"exception {exception_id} stays open."
+                )
             # Resolve the held exception BEFORE re-driving settlement (B5). A DELAYED re-run
             # that lands DELAYED again calls record_exception, which dedupes on
             # (paymentId, category, OPEN) — if this row were still OPEN, the new occurrence
@@ -641,9 +653,31 @@ class PaymentsService:
             # Re-drive settlement with the operator-chosen outcome. The payment is at
             # IN_PROGRESS (DELAYED holds there, not terminal), so settle_payment is a
             # legitimate forward transition. If it lands MATCHED → SETTLED.
-            self.settle_payment(
-                exc["paymentId"], outcome=new_settlement_outcome or "MATCHED",
-            )
+            #
+            # The guard above closes the common refusal, but the state can still move between
+            # the check and here (the completion worker, a concurrent operator). Re-open the
+            # exception on ANY failure rather than leaving it RESOLVED with nothing done —
+            # a silently-closed row is the one failure mode the operator cannot see. The
+            # re-open cannot collide with `idx_exception_open_unique`: this resolve holds the
+            # only OPEN claim for (paymentId, category), and it closed it a moment ago.
+            try:
+                self.settle_payment(
+                    exc["paymentId"], outcome=new_settlement_outcome or "MATCHED",
+                )
+            except Exception:
+                self.db["exceptions"].update_one(
+                    {"_id": exc["_id"]},
+                    {"$set": {
+                        "status": STATUS_OPEN,
+                        "resolution": None,
+                        "updatedAt": datetime.now(timezone.utc),
+                    }},
+                )
+                logger.warning(
+                    "resolve_exception: RETRY_SETTLEMENT on %s failed — re-opened %s",
+                    exc["paymentId"], exception_id, exc_info=True,
+                )
+                raise
         elif action == ACTION_RETURN_FUNDS:
             # return_of_funds flips the exception OPEN→RESOLVED *inside* its ACID txn
             # (conditional on OPEN) — the money move and the status claim are one atomic

@@ -152,6 +152,10 @@ export function buildLifecycleStages(payment, trace) {
       (exceptionsByStage[n] ||= []).push(e);
     }
   }
+  // Which stage numbers have already had their exceptions attached to a panel. A stage with
+  // several panels (stage 7: External settlement + Settlement posting) must render the
+  // resolve CTAs exactly once — see the `.map` below.
+  const claimedStages = new Set();
 
   // 2026-09-09 (Kiran): a payment HELD at the step-up gate sits at INITIATED with
   // `stepUpRequired` set — stage 2 has evaluated the (insufficient) assertion but recorded
@@ -544,13 +548,23 @@ export function buildLifecycleStages(payment, trace) {
       },
     },
   ]
+    // Drop the fee panel BEFORE the exception routing below — a panel that is filtered out
+    // must not be the one that claims its stage's exceptions, or they render nowhere.
+    .filter((s) => s.key !== "feeLedgerEvent" || hasFee)
     // Route each exception to its originating stage so the resolve CTAs render at the
     // failure site rather than a separate stage-9 panel. `exceptionsByStage` is keyed by
     // the leading integer of the exception's `source.stage`. A RETURN_FUNDS resolution
     // also carries the reversal ledger event (trace.reversalEvent) so the panel can show
     // "compensating movement posted" once the GL batch journals it.
+    //
+    // A stage number can own MORE than one panel (stage 7 is split into External settlement
+    // + Settlement posting). Only the FIRST panel of a stage claims that stage's exceptions:
+    // attaching them to every panel with the number rendered the whole ExceptionsPanel twice,
+    // giving the operator two live "Return funds" buttons for one exception (the second
+    // resolve then 409s on the OPEN guard and surfaces as a red banner on a correct action).
     .map((s) => {
-      const ex = exceptionsByStage[s.stage] || [];
+      const ex = claimedStages.has(s.stage) ? [] : (exceptionsByStage[s.stage] || []);
+      if (ex.length) claimedStages.add(s.stage);
       const hasReturn = ex.some((e) => e?.resolution?.action === "RETURN_FUNDS");
       const rev = hasReturn ? (trace?.reversalEvent ?? null) : null;
       // Build the reversal's double-entry legs (Dr 1131 clearing / Cr customer deposit)
@@ -564,8 +578,7 @@ export function buildLifecycleStages(payment, trace) {
           }
         : null;
       return { ...s, exceptions: ex, reversalEvent: rev, reversalLegs };
-    })
-    .filter((s) => s.key !== "feeLedgerEvent" || hasFee);
+    });
 }
 
 /**

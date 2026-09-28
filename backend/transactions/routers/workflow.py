@@ -83,7 +83,11 @@ def resolve_exception(
         msg = str(e)
         if "not found" in msg:
             code = 404
-        elif "not OPEN" in msg or "is " in msg and "OPEN" in msg:
+        # 409 = the resolve conflicts with current state: the exception is already closed,
+        # another resolver won the race, or the payment has moved past the state the action
+        # needs (a RETRY on a payment no longer IN_PROGRESS — which the service now refuses
+        # BEFORE writing, so the exception stays open and retryable).
+        elif "not OPEN" in msg or "not IN_PROGRESS" in msg or ("is " in msg and "OPEN" in msg):
             code = 409
         elif "not legal" in msg:
             code = 422

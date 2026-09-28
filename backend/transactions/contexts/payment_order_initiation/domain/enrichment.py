@@ -302,24 +302,39 @@ def _apply_agent_proposals(
     # the planner's pending updates. Bank enrichment is external-creditor-only by design
     # (Doina's example is an external BIC → beneficiary bank).
     #
-    # The agent resolves the bank FROM the customer-supplied BIC. Treat the agent's
-    # `creditor.bic` proposal as the lookup key if present, else fall back to the BIC already
-    # on the payment (the common case — the customer supplied the BIC, the agent fills the
-    # rest). Re-validate through the transactions-side directory port and apply the record's
-    # CANONICAL values, never the agent's restated strings. Customer-supplied bank fields
-    # win per-field. A BIC the directory doesn't know is a WARN → the caller's fallback runs.
+    # The agent resolves the bank FROM the customer-supplied BIC. The customer's BIC is the
+    # AUTHORITY, never a fallback: a proposed BIC is honoured only when the customer supplied
+    # none. The agent is explicitly forbidden from inventing one (spec L679), but the only
+    # thing enforcing that used to be the prompt — and a model that returned a *different*
+    # BIC that happens to exist in the directory would silently redirect the payment's
+    # beneficiary bank, since the per-field customer-wins gate cannot help for fields the
+    # customer left blank. Re-validate through the transactions-side directory port and apply
+    # the record's CANONICAL values, never the agent's restated strings. Customer-supplied
+    # bank fields win per-field. A BIC the directory doesn't know is a WARN → the caller's
+    # fallback runs.
     bank_props = [p for p in (proposals or [])
                   if isinstance(p, dict) and p.get("field") in _AGENT_BANK_FIELDS]
     if bank_props and external_creditor:
         creditor = payment.get("creditor") or {}
         bic_prop = next((p for p in bank_props if p.get("field") == "creditor.bic"), None)
-        lookup_bic = (bic_prop.get("to") if bic_prop else None) or creditor.get("bic")
+        proposed_bic = bic_prop.get("to") if bic_prop else None
+        customer_bic = creditor.get("bic")
+        # Customer's BIC wins outright. A contradicting proposal is dropped and recorded —
+        # the operator should see that the agent tried to change the routing key.
+        if customer_bic and proposed_bic and proposed_bic != customer_bic:
+            plan.outcomes.append((
+                "beneficiary_bank_resolved", "WARN",
+                f"Enrichment Agent proposed BIC {proposed_bic!r}, which contradicts the "
+                f"customer-supplied {customer_bic!r} — ignored. The customer's BIC is the "
+                "lookup key; the agent resolves from it and may not replace it.",
+            ))
+        lookup_bic = customer_bic or proposed_bic
         record = reference_data.bank_by_bic(lookup_bic) if lookup_bic else None
         if record is None:
             plan.outcomes.append((
                 "beneficiary_bank_resolved", "WARN",
-                f"Enrichment Agent proposed BIC {lookup_bic!r}, which is not in the "
-                "institution directory — not applied. The deterministic fallback will run.",
+                f"BIC {lookup_bic!r} is not in the institution directory — the Enrichment "
+                "Agent's bank proposal was not applied. The deterministic fallback will run.",
             ))
         else:
             canonical = {

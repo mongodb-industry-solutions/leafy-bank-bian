@@ -139,12 +139,12 @@ def list_payments(
     items = list(cursor)
     # Join each row with its open (or latest resolved) exception occurrence, so the Activity
     # list surfaces the exception reason + discrepancy subline for failed/returned payments
-    # — the same row rendering the Operations queue used. Per-payment join (not batch $in) to
-    # match list_exceptions and keep the FakeDb suite hermetic. Null for a payment with no
-    # exception doc (the common case).
+    # — the same row rendering the Operations queue uses. ONE `$in` for the page. Null for a
+    # payment with no exception doc (the common case).
     exc_coll = connection.get_collection(db_name, "exceptions")
+    joined = _join_exceptions(exc_coll, [i.get("paymentId") for i in items])
     for item in items:
-        item["exception"] = _join_exception(exc_coll, item.get("paymentId"))
+        item["exception"] = joined.get(item.get("paymentId"))
     return {
         "items": items,
         "total": coll.count_documents(query),
@@ -233,26 +233,40 @@ def _with_xml(execution: dict) -> dict:
     return execution
 
 
-def _join_exception(exc_coll, payment_id: Optional[str]) -> Optional[dict]:
-    """The open exception for a payment, or the latest resolved/dismissed one if none is
-    open, or None when the payment has no exception doc at all (a legacy terminal payment
-    from before stage 9). The queue row renders this so the Operations lens shows the
-    reason + the discrepancy without a second fetch."""
-    if not payment_id:
-        return None
-    candidates = list(exc_coll.find({"paymentId": payment_id}))
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _pick_exception(candidates: list) -> Optional[dict]:
+    """The one exception a list row renders: the open one, else the most-recently-updated
+    resolved/dismissed one, else None. `updatedAt` is tz-aware; fall back to a tz-aware
+    epoch so a doc missing both timestamps cannot raise on comparison."""
     if not candidates:
         return None
     open_excs = [e for e in candidates if e.get("status") == "OPEN"]
     if open_excs:
         return open_excs[0]
-    # No OPEN one — show the most-recently-updated resolved/dismissed exception so a closed
-    # row still carries its history. `updatedAt` is tz-aware; fall back to a tz-aware epoch.
     return max(
         candidates,
-        key=lambda e: e.get("updatedAt") or e.get("createdAt")
-        or datetime(1970, 1, 1, tzinfo=timezone.utc),
+        key=lambda e: e.get("updatedAt") or e.get("createdAt") or _EPOCH,
     )
+
+
+def _join_exceptions(exc_coll, payment_ids: list) -> dict:
+    """Map `paymentId -> the exception to render`, for a whole page of list rows.
+
+    ONE `$in` query for the page, not one per row. The per-row version issued up to `limit`
+    (25) separate lookups against a shared, append-only collection on every Activity-list and
+    Operations-queue load — and none of them could use `idx_exception_open_unique`, which is
+    partial on `status == "OPEN"` and so ineligible for a query that does not constrain
+    status. `idx_exception_payment_recent` now serves this one.
+    """
+    ids = [pid for pid in payment_ids if pid]
+    if not ids:
+        return {}
+    by_payment: dict = {}
+    for exc in exc_coll.find({"paymentId": {"$in": ids}}):
+        by_payment.setdefault(exc.get("paymentId"), []).append(exc)
+    return {pid: _pick_exception(excs) for pid, excs in by_payment.items()}
 
 
 def list_exceptions(
@@ -282,8 +296,9 @@ def list_exceptions(
     items = list(
         coll.find(query, _LIST_PROJECTION).sort("createdAt", -1).skip(skip).limit(limit)
     )
+    joined = _join_exceptions(exc_coll, [i.get("paymentId") for i in items])
     for item in items:
-        item["exception"] = _join_exception(exc_coll, item.get("paymentId"))
+        item["exception"] = joined.get(item.get("paymentId"))
     return {
         "items": items,
         "total": coll.count_documents(query),

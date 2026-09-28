@@ -179,6 +179,18 @@ EXCEPTIONS_INDEXES = [
         "unique": True,
         "partialFilterExpression": {"status": {"$eq": "OPEN"}},
     },
+    # The read path. `_join_exceptions` resolves a whole page of Activity-list /
+    # Operations-queue rows with one `{"paymentId": {"$in": [...]}}` query. The unique index
+    # above cannot serve it: it is partial on `status == "OPEN"`, so a query that does not
+    # constrain `status` is not eligible and the lookup collection-scans. `exceptions` only
+    # grows — occurrence-per-doc (B2) never deletes, and the collection is shared — so this
+    # is the 2026-08-31 shared-collection lesson applied to the read side.
+    # `updatedAt` descending is part of the key because the join picks the
+    # most-recently-updated row when none is OPEN.
+    {
+        "name": "idx_exception_payment_recent",
+        "keys": [("paymentId", ASCENDING), ("updatedAt", DESCENDING)],
+    },
 ]
 
 

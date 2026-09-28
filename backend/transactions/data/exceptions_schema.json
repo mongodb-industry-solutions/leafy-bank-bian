@@ -75,14 +75,21 @@
         },
         "agent": {
           "bsonType": ["object", "null"],
-          "description": "Reserved null in Phase 1 (R12: 'will not create a new agent here'). The Reconciliation Agent's output lands here (Sep 17 L1319-1323): investigation result, likely root cause, supporting evidence, confidence, recommended resolution. Shape ratified via Q61.",
+          "description": "Null until the Reconciliation Agent runs. Its output lands here (Sep 17 L1319-1323): investigation result, likely root cause, supporting evidence, confidence, recommended resolution. Shape ratified via Q61. Written by backend/payment_agent/reconciliation_agent.py `record_investigation` — the ONLY write that agent performs.",
           "properties": {
             "investigation": {"bsonType": ["string", "null"]},
             "rootCause": {"bsonType": ["string", "null"]},
             "evidence": {"bsonType": "array", "items": {"bsonType": "string"}},
-            "confidence": {"bsonType": ["double", "null"]},
+            "confidence": {
+              "bsonType": ["string", "null"],
+              "enum": ["HIGH", "MEDIUM", "LOW", null],
+              "description": "A free-text LABEL, not a numeric score — an LLM's numeric confidence is not calibrated, so the operator sees the label. Validated against this same set in `reconciliation_agent._CONFIDENCE_VALUES` before the write; an out-of-set value is refused, not coerced."
+            },
             "recommendedResolution": {"bsonType": ["string", "null"]},
-            "recordedAt": {"bsonType": ["date", "null"]}
+            "recordedAt": {
+              "bsonType": ["string", "null"],
+              "description": "ISO 8601 string, not a BSON date — the agent service writes `datetime.now(timezone.utc).isoformat()` so the value survives the JSON hop to the UI unchanged."
+            }
           }
         },
         "createdAt": {"bsonType": "date"},
