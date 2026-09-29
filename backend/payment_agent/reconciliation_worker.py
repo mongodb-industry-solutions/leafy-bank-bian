@@ -89,7 +89,13 @@ def run_reconciliation_worker(agent: Any, db: Any, connection: Any) -> None:
 
 def start_reconciliation_worker(agent: Any, db: Any, connection: Any) -> threading.Thread | None:
     """Start the worker in a daemon thread, if enabled. Returns the thread or None."""
-    if os.getenv("ENABLE_RECONCILIATION_AGENT", "true").lower() not in ("1", "true", "yes"):
+    # ⚠️ Default OFF (2026-09-29, Kiran). Set ENABLE_RECONCILIATION_AGENT=true to run it.
+    # It was default-ON so the HITL story needed no configuration; but this worker watches
+    # `exceptions` for OPEN discrepancies and calls Bedrock per insert, so during the
+    # inbound-settlement repair it fired on every artifact discrepancy (and on an expired
+    # AWS SSO session, logged a TokenRetrievalError each time — handover §9). An agent that
+    # spends money and writes to documents on a change stream is an opt-in, not a default.
+    if os.getenv("ENABLE_RECONCILIATION_AGENT", "false").lower() not in ("1", "true", "yes"):
         logger.info("Reconciliation Agent worker disabled (ENABLE_RECONCILIATION_AGENT != true).")
         return None
     if agent is None:

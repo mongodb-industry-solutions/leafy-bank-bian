@@ -113,9 +113,11 @@ const EMPTY = {
   transferType: "THIRD_PARTY",
   // stage 7 simulation lever (wire-only; default MATCHED = happy path)
   simulatedSettlementOutcome: "MATCHED",
-  // Enrichment Agent toggle (default on → agent owns beneficiary-bank enrichment +
-  // purpose-code/ref proposals). Off → Stage 3 runs fully deterministically.
-  enableEnrichmentAgent: true,
+  // Enrichment Agent toggle. Default OFF (2026-09-29, Kiran) → Stage 3 runs fully
+  // deterministically. Switch to "AI agent" and the agent owns beneficiary-bank enrichment
+  // + purpose-code/ref proposals. The wizard default matches the request contract's
+  // (`api_models.InitiateBody.enableEnrichmentAgent`) so the screen and the API agree.
+  enableEnrichmentAgent: false,
 };
 
 const isWire = (form) => form.rail === "WIRE";
