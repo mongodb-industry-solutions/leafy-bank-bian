@@ -1,9 +1,10 @@
 "use client";
 
 import { useUser } from "@/lib/context/UserContext";
+import { BACKOFFICE_DECISION_KEY } from "@/lib/const/magentaBackofficeBridge";
 import { Body } from "@leafygreen-ui/typography";
 import { useEffect, useState } from "react";
-import LeafyBankAssistant from "../LeafyBankAssistant/LeafyBankAssistant";
+import LeafyBankChatAssistant from "../LeafyBankChatAssistant/LeafyBankChatAssistant";
 import styles from "./FloatingAssistant.module.css";
 
 export default function FloatingAssistant() {
@@ -12,12 +13,18 @@ export default function FloatingAssistant() {
   // appear while the login modal/overlay is still on screen.
   const { selectedUser, loginInProgress } = useUser();
   const [modalOpen, setModalOpen] = useState(false);
+  const [pendingResolution, setPendingResolution] = useState(null);
 
   const [showBubble, setShowBubble] = useState(true);
   const [fadeOut, setFadeOut] = useState(false);
+  // The agent proactively has something to say before the customer ever opens
+  // the chat — mirrors the "!" unread indicator on a real messaging app, and
+  // clears once they open it and start reading.
+  const [hasUnread, setHasUnread] = useState(true);
 
   const toggleChatbot = () => {
     setModalOpen(true);
+    setHasUnread(false);
   };
 
   useEffect(() => {
@@ -28,6 +35,25 @@ export default function FloatingAssistant() {
 
     return () => clearTimeout(timer);
   }, []);
+
+  // Picked up once, right when this mounts (e.g. landing back on "/" after a
+  // back-office approve/deny) — see lib/const/magentaBackofficeBridge.js.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(BACKOFFICE_DECISION_KEY);
+      if (!raw) return;
+      setPendingResolution(JSON.parse(raw));
+      setModalOpen(true);
+      setHasUnread(false);
+    } catch {
+      localStorage.removeItem(BACKOFFICE_DECISION_KEY);
+    }
+  }, []);
+
+  function handleResolutionConsumed() {
+    localStorage.removeItem(BACKOFFICE_DECISION_KEY);
+    setPendingResolution(null);
+  }
 
   if (!selectedUser || loginInProgress) return null;
 
@@ -47,6 +73,8 @@ export default function FloatingAssistant() {
           </div>
         )}
 
+        {hasUnread && <span className={styles.unreadBadge}>!</span>}
+
         <img src="/agent.png" alt="Chat Icon" className={styles.chatIcon} />
 
         <div className={styles.textWrapper}>
@@ -59,9 +87,11 @@ export default function FloatingAssistant() {
         </div>
       </div>
 
-      <LeafyBankAssistant
+      <LeafyBankChatAssistant
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
+        pendingResolution={pendingResolution}
+        onResolutionConsumed={handleResolutionConsumed}
       />
     </>
   );

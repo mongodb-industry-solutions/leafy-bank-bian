@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Icon from "@leafygreen-ui/icon";
 import BottomNav from "@/components/BottomNav/BottomNav";
 import SendMoneyModal from "@/components/SendMoneyModal/SendMoneyModal";
-import LeafyBankAssistant from "@/components/LeafyBankAssistant/LeafyBankAssistant";
+import LeafyBankChatAssistant from "@/components/LeafyBankChatAssistant/LeafyBankChatAssistant";
 import { useRouter } from "next/navigation";
 
 /**
@@ -64,7 +64,7 @@ export default function MobileActions() {
         initialView={sendMoneyInitialView}
       />
 
-      <LeafyBankAssistant
+      <LeafyBankChatAssistant
         isOpen={assistantOpen}
         onClose={() => setAssistantOpen(false)}
       />

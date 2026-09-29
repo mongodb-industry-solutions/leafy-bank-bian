@@ -11,7 +11,7 @@ import Icon from "@leafygreen-ui/icon";
 import Link from "next/link";
 import ProductCard from "@/components/ProductCard/ProductCard";
 import CollapsibleProductCard from "@/components/ProductCard/CollapsibleProductCard";
-import LeafyBankAssistant from "../components/LeafyBankAssistant/LeafyBankAssistant";
+import LeafyBankChatAssistant from "../components/LeafyBankChatAssistant/LeafyBankChatAssistant";
 import OpenFinanceAssistant from "@/components/OpenFinanceAssistant/OpenFinanceAssistant";
 import Login from "@/components/Login/Login";
 import AccountModal from "@/components/AccountModal/AccountModal";
@@ -330,10 +330,9 @@ const HomeContent = ({ hidden = false, onReady = null }) => {
         setAccountType={setAccountType}
       />
 
-      <LeafyBankAssistant
+      <LeafyBankChatAssistant
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        initialPrompt={pendingPrompt}
       />
 
       <OpenFinanceAssistant

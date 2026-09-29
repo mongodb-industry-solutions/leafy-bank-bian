@@ -1,0 +1,520 @@
+/* Visual chrome mirrors LeafyBankAssistant/OpenFinanceAssistant so this mock
+   drops into the existing chat bubble without looking out of place. */
+
+.customModalBackdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 30, 43, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.customModalContainer {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  max-width: 90vw;
+  height: 90vh;
+  overflow: hidden;
+  position: relative;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.closeButton {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+  z-index: 1001;
+}
+
+.closeButton:hover {
+  color: #000;
+}
+
+.chatContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 70vw;
+  overflow: hidden;
+}
+
+/* ─── Header ─── */
+
+.chatHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 30px;
+  border-bottom: none;
+  background: white;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.chatHeaderContent {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.agentImage {
+  width: 70px;
+  height: 40px;
+}
+
+.headerTitleWrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.chatTitle {
+  margin: 0;
+  font-size: 18px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgb(62, 62, 62);
+}
+
+.pulseDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00ef5d;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.5; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ─── Chat layout ─── */
+
+.chatTabContent {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.chatMessages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* ─── Compose bar (cosmetic — see LeafyBankChatAssistant.js for why) ─── */
+
+.chatInputContainer {
+  display: flex;
+  gap: 8px;
+  padding: 16px;
+  border-top: 1px solid #e5e7eb;
+  background: white;
+  flex-shrink: 0;
+}
+
+.chatInput {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 150ms ease;
+}
+
+.chatInput:focus {
+  outline: none;
+  border-color: #007856;
+  box-shadow: 0 0 0 2px rgba(0, 120, 86, 0.1);
+}
+
+.chatInput::placeholder {
+  color: #9ca3af;
+}
+
+.chatInput:disabled {
+  background: #f9fafb;
+  cursor: not-allowed;
+}
+
+.sendButton {
+  background: #007856;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 150ms ease;
+}
+
+.sendButton:hover:not(:disabled) {
+  background: #00593f;
+}
+
+.sendButton:disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+}
+
+/* ─── Messages ─── */
+
+.message {
+  display: flex;
+  margin-bottom: 8px;
+}
+
+.assistantMessage {
+  justify-content: flex-start;
+}
+
+.assistantContent {
+  display: flex;
+  flex-direction: column;
+  /* Widened from 80% — tables/SVG charts need more room than plain text
+     to stay readable; see .messageText table/svg rules below. */
+  max-width: 92%;
+  gap: 6px;
+}
+
+.assistantMessage .messageText {
+  background: #fafbfc;
+  padding: 8px 12px;
+  border-radius: 12px;
+  word-wrap: break-word;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.userMessage {
+  justify-content: flex-end;
+}
+
+.userMessage .messageText {
+  background: #dcfce7;
+  color: #166534;
+  padding: 8px 12px;
+  border-radius: 10px;
+  max-width: 70%;
+  word-wrap: break-word;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.messageText {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.messageText strong {
+  font-weight: 600;
+}
+
+/* GFM tables (marked's gfm:true output) had zero styling before this —
+   columns ran together with no borders/spacing. */
+.messageText table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.messageText th,
+.messageText td {
+  border: 1px solid #e8edeb;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.messageText th {
+  background: #f3f8f6;
+  color: #1c2d26;
+  font-weight: 600;
+}
+
+.messageText tr:nth-child(even) td {
+  background: #fafbfc;
+}
+
+/* Inline SVG bar charts (see insights_service.py's _bar_chart_svg) — fixed
+   pixel width/height from generation, scaled responsively here so they
+   don't overflow a narrow bubble. */
+.messageText svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 8px 0;
+}
+
+/* ─── Insight rows (replaces raw tool/query/result blocks) ─── */
+
+.insightWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: fit-content;
+}
+
+.insightRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #4b7563;
+  background: #f0fdf4;
+  border: 1px solid #d7f5e6;
+  border-radius: 20px;
+  padding: 5px 12px;
+  width: fit-content;
+}
+
+.insightIcon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.insightLabel {
+  color: #166534;
+}
+
+.insightFeature {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #075e54;
+  background: #d7f5e6;
+  border-radius: 10px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+/* Collapsed-by-default "view record" toggle + preview — a small, opt-in proof
+   of the underlying document shape, deliberately tiny so it never turns back
+   into the wall-of-JSON look this replaced. */
+.insightToggle {
+  background: none;
+  border: none;
+  color: #6b8f7f;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  margin-left: 2px;
+  white-space: nowrap;
+}
+
+.insightToggle:hover {
+  color: #166534;
+  text-decoration: underline;
+}
+
+.insightRecord {
+  margin: 0 0 0 12px;
+  padding: 6px 10px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-left: 2px solid #007856;
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #374151;
+  white-space: pre-wrap;
+  max-width: 320px;
+}
+
+/* ─── Thinking indicator ─── */
+
+.stepIndicator {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  width: fit-content;
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #d1d5db;
+  border-top-color: #007856;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── Decision (yes/no) prompt ─── */
+
+.decisionRow {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid #e5e7eb;
+  background: white;
+  flex-shrink: 0;
+}
+
+.decisionButtonYes {
+  background: #007856;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 150ms ease;
+}
+
+.decisionButtonYes:hover {
+  background: #00593f;
+}
+
+.decisionButtonNo {
+  background: white;
+  color: #4b5563;
+  border: 1px solid #d1d5db;
+  border-radius: 20px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 150ms ease;
+}
+
+.decisionButtonNo:hover {
+  background: #f3f4f6;
+}
+
+/* ─── Multi-option choice prompt (e.g. crypto vs. stocks, plan tiers) ─── */
+
+.choiceRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #e5e7eb;
+  background: white;
+  flex-shrink: 0;
+}
+
+.choiceButton {
+  text-align: left;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #1c2d26;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 150ms ease;
+}
+
+.choiceButton:hover {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+/* ─── Back-office hint callout ─── */
+
+.backofficeHint {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: #78350f;
+}
+
+.backofficeHintLink {
+  align-self: flex-start;
+  background: white;
+  border: 1px solid #f0c556;
+  color: #92400e;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.backofficeHintLink:hover {
+  background: #fef3c7;
+}
+
+/* ─── Reset control ─── */
+
+.resetRow {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.resetButton {
+  background: none;
+  border: 1px solid #d1d5db;
+  color: #4b5563;
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.resetButton:hover {
+  background: #f3f4f6;
+}
+
+/* ─── Mobile ─── */
+@media (max-width: 768px) {
+  .customModalContainer { max-width: 96vw; }
+  .chatContainer { width: 96vw; }
+  .chatHeader { padding: 6px 16px; }
+  .chatHeaderContent { gap: 10px; }
+  .agentImage { width: 48px; height: 28px; }
+  .chatTitle { font-size: 16px; }
+}

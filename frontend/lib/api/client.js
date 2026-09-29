@@ -1,6 +1,7 @@
 const CORE_BASE = "/api/backend";
 const CHATBOT_BASE = "/api/chatbot";
 const OPENFINANCE_CHAT_BASE = "/api/openfinance-chat";
+const CUSTOMER360_CHAT_BASE = "/api/customer360-chat";
 
 /**
  * Core backend API client.
@@ -165,6 +166,105 @@ export async function openFinanceChatApi(path, { body = null } = {}) {
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : null,
     });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { data: null, error: `${res.status}: ${errText}` };
+    }
+
+    return { data: await res.json(), error: null };
+  } catch (e) {
+    return { data: null, error: e.message };
+  }
+}
+
+/**
+ * customer360-agent (Magenta) client — synchronous, single JSON response.
+ * Body shape: { message, session_id, user_id }. Response shape (confirmed
+ * against a live local `agentic dev up` call — the hosted-platform docs'
+ * { success, response, ... } shape does NOT apply locally):
+ * { result, session_id, user_id, execution_id, status }. No `success`
+ * field locally; `status` ("completed"/"suspended"/...) is the only
+ * outcome signal, and the text is under `result`, not `response`.
+ * @param {object} body
+ * @returns {Promise<{data: any, error: string|null}>}
+ */
+export async function customer360ChatApi(body) {
+  try {
+    const res = await fetch(CUSTOMER360_CHAT_BASE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { data: null, error: `${res.status}: ${errText}` };
+    }
+
+    return { data: await res.json(), error: null };
+  } catch (e) {
+    return { data: null, error: e.message };
+  }
+}
+
+/**
+ * Resume a suspended legacy human-review execution (see
+ * app/api/customer360-review/resume/route.js). Async on the platform side —
+ * returns {success, execution_id, status: "resuming"} immediately; poll
+ * getCustomer360ExecutionStatus for the final result.
+ * @param {{executionId: string, decision: string, reviewerNotes?: string}} args
+ * @returns {Promise<{data: any, error: string|null}>}
+ */
+export async function resumeCustomer360Review({ executionId, decision, reviewerNotes }) {
+  try {
+    const res = await fetch("/api/customer360-review/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ execution_id: executionId, decision, reviewer_notes: reviewerNotes || "" }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { data: null, error: `${res.status}: ${errText}` };
+    }
+
+    return { data: await res.json(), error: null };
+  } catch (e) {
+    return { data: null, error: e.message };
+  }
+}
+
+/**
+ * Poll a resumed execution's status/result (see
+ * app/api/customer360-review/status/route.js).
+ * @param {string} executionId
+ * @returns {Promise<{data: any, error: string|null}>}
+ */
+export async function getCustomer360ExecutionStatus(executionId) {
+  try {
+    const res = await fetch(`/api/customer360-review/status?execution_id=${encodeURIComponent(executionId)}`);
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { data: null, error: `${res.status}: ${errText}` };
+    }
+
+    return { data: await res.json(), error: null };
+  } catch (e) {
+    return { data: null, error: e.message };
+  }
+}
+
+/**
+ * List currently suspended executions (see
+ * app/api/customer360-review/list/route.js) — the local `agentic dev up`
+ * stack's own record, not a client-side queue.
+ * @returns {Promise<{data: any, error: string|null}>}
+ */
+export async function listCustomer360SuspendedReviews() {
+  try {
+    const res = await fetch("/api/customer360-review/list");
 
     if (!res.ok) {
       const errText = await res.text();

@@ -10,7 +10,7 @@ import Icon from "@leafygreen-ui/icon";
 import IconButton from "@leafygreen-ui/icon-button";
 import Code from "@leafygreen-ui/code";
 import OverlapCards from "../../components/OverlapCards/OverlapCards";
-import LeafyBankAssistant from "../../components/LeafyBankAssistant/LeafyBankAssistant";
+import LeafyBankChatAssistant from "../../components/LeafyBankChatAssistant/LeafyBankChatAssistant";
 import MobileActions from "@/components/MobileActions/MobileActions";
 import { useLoansPageData } from "@/lib/api/hooks";
 
@@ -239,7 +239,7 @@ export default function LoansPage() {
         </div>
       </section>
 
-      <LeafyBankAssistant isOpen={modalOpen} onClose={() => setModalOpen(false)} />
+      <LeafyBankChatAssistant isOpen={modalOpen} onClose={() => setModalOpen(false)} />
 
       {/* Mobile-only bottom navigation + its action modals. */}
       <MobileActions />

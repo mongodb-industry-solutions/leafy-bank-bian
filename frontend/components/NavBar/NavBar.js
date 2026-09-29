@@ -42,13 +42,17 @@ const NavBarContent = ({ bianModelUrl }) => {
     const { selectedUser, authorizedConsents, loginInProgress } = useUser();
     const pathname = usePathname();
     const isGlMonitor = pathname?.startsWith("/gl-pipeline-monitor");
+    // The back-office reviewer screen is a different persona's view. It should never
+    // show a customer's nav links or identity, even if one happens to be selected in
+    // this browser's localStorage (e.g. opened in a new tab from a customer session).
+    const isBackOffice = pathname?.startsWith("/back-office");
     // Before a user is chosen (welcome modal), show only the logo — no nav links or user controls.
     // The GL monitor runs as an implicit ops user, so it's always treated as signed in.
     // selectedUser is set as soon as the login flow starts (to prefetch data in the
     // background) — loginInProgress excludes that window so the header doesn't show
     // "Frida" while the login modal/overlay is still on screen.
-    const hasUser = isGlMonitor || (!!selectedUser?.id && !loginInProgress);
-    const hideNavLinks = isGlMonitor || !hasUser;
+    const hasUser = !isBackOffice && (isGlMonitor || (!!selectedUser?.id && !loginInProgress));
+    const hideNavLinks = isGlMonitor || isBackOffice || !hasUser;
 
     return (
         <header className={styles.navBar}>

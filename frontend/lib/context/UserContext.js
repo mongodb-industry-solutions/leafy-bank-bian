@@ -1,7 +1,8 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
-import { coreApi } from "@/lib/api/client";
+import { coreApi, customer360ChatApi } from "@/lib/api/client";
+import { chatHistoryKey, chatSessionIdKey } from "@/lib/const/magentaBackofficeBridge";
 import { USER_MAP } from "@/lib/constants";
 
 const UserContext = createContext(null);
@@ -30,9 +31,18 @@ export function UserProvider({ children }) {
   // Bumped to force core data (accounts/transactions) re-fetch, e.g. after a payment.
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
 
-  // Chat state — persists across navigation (e.g. bank-login redirect and back)
-  const [chatMessages, setChatMessages] = useState(null); // null = fresh session, [] = cleared
-  const [chatThreadId, setChatThreadId] = useState(null);
+  // customer360-agent chat session — created fresh on every real login (see
+  // selectUser below), persisted across navigation/refresh via localStorage
+  // (same keys LeafyBankChatAssistant itself reads — see magentaBackofficeBridge.js).
+  const [chatSessionId, setChatSessionId] = useState(null);
+  // The proactive, already-evaluated greeting from the customer360-agent
+  // orchestrator's Session Start turn (see system_message.py) — fired
+  // automatically on login, before the customer has opened the chat at all,
+  // so LeafyBankChatAssistant can show a real, personalized opening message
+  // instantly instead of a static placeholder. null = not ready yet/failed
+  // (LeafyBankChatAssistant falls back to its own static welcome message either way).
+  const [chatGreeting, setChatGreeting] = useState(null);
+  const [chatGreetingLoading, setChatGreetingLoading] = useState(false);
 
   // Hydrate from localStorage on mount (needed for bank-login tab)
   useEffect(() => {
@@ -47,6 +57,16 @@ export function UserProvider({ children }) {
           parsed.bankUsername = details?.BankUserName ?? details?.UserName ?? parsed.name;
         }
         setSelectedUser(parsed);
+        // Continue an existing session (this is a refresh/new tab, not a
+        // fresh login) — don't regenerate the session or re-fire the
+        // Session Start greeting call, just pick the id back up so the
+        // next message in this browser continues the same conversation.
+        try {
+          const existingSessionId = localStorage.getItem(chatSessionIdKey(parsed.id));
+          if (existingSessionId) setChatSessionId(existingSessionId);
+        } catch {
+          /* storage unavailable — LeafyBankChatAssistant falls back to its own id */
+        }
       } catch {
         localStorage.removeItem("selectedUser");
       }
@@ -56,18 +76,64 @@ export function UserProvider({ children }) {
   const selectUser = useCallback((user) => {
     // Clear previous session
     setConsents(new Map());
-    setChatMessages(null);
-    setChatThreadId(null);
 
     // Set new user
     setSelectedUser(user);
     localStorage.setItem("selectedUser", JSON.stringify(user));
+
+    // Fresh customer360-agent session on every real login — see
+    // PROJECT-PLAN.md's "Session Start" design: financial_wellness (and the
+    // rest of First Contact) should already have run, with a real proactive
+    // greeting ready, before the customer ever opens the chat. Backoffice
+    // personas (Marc/Ana/Noah) have no bankUsername and are skipped entirely
+    // — this is a customer-facing concept only.
+    setChatGreeting(null);
+    if (!user?.bankUsername) {
+      setChatSessionId(null);
+      return;
+    }
+
+    const sessionId =
+      typeof window !== "undefined" && window.crypto?.randomUUID
+        ? window.crypto.randomUUID()
+        : `${user.id ?? "anon"}-${Date.now()}`;
+    setChatSessionId(sessionId);
+    try {
+      localStorage.setItem(chatSessionIdKey(user.id), sessionId);
+      localStorage.removeItem(chatHistoryKey(user.id));
+    } catch {
+      /* storage unavailable — the greeting still applies via React state below */
+    }
+
+    setChatGreetingLoading(true);
+    (async () => {
+      const { data, error } = await customer360ChatApi({
+        message: "__SESSION_START__",
+        session_id: sessionId,
+        user_id: user.bankUsername,
+      });
+      if (!error && data?.status === "completed" && data.result) {
+        setChatGreeting(data.result);
+      } else {
+        // Not worth surfacing as a login-blocking error (LeafyBankChatAssistant
+        // just shows its own static welcome message instead), but silent
+        // failure here is a real debugging dead-end otherwise — log it.
+        console.warn("Session Start greeting failed:", error || data);
+      }
+      // Any failure here just means LeafyBankChatAssistant shows its own static
+      // welcome message instead — not worth surfacing as a login-blocking
+      // error for a proactive nice-to-have.
+      setChatGreetingLoading(false);
+    })();
   }, []);
 
   const clearUser = useCallback(() => {
     localStorage.removeItem("selectedUser");
     setSelectedUser(null);
     setConsents(new Map());
+    setChatSessionId(null);
+    setChatGreeting(null);
+    setChatGreetingLoading(false);
   }, []);
 
   // Record that the next full page load is an intentional in-app navigation, so
@@ -253,10 +319,9 @@ export function UserProvider({ children }) {
     consentRefreshKey,
     dataRefreshKey,
     refreshData,
-    chatMessages,
-    setChatMessages,
-    chatThreadId,
-    setChatThreadId,
+    chatSessionId,
+    chatGreeting,
+    chatGreetingLoading,
   };
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;

@@ -27,6 +27,31 @@
   margin-left: 10px;
 }
 
+/* Unread indicator — the agent has a proactive message waiting, before the
+   customer has even opened the chat. Clears once they open it. */
+.unreadBadge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: #d0342c;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 2px white;
+  animation: badgePop 1.6s ease-in-out infinite;
+}
+
+@keyframes badgePop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
 .chatbotText {
   font-size: 16px;
   font-weight: 500;
