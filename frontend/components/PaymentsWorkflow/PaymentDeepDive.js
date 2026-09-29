@@ -846,9 +846,13 @@ function RailViews({ data }) {
   // the message itself rather than a hardcoded list, so an element added to the mapper shows
   // up here without editing this component.
   // Through the ISO envelope: a pacs.008 is `Document/FIToFICstmrCdtTrf/{GrpHdr,
-  // CdtTrfTxInf}`, and `CdtTrfTxInf` is 1..n. Paths are shown relative to
-  // `FIToFICstmrCdtTrf` — repeating the wrapper on every row would be noise.
-  const isoBody = iso?.Document?.FIToFICstmrCdtTrf ?? iso;
+  // CdtTrfTxInf}`, and `CdtTrfTxInf` is 1..n. An inbound payment's stage-5 message is a
+  // pacs.002 instead — `Document/FIToFIPmtStsRpt/{GrpHdr, OrgnlGrpInfAndSts,
+  // TxInfAndSts}` (pacs002.py MESSAGE_ROOT) — a different message root, same envelope
+  // shape. Paths are shown relative to whichever message root is present — repeating the
+  // wrapper on every row would be noise.
+  const isoBody =
+    iso?.Document?.FIToFICstmrCdtTrf ?? iso?.Document?.FIToFIPmtStsRpt ?? iso;
   const isoRows = [];
   Object.entries(isoBody).forEach(([group, children]) => {
     (Array.isArray(children) ? children : [children]).forEach((child) => {
@@ -952,6 +956,18 @@ function summaryRows(stage, payment) {
         ["Client reference", d?.remittance?.invoiceNo],
         ["Initiated", fmtWhen(d?.initiatedAt)],
       ];
+    case "beneficiaryResolution": {
+      // Inbound stage 2 (FR-2.IN1-4) — resolves the CLAIMED creditor from stage 1 against
+      // Leafy Bank's own account records. No customer session exists here, so there is no
+      // authentication{}/entitlement{} pair to show, unlike outbound's stage 2.
+      const r = d;
+      return [
+        ["Match outcome", r?.matchOutcome],
+        ["Matched account", r?.matchedAccountId],
+        ["Match method", r?.matchMethod],
+        ["Checked at", fmtWhen(r?.checkedAt)],
+      ];
+    }
     case "checks": {
       // Stage 2's two summary blocks. The authentication assessment says what the CHANNEL
       // asserted — `NONE` means nothing was asserted, which is why the check beneath reads
@@ -989,6 +1005,10 @@ function summaryRows(stage, payment) {
       // the wireDetails envelope (caller-supplied or derived from the authenticated caller);
       // shown here rather than only in the diff so a pass-through value is visible too.
       const initiatingParty = payment?.wireDetails?.initiatingParty;
+      // Inbound-only (FR-3.IN1): screens the ORIGINATOR rather than outbound's counterparty.
+      // Written to the same `correspondent.sanctionsCheck` object outbound's stage-4 uses,
+      // so an inbound payment with no fraud{} still shows the screening it actually ran.
+      const originatorScreen = d?.originatorSanctionsCheck;
       return [
         ["Checks recorded", checks.length || null],
         ["Warnings", warned || null],
@@ -996,6 +1016,9 @@ function summaryRows(stage, payment) {
         ["Fields enriched", e?.resolved?.length ?? null],
         ["Corridor", corridorLabel(payment)],
         ["Purpose", payment?.categoryPurpose],
+        ["Originator sanctions screening", originatorScreen
+          ? `${originatorScreen.status}${originatorScreen.provider ? ` · ${originatorScreen.provider}` : ""}`
+          : null],
         ["Charges", payment?.fees?.length
           ? payment.fees.map((f) => `${fmtAmount(f.amount, f.currency)} ${f.type} (${f.chargedTo})`).join(", ")
           : null],
@@ -1005,6 +1028,17 @@ function summaryRows(stage, payment) {
           ? (initiatingParty.name || initiatingParty.identification)
           : null],
         ["Enriched at", fmtWhen(e?.resolvedAt)],
+      ];
+    }
+    case "acceptanceDecision": {
+      // Inbound stage 4 (FR-4.IN1) — the accept/reject rollup, not a routing decision.
+      const ad = payment?.acceptanceDecision;
+      return [
+        ["Decision", ad?.decision],
+        ["Reason code", ad?.reasonCode],
+        ["Beneficiary match", ad?.beneficiaryMatch],
+        ["Sanctions status", ad?.sanctionsStatus],
+        ["Decided at", fmtWhen(ad?.decidedAt)],
       ];
     }
     case "authorization": {

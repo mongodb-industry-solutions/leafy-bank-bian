@@ -92,7 +92,22 @@ function stageFiveMeta(payment, reached, execution, tx) {
   return "stage 5";
 }
 
+/**
+ * Whether `payment` is an inbound wire. Stages 1-5 read differently for inbound (Doina's
+ * Sep 17 doc, "Incoming — Stage Summary" table, L1591-1602 — labels below are her exact
+ * column-1 wording, not paraphrases): stage 1 is passive receipt rather than customer
+ * submission, stage 2 becomes beneficiary resolution instead of caller authentication,
+ * stage 3 drops routing/fee enrichment and adds originator sanctions screening, stage 4 has
+ * no routing decision (it's a binary accept/reject), and stage 5 confirms receipt (a
+ * pacs.002) rather than submitting a payment. Stages 6-8 are the same shape both ways —
+ * her own framing is "only the direction of the debit/credit legs" (L1039) — so no branch
+ * needed there. Stage 9 (UTA) exists in her doc but is out of scope for now (2026-09-29,
+ * Kiran) — not built into this rail.
+ */
+const isInbound = (payment) => payment?.direction === "INBOUND";
+
 export function buildLifecycleStages(payment, trace) {
+  const inbound = isInbound(payment);
   const tx = trace?.transaction ?? null;
   const le = trace?.ledgerEvent ?? null;
   const sls = trace?.subLedgerEntries ?? [];
@@ -176,7 +191,7 @@ export function buildLifecycleStages(payment, trace) {
   return [
     {
       key: "initiation",
-      label: "Initiation",
+      label: inbound ? "Payment Order Initiation (Inbound)" : "Initiation",
       icon: "Edit",
       stage: 1,
       reached: !!payment,
@@ -184,39 +199,64 @@ export function buildLifecycleStages(payment, trace) {
       meta: payment?.paymentId,
       kind: "initiation",
       data: payment,
-      intro:
-        "Captures the payment instruction and creates the canonical payments document " +
-        "immediately. Payment type and rail are set from the customer's selection at creation — " +
-        "never inferred downstream — and the debtor and creditor are frozen as immutable, " +
-        "point-in-time snapshots: the Travel Rule (FATF Rec 16) requires originator details to " +
-        "travel unchanged with the payment.",
+      intro: inbound
+        ? "A wire arrives from the sending bank as an interbank message rather than a " +
+          "customer submission — there is no capture screen and no rail to choose; the " +
+          "channel it arrived on already fixes that. The original message is preserved as " +
+          "evidence first, then the payment record is created from it. The beneficiary named " +
+          "in the message is only a claim at this point — Leafy Bank confirms it owns that " +
+          "account next, at stage 2."
+        : "Captures the payment instruction and creates the canonical payments document " +
+          "immediately. Payment type and rail are set from the customer's selection at creation — " +
+          "never inferred downstream — and the debtor and creditor are frozen as immutable, " +
+          "point-in-time snapshots: the Travel Rule (FATF Rec 16) requires originator details to " +
+          "travel unchanged with the payment.",
     },
     {
       key: "authentication",
-      label: "Authentication & entitlement",
+      label: inbound ? "Message Authentication & Beneficiary Resolution" : "Authentication & entitlement",
       icon: "Lock",
       stage: 2,
-      reached: stageTwoChecks.length > 0 || heldForStepUp,
-      meta: heldForStepUp
-        ? "verification required"
-        : stageTwoChecks.length
-          ? `${stageTwoChecks.length} checks`
-          : "stage 2",
-      kind: "checks",
-      data: stageTwoChecks,
+      reached: inbound
+        ? !!payment?.beneficiaryResolution
+        : stageTwoChecks.length > 0 || heldForStepUp,
+      meta: inbound
+        ? (payment?.beneficiaryResolution?.matchOutcome
+            ? payment.beneficiaryResolution.matchOutcome
+            : "stage 2")
+        : heldForStepUp
+          ? "verification required"
+          : stageTwoChecks.length
+            ? `${stageTwoChecks.length} checks`
+            : "stage 2",
+      kind: inbound ? "beneficiaryResolution" : "checks",
+      data: inbound ? payment?.beneficiaryResolution ?? null : stageTwoChecks,
       actionRequired: heldForStepUp,
-      intro:
-        "Answers one question — is this caller allowed to initiate this amount? Two gates: " +
-        "party authentication — is this the real customer, corporate user, or API? — and " +
-        "payment entitlement — is this caller allowed to initiate this amount from this " +
-        "account? Records the authentication{} and entitlement{} assessments and the checks[] " +
-        "results the gates produce, including dual approval once the amount clears the segment " +
-        "threshold.",
-      raw: {
-        authentication: payment?.authentication ?? null,
-        entitlement: payment?.entitlement ?? null,
-        checks: stageTwoChecks,
-      },
+      // A different question entirely for inbound (Doina L488): not "is this caller allowed
+      // to send this amount?" but "is this a legitimate message, and does the account it
+      // names actually belong to the person it claims to belong to?" There is no customer to
+      // authenticate — no step-up, no entitlement policy — so this stage instead resolves the
+      // CLAIMED creditor from stage 1 against Leafy Bank's own account records.
+      intro: inbound
+        ? "A different question from outbound's stage 2 — there is no customer to " +
+          "authenticate here, only a sending bank. First the message itself is authenticated " +
+          "at the network level, then the claimed beneficiary from stage 1 is checked " +
+          "against Leafy Bank's own account records: does the account exist and is it open, " +
+          "and does the name on the wire match the name on file? A full match proceeds; a " +
+          "close-but-not-exact name proceeds with a flag; no match at all sends the payment " +
+          "straight to Exceptions rather than continuing forward."
+        : "Answers one question — is this caller allowed to initiate this amount? Two gates: " +
+          "party authentication — is this the real customer, corporate user, or API? — and " +
+          "payment entitlement — is this caller allowed to initiate this amount from this " +
+          "account? Records both assessments and their results, including dual approval once " +
+          "the amount clears the segment threshold.",
+      raw: inbound
+        ? { beneficiaryResolution: payment?.beneficiaryResolution ?? null }
+        : {
+            authentication: payment?.authentication ?? null,
+            entitlement: payment?.entitlement ?? null,
+            checks: stageTwoChecks,
+          },
     },
     {
       // Stage 3 owns three states (VALIDATED -> ENRICHED -> FINAL_VALIDATED) and two kinds
@@ -227,17 +267,37 @@ export function buildLifecycleStages(payment, trace) {
       label: "Validation & enrichment",
       icon: "Checkmark",
       stage: 3,
+      // Same three states both ways — RECEIVED and INITIATED both forward into VALIDATED
+      // (lifecycle.py's `_FORWARD`), so this stage's reached-check needs no direction branch.
       reached: reached("VALIDATED", "ENRICHED", "FINAL_VALIDATED"),
       meta: stageThreeMeta(payment, reached),
-      intro:
-        "Validates the instructed payment — structure, the debtor and creditor accounts, and " +
-        "duplicate and idempotency — then enriches the gaps: bank and clearing-member IDs, " +
-        "routing data, a purpose code, regulatory info and FX. Records the domestic/cross-" +
-        "border determination, and confirms the chosen payment type is viable on the rail.",
+      // Her L699: "structural/account/beneficiary validation already happened in Stage 2 for
+      // inbound... the sequence is reordered relative to outgoing, not duplicated." What's
+      // new for inbound is sanctions/AML screening of the ORIGINATOR (the mirror of
+      // outbound's stage-4 screening of the counterparty) and incoming FX — most of
+      // outbound's enrichment (routing data, clearing-member IDs, fee estimation) does not
+      // apply, because routing already happened on the sender's side.
+      intro: inbound
+        ? "Screens the sending party for sanctions before any money is credited at stage 6 " +
+          "— the mirror of outbound's counterparty screening, run earlier here because " +
+          "accepting funds is itself a compliance decision, not just releasing them. If the " +
+          "payment arrives in a different currency than the beneficiary's account, a " +
+          "simulated exchange rate converts it, and the payment is classified domestic or " +
+          "cross-border. Routing and fee work do not apply here — that already happened on " +
+          "the sender's side before the message reached Leafy Bank."
+        : "Validates the instructed payment — structure, the debtor and creditor accounts, and " +
+          "duplicate and idempotency — then enriches the gaps: bank and clearing-member IDs, " +
+          "routing data, a purpose code, regulatory info and FX. Records the domestic/cross-" +
+          "border determination, and confirms the chosen payment type is viable on the rail.",
       kind: "enrichment",
       data: {
         events: eventsFor("VALIDATED", "ENRICHED", "FINAL_VALIDATED"),
         enrichment: payment?.enrichment || null,
+        // Inbound writes sanctions + fx directly rather than through the enrichment{} diff
+        // (screen_and_accept.py sets `correspondent.sanctionsCheck` / `fx`, not
+        // `enrichment.resolved`) — surfaced here so the panel isn't empty for inbound.
+        originatorSanctionsCheck: inbound ? payment?.correspondent?.sanctionsCheck ?? null : null,
+        fx: inbound ? payment?.fx ?? null : null,
         // Every check any stage-3 half recorded. Empty-tolerant: a payment written before
         // stage 3 existed simply has none.
         checks: (payment?.checks || []).filter((c) =>
@@ -254,18 +314,44 @@ export function buildLifecycleStages(payment, trace) {
       // backend check NAMES match her four lines one-for-one. MANUAL_FRAUD_REVIEW is the REVIEW
       // hold (FR-4.13): the payment is routed but not yet authorised.
       key: "authorization",
-      label: "Orchestration & authorization",
+      label: inbound ? "Acceptance Decision & Compliance Authorization" : "Orchestration & authorization",
       icon: "Diagram3",
       stage: 4,
-      reached: reached("ROUTED", "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED"),
-      meta: stageFourMeta(payment, reached),
-      intro:
-        "Chooses the execution path within the already-selected rail, writes the immutable " +
-        "routing snapshot, and confirms the commitment back to the originator. Then scores the " +
-        "fully-formed payment for fraud and runs transaction-level authorization — approve, " +
-        "decline, or hold.",
-      kind: "authorization",
-      data: {
+      // Inbound has no ROUTED/AUTHORISED/APPROVED — FINAL_VALIDATED forwards straight to
+      // ACCEPTED (lifecycle.py `_FORWARD[FINAL_VALIDATED] = {ROUTED, ACCEPTED}`).
+      reached: inbound
+        ? !!payment?.acceptanceDecision
+        : reached("ROUTED", "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED"),
+      meta: inbound
+        ? (payment?.acceptanceDecision?.decision || "stage 4")
+        : stageFourMeta(payment, reached),
+      // Her L823: "there is no execution-path or rail-selection decision... the routing
+      // already happened before the message reached Leafy Bank." What replaces outbound's
+      // orchestration + fraud scoring is a binary ACCEPT/REJECT rollup of stage 2's
+      // beneficiary match and stage 3's sanctions outcome (FR-4.IN1). On REJECT the payment
+      // routes to Exceptions rather than advancing (FR-4.IN3) — never held for manual
+      // review, which is an outbound-only concept (FR-4.13) with no inbound equivalent.
+      intro: inbound
+        ? "No routing choice to make here — the sending bank already chose the path before " +
+          "the message arrived. Instead, this stage rolls up the two checks that came " +
+          "before it — did the beneficiary match, did the originator clear sanctions — into " +
+          "one decision: accept the payment, or reject it back to the sender. Accepting " +
+          "leads to a confirmation being sent at stage 5; rejecting stops the payment here " +
+          "and routes it to Exceptions instead."
+        : "Chooses the execution path within the already-selected rail, writes the immutable " +
+          "routing snapshot, and confirms the commitment back to the originator. Then scores the " +
+          "fully-formed payment for fraud and runs transaction-level authorization — approve, " +
+          "decline, or hold.",
+      kind: inbound ? "acceptanceDecision" : "authorization",
+      data: inbound
+        ? {
+            events: eventsFor("ACCEPTED"),
+            acceptanceDecision: payment?.acceptanceDecision || null,
+            checks: (payment?.checks || []).filter((c) =>
+              String(c?.stage || "").startsWith("4 ")
+            ),
+          }
+        : {
         events: eventsFor("ROUTED", "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED"),
         fraud: payment?.fraud || null,
         sanctions: payment?.correspondent?.sanctionsCheck || null,
@@ -307,29 +393,66 @@ export function buildLifecycleStages(payment, trace) {
       // book transfer (no artifacts, has a tx) and an external wire (artifacts, no tx)
       // register.
       key: "execution",
-      label: "Rail execution",
+      label: inbound ? "Execution (Status Response)" : "Rail execution",
       icon: "Beaker",
       stage: 5,
-      reached: reached("SUBMITTED", "IN_PROGRESS") || !!tx,
-      status: execution?.status ?? tx?.transactionStatus,
-      meta: stageFiveMeta(payment, reached, execution, tx),
-      intro:
-        "Transforms the canonical payment into a rail-specific message at the rail boundary — a " +
-        "pacs.008 for a wire — submits it to the network, and records the execution and its " +
-        "acknowledgement. A book transfer reaches no rail and is recorded as exactly that.",
+      reached: inbound
+        ? reached("ACCEPTED")
+        : reached("SUBMITTED", "IN_PROGRESS") || !!tx,
+      status: inbound ? undefined : (execution?.status ?? tx?.transactionStatus),
+      meta: inbound
+        ? (payment?.refs?.statusResponseMessageId ? "pacs.002 ACCP" : "stage 5")
+        : stageFiveMeta(payment, reached, execution, tx),
+      // Her L938: outbound "executes" by transforming the canonical payment into an
+      // outbound rail message and submitting it to a network. Inbound has nothing left to
+      // submit — the money already arrived. "Execution" here means generating and
+      // transmitting the status response back to the SENDING bank: a simulated pacs.002
+      // confirming the payment will be applied. No `paymentExecutions` record is created
+      // for inbound (that collection is outbound-only, L944) — the pacs.002 lives in
+      // `paymentMessages` alongside outbound's pacs.008, distinguished by `direction`.
+      intro: inbound
+        ? "The money already arrived, so there's nothing left to submit to a network — " +
+          "\"execution\" here means telling the sending bank what happened. A confirmation " +
+          "message goes back: accepted if stage 4 approved it, rejected if it did not. " +
+          "Sending that confirmation is what advances the payment forward, ahead of the " +
+          "internal posting that follows at stage 6."
+        : "Transforms the canonical payment into a rail-specific message at the rail boundary — a " +
+          "pacs.008 for a wire — submits it to the network, and records the execution and its " +
+          "acknowledgement. A book transfer reaches no rail and is recorded as exactly that.",
       kind: "railExecution",
       data: {
-        events: eventsFor("SUBMITTED", "IN_PROGRESS"),
+        events: inbound ? eventsFor("ACCEPTED") : eventsFor("SUBMITTED", "IN_PROGRESS"),
         execution,
         attempts: executions,
-        // BUSINESS VIEW (her L550-553) and ISO VIEW (L555-563) — the two tabs, from the two
-        // documents. `business` falls back to the payment itself so a pre-stage-5 payment
-        // still renders something rather than an empty tab.
-        business: message?.payload ?? null,
-        iso: execution?.message ?? null,
+        // BUSINESS VIEW (her L550-553) and ISO VIEW (L555-563) — the two tabs. Outbound's
+        // business view is the pacs.008 payload (`message.payload`, shaped by
+        // `execution_documents.canonical_payload`). Inbound's `message` is the pacs.002
+        // status response instead — its payload has NO debtor/creditor/amount fields (it is
+        // a status report, not a payment instruction), so the business view is built here
+        // from the payment doc itself, which already carries every field the row list reads.
+        business: inbound
+          ? {
+              paymentId: payment?.paymentId,
+              debtorName: payment?.debtor?.name,
+              creditorName: payment?.creditor?.name,
+              amount: payment?.amount,
+              currency: payment?.currency,
+              rail: payment?.rail,
+              clearingNetwork: payment?.wireDetails?.network,
+              endToEndId: payment?.senderReferences?.endToEndId,
+              uetr: payment?.uetr,
+              chargeBearer: payment?.chargeBearer,
+              creditorBankName: payment?.creditor?.bankName,
+              creditorBankCountry: payment?.creditor?.bankCountry,
+              creditorBic: payment?.creditor?.bic,
+              purposeCode: payment?.categoryPurpose,
+              remittanceInfo: payment?.remittance?.unstructured,
+            }
+          : message?.payload ?? null,
+        iso: inbound ? message?.payload ?? null : execution?.message ?? null,
         // Derived server-side (stdlib ElementTree) and returned by the same route — the UI
-        // never serialises XML itself.
-        xml: execution?.messageXml ?? null,
+        // never serialises XML itself. Inbound has no execution doc to carry one.
+        xml: inbound ? null : execution?.messageXml ?? null,
         transformationAudit: message?.transformationAudit ?? [],
         mappingVersion: message?.mappingVersion ?? null,
         clearing: payment?.clearing ?? null,
@@ -483,9 +606,9 @@ export function buildLifecycleStages(payment, trace) {
       meta: position?.modelLabel || (clearing.settledAt ? "settled" : "pending"),
       intro:
         "Simulates the external settlement response and confirms the outcome — matched, " +
-        "unmatched, delayed, or exception. The settlement status (PENDING -> SETTLED) advances " +
-        "here, independently of the GL batch (Doina A.1/A.3: once external settlement is " +
-        "confirmed, the second accounting event posts).",
+        "unmatched, delayed, or exception. The settlement status advances here, independently " +
+        "of the GL batch: once external settlement is confirmed, the second accounting event " +
+        "posts.",
       kind: "legs",
       data: { position, clearing, event: se },
     },
@@ -503,10 +626,10 @@ export function buildLifecycleStages(payment, trace) {
       status: se?.postingStatus,
       meta: se?.postingResult?.journalEntryId || (se ? "pending journal" : null),
       intro:
-        "The second, distinct accounting event (Doina A.1) — Dr Wire Clearing / Cr Nostro or " +
-        "Central Bank — posted once external settlement is confirmed. Its postingStatus flips " +
-        "to POSTED when the GL batch journals it, so this step goes green only after the batch " +
-        "runs, after the External settlement step has already gone green.",
+        "The second, distinct accounting event — Dr Wire Clearing / Cr Nostro or " +
+        "Central Bank — posted once external settlement is confirmed. It only turns green " +
+        "once the batch journals it, so this step completes after the External settlement " +
+        "step above it.",
       kind: "ledgerEvent",
       data: se,
       legs: se
@@ -640,7 +763,7 @@ export function groupLifecycleStages(stages) {
       status: terminal?.status ?? undefined,
       meta: reachedCount ? `${reachedCount} of ${children.length} reached` : undefined,
       intro:
-        "One stage (Doina's 6: Accounting & posting) around four panels — the balanced " +
+        "One stage, Accounting & Posting, shown as four panels — the balanced " +
         "debit/credit event, a second event for any wire fee, the paired sub-ledger entries, " +
         "and the aggregated journal. The panels advance together: posting can finish before " +
         "settlement and vice-versa without the panels disagreeing on what or how much was " +
