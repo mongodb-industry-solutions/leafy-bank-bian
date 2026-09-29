@@ -151,7 +151,27 @@ _KNOWN_EXTRAS = {
     # pattern as `simulatedSettlementOutcome`. The FOURTEENTH; argued for in
     # `payment_document.build`'s comment, not slipped in.
     "enableEnrichmentAgent",
+    # 2026-09-28 (incoming wire): the three fields the inbound flow adds. Argued for in
+    # `payment_document.build`'s comments, not slipped in.
+    #
+    # `direction` (DR-1.IN1) is the FIFTEENTH — the axis stages 6/7/8 read to decide which
+    # way to post; her L1036 makes it the single discriminator for the whole inbound
+    # difference. `beneficiaryResolution` (DR-2.IN1) is the SIXTEENTH, and
+    # `acceptanceDecision` (DR-4.IN1) the SEVENTEENTH; both are inbound-only and null on
+    # every outbound payment, exactly as `fraud` is the outbound-only counterpart.
+    #
+    # All three are in Doina's Sep 17 data-model requirements and absent from the canonical
+    # spec (verified: `propose_payments.json` declares none of them). They move into the
+    # spec with `RECEIVED`/`ACCEPTED` — see `_ENUM_EXTENSIONS` below for that follow-up.
+    "direction",
+    "beneficiaryResolution",
+    "acceptanceDecision",
 }
+
+# Written by `build_inbound` only. An outbound payment has no counterparty references to
+# preserve, so this is NOT in `_KNOWN_EXTRAS` above (which pins what EVERY payment carries)
+# — it is asserted separately by `test_an_inbound_payment_adds_only_the_sender_references`.
+_KNOWN_INBOUND_EXTRAS = {"senderReferences"}
 
 # Enum values the code writes that are NOT in the canonical spec's enum for that field —
 # admitted explicitly so the guard stays honest about what it allows, rather than silently
@@ -164,10 +184,23 @@ _KNOWN_EXTRAS = {
 # `lifecycle.events[].state` enums (`doinas-research/propose_payments.json` + the consolidated
 # v35 model), so the admission is retired — the map is empty and the guard reverts to the spec
 # alone. Kept (empty) as the documented seam for any future enum extension.
+#
+# 2026-09-28 (incoming wire): `RECEIVED` (DR-1.IN2) and `ACCEPTED` (DR-5.IN1) are the
+# inbound peers of `INITIATED` and `SUBMITTED`. Doina's Sep 17 doc adds them to the SAME
+# status enum — her L186: *"inbound payments add three new values to the same enum, not a
+# parallel one"* — but the canonical `propose_payments.json` has not been regenerated yet
+# (verified: neither value is in its enum). Admitted here rather than smuggled past the
+# guard, exactly as `MANUAL_FRAUD_REVIEW` was while Q33 was open.
+#
+# ⚠️ Self-destructing: `test_the_inbound_states_are_still_absent_from_the_canonical_enums`
+# FAILS the moment the spec catches up, which is the signal to delete this admission and
+# let the guard revert to the spec alone. Do not silence that test — it is the deadline.
+_INBOUND_STATES = {"RECEIVED", "ACCEPTED"}
+
 _ENUM_EXTENSIONS = {
-    "status": set(),
-    "lifecycle.currentState": set(),
-    "lifecycle.events[].state": set(),
+    "status": set(_INBOUND_STATES),
+    "lifecycle.currentState": set(_INBOUND_STATES),
+    "lifecycle.events[].state": set(_INBOUND_STATES),
 }
 
 
@@ -291,6 +324,45 @@ def _assert_enum_values_legal(schema, doc, where):
 def test_every_written_enum_value_is_legal(schema, rail):
     doc = payment_document.build(_ctx(payment_rail=rail))
     _assert_enum_values_legal(schema, doc, f"as built ({rail})")
+
+
+def test_the_inbound_states_are_still_absent_from_the_canonical_enums(schema):
+    """The deadline on `_ENUM_EXTENSIONS`. ⚠️ **When this test fails, delete the admission.**
+
+    `RECEIVED` / `ACCEPTED` are admitted past the enum guard because Doina's Sep 17 doc
+    declares them (DR-1.IN2, DR-5.IN1) and the canonical `propose_payments.json` has not
+    been regenerated. That is a temporary, documented deviation — not a licence.
+
+    This asserts the deviation is still *needed*. The moment the spec is regenerated with
+    the two values, this fails, and the correct response is to empty `_ENUM_EXTENSIONS` and
+    let the guard check against the spec alone. Silencing it instead would leave a
+    permanent, invisible hole in exactly the guard that exists to prevent enum drift
+    (defect 2026-04-24) — the failure IS the reminder.
+    """
+    for path in ("status", "lifecycle.currentState", "lifecycle.events[].state"):
+        allowed = dict(_enum_fields(schema))[path]
+        still_absent = _INBOUND_STATES - set(allowed)
+        assert still_absent == _INBOUND_STATES, (
+            f"{path}: {_INBOUND_STATES - still_absent} is now in the canonical spec enum. "
+            f"Delete it from `_ENUM_EXTENSIONS` — the admission has served its purpose."
+        )
+
+
+def test_an_inbound_payment_carries_the_inbound_direction():
+    """`direction` is the one field stages 6/7/8 read to decide which way to post, so a
+    payment built INBOUND must say so — and an ordinary one must still say OUTBOUND
+    without any caller naming the field (the default is what keeps every existing fixture
+    meaning what it meant)."""
+    assert payment_document.build(_ctx())["direction"] == "OUTBOUND"
+    assert payment_document.build(_ctx(direction="INBOUND"))["direction"] == "INBOUND"
+
+
+def test_the_inbound_only_slots_are_empty_at_creation():
+    """Stage 2 and stage 4 fill these on the inbound path; stage 1 only opens the slot —
+    the same discipline as `fraud`, which is the outbound-only counterpart."""
+    doc = payment_document.build(_ctx(direction="INBOUND"))
+    assert doc["beneficiaryResolution"] is None
+    assert doc["acceptanceDecision"] is None
 
 
 def test_the_enum_walk_reaches_inside_arrays():

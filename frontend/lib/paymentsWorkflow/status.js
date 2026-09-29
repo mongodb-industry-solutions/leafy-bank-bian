@@ -32,14 +32,18 @@ export const statusBadgeVariant = (status) => {
     case "RETURNED":
     case "REVERSED":
       return "red";
-    // Accepted but not yet executed
+    // Accepted but not yet executed. `RECEIVED` and `ACCEPTED` are the inbound peers of
+    // INITIATED and SUBMITTED (DR-1.IN2 / DR-5.IN1) — the same thing to a reader ("in the
+    // saga, money not yet applied"), so the same colour.
     case "INITIATED":
+    case "RECEIVED":
     case "VALIDATED":
     case "ENRICHED":
     case "FINAL_VALIDATED":
     case "ROUTED":
     case "AUTHORISED":
     case "APPROVED":
+    case "ACCEPTED":
       return "blue";
     case "DRAFT":
       return "lightgray";
@@ -100,15 +104,22 @@ export const pillFamily = (status) => {
     case "REVERSED":
     case "REFUNDED":
     case "DISCREPANT":
+    // Inbound Unable-to-Apply (FR-9.IN1). An arrived payment that cannot be credited —
+    // action required, and red is what the other ACTION_REQUIRED categories use.
+    case "UTA":
       return "red";
-    // Accepted but not yet executed
+    // Accepted but not yet executed. `RECEIVED` and `ACCEPTED` are the inbound peers of
+    // INITIATED and SUBMITTED (DR-1.IN2 / DR-5.IN1) — the same thing to a reader ("in the
+    // saga, money not yet applied"), so the same colour.
     case "INITIATED":
+    case "RECEIVED":
     case "VALIDATED":
     case "ENRICHED":
     case "FINAL_VALIDATED":
     case "ROUTED":
     case "AUTHORISED":
     case "APPROVED":
+    case "ACCEPTED":
       return "blue";
     case "DRAFT":
     case "UNRECONCILED":

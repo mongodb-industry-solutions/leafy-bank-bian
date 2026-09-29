@@ -16,6 +16,7 @@
   --pw-border-light: #e8ebeb;   /* gray.light2 — inner dividers, same hairline */
   --pw-text: #1c2d38;           /* gray.dark3 — primary text */
   --pw-muted: #3d4f58;          /* gray.dark2 — secondary text */
+  --pw-danger: #b4502b;         /* red.dark2 — inline error text */
   --pw-faint: #889397;          /* gray.base — meta / timestamps */
   --pw-accent: #00684a;         /* green.dark2 — brand / primary actions */
   --pw-accent-light: #c0fae6;   /* green.light2 — active tint (was light3, too pale to read) */
@@ -107,6 +108,24 @@
   font-size: 12px;
   line-height: 20px;
   color: var(--pw-muted);
+  white-space: nowrap;
+}
+
+/* The manual incoming-wire trigger (PaymentsLens header). Self-contained so the header
+   row's flex gap does the layout — no grid/table dependency. */
+.inboundTrigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inboundError {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--pw-danger, #b4502b);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -303,6 +322,37 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The IN/OUT direction marker on each Activity row (2026-09-29). Compact on purpose —
+   it sits inside the truncating beneficiary line, so it must be small enough to leave
+   the counterparty name the room. Inbound = the accent green (money in); outbound = the
+   muted rail-tag look (money out) — the same done-vs-neutral pairing the status pills
+   use, so the direction read and the status read don't compete for attention. */
+.directionBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  vertical-align: 2px;
+}
+
+.directionIn {
+  border: 1px solid var(--pw-accent);
+  background: var(--pw-accent-light);
+  color: var(--pw-accent);
+}
+
+.directionOut {
+  border: 1px solid var(--pw-border);
+  background: var(--pw-surface);
+  color: var(--pw-muted);
 }
 
 .cellMuted {

@@ -30,9 +30,14 @@ function normalizeTransaction(t) {
     BookgDt: t.bookingDate,
     Amt: { value: t.amount },
     // Direction and counterparty are framed relative to the viewer by the backend
-    // (viewerDirection/counterparty). Fall back to the stored sender-oriented fields
-    // for any doc that predates that framing.
-    CdtDbtInd: (t.viewerDirection || t.direction) === "OUTGOING" ? "DBIT" : "CRDT",
+    // (viewerDirection/counterparty). Fall back to the stored sender-oriented field for
+    // any doc that predates that framing — which is why two vocabularies appear here:
+    // `viewerDirection` is per-reader ("OUTGOING"), while the stored
+    // `transactions.direction` is the bank's view ("OUTBOUND", D-IN2). Documents written
+    // before that rename still carry "OUTGOING", so both spellings mean money out.
+    CdtDbtInd: ["OUTGOING", "OUTBOUND"].includes(t.viewerDirection || t.direction)
+      ? "DBIT"
+      : "CRDT",
     Cdtr: { Nm: (t.counterparty || t.payee)?.name },
     AddtlNtryInf: t.description,
     // BIAN txnCode is "PMNT-MCRD-POSD": family is the SECOND segment (MCRD=card),

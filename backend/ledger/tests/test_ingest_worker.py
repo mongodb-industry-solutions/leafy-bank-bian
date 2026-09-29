@@ -266,3 +266,36 @@ def test_a_reversal_txn_does_not_build_a_fee_event():
     txn = _txn(reversalOf="TXN-orig", feeAmount=0.0, feeCurrency="USD",
                payer={"accountId": "ACC-debtor"}, payee={"accountId": "ACC-CLEARING-WIRE"})
     assert build_fee_event(txn, payer_account=debtor, coa=coa) is None
+
+
+# --- the incoming wire: the mirror posting (FR-6.IN1) -------------------------
+
+def test_an_inbound_transaction_posts_the_mirror_legs_with_no_rule_change():
+    """FR-6.IN1 — `Dr Wire Clearing / Cr Customer Deposit`, the reverse of outbound FR-6.3.
+
+    Her L1036: *"the entire pipeline is reused unchanged ... what's different: only the
+    direction of the debit/credit legs."* This test is the evidence for that claim.
+
+    The ledger has **no inbound branch and needs none**: `_principal_gl_account` reads each
+    account's own `gl.accountCode` rather than consulting a side-to-code table, so an
+    inbound transaction — payer = clearing, payee = customer — decomposes to the mirrored
+    pair by construction. If someone later adds a `direction` check to the posting rules,
+    this test is what says it was unnecessary.
+    """
+    coa = _coa_with_clearing()
+    clearing = _account("ACC-CLEARING-WIRE", "1131")
+    customer = _account("ACC-beneficiary", "2111")
+    txn = _txn(
+        payer={"accountId": "ACC-CLEARING-WIRE"},
+        payee={"accountId": "ACC-beneficiary"},
+        direction="INBOUND",
+    )
+
+    event = build_ledger_event(txn, clearing, customer, coa)
+
+    assert event["debitLeg"]["glAccountCode"] == "1131", "clearing must be DEBITED inbound"
+    assert event["creditLeg"]["glAccountCode"] == "2111", "the customer must be CREDITED"
+    assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"]
+    # The idempotency key is unchanged — `trace_payment` looks the principal event up by
+    # exactly `paymentId`, for inbound as for outbound.
+    assert event["idempotencyKey"] == txn["paymentId"]

@@ -526,7 +526,7 @@ def test_happy_path_moves_money_once_and_settles(service, db):
 
     assert len(db["transactions"].inserted) == 1
     txn = db["transactions"].inserted[0]
-    assert txn["direction"] == "OUTGOING"
+    assert txn["direction"] == "OUTBOUND"
     assert "legs" not in txn, "v4_21 one-doc shape: no debit/credit legs"
     assert "gl" not in txn, "accounting stays out of the payments domain"
 

@@ -18,7 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from api_models import ExceptionResolveRequest
+from api_models import ExceptionResolveRequest, UtaResolveRequest
 from routers._util import to_json_response
 from services import workflow_read_service
 
@@ -97,6 +97,45 @@ def resolve_exception(
     except Exception as e:
         import logging
         logging.error("resolve_exception failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal exception resolution error.")
+
+
+# The inbound queue's own write route (FR-9.IN2). Separate from `/resolve` because UTA's
+# two actions are structurally different from the outbound ones — Repair takes an account
+# and resumes the saga, Return generates a pacs.004 and closes the payment. Folding them
+# into the generic resolver would make every field optional for every action.
+@router.post("/exceptions/{exception_id}/uta")
+def resolve_uta(
+    request: Request,
+    exception_id: str,
+    body: UtaResolveRequest,
+) -> JSONResponse:
+    svc = request.app.state.payments_service
+    try:
+        updated = svc.resolve_uta(
+            exception_id,
+            action=body.action,
+            matched_account_id=body.matchedAccountId,
+            return_reason_code=body.returnReasonCode,
+            note=body.note,
+        )
+        return to_json_response(updated)
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg:
+            code = 404
+        elif "not OPEN" in msg or "stays open" in msg:
+            # The payment moved past the state the action needs, or another resolver won —
+            # the exception is untouched and the action can be retried.
+            code = 409
+        elif "not legal" in msg or "requires" in msg:
+            code = 422
+        else:
+            code = 400
+        raise HTTPException(status_code=code, detail=msg)
+    except Exception as e:
+        import logging
+        logging.error("resolve_uta failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal exception resolution error.")
 
 

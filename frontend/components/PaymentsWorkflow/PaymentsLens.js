@@ -14,7 +14,7 @@ import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
 import PaymentDeepDive from "./PaymentDeepDive";
 import { usePaymentsList } from "@/lib/api/hooks";
-import { workflowApi } from "@/lib/api/client";
+import { coreApi, workflowApi } from "@/lib/api/client";
 import { fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
 
 const PAGE_SIZE = 25;
@@ -170,9 +170,22 @@ function CommandSearch({ onJump, onFilterCustomer }) {
 }
 
 // The list's projection already carries `debtor`/`creditor` (name + accountId), so the
-// human-relevant column is the counterparty, not the internal customerId. Primary = the
-// beneficiary; the sub-line is the funding account the money leaves from.
+// human-relevant column is the counterparty, not the internal customerId — and the
+// counterparty is decided by DIRECTION, because the two directions face opposite ways:
+//   outbound: the external recipient (creditor), funded from the debtor's account
+//   inbound:  the external SENDER (debtor), landing in our customer's account
+// Showing the creditor on an inbound row would name our own customer as the
+// "counterparty" of a wire they received — the interesting party is who sent it.
+//
+// ⚠️ Absent `direction` = outbound: every payment created before the incoming flow
+// existed is outbound, and the field was absent then. Never read absence as "unknown".
 function beneficiaryOf(p) {
+  if (p.direction === "INBOUND") {
+    return {
+      name: p.debtor?.name || p.debtor?.bankName || "External sender",
+      sub: p.creditor?.accountId ? `to ${p.creditor.accountId}` : "",
+    };
+  }
   return {
     name: p.creditor?.name || p.creditor?.accountId || "—",
     sub: p.debtor?.accountId ? `from ${p.debtor.accountId}` : "",
@@ -229,6 +242,49 @@ const ACTION_LABELS = {
   RETURN: "Return",
 };
 
+/**
+ * The manual incoming-wire trigger (2026-09-29): one click generates a simulated external
+ * pacs.008, runs it through the inbound lifecycle, and jumps to the new payment — the same
+ * "watch it land" flow the outbound wizard's View-lifecycle gives.
+ *
+ * No scenario picker, deliberately (Kiran, 2026-09-29): the button is the happy path and
+ * nothing else — the same traffic the 5-minute background simulator generates
+ * (`ENABLE_INBOUND_SIM`, two per cycle). The variant scenarios (name mismatch, sanctioned
+ * sender, FX, duplicate) stay on the API route
+ * (`POST /FinancialGateway/{id}/Inbound/Simulate`), where a presenter or a test fires them
+ * deliberately — they hold or refuse a payment, and that is work a human should have to
+ * ask for, not a dropdown away from an idle click.
+ */
+function InboundTrigger({ onRefresh, onJump }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fire = async () => {
+    setBusy(true);
+    setError(null);
+    const { data, error: err } = await coreApi(
+      "FinancialGateway/GW-WIRE-01/Inbound/Simulate",
+      { method: "POST", body: {} }
+    );
+    setBusy(false);
+    if (err || !data?.paymentId) {
+      setError(err || "No payment came back.");
+      return;
+    }
+    if (onRefresh) onRefresh();
+    if (onJump) onJump(data.paymentId);
+  };
+
+  return (
+    <div className={styles.inboundTrigger}>
+      <Button size="xsmall" variant="primary" disabled={busy} onClick={fire}>
+        {busy ? "Arriving…" : "Simulate incoming wire"}
+      </Button>
+      {error && <span className={styles.inboundError}>{error}</span>}
+    </div>
+  );
+}
+
 function PaymentsTable({ items, selectedPaymentId, onSelect }) {
   return (
     <div className={styles.tableWrap}>
@@ -243,7 +299,7 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
         </colgroup>
         <thead>
           <tr>
-            <th>Beneficiary</th>
+            <th>Counterparty</th>
             <th>Payment ID</th>
             <th>Created</th>
             <th className={styles.numeric}>Amount</th>
@@ -276,6 +332,19 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
               >
                 <td>
                   <div className={styles.beneficiary} title={beneficiary.name}>
+                    {/* The direction marker: at a glance, which way the money moved.
+                        Inbound gets the accent green (money IN); outbound the muted tag
+                        (money out) — the same pairing the status pills use for
+                        done-vs-neutral, so the two reads don't compete. */}
+                    <span
+                      className={`${styles.directionBadge} ${
+                        p.direction === "INBOUND"
+                          ? styles.directionIn
+                          : styles.directionOut
+                      }`}
+                    >
+                      {p.direction === "INBOUND" ? "IN" : "OUT"}
+                    </span>
                     {beneficiary.name}
                   </div>
                   {beneficiary.sub && (
@@ -379,6 +448,7 @@ export default function PaymentsLens({
             </span>
           </div>
           <div className={styles.panelHeadRight}>
+            <InboundTrigger onRefresh={onRefresh} onJump={onSelect} />
             <span className={styles.resultCount}>
               {loading ? "Loading…" : `${total} ${total === 1 ? "payment" : "payments"}`}
             </span>

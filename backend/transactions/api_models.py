@@ -335,6 +335,81 @@ class ExceptionResolveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class InboundMessageRequest(BaseModel):
+    """BIAN `POST /FinancialGateway/{id}/Inbound/Initiate` — an arriving external pacs.008.
+
+    A real v14 operation: `FinancialGateway` is SD 30542 with a published semantic API, and
+    `Inbound/Initiate` is one of its declared endpoints. So the inbound entry point is BIAN
+    alignment rather than an invention (D-IN3).
+
+    ## Why this is a separate contract from `PaymentOrderInitiateRequest`
+
+    An inbound wire is, by definition, a WIRE crediting an account this bank holds — exactly
+    the combination `_check_cross_field_rules` rejects for a customer-initiated payment
+    (defect 2026-09-08 `discriminator-conflation`). That rule is CORRECT and stays: an
+    on-us wire submitted by a customer really is incoherent. What it cannot do is describe
+    a message arriving from another bank, which is a different act entirely — no customer,
+    no account selection, no rail choice (her L385: the rail is fixed by the channel).
+
+    So the two entry points stay independent. Nothing here relaxes the outbound contract.
+
+    The body is the raw ISO message. It is NOT validated by Pydantic beyond being an object:
+    structural validation belongs to `inbound_pacs008.parse`, which runs **after** the raw
+    message is persisted (FR-1.IN1) so a malformed message is still stored for inspection.
+    Rejecting it at the contract boundary would throw it away — the one outcome her L369
+    explicitly requires us to avoid.
+    """
+
+    message: dict = Field(
+        ...,
+        description="The received ISO 20022 pacs.008 document, as sent.",
+    )
+    model_config = ConfigDict(extra="forbid")
+
+
+class UtaResolveRequest(BaseModel):
+    """`POST /workflow/exceptions/{exceptionId}/uta` — an operator's UTA resolution.
+
+    FR-9.IN2's two structurally different actions, which is why this is not folded into
+    `ExceptionResolveRequest`: REPAIR needs an account id (and nothing else does), and
+    RETURN needs an ISO return-reason code. A single model would make both optional on every
+    action and validate neither.
+    """
+
+    action: Literal["REPAIR", "RETURN"]
+    # REPAIR only — the account the operator confirms as the true beneficiary.
+    matchedAccountId: Optional[str] = None
+    # RETURN only — an ISO 20022 ExternalReturnReason1Code.
+    returnReasonCode: Optional[str] = None
+    note: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _check_action_fields(self):
+        if self.action == "REPAIR" and not self.matchedAccountId:
+            raise ValueError("REPAIR requires matchedAccountId — the account to credit.")
+        if self.action == "RETURN" and not self.returnReasonCode:
+            raise ValueError(
+                "RETURN requires returnReasonCode — an ISO ExternalReturnReason1Code "
+                "the pacs.004 can quote."
+            )
+        return self
+
+
+class InboundSimulateRequest(BaseModel):
+    """`POST /FinancialGateway/{id}/Inbound/Simulate` — the manual inbound trigger.
+
+    The demo control for the incoming-wire story. `scenario` names the mutation the
+    generated message carries (see `simulate.py` for what each one exercises); HAPPY is the
+    default because it is the one a presenter clicks mid-story.
+    """
+
+    scenario: Literal[
+        "HAPPY", "PARTIAL", "MISMATCH", "SANCTIONS", "FX", "DUPLICATE",
+    ] = "HAPPY"
+    model_config = ConfigDict(extra="forbid")
+
+
 class FraudEvaluationRequest(BaseModel):
     """BIAN `POST /FraudEvaluation/Evaluate`.
 

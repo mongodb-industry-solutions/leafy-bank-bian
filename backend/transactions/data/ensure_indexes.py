@@ -160,6 +160,20 @@ PAYMENT_MESSAGES_INDEXES = [
         "unique": True,
     },
     {"name": "idx_payment_messages_payment_id", "keys": [("paymentId", ASCENDING)]},
+    # The incoming flow makes one payment carry up to three messages (the received
+    # pacs.008, the pacs.002 acknowledgement, and possibly a pacs.004 return), so the
+    # deep-dive panel now selects BY PURPOSE rather than taking the only row. A compound
+    # index on `(paymentId, purpose)` serves that; the `paymentId`-only index above still
+    # serves the "all messages for this payment" read, which is the prefix.
+    #
+    # ⚠️ NOT partial on `purpose`: pre-incoming documents carry no `purpose` field at all,
+    # and a partial index would exclude every one of them from a query that does not
+    # constrain it — defect 2026-09-28 A6, where a partial index added for a write
+    # invariant could not serve the read path on the same keys.
+    {
+        "name": "idx_payment_messages_payment_purpose",
+        "keys": [("paymentId", ASCENDING), ("purpose", ASCENDING)],
+    },
 ]
 
 # Stage 9 — the `exceptions` queue. One OPEN occurrence per (paymentId, category) is the

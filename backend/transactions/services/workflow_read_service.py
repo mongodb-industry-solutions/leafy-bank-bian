@@ -44,8 +44,14 @@ _LIST_PROJECTION = {
     "instructedCurrency": 1,
     "lifecycle.currentState": 1,
     "lifecycle.stateEnteredAt": 1,
+    # The incoming wire (2026-09-29). `direction` is what the Activity list marks each row
+    # with (inbound vs outbound — the two read very differently: money arriving vs money
+    # leaving), and `debtor.bankName` is the external sender's bank, the inbound row's
+    # counterparty label. Inclusion-allowlisted like everything else — see the ⚠️ above.
+    "direction": 1,
     "debtor.name": 1,
     "debtor.accountId": 1,
+    "debtor.bankName": 1,
     "creditor.name": 1,
     "creditor.accountId": 1,
     # Stage 4. The list is the Analyst's lens, and a payment's risk decision is exactly the

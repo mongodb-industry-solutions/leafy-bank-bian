@@ -41,6 +41,7 @@ from shared.posting_rules import (
     EVENT_PAYMENT_SETTLEMENT,
     SIDE_CREDIT,
     SIDE_DEBIT,
+    decompose_inbound_settlement,
     decompose_settlement,
 )
 from shared.refs import PREFIX_GROUP, PREFIX_LEDGER_EVENT, derive_ref
@@ -82,24 +83,37 @@ def build_settlement_event(
 ) -> dict:
     """Pure: assemble the settlement ledgerEvent from a settled payment and its clearing account.
 
-    The ``settlementAccountCode`` (1111 or 1121) is read from ``payment.clearing`` —
-    ``settle.py`` stamps it at the same moment as the SETTLED transition, so the worker never
-    sees a SETTLED payment without it. The leg AMOUNT comes from ``txn`` (the clearing amount
-    credited to 1131 at stage 6), not ``payment.amount`` — see the note at the call below.
+    The ``settlementAccountCode`` (1111 or 1121) is read from ``payment.clearing`` — the
+    settlement stage stamps it at the same moment as the SETTLED transition (outbound
+    ``settle.py``; inbound ``apply.py``), so the worker never sees a SETTLED payment without
+    it. The leg AMOUNT comes from ``txn`` (the clearing amount moved at stage 6), not
+    ``payment.amount`` — see the note at the call below.
+
+    ## Direction: the two events are mirror images (FR-7.IN1)
+
+    Outbound (money leaves us): ``Dr 1131 Wire Clearing / Cr 1111|1121`` — the hold on the
+    clearing account is released to the settlement account.
+    Inbound (money arrived): ``Dr 1111|1121 Nostro / Cr 1131 Wire Clearing`` — the nostro
+    position funds the release of the hold stage 6 took. Doina's FR-7.IN1: *"the mirror of
+    outgoing FR-7.1."* Both directions net the clearing account to zero.
     """
     settlement_code = (payment.get("clearing") or {}).get("settlementAccountCode")
     if not settlement_code:
         raise ValueError(
             f"payment {payment.get('paymentId')!r} has no clearing.settlementAccountCode — "
-            "settle.py must stamp it at the SETTLED transition"
+            "the settle stage must stamp it at the SETTLED transition "
+            "(settle.py outbound, apply.py inbound)"
         )
 
+    inbound = payment.get("direction") == "INBOUND"
+    decompose = decompose_inbound_settlement if inbound else decompose_settlement
+
     # Source the leg amount from the `transactions` doc (the clearing amount actually
-    # credited to 1131 at stage 6), NOT `payment.amount` — which `_plan_fx` diverges to the
-    # settlement-currency amount on a cross-border FX wire. Using txn.amount here makes
-    # `Dr 1131` (settlement) equal `Cr 1131` (principal) so the clearing account nets to
-    # zero; the FX exchange is recorded on `settlementPositions` instead (FR-7.6).
-    legs = decompose_settlement(
+    # moved at stage 6), NOT `payment.amount` — which FX diverges to the converted amount.
+    # Using txn.amount here makes the settlement event's clearing leg equal the principal
+    # event's clearing leg so the clearing account nets to zero; the FX exchange is
+    # recorded on `settlementPositions` instead (FR-7.6).
+    legs = decompose(
         amount=txn.get("amount", 0),
         currency=txn.get("currency", "USD"),
         clearing_account=clearing_account,
@@ -128,7 +142,10 @@ def build_settlement_event(
         "occurredAt": occurred_at,
         "valueDate": occurred_at,
         "periodName": occurred_at.strftime("%B %Y"),
-        "description": f"External settlement posting — SETTLEMENT: {payment_id}",
+        "description": (
+            f"{'Inbound' if inbound else 'External'} settlement posting — "
+            f"SETTLEMENT: {payment_id}"
+        ),
         "meta": {
             "subLedgerType": "CLEARING_AND_SETTLEMENT",
             "periodCode": period_code,
@@ -185,15 +202,27 @@ def process_settlement(
     if not payment_id:
         raise ValueError("payment missing paymentId")
 
-    # Find the clearing account from the transactions doc (payee.accountId for an external wire).
+    # Find the clearing account from the transactions doc — by DIRECTION, because the two
+    # directions put the clearing account on opposite sides of the same doc (her L1036: the
+    # inbound difference is only "the direction of the debit/credit legs"):
+    #   outbound external wire: payer = the customer, payee = the clearing account
+    #   inbound wire:           payer = the clearing account, payee = the customer
+    # Reading `payee` unconditionally resolves the CUSTOMER on an inbound payment, whose
+    # gl.accountCode is a deposit control — the settlement event would debit the customer's
+    # deposit instead of the nostro. The `payer`/`payee` axis and `direction` are orthogonal
+    # (an internal transfer's payee is a customer too); direction is what decides which side
+    # the clearing account sits on.
     transactions = connection.get_collection(db_name, "transactions")
     txn = transactions.find_one({"paymentId": payment_id})
     if not txn:
         raise ValueError(f"no transactions doc for paymentId={payment_id} — cannot find clearing account")
 
-    clearing_account_id = (txn.get("payee") or {}).get("accountId")
+    side = "payer" if payment.get("direction") == "INBOUND" else "payee"
+    clearing_account_id = (txn.get(side) or {}).get("accountId")
     if not clearing_account_id:
-        raise ValueError(f"transactions doc for paymentId={payment_id} has no payee.accountId")
+        raise ValueError(
+            f"transactions doc for paymentId={payment_id} has no {side}.accountId"
+        )
 
     accounts = connection.get_collection(db_name, "accounts")
     clearing_account = accounts.find_one({"accountId": clearing_account_id})

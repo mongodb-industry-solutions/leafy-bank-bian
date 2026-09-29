@@ -135,7 +135,7 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
 }
 
 /** Zone 2 — vertical spine of expandable rows; the selected row expands to its full detail. */
-function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve, onResolveException, onAcknowledgeAgent, refreshKey = 0 }) {
+function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve, onResolveException, onResolveUta, onAcknowledgeAgent, refreshKey = 0 }) {
   const failedIdx = states.indexOf("failed");
   return (
     <div className={styles.timeline}>
@@ -192,6 +192,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                       onApprove={onApprove}
                       onResolve={onResolve}
                       onResolveException={onResolveException}
+                      onResolveUta={onResolveUta}
                       onAcknowledgeAgent={onAcknowledgeAgent}
                       refreshKey={refreshKey}
                     />
@@ -202,6 +203,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                       onApprove={onApprove}
                       onResolve={onResolve}
                       onResolveException={onResolveException}
+                      onResolveUta={onResolveUta}
                       onAcknowledgeAgent={onAcknowledgeAgent}
                       refreshKey={refreshKey}
                     />
@@ -224,7 +226,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
  * per-panel heads lets the reader name each accounting fact before its legs, instead of six
  * anonymous columns that read as separate top-level stages.
  */
-function GroupStageBody({ group, payment, onApprove, onResolve, onResolveException, onAcknowledgeAgent, refreshKey = 0 }) {
+function GroupStageBody({ group, payment, onApprove, onResolve, onResolveException, onResolveUta, onAcknowledgeAgent, refreshKey = 0 }) {
   return (
     <div className={styles.groupBody}>
       {group.intro && (
@@ -246,6 +248,7 @@ function GroupStageBody({ group, payment, onApprove, onResolve, onResolveExcepti
             onApprove={onApprove}
             onResolve={onResolve}
             onResolveException={onResolveException}
+            onResolveUta={onResolveUta}
             onAcknowledgeAgent={onAcknowledgeAgent}
           />
         </section>
@@ -1308,7 +1311,7 @@ function RoutingDecision({ snapshot }) {
   );
 }
 
-function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveException, onAcknowledgeAgent, refreshKey = 0 }) {
+function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveException, onResolveUta, onAcknowledgeAgent, refreshKey = 0 }) {
   // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
   // must sit above the early returns (rules of hooks).
   const [showRaw, setShowRaw] = useState(false);
@@ -1556,6 +1559,7 @@ function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveExcept
           <ExceptionsPanel
             exceptions={stage.exceptions}
             onResolve={onResolveException}
+            onResolveUta={onResolveUta}
             onAcknowledgeAgent={onAcknowledgeAgent}
             reversalEvent={stage.reversalEvent}
             reversalLegs={stage.reversalLegs}
@@ -1612,13 +1616,33 @@ const EXCEPTION_ACTIONS = {
   SETTLEMENT_RETURNED: ["RETURN_FUNDS"],
   RECONCILIATION_DISCREPANCY: ["ACCEPT_DISCREPANCY"],
   DUPLICATE_SIGNAL: ["DISMISS"],
+  // Inbound only (FR-9.IN2). Structurally different from every action above: REPAIR
+  // resumes the payment at stage 3 after an operator confirms the beneficiary, RETURN
+  // sends a pacs.004 back to the sender. They post to a different route (`/uta`) because
+  // each needs a field none of the outbound actions has.
+  UTA: ["REPAIR", "RETURN"],
 };
 const ACTION_LABELS = {
   RETRY_SETTLEMENT: "Retry settlement",
   RETURN_FUNDS: "Return funds",
   ACCEPT_DISCREPANCY: "Accept with cause",
   DISMISS: "Dismiss",
+  REPAIR: "Repair — confirm match",
+  RETURN: "Return via pacs.004",
 };
+
+// The UTA actions post to `/workflow/exceptions/{id}/uta`, not `/resolve`. Named here so
+// the panel routes by data rather than by a hardcoded category check at the call site.
+const UTA_ACTIONS = new Set(["REPAIR", "RETURN"]);
+
+// ISO 20022 ExternalReturnReason1Code — the subset the backend's pacs.004 builder accepts.
+// Mirrors `pacs004.RETURN_REASON_CODES`; an operator picks the reason the sender will see.
+const RETURN_REASONS = [
+  ["AC01", "AC01 — Incorrect account number"],
+  ["AC04", "AC04 — Closed account number"],
+  ["RR04", "RR04 — Regulatory reason"],
+  ["MS03", "MS03 — No reason specified"],
+];
 const SEVERITY_LABEL = {
   ACTION_REQUIRED: "Action required",
   INFORMATIONAL: "Informational",
@@ -1640,11 +1664,25 @@ const EXCEPTION_EXPLANATION = {
   DUPLICATE_SIGNAL:
     "This payment resembles an earlier one — a possible duplicate submission. Dismiss if " +
     "the duplication is intentional.",
+  UTA:
+    "An incoming payment arrived that cannot be credited as instructed — the beneficiary " +
+    "could not be confirmed, or acceptance was refused. The funds are held in the wire " +
+    "clearing account: confirm the correct beneficiary to apply them, or return them to " +
+    "the sending bank.",
 };
 
 function exceptionDetailText(exc) {
   const d = exc?.detail || {};
   if (exc?.category === "DUPLICATE_SIGNAL" && d.duplicateOf) return `Resembles ${d.duplicateOf}`;
+  if (exc?.category === "UTA") {
+    // Her L1341-1343 demo panel: the claimed beneficiary, and the closest thing we found.
+    // Both come off `detail` so the operator never has to open the raw message.
+    const claimed = d.claimedName ? `"${d.claimedName}"` : "unnamed beneficiary";
+    const closest = d.closestAccountId ? ` · closest match ${d.closestAccountId}` : "";
+    return `${claimed}${d.claimedAccountNo ? ` · a/c ${d.claimedAccountNo}` : ""} — ${
+      d.matchOutcome || "no match"
+    }${closest}`;
+  }
   const disc = d.discrepancyAmount;
   if (disc != null) {
     const n = Number(disc);
@@ -1655,7 +1693,7 @@ function exceptionDetailText(exc) {
   return "—";
 }
 
-function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs, refreshKey = 0, onAcknowledgeAgent }) {
+function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, reversalLegs, refreshKey = 0, onAcknowledgeAgent }) {
   const baseOpen = exceptions.find((e) => e?.status === "OPEN");
   // The Reconciliation Agent writes `exceptions.agent{}` asynchronously, after the exception
   // opens. Fetch it on a dedicated refresh so the operator sees the agent's findings appear
@@ -1666,6 +1704,12 @@ function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs, r
   const [outcome, setOutcome] = useState("MATCHED");
   const [busy, setBusy] = useState(false);
   const [approving, setApproving] = useState(false);
+  // UTA only. The account an operator confirms as the true beneficiary (Repair), and the
+  // ISO reason the sending bank will see (Return). Pre-filled from the exception's own
+  // `closestAccountId` so the common case — confirming the match the system already found —
+  // is one click, which is exactly what her demo panel shows.
+  const [repairAccount, setRepairAccount] = useState("");
+  const [returnReason, setReturnReason] = useState("AC01");
 
   if (!exceptions.length) {
     return <Body className={styles.muted}>No exceptions recorded for this payment.</Body>;
@@ -1681,14 +1725,30 @@ function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs, r
 
   const actions = open ? EXCEPTION_ACTIONS[open.category] || [] : [];
   const needsOutcome = actions.includes("RETRY_SETTLEMENT");
+  const isUta = open?.category === "UTA";
+  // The account the system found but could not confirm. Offered as the default so the
+  // operator confirms a specific suggestion rather than typing an id from memory.
+  const suggestedAccount = open?.detail?.closestAccountId || "";
 
   async function doResolve(action) {
-    if (!open || !onResolve) return;
+    if (!open) return;
     setBusy(true);
-    await onResolve(open.exceptionId, action, {
-      note: note || undefined,
-      newSettlementOutcome: action === "RETRY_SETTLEMENT" ? outcome : undefined,
-    });
+    if (UTA_ACTIONS.has(action)) {
+      // Different route, different fields — see `UTA_ACTIONS`.
+      if (onResolveUta) {
+        await onResolveUta(open.exceptionId, action, {
+          matchedAccountId:
+            action === "REPAIR" ? repairAccount || suggestedAccount : undefined,
+          returnReasonCode: action === "RETURN" ? returnReason : undefined,
+          note: note || undefined,
+        });
+      }
+    } else if (onResolve) {
+      await onResolve(open.exceptionId, action, {
+        note: note || undefined,
+        newSettlementOutcome: action === "RETRY_SETTLEMENT" ? outcome : undefined,
+      });
+    }
     setBusy(false);
     setNote("");
   }
@@ -1779,17 +1839,55 @@ function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs, r
         </div>
       ))}
 
-      {open && onResolve && actions.length > 0 && (
+      {open && (onResolve || onResolveUta) && actions.length > 0 && (
         <div className={styles.resolveCallout}>
           <div className={styles.resolveCalloutTitle}>
             <Icon glyph="Diagram3" />
-            <span>Resolve this exception</span>
+            <span>{isUta ? "Unable to apply — resolve" : "Resolve this exception"}</span>
           </div>
           <Body>
-            Select an action. The payment&apos;s terminal state is not changed — resolution is
-            evidence alongside it. A return of funds posts a compensating movement that
-            restores the debtor and clears the clearing account.
+            {isUta
+              ? "Confirm the beneficiary to apply the funds, or return them to the sending " +
+                "bank with a pacs.004. A repair resumes the payment at validation and " +
+                "credits the customer; a return credits no one."
+              : "Select an action. The payment's terminal state is not changed — resolution " +
+                "is evidence alongside it. A return of funds posts a compensating movement " +
+                "that restores the debtor and clears the clearing account."}
           </Body>
+          {isUta && (
+            <>
+              <div className={styles.resolveField}>
+                <label className={styles.resolveFieldLabel} htmlFor="uta-account">
+                  Beneficiary account to credit
+                </label>
+                <TextInput
+                  id="uta-account"
+                  size="small"
+                  placeholder={suggestedAccount || "Account id"}
+                  value={repairAccount}
+                  onChange={(e) => setRepairAccount(e.target.value)}
+                />
+              </div>
+              <div className={styles.resolveField}>
+                <label className={styles.resolveFieldLabel} htmlFor="uta-reason">
+                  Return reason (pacs.004)
+                </label>
+                <Select
+                  id="uta-reason"
+                  size="small"
+                  value={returnReason}
+                  onChange={setReturnReason}
+                  allowDeselect={false}
+                >
+                  {RETURN_REASONS.map(([code, label]) => (
+                    <Option key={code} value={code}>
+                      {label}
+                    </Option>
+                  ))}
+                </Select>
+              </div>
+            </>
+          )}
           {needsOutcome && (
             <div className={styles.resolveField}>
               <label className={styles.resolveFieldLabel} htmlFor="exc-settlement-outcome">
@@ -1825,8 +1923,13 @@ function ExceptionsPanel({ exceptions, onResolve, reversalEvent, reversalLegs, r
               <Button
                 key={a}
                 size="small"
-                variant={a === "DISMISS" ? "default" : "primary"}
-                disabled={busy}
+                // RETURN is destructive in the sense that matters here — no customer is
+                // credited and the payment closes — so it does not get the primary styling
+                // that would make it the obvious default next to Repair.
+                variant={a === "DISMISS" || a === "RETURN" ? "default" : "primary"}
+                // Repair needs an account: either the operator typed one or the system
+                // suggested one. Without this the button posts an empty id and 422s.
+                disabled={busy || (a === "REPAIR" && !repairAccount && !suggestedAccount)}
                 onClick={() => doResolve(a)}
               >
                 {ACTION_LABELS[a] || a}
@@ -1980,6 +2083,25 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
     if (onDataChanged) onDataChanged();
   }
 
+  // The inbound queue's resolve (FR-9.IN2). A separate route from `resolveException`
+  // because REPAIR and RETURN carry fields none of the outbound actions has — see
+  // `UTA_ACTIONS`. Same refresh discipline (defect 2026-09-28 B6): bump BOTH the detail's
+  // nudge and the list's shared key, or hitting Back shows the stale OPEN row.
+  async function resolveUta(excId, action, { matchedAccountId, returnReasonCode, note } = {}) {
+    if (!excId) return;
+    setResolveError(null);
+    const { error: err } = await coreApi(
+      `workflow/exceptions/${excId}/uta`,
+      { method: "POST", body: { action, matchedAccountId, returnReasonCode, note } }
+    );
+    if (err) {
+      setResolveError(err);
+      return;
+    }
+    setNudge((n) => n + 1);
+    if (onDataChanged) onDataChanged();
+  }
+
   // HITL approval gate (Phase 2.5): the Reconciliation Agent's graph paused at its `approval`
   // node via `interrupt()`, surfacing its AI investigation for operator review. This
   // resumes the graph with the operator's acknowledgement. The operator THEN resolves
@@ -2085,6 +2207,19 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
         </div>
         <div className={styles.panelHeadRight}>
           <span className={`${styles.mono} ${styles.muted}`}>{paymentId}</span>
+          {/* The IN/OUT marker, same device as the Activity rows — the deep-dive is
+              reached from a list row or the inbound trigger, and both directions land
+              here, so the header says which one you are reading. Absent direction =
+              outbound (pre-incoming payments carry no field). */}
+          <span
+            className={`${styles.directionBadge} ${
+              payment?.direction === "INBOUND"
+                ? styles.directionIn
+                : styles.directionOut
+            }`}
+          >
+            {payment?.direction === "INBOUND" ? "INBOUND" : "OUTBOUND"}
+          </span>
           {payment?.status && (
             <StatusPill status={payment.status} />
           )}
@@ -2131,6 +2266,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
               onApprove={() => setStepUpOpen(true)}
               onResolve={resolveReview}
               onResolveException={resolveException}
+              onResolveUta={resolveUta}
               onAcknowledgeAgent={acknowledgeAgent}
               refreshKey={nudge}
             />

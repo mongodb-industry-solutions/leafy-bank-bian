@@ -129,13 +129,96 @@ def _iso_date(value: Optional[date]) -> Optional[str]:
     return value.isoformat() if value else None
 
 
-def build(ctx) -> dict:
-    """Assemble the payment order document from a captured, validated context."""
+def inbound_party_snapshots(ctx) -> tuple[dict, dict]:
+    """`(debtor, creditor)` for a payment parsed from a received pacs.008.
+
+    The mirror of the outbound pair, and the asymmetry is the point:
+
+    * the **debtor** is external — an originator at another bank — so its snapshot comes
+      straight off the message, exactly as an outbound external *creditor*'s does;
+    * the **creditor** is *claimed*, not resolved. Her L387: at stage 1 it is "an account
+      number and name asserted by the sending bank". So `accountId` stays **None** here even
+      though the account probably exists — filling it in would assert a confirmation that
+      stage 2 has not made yet (FR-2.IN3). `resolve.run` sets it once the match succeeds.
+
+    That null `accountId` is load-bearing, not an omission: it is what makes the claimed /
+    confirmed distinction visible in the stored document rather than only in prose.
+    """
+    parsed = ctx.inbound_parsed or {}
+    debtor = dict(parsed.get("debtor") or {})
+    claimed = dict(ctx.claimed_creditor or {})
+    creditor = {
+        "accountId": None,  # ⚠️ claimed, not confirmed — stage 2 fills this
+        "accountNo": claimed.get("accountNo"),
+        "iban": claimed.get("iban"),
+        "name": claimed.get("name"),
+        "bic": claimed.get("bic") or OUR_BIC,
+        "bankName": claimed.get("bankName") or OUR_BANK_NAME,
+        "bankCountry": claimed.get("bankCountry") or OUR_BANK_COUNTRY,
+        "address": claimed.get("address"),
+        "accountType": None,
+        "clearingSystemMemberId": claimed.get("clearingSystemMemberId"),
+        "clearingSystemCode": claimed.get("clearingSystemCode"),
+    }
+    debtor.setdefault("bankCountry", None)
+    return debtor, creditor
+
+
+def build_inbound(ctx) -> dict:
+    """The canonical `payments` document for a received pacs.008 (FR-1.IN2).
+
+    Delegates to `build` so the canonical shape has exactly ONE definition. Inbound differs
+    in three ways and no more, which is the whole argument of her L1036 (*"only the direction
+    ... driven entirely by the `direction` field"*):
+
+      1. `direction: INBOUND` — already carried on the context, so `build` writes it;
+      2. the party snapshots are built from the message, not from account lookups;
+      3. no `customerId` at the top level, because the originator is not our customer. The
+         beneficiary's customer id is attached by stage 2, once the account is confirmed.
+
+    Everything else — every required key, every present-but-null block a later stage fills —
+    is identical, so an inbound payment is readable by every existing consumer.
+    """
+    debtor, creditor = inbound_party_snapshots(ctx)
+    doc = build(ctx, debtor=debtor, creditor=creditor)
+    # The originator is external; there is no Leafy Bank customer on the debtor side. Stage
+    # 2 sets this to the BENEFICIARY's customer id once the claimed account is confirmed —
+    # the one customer this payment actually has.
+    doc["customerId"] = None
+    doc["initiation"]["initiatedBy"] = "FINANCIAL-GATEWAY"
+    doc["initiation"]["channel"] = "GATEWAY"
+    # The sender's own references, preserved. Ours are minted locally (see `receive.run`);
+    # these are what the counterparty will quote in any enquiry, so they must survive.
+    doc["senderReferences"] = {
+        "msgId": (ctx.inbound_parsed or {}).get("senderMsgId"),
+        "endToEndId": (ctx.inbound_parsed or {}).get("senderEndToEndId"),
+        "txId": (ctx.inbound_parsed or {}).get("senderTxId"),
+        "instructionId": (ctx.inbound_parsed or {}).get("senderInstructionId"),
+    }
+    # The UETR travels with the payment across every hop — keep the sender's rather than
+    # the one `build` minted from our ObjectId. This is the ISO tracking identifier and
+    # re-minting it would break the end-to-end trace the whole story hangs on.
+    if (ctx.inbound_parsed or {}).get("uetr"):
+        doc["uetr"] = ctx.inbound_parsed["uetr"]
+    doc["remittance"]["purposeCode"] = (ctx.inbound_parsed or {}).get("purposeCode")
+    return doc
+
+
+def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None) -> dict:
+    """Assemble the payment order document from a captured, validated context.
+
+    `debtor` / `creditor` let the inbound path supply snapshots built from a received
+    message instead of from account lookups (`build_inbound`). Defaulted rather than
+    required so every existing caller is unchanged.
+    """
     now = ctx.now
     oid = ctx.payment_oid
 
-    creditor = creditor_snapshot(ctx)
-    debtor = party_snapshot(ctx.debtor_customer, ctx.debtor_account)
+    creditor = creditor if creditor is not None else creditor_snapshot(ctx)
+    debtor = (
+        debtor if debtor is not None
+        else party_snapshot(ctx.debtor_customer, ctx.debtor_account)
+    )
 
     envelopes = initiation_envelope.build_envelopes(
         rail=ctx.payment_rail,
@@ -178,6 +261,17 @@ def build(ctx) -> dict:
         "msgId": derive_ref("MSG", oid),
         "customerId": ctx.debtor_customer_id,
         "initiatedAt": now,
+        # DR-1.IN1 — which way the money is flowing. OUTBOUND for a customer-initiated
+        # payment (every payment before the incoming flow existed), INBOUND for one parsed
+        # from a received pacs.008. Stages 6, 7 and 8 read this and nothing else to decide
+        # which way to post: her L1036 is explicit that the inbound difference is "only the
+        # direction of the debit/credit legs ... driven entirely by the `direction` field".
+        #
+        # ⚠️ Not the same axis as `paymentMessages.direction`, which describes a MESSAGE's
+        # travel. An INBOUND payment emits an OUTBOUND pacs.002 (FR-5.IN2) — the two fields
+        # disagree on purpose and neither may be derived from the other.
+        # Not in the canonical spec — see `test_payment_document_spec._KNOWN_EXTRAS`.
+        "direction": ctx.direction,
         # R3: the customer's selection, set once at initiation and never inferred later.
         "type": ctx.payment_type,
         "rail": ctx.payment_rail,
@@ -294,6 +388,18 @@ def build(ctx) -> dict:
         },
         # Written by stage 4b, after the instruction exists (decision §11).
         "fraud": None,
+        # DR-2.IN1 — inbound stage 2's beneficiary resolution: does the account the sending
+        # bank named actually exist, is it open, and does the name on record match the one
+        # the message claims? Null on an outbound payment, which has no claimed beneficiary
+        # to confirm (her L502: outgoing "has no equivalent concept"). Also the slot an
+        # operator's Repair writes (FR-9.IN2) — persisted here, not carried on the context,
+        # so a resume after a UTA hold restores the correction (defect 2026-09-28
+        # `control-not-persisted-across-reentry`).
+        "beneficiaryResolution": None,
+        # DR-4.IN1 — inbound stage 4's binary accept/reject, rolling up the beneficiary
+        # match (stage 2) and the sanctions outcome (stage 3). The inbound-only counterpart
+        # of `fraud`; null outbound.
+        "acceptanceDecision": None,
         # Stage 2's two slots, present-but-empty for the same reason as every other block
         # here: a later stage fills them without an `$exists`-branching read. `checks[]`
         # is append-only and shared with stage 3 onward (`domain/checks.py`); both are

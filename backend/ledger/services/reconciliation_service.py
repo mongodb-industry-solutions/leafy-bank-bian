@@ -204,6 +204,63 @@ def compute_reconciliation(
     if is_internal:
         legs.append(LegResult(LEG_PAYMENT_RAIL, LEG_NOT_APPLICABLE,
                               detail="Book transfer — no rail artifact (Q39)."))
+    elif payment.get("direction") == "INBOUND":
+        # FR-8.IN1 — an inbound payment has NO execution record by design (her L944:
+        # `paymentExecutions` tracks outbound rail submissions only), so leg 1 compares
+        # what inbound DOES have: the received pacs.008 (stage 1) and the transmitted
+        # pacs.002 status report (stage 5) against the posted ledger entry (the principal
+        # event's clearing debit — the amount actually credited).
+        #
+        # Without this branch every inbound payment sat at leg-1 PENDING forever
+        # ("No paymentExecutions doc yet") — rescanned each batch, never RECONCLED.
+        # The message-side constants are mirrored from the transactions service's
+        # `inbound_documents` / `pacs002` (no cross-service import; same discipline as
+        # the exceptions stub's twin).
+        pm_coll = connection.get_collection(db_name, "paymentMessages")
+        received = pm_coll.find_one({
+            "paymentId": payment_id, "direction": "INBOUND",
+            "purpose": "CREDIT_TRANSFER",
+        })
+        response = pm_coll.find_one({
+            "paymentId": payment_id, "purpose": "STATUS_RESPONSE",
+        })
+        if received is None:
+            legs.append(LegResult(
+                LEG_PAYMENT_RAIL, LEG_PENDING,
+                detail="No stored inbound pacs.008 yet — the gateway has not recorded the message."))
+        elif response is None:
+            legs.append(LegResult(
+                LEG_PAYMENT_RAIL, LEG_PENDING,
+                detail="No transmitted pacs.002 yet — stage 5 has not confirmed to the sender."))
+        elif response.get("statusCode") != "ACCP":
+            legs.append(LegResult(
+                LEG_PAYMENT_RAIL, LEG_MISMATCH,
+                left_amount=payment_amount_minors,
+                detail=f"The transmitted pacs.002 says {response.get('statusCode')}, not ACCP — "
+                       "the sender was not told this payment would be applied."))
+        elif principal_event is None:
+            legs.append(LegResult(
+                LEG_PAYMENT_RAIL, LEG_PENDING,
+                detail="The credit has not posted yet (no principal ledgerEvent)."))
+        else:
+            posted_minors = principal_event.get("debitLeg", {}).get("amount")
+            if payment_amount_minors is None or posted_minors is None:
+                legs.append(LegResult(
+                    LEG_PAYMENT_RAIL, LEG_PENDING,
+                    detail="Amount missing on the payment or the posted credit leg."))
+            elif payment_amount_minors == posted_minors:
+                legs.append(LegResult(
+                    LEG_PAYMENT_RAIL, LEG_MATCH,
+                    left_amount=payment_amount_minors,
+                    right_amount=posted_minors,
+                    detail="Inbound message received and pacs.002 (ACCP) transmitted; "
+                           "credited amount == posted clearing debit."))
+            else:
+                legs.append(LegResult(
+                    LEG_PAYMENT_RAIL, LEG_MISMATCH,
+                    left_amount=payment_amount_minors,
+                    right_amount=posted_minors,
+                    detail="Credited amount != posted clearing debit."))
     else:
         pe_coll = connection.get_collection(db_name, "paymentExecutions")
         executions = list(pe_coll.find({"paymentId": payment_id}, {"_id": 0}).sort("attempt", 1))

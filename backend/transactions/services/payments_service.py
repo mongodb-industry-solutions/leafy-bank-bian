@@ -20,11 +20,12 @@ Where the stages are:
 """
 
 import logging
+import random
 from datetime import date, datetime, timezone
 from typing import Optional
 
 from database.connection import MongoDBConnection
-from process import payment_lifecycle
+from process import inbound_lifecycle, payment_lifecycle
 from process.exceptions import (
     ACTION_ACCEPT_DISCREPANCY,
     ACTION_DISMISS,
@@ -35,6 +36,7 @@ from process.exceptions import (
     CATEGORY_SETTLEMENT_DELAYED,
     CATEGORY_SETTLEMENT_RETURNED,
     CATEGORY_SETTLEMENT_UNMATCHED,
+    CATEGORY_UTA,
     STATUS_DISMISSED,
     STATUS_OPEN,
     STATUS_RESOLVED,
@@ -202,6 +204,270 @@ class PaymentsService:
             settlement_outcome=settlement_outcome,
         )
         return payment_lifecycle.run(ctx)
+
+    def simulate_inbound(self, scenario: str = "HAPPY", *, account_id: Optional[str] = None) -> dict:
+        """Generate one simulated inbound pacs.008 and run it (demo trigger).
+
+        One code path for both triggers — the background worker and the manual route — so
+        the two can never drift apart. Picks a live customer account as the claimed
+        beneficiary, builds the message via `simulate.build_message` (which names the
+        scenario's mutation), and hands it to `receive_inbound`.
+
+        `account_id` pins the beneficiary, which exists for the tests: `random.choice` over
+        live accounts is right for a demo trigger and wrong for an assertion, which would
+        be grading a scenario against whichever account the draw happened to pick.
+
+        `DUPLICATE` runs the SAME message twice and returns the FIRST result: the second is
+        an idempotent replay that returns the same payment, and that identity IS the demo
+        beat ("the same wire arriving twice credits the customer once").
+        """
+        from contexts.financial_gateway.domain import simulate
+
+        if scenario.upper() not in simulate.SCENARIOS:
+            raise ValueError(
+                f"Unknown inbound scenario {scenario!r} "
+                f"(legal: {list(simulate.SCENARIOS)})."
+            )
+
+        # ⚠️ Customer accounts only, and by type — the shared `accounts` collection also
+        # holds NOSTRO/VOSTRO/GL_ACCOUNT bank-internal accounts, and a simulated wire
+        # naming the clearing account as its beneficiary is not a demo beat, it is a
+        # corruption of the mirror posting (defect 2026-06-29's rule, read-side edition).
+        # Projected: on a shared database, an unprojected list read is the 2026-08-31
+        # 37 MB failure, and this loop needs four fields.
+        candidates = list(self.accounts.find(
+            {
+                "type": {"$in": ["CURRENT", "SAVINGS", "CHECKING"]},
+                "status": "ACTIVE",
+            },
+            {"accountId": 1, "accountNumber": 1, "iban": 1, "currency": 1,
+             "customerSnapshot.customerId": 1, "type": 1, "status": 1},
+        ))
+        if account_id is not None:
+            candidates = [a for a in candidates if a.get("accountId") == account_id]
+        if not candidates:
+            raise ValueError(
+                "No active customer account to name as the inbound beneficiary — "
+                "seed accounts first."
+            )
+        account = random.choice(candidates)
+
+        customer = self.customers.find_one(
+            {"customerId": (account.get("customerSnapshot") or {}).get("customerId")}
+        )
+        holder = ((customer or {}).get("identification") or {}).get("legalName")
+        if not holder:
+            raise ValueError(
+                f"Account {account.get('accountId')} has no named holder on record — "
+                "the beneficiary name match has nothing to match against."
+            )
+
+        identifier = account.get("iban") or account.get("accountNumber")
+        message = simulate.build_message(
+            scenario=scenario.upper(),
+            beneficiary_name=holder,
+            beneficiary_identifier=identifier,
+            identifier_is_iban=bool(account.get("iban")),
+            account_currency=account.get("currency") or "USD",
+        )
+
+        first = self.receive_inbound(message)
+        if scenario.upper() != simulate.SCENARIO_DUPLICATE:
+            return first
+        replay = self.receive_inbound(message)
+        if replay.get("paymentId") != first.get("paymentId"):
+            # Not an assertion about idempotency's correctness — the hermetic suite owns
+            # that. This is the trigger reporting honestly what it produced, because the
+            # whole point of the DUPLICATE scenario is that both sends are one payment.
+            logger.warning(
+                "simulate_inbound: duplicate scenario produced two payment ids (%s, %s)",
+                first.get("paymentId"), replay.get("paymentId"),
+            )
+        return first
+
+    def receive_inbound(self, message: dict) -> dict:
+        """Receive an external pacs.008 and run the inbound lifecycle (FR-1.IN1..3).
+
+        The inbound counterpart of `initiate_payment`, and the entry point behind
+        `POST /FinancialGateway/{id}/Inbound/Initiate`. Takes a MESSAGE, not a payment
+        request: there is no customer, no account selection and no rail choice on this path
+        (her L385 — the rail is fixed by the channel the message arrived on).
+
+        Raises `ValueError` (incl. `MessageRejected`) on an unusable message; the route maps
+        it to 400. A rejected message is still persisted first — see `receive.run`.
+        """
+        ctx = PaymentContext(
+            # No customer and no debtor account: the originator banks elsewhere. These are
+            # required positional fields on the context, so they are explicitly empty rather
+            # than absent — `receive.run` fills what the message actually yields.
+            customer_ref="",
+            debtor_account_ref="",
+            instructed_amount=0.0,
+            instructed_currency="",
+            payment_type="",
+            payment_rail="",
+            direction="INBOUND",
+            collections=self._collections(),
+            payment_limit_usd=self.payment_limit_usd,
+            reference_data=self.reference_data,
+            rail_gateway=self.rail_gateway,
+        )
+        ctx.inbound_message = message
+        return inbound_lifecycle.run(ctx)
+
+    def resume_inbound(self, payment_id: str) -> dict:
+        """Resume an inbound payment after a UTA Repair (FR-9.IN2).
+
+        Re-enters at stage 3 (her L1336: *"the payment resumes at Stage 3"*), because the
+        operator has just supplied what stage 2 could not resolve.
+
+        ⚠️ The correction is read back **from the document**, never from a caller argument:
+        `uta.repair` persists `beneficiaryResolution` before calling this, and
+        `_inbound_context_from_doc` rebuilds the context from what is stored. That is the
+        whole point of the split — defect 2026-09-28 (`control-not-persisted-across-reentry`)
+        is what happens when a resume trusts memory instead.
+        """
+        payment = self.payments.find_one({"paymentId": payment_id})
+        if payment is None:
+            raise ValueError(f"Payment {payment_id} not found.")
+        if payment.get("direction") != "INBOUND":
+            raise ValueError(f"Payment {payment_id} is not an inbound payment.")
+        ctx = self._inbound_context_from_doc(payment)
+        return inbound_lifecycle.run(
+            ctx, start_index=inbound_lifecycle.REPAIR_RESUME_INDEX
+        )
+
+    def _inbound_context_from_doc(self, payment: dict) -> PaymentContext:
+        """Rebuild an inbound context from a persisted payment.
+
+        The inbound twin of `_context_from_doc`, and it restores the same class of thing:
+        every field a later stage reads off `ctx` rather than off the document. The two that
+        matter most here are `beneficiary_match` and the resolved creditor account — both
+        written by stage 2 (or by an operator's Repair) and both lost if this trusted the
+        in-memory context instead of the stored one.
+        """
+        colls = self._collections()
+        resolution = payment.get("beneficiaryResolution") or {}
+        creditor_ref = resolution.get("matchedAccountId") or (
+            payment.get("creditor") or {}
+        ).get("accountId")
+
+        creditor_account = (
+            colls.accounts.find_one({"accountId": creditor_ref}) if creditor_ref else None
+        )
+        creditor_customer_id = (
+            (creditor_account or {}).get("customerSnapshot") or {}
+        ).get("customerId")
+        creditor_customer = (
+            colls.customers.find_one({"customerId": creditor_customer_id})
+            if creditor_customer_id else None
+        )
+
+        remittance = payment.get("remittance") or {}
+        debtor = payment.get("debtor") or {}
+        ctx = PaymentContext(
+            customer_ref=creditor_customer_id or "",
+            debtor_account_ref="",
+            instructed_amount=payment.get("amount") or payment["instructedAmount"],
+            instructed_currency=payment.get("currency") or payment["instructedCurrency"],
+            payment_type=payment["type"],
+            payment_rail=payment["rail"],
+            direction="INBOUND",
+            remittance_unstructured=remittance.get("unstructured"),
+            remittance_reference=remittance.get("reference"),
+            charge_bearer=payment["chargeBearer"],
+            collections=colls,
+            payment_limit_usd=self.payment_limit_usd,
+            reference_data=self.reference_data,
+            rail_gateway=self.rail_gateway,
+        )
+        ctx.payment_oid = payment["_id"]
+        ctx.payment_id = payment["paymentId"]
+        ctx.end_to_end_id = payment["endToEndId"]
+        ctx.txn_code = "PMNT-RCDT-ESCT"
+        ctx.payment_doc = payment
+        ctx.current_state = payment["status"]
+        ctx.now = datetime.now(timezone.utc)
+        ctx.creditor_account = creditor_account
+        ctx.creditor_account_ref = creditor_ref
+        ctx.creditor_customer = creditor_customer
+        ctx.creditor_customer_id = creditor_customer_id
+        # The stage-2 outcome, restored from the document — including a Repair's MATCHED.
+        ctx.beneficiary_match = resolution.get("matchOutcome")
+        ctx.claimed_creditor = dict(payment.get("creditor") or {})
+        # Enough of the parse for stages 3-7 to re-read the originator. The stored debtor
+        # snapshot IS the parsed originator (stage 1 built one from the other), so this
+        # reconstructs the fields those stages actually touch rather than re-parsing the
+        # raw message.
+        ctx.inbound_parsed = {
+            "debtor": debtor,
+            "purposeCode": remittance.get("purposeCode"),
+            "settlementDate": (payment.get("clearing") or {}).get("settlementDate"),
+            **(payment.get("senderReferences") or {}),
+        }
+        ctx.inbound_message_id = (payment.get("refs") or {}).get("canonicalJsonId")
+        return ctx
+
+    def resolve_uta(
+        self,
+        exception_id: str,
+        *,
+        action: str,
+        matched_account_id: Optional[str] = None,
+        return_reason_code: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> dict:
+        """Resolve one Unable-to-Apply exception (FR-9.IN2). Returns the updated exception.
+
+        Guard chain, mirroring `resolve_exception`: exception exists -> OPEN -> category is
+        UTA -> payment exists -> run the action -> mark resolved.
+
+        ## Ordering: the claim is written LAST here, not first
+
+        `resolve_exception`'s RETRY path resolves BEFORE re-driving, because its producer
+        dedupes on the open row (defect 2026-09-23 B5). Neither UTA action has that problem
+        — a Repair resumes the saga and a Return closes the payment, and neither re-runs the
+        producer that opened this exception. So the safer ordering applies: do the work, and
+        only mark the exception resolved once it has actually succeeded. A failure leaves
+        the row OPEN and retryable, which is defect 2026-09-28 A4's requirement met by
+        construction rather than by a rollback.
+        """
+        from contexts.financial_gateway.application import uta
+
+        exc = self.db["exceptions"].find_one({"exceptionId": exception_id})
+        if exc is None:
+            raise ValueError(f"Exception {exception_id} not found.")
+        if exc["status"] != STATUS_OPEN:
+            raise ValueError(
+                f"Exception {exception_id} is {exc['status']}, not OPEN — only an open "
+                "exception can be resolved."
+            )
+        if exc["category"] != CATEGORY_UTA:
+            raise ValueError(
+                f"Action {action} is not legal for a {exc['category']} exception — "
+                "REPAIR and RETURN apply only to an Unable-to-Apply exception."
+            )
+
+        payment = self.payments.find_one({"paymentId": exc["paymentId"]})
+        if payment is None:
+            raise ValueError(
+                f"Payment {exc['paymentId']} for exception {exception_id} not found."
+            )
+
+        if action == "REPAIR":
+            uta.repair(
+                self, exc, payment,
+                matched_account_id=matched_account_id, note=note,
+            )
+        else:  # RETURN
+            uta.build_return(
+                self, payment, return_reason_code=return_reason_code,
+            )
+
+        self._mark_exception_resolved(
+            exc, action, note, datetime.now(timezone.utc),
+        )
+        return self.db["exceptions"].find_one({"exceptionId": exception_id})
 
     def resume_payment(
         self, payment_id: str, *, customer_ref: str, authentication: Optional[dict]

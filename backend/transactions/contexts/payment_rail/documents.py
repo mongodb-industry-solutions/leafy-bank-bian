@@ -35,6 +35,7 @@ def transaction_doc(
     payment_execution_id: Optional[str] = None,
     fee_amount: float = 0.0,
     fee_currency: Optional[str] = None,
+    direction: str = "OUTBOUND",
 ) -> dict:
     """One v4_21 transactions doc: the confirmed payer->payee movement. NOT an accounting record
     (no legs, no gl) — the ledger service derives DR/CR ledgerEvents from this via CDC. The ledger
@@ -53,7 +54,16 @@ def transaction_doc(
         "bankRef": f"LEAFY-BOOK-{payment_id.split('-', 1)[-1]}",
         "rail": payment_rail,
         "paymentType": "CREDIT_TRANSFER",
-        "direction": "OUTGOING",
+        # D-IN2 (2026-09-28): `OUTBOUND`/`INBOUND`, matching `payments.direction` and
+        # `paymentMessages.direction`. Was the literal `"OUTGOING"` — one collection using a
+        # third vocabulary for the same axis, which the incoming flow would have made a
+        # standing trap. Readers that compare against the old value are updated in the same
+        # pass: `accounts_service` (`viewerDirection`) and the frontend's `CdtDbtInd`.
+        #
+        # ⚠️ `viewerDirection` is NOT this field. This one is the bank's view of the payment;
+        # `viewerDirection` is re-framed per reader at query time (money in vs money out for
+        # whoever is looking), and both sides of an internal transfer read one stored doc.
+        "direction": direction,
         "txnCode": txn_code,
         "amount": amount,
         "currency": currency,
@@ -191,14 +201,53 @@ def build_notifications(
     payment_rail: str,
     is_internal: bool,
     now: datetime,
+    direction: str = "OUTBOUND",
+    originator_name: Optional[str] = None,
 ) -> list[dict]:
-    """Build the sender-side notification for a payment.
+    """Build the customer-side notification for a payment.
 
-    Leafy Bank UX: only the debtor (sender) receives a notification. Always returns exactly
-    one document. `txn_id` is the single v4_21 transaction doc's txnId.
+    Leafy Bank UX: exactly one notification, to the Leafy Bank customer the payment
+    concerns. **Which customer that is depends on the direction** — outbound notifies the
+    debtor (they sent money), inbound notifies the creditor (they received it). On an
+    inbound payment the debtor is another bank's customer and is not ours to notify.
+
+    `txn_id` is the single v4_21 transaction doc's txnId.
     """
     debtor_balance = (debtor_after.get("balance", {}) or {}).get("current")
     creditor_name = creditor_account.get("accountNumber") or creditor_account.get("accountId")
+
+    if direction == "INBOUND":
+        # The RECIPIENT is the notified party, and the balance that matters is theirs.
+        creditor_balance = (creditor_account.get("balance", {}) or {}).get("current")
+        notif_oid = ObjectId()
+        return [
+            {
+                "_id": notif_oid,
+                "notificationId": derive_ref("NOTIF", notif_oid),
+                "eventType": "PaymentReceived",
+                "message": (
+                    f"You received {currency} {amount} from "
+                    f"{originator_name or 'an external sender'}. "
+                    f"New balance: {currency} {creditor_balance}."
+                ),
+                "notificationDate": now,
+                "recipient": {
+                    "customerId": (creditor_account.get("customerSnapshot") or {}).get(
+                        "customerId"
+                    )
+                },
+                "transactionId": txn_id,
+                "paymentId": payment_id,
+                "accounts": {
+                    # The clearing account is the sender of record for an inbound credit.
+                    "senderAccountId": debtor_account.get("accountId"),
+                    "receiverAccountId": creditor_account["accountId"],
+                },
+                "createdAt": now,
+                "createdBy": "SERVICE-PAYMENTS",
+                "sourceSystem": "leafy-bank-payments-service",
+            }
+        ]
 
     if is_internal:
         event_type = "InternalTransfer"

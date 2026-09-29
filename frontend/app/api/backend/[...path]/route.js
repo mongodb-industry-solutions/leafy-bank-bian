@@ -51,6 +51,11 @@ const BACKEND_BY_PREFIX = {
   // — it owns `payments` and the `settle.run` stage. Scoped to this prefix only (defect
   // 2026-07-06: blanket-applying a prefix convention broke every BIAN call).
   PaymentSettlement: TRANSACTIONS_BACKEND,
+  // BIAN FinancialGateway (SD 30542) — the incoming-wire entry point lives on transactions
+  // (`/FinancialGateway/{id}/Inbound/Initiate` + `/Simulate`). Without this row the proxy
+  // falls through to CONSENT_BACKEND and every inbound call 404s behind `/api/v1` (the
+  // 2026-07-06 lesson: a new backend prefix must be scoped into the map, never assumed).
+  FinancialGateway: TRANSACTIONS_BACKEND,
   // GL pipeline monitor routes (read-only) live on the ledger service.
   pipeline: LEDGER_BACKEND,
   // Back-office payments workflow routes (read-only) live on the transactions service —

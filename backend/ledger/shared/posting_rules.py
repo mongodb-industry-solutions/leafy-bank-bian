@@ -320,3 +320,60 @@ def decompose_settlement(
     ]
     assert_balanced(legs)
     return legs
+
+
+def decompose_inbound_settlement(
+    *,
+    amount: float | str | Decimal,
+    currency: str,
+    clearing_account: dict,
+    settlement_account_code: str,
+    coa: ChartOfAccounts,
+) -> list[PostingLeg]:
+    """Decompose the INBOUND settlement leg pair (FR-7.IN1): the mirror of the outbound pair.
+
+    An inbound wire's money arrived the other way round — FROM the correspondent into our
+    nostro — so both legs flip:
+
+      - Dr 1111 Nostro Accounts (or 1121)  — the nostro position funds the credit
+      - Cr 1131 Wire Clearing               — releasing the hold stage 6 took on it
+
+    Doina's FR-7.IN1 is explicit: *"the mirror of outgoing FR-7.1."* The clearing account
+    still nets to zero — stage 6 debited it (``Dr 1131 / Cr customer``), this credits it back
+    — which is the invariant that makes the mirror correct rather than just symmetric.
+
+    Same validation and the same ``entityReference`` argument as the outbound pair: the
+    clearing account is the operational account this event is about.
+    """
+    amount_minor = to_minor_units(amount)
+    if amount_minor <= 0:
+        raise ValueError(f"settlement amount must be positive, got {amount!r}")
+
+    clearing_code = (clearing_account.get("gl") or {}).get("accountCode")
+    if not clearing_code:
+        raise ValueError(
+            f"clearing account {clearing_account.get('accountId')!r} has no gl.accountCode"
+        )
+    coa.require_active_posting_account(clearing_code)
+    coa.require_active_posting_account(settlement_account_code)
+
+    legs = [
+        PostingLeg(
+            event_type=EVENT_PAYMENT_SETTLEMENT,
+            side=SIDE_DEBIT,
+            gl_account_code=settlement_account_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=clearing_account["accountId"],
+        ),
+        PostingLeg(
+            event_type=EVENT_PAYMENT_SETTLEMENT,
+            side=SIDE_CREDIT,
+            gl_account_code=clearing_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=clearing_account["accountId"],
+        ),
+    ]
+    assert_balanced(legs)
+    return legs

@@ -91,6 +91,13 @@ class PaymentContext:
     wire_details: Optional[dict] = None
     ach_details: Optional[dict] = None
     internal_details: Optional[dict] = None
+    # DR-1.IN1 — OUTBOUND (a customer-initiated payment) or INBOUND (one parsed from a
+    # received pacs.008). Defaults OUTBOUND so every existing caller, test fixture and
+    # hand-built context keeps its current meaning without naming the field.
+    #
+    # ⚠️ Orthogonal to `paymentMessages.direction`, which describes a MESSAGE's travel: an
+    # INBOUND payment emits an OUTBOUND pacs.002 (FR-5.IN2). Never derive one from the other.
+    direction: str = "OUTBOUND"
 
     # --- infrastructure ------------------------------------------------------
     collections: Optional[PaymentCollections] = None
@@ -162,6 +169,22 @@ class PaymentContext:
     # `evaluate.run` skip the fraud re-score and commit the authorisation the model withheld;
     # "REJECTED" makes it raise so the saga marks the payment REJECTED. None = normal path.
     review_override: Optional[str] = None
+    # --- inbound (incoming wire) ---------------------------------------------
+    # The parsed pacs.008 the payment was built from, and the `paymentMessages` doc that
+    # stored it. Set by `receive.run` (inbound stage 1) and read by stage 2's beneficiary
+    # resolution and stage 8's leg-1 comparison. None on every outbound payment.
+    inbound_message: Optional[dict] = None
+    inbound_message_id: Optional[str] = None
+    # The parsed message (`inbound_pacs008.parse`'s output) and the beneficiary the SENDER
+    # claimed. `claimed_creditor` is deliberately named for what it is: at stage 1 it is an
+    # assertion, not a resolved account (her L387). Stage 2 promotes it to
+    # `creditor_account` / `creditor_customer` once the lookup and name match succeed.
+    inbound_parsed: Optional[dict] = None
+    claimed_creditor: Optional[dict] = None
+    # Inbound stage 2's outcome (MATCHED / PARTIAL / NO_MATCH), read by stage 4's accept
+    # decision. Rebuilt from `payments.beneficiaryResolution` on a resume, never trusted
+    # from memory across a hold.
+    beneficiary_match: Optional[str] = None
     checkpoints: list = field(default_factory=list)
 
     # --- control -------------------------------------------------------------

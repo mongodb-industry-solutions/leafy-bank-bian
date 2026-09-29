@@ -15,6 +15,8 @@ from fastapi.responses import Response
 
 from api_models import (
     FraudEvaluationRequest,
+    InboundMessageRequest,
+    InboundSimulateRequest,
     PaymentConfirmationRequest,
     PaymentOrderBulkInitiateRequest,
     PaymentOrderInitiateRequest,
@@ -30,7 +32,7 @@ from routers.workflow import router as workflow_router
 from services.payments_service import PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
-from workers import settlement_completion_worker
+from workers import inbound_sim_worker, settlement_completion_worker
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
@@ -102,6 +104,36 @@ if ENABLE_SETTLEMENT_COMPLETION:
     logger.info(
         "started background worker: settlement_completion_worker (poll=%ds, delay=%ss)",
         _poll, _delay,
+    )
+
+# The inbound simulator (2026-09-29): one simulated incoming pacs.008 per interval, default
+# 5 minutes. Set ENABLE_INBOUND_SIM=true to run it, or INBOUND_SIM_INTERVAL_SECONDS to change
+# the cadence. The worker shares the manual route's code path
+# (`payments_service.simulate_inbound`), so the two triggers cannot drift apart. No disabled
+# branch inside `run` — this flag is what keeps it out of `_restart_loop` entirely (the
+# 2026-07-08 eod_topup_worker lesson).
+#
+# ⚠️ Default OFF (2026-09-29, Kiran). It shipped default-ON so the demo would show inbound
+# traffic with no configuration, and that is genuinely nicer for a demo — but an ambient
+# writer that needs no opt-in is the wrong default while inbound data is being repaired:
+# it lands fresh payments mid-repair, and it accumulated the rows that made the wrong-leg
+# backfill a 25-payment cleanup instead of a 2-payment one. The demo path is the explicit
+# one (the Activity-header button, or /Inbound/Simulate); ambient traffic is an opt-in.
+# Flip back to default-ON only once the repair is verified green AND you want it in staging.
+ENABLE_INBOUND_SIM = os.getenv("ENABLE_INBOUND_SIM", "false").lower() == "true"
+if ENABLE_INBOUND_SIM:
+    _inbound_interval = int(os.getenv(
+        "INBOUND_SIM_INTERVAL_SECONDS",
+        str(inbound_sim_worker.DEFAULT_INTERVAL_SECONDS),
+    ))
+    threading.Thread(
+        target=_restart_loop,
+        args=("inbound_sim_worker",
+              inbound_sim_worker.run, payments_service, _inbound_interval),
+        daemon=True, name="inbound_sim_worker",
+    ).start()
+    logger.info(
+        "started background worker: inbound_sim_worker (interval=%ds)", _inbound_interval,
     )
 
 app.include_router(workflow_router)
@@ -215,6 +247,75 @@ async def payment_order_procedure_initiate(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logging.error("PaymentOrderInitiation/Initiate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/FinancialGateway/{financialgatewayid}/Inbound/Initiate")
+async def financial_gateway_inbound_initiate(
+    financialgatewayid: str,
+    body: InboundMessageRequest,
+):
+    """BIAN FinancialGateway (SD 30542) — an external pacs.008 arrives (FR-1.IN1..3).
+
+    The inbound entry point, and a real v14 operation (verified against the local BIAN KG:
+    `/FinancialGateway/{financialgatewayid}/Inbound/Initiate`). `financialgatewayid`
+    identifies the channel the message arrived on — which is what fixes the rail as WIRE
+    without any caller choosing it (her L385).
+
+    Runs the whole inbound lifecycle synchronously, like `Initiate` does outbound. A payment
+    held as Unable to Apply returns 200 with its UTA status: the message WAS received and
+    processed correctly, and the hold is a business outcome for an operator, not an error
+    for the sending gateway to retry.
+    """
+    try:
+        payment_doc = payments_service.receive_inbound(body.message)
+        return _bian_response({
+            "paymentId": payment_doc["paymentId"],
+            "status": payment_doc["status"],
+            "direction": payment_doc.get("direction"),
+            "beneficiaryResolution": payment_doc.get("beneficiaryResolution"),
+            "acceptanceDecision": payment_doc.get("acceptanceDecision"),
+            "payment": _strip(payment_doc),
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        # Includes MessageRejected. The raw message is already persisted (FR-1.IN1), so a
+        # 400 here never means the message was lost.
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("FinancialGateway/Inbound/Initiate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/FinancialGateway/{financialgatewayid}/Inbound/Simulate")
+async def financial_gateway_inbound_simulate(
+    financialgatewayid: str,
+    body: InboundSimulateRequest,
+):
+    """Manual trigger for the inbound simulator (demo control).
+
+    Shares `simulate_inbound` with the background worker, so a manual fire and a scheduled
+    one behave identically. The scenario is caller-chosen — including SANCTIONS and
+    DUPLICATE, which the worker's rotation never fires on its own (a standing sanctions
+    refusal in the queue reads as a broken bank, not a demo beat).
+    """
+    try:
+        payment_doc = payments_service.simulate_inbound(body.scenario)
+        return _bian_response({
+            "paymentId": payment_doc["paymentId"],
+            "status": payment_doc["status"],
+            "direction": payment_doc.get("direction"),
+            "scenario": body.scenario.upper(),
+            "beneficiaryResolution": payment_doc.get("beneficiaryResolution"),
+            "acceptanceDecision": payment_doc.get("acceptanceDecision"),
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("FinancialGateway/Inbound/Simulate failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal payment processing error.")
 
 

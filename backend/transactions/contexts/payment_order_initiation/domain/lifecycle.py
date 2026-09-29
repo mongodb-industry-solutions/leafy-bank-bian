@@ -61,6 +61,13 @@ logger = logging.getLogger(__name__)
 
 DRAFT = "DRAFT"
 INITIATED = "INITIATED"
+# Inbound entry state (DR-1.IN2). The peer of INITIATED, not a replacement: her L188 —
+# "parallel in role to INITIATED, but reflects passive receipt rather than active customer
+# submission." An inbound payment is born at DRAFT like any other, advances to RECEIVED
+# instead of INITIATED, and rejoins the shared path at VALIDATED. That is why it is a side
+# state off HAPPY_PATH rather than a member: adding it to the list would shift every index
+# after it, and `_IN_FLIGHT_FROM` is computed from those indices.
+RECEIVED = "RECEIVED"
 VALIDATED = "VALIDATED"
 ENRICHED = "ENRICHED"
 FINAL_VALIDATED = "FINAL_VALIDATED"
@@ -75,6 +82,13 @@ APPROVED = "APPROVED"
 # needs the `_ENUM_EXTENSIONS` admission it used while the value was unratified.
 MANUAL_FRAUD_REVIEW = "MANUAL_FRAUD_REVIEW"
 SUBMITTED = "SUBMITTED"
+# Inbound peer of SUBMITTED (DR-5.IN1), set when the positive pacs.002 status report is
+# transmitted back to the sending bank (FR-5.IN3). Like RECEIVED, a side state off
+# HAPPY_PATH — but unlike RECEIVED it sits AFTER the in-flight boundary, so its legal
+# terminals are the post-execution ones (a payment accepted and then returned closes as
+# RETURNED, never REJECTED — DR-9.IN2 draws exactly that line). `_SIDE_STATE_RANK` is what
+# tells `_terminals_for` so.
+ACCEPTED = "ACCEPTED"
 IN_PROGRESS = "IN_PROGRESS"
 POSTED = "POSTED"
 SETTLED = "SETTLED"
@@ -114,16 +128,53 @@ _FORWARD[RECONCILED] = set()
 _FORWARD[ROUTED] = {AUTHORISED, MANUAL_FRAUD_REVIEW}
 _FORWARD[MANUAL_FRAUD_REVIEW] = {AUTHORISED}
 
+# --- the inbound path (incoming wire) ----------------------------------------
+# Two side states carry an inbound payment; everything between them is the SHARED path.
+#
+#   DRAFT -> RECEIVED -> VALIDATED -> ENRICHED -> FINAL_VALIDATED -> ACCEPTED -> IN_PROGRESS
+#            \_ stage 1                \_ stages 2/3, unchanged      \_ stages 4/5   \_ 6/7/8
+#
+# RECEIVED replaces INITIATED (passive receipt, not customer submission) and ACCEPTED
+# replaces the ROUTED/AUTHORISED/APPROVED/SUBMITTED run — her L823: inbound has no
+# rail-selection or execution-path decision, only a binary accept/reject, so those four
+# outbound states have no inbound meaning. From IN_PROGRESS on, the two directions share
+# one path: stage 6 posting, stage 7 settlement and stage 8 reconciliation are the same
+# machinery with the legs mirrored (FR-6.IN1 / FR-7.IN1 / FR-8.IN1).
+_FORWARD[DRAFT] = {INITIATED, RECEIVED}
+_FORWARD[RECEIVED] = {VALIDATED}
+_FORWARD[FINAL_VALIDATED] = {ROUTED, ACCEPTED}
+_FORWARD[ACCEPTED] = {IN_PROGRESS}
+
 # POSTED is stamped by the ledger service, asynchronously, and may arrive after SETTLED —
 # the posting axis is independent (D1). Allow IN_PROGRESS -> SETTLED to skip it.
 _FORWARD[IN_PROGRESS] = {POSTED, SETTLED}
 
 
+# Where each side state sits relative to the in-flight boundary, expressed as the happy-path
+# state it stands in for. A side state is not IN HAPPY_PATH (adding it would shift every
+# later index and `_IN_FLIGHT_FROM` with them), so it cannot be ranked by position — this
+# map is that rank, and `_terminals_for` reads it instead of defaulting every side state to
+# "pre-execution", which was true while MANUAL_FRAUD_REVIEW was the only one.
+#
+# ⚠️ ACCEPTED is the reason this map exists. It sits AFTER the boundary: by the time the
+# pacs.002 is away, Leafy Bank has told the sender it will apply the funds. Left on the old
+# default it would have been eligible for REJECTED, and DR-9.IN2 is explicit that a payment
+# which was accepted and later returned closes as RETURNED — REJECTED means never accepted.
+_SIDE_STATE_RANK = {
+    MANUAL_FRAUD_REVIEW: ROUTED,     # before SUBMITTED — no money has moved
+    RECEIVED: INITIATED,             # inbound entry, peer of INITIATED
+    ACCEPTED: SUBMITTED,             # inbound peer of SUBMITTED — in flight
+}
+
+
 def _terminals_for(state: str) -> frozenset:
     if state not in HAPPY_PATH:
-        # Side states off the happy path (MANUAL_FRAUD_REVIEW) sit before SUBMITTED — no money
-        # has moved — so their legal terminals are the pre-execution ones.
-        return _PRE_EXECUTION_TERMINALS
+        # A side state is ranked by the happy-path state it stands in for. Unknown side
+        # states keep the old conservative default (pre-execution).
+        stand_in = _SIDE_STATE_RANK.get(state)
+        if stand_in is None:
+            return _PRE_EXECUTION_TERMINALS
+        state = stand_in
     idx = HAPPY_PATH.index(state)
     return _POST_EXECUTION_TERMINALS if idx >= _IN_FLIGHT_FROM else _PRE_EXECUTION_TERMINALS
 

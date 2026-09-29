@@ -157,3 +157,107 @@ def test_the_settlement_event_uses_the_clearing_amount_not_the_fx_diverged_amoun
     assert event["creditLeg"]["amount"] == 100_000
     assert event["debitLeg"]["currency"] == "EUR"
     assert event["creditLeg"]["currency"] == "EUR"
+
+
+# --- the incoming wire: the mirror settlement event (FR-7.IN1) ----------------
+#
+# Found live on 2026-09-29: an inbound payment settled on arrival raised in
+# `build_settlement_event` ("no clearing.settlementAccountCode") and crash-looped the worker,
+# blocking every settlement queued behind it — the 2026-07-01 incident class, reproduced by
+# the incoming flow. These pin both halves of the fix: the stamped routing field, and the
+# mirrored legs + the payer-side clearing-account resolution.
+
+def test_an_inbound_settlement_builds_the_mirror_legs():
+    """FR-7.IN1 — `Dr Nostro / Cr Wire Clearing`, the mirror of outgoing FR-7.1.
+
+    Asserted on the built event's legs, not just the decomposition, so the direction branch
+    inside `build_settlement_event` itself is what is pinned."""
+    payment = {**_PAYMENT, "direction": "INBOUND"}
+    event = build_settlement_event(payment, _TXN, _CLEARING_ACCOUNT, _COA)
+
+    assert event["debitLeg"]["glAccountCode"] == "1111", "the nostro must be DEBITED inbound"
+    assert event["creditLeg"]["glAccountCode"] == "1131", "the clearing hold must be RELEASED"
+    assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"]
+    assert event["idempotencyKey"] == "PAY-test0001-SETTLEMENT", (
+        "the key is per-payment, not per-direction — one payment, one settlement event"
+    )
+    assert "Inbound settlement posting" in event["description"]
+
+
+def test_an_outbound_settlement_keeps_its_original_legs():
+    """No `direction` field on the payment = outbound, the pre-inbound behaviour. Pinning
+    that the mirror did not silently flip the outbound event too."""
+    event = build_settlement_event(_PAYMENT, _TXN, _CLEARING_ACCOUNT, _COA)
+
+    assert event["debitLeg"]["glAccountCode"] == "1131"
+    assert event["creditLeg"]["glAccountCode"] == "1111"
+
+
+def test_the_clearing_account_is_resolved_from_the_payer_side_for_inbound():
+    """`process_settlement` picks the clearing account off the transactions doc by
+    DIRECTION: outbound payee = clearing, inbound payer = clearing. Reading `payee`
+    unconditionally resolves the CUSTOMER on an inbound payment, whose gl.accountCode is a
+    deposit control — the settlement would debit the customer's deposit.
+
+    Exercised through a fake connection, so the resolution (not just the pure builder) is
+    what is pinned."""
+    from workers import settlement_worker
+
+    customer_txn = {
+        **_TXN,
+        # The inbound shape: payer = clearing, payee = the customer.
+        "payer": {"accountId": "ACC-CLEARING-WIRE"},
+        "payee": {"accountId": "ACC-customer01"},
+    }
+    payment = {**_PAYMENT, "direction": "INBOUND"}
+
+    class _Coll(dict):
+        def __init__(self, docs):
+            super().__init__()
+            self.docs = docs
+
+        def find_one(self, flt, *a, **kw):
+            for d in self.docs:
+                if all(d.get(k) == v for k, v in flt.items()):
+                    return d
+            return None
+
+    class _Db(dict):
+        def __init__(self):
+            super().__init__()
+            self["transactions"] = _Coll([customer_txn])
+            self["accounts"] = _Coll([
+                _CLEARING_ACCOUNT,
+                {"accountId": "ACC-customer01", "type": "CHECKING",
+                 "gl": {"accountCode": "2111"}},
+            ])
+            self["ledgerEvents"] = _Coll([])
+
+    class _Conn:
+        def __init__(self, db):
+            self._db = db
+
+        def get_collection(self, _name, coll):
+            return self._db[coll]
+
+    inserted = []
+
+    class _Capture(_Coll):
+        """A collection that records inserts instead of writing."""
+
+        def insert_one(self, doc):
+            self.docs.append(doc)
+            inserted.append(doc)
+
+    conn = _Conn(_Db())
+    conn._db["ledgerEvents"] = _Capture([])
+
+    settlement_worker.process_settlement(payment, conn, "test-db", _COA)
+
+    assert len(inserted) == 1
+    legs = {inserted[0]["debitLeg"]["glAccountCode"],
+            inserted[0]["creditLeg"]["glAccountCode"]}
+    assert legs == {"1111", "1131"}, (
+        "the clearing account came off the PAYER side — the customer's deposit (2111) "
+        "must not appear in an inbound settlement event"
+    )

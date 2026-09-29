@@ -183,11 +183,17 @@ class AccountsService:
             .limit(limit)
         )
 
-        # The stored doc is written from the sender's perspective (direction always
-        # OUTGOING, payer=sender, payee=recipient). The SAME doc is returned to both
-        # parties, so re-frame it relative to the viewer at read time (no DB write):
-        # if the viewer owns the payee side, this is money IN and the counterparty is
-        # the payer; otherwise it's money OUT and the counterparty is the payee.
+        # The stored doc is written from the sender's perspective (payer=sender,
+        # payee=recipient). The SAME doc is returned to both parties, so re-frame it
+        # relative to the viewer at read time (no DB write): if the viewer owns the payee
+        # side, this is money IN and the counterparty is the payer; otherwise it's money
+        # OUT and the counterparty is the payee.
+        #
+        # ⚠️ `viewerDirection` (INCOMING/OUTGOING) is a DIFFERENT axis from the stored
+        # `transactions.direction` (INBOUND/OUTBOUND, D-IN2). This one is per-reader — the
+        # two parties to one transfer get opposite values from the same document. The
+        # stored one is the bank's view of the payment and is the same for everyone. The
+        # vocabularies are kept distinct on purpose so the two can never be confused.
         owned = set(owned_ids)
         results = []
         for txn in cursor:

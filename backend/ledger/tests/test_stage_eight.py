@@ -592,3 +592,111 @@ def test_trace_payment_reversal_event_is_null_when_no_return_of_funds():
     trace = pipeline_read_service.trace_payment(_PAY, c, "db")
 
     assert trace["reversalEvent"] is None
+
+
+# --- the incoming wire: FR-8.IN1, leg 1 without an execution record --------------
+#
+# An inbound payment has no `paymentExecutions` doc by design (her L944), so leg 1 compares
+# the received pacs.008 + the transmitted pacs.002 against the posted ledger entry INSTEAD
+# (FR-8.IN1). Before this branch every inbound payment sat at leg-1 PENDING forever,
+# rescanned each batch, never RECONCILED.
+
+def _inbound_principal_event(amount_minors: int = _MIN) -> dict:
+    """An inbound PAYMENT_PRINCIPAL ledgerEvent: **Dr 1131 clearing / Cr 2111 customer** —
+    the mirror of the outbound principal. Stage 6's posting (FR-6.IN1)."""
+    return {
+        "eventId": _EVT,
+        "idempotencyKey": _PAY,
+        "postingStatus": "POSTED",
+        "debitLeg": {"glAccountCode": "1131", "amount": amount_minors, "currency": "USD"},
+        "creditLeg": {"glAccountCode": "2111", "amount": amount_minors, "currency": "USD"},
+    }
+
+
+def _inbound_settlement_event(amount_minors: int = _MIN) -> dict:
+    """An inbound PAYMENT_SETTLEMENT ledgerEvent: **Dr 1111 nostro / Cr 1131 clearing** —
+    the mirror of the outbound settlement. Stage 7's posting (FR-7.IN1). 1131 nets to zero
+    across the two events, exactly as it does outbound."""
+    return {
+        "eventId": _EVT_SET,
+        "idempotencyKey": f"{_PAY}-SETTLEMENT",
+        "postingStatus": "POSTED",
+        "debitLeg": {"glAccountCode": "1111", "amount": amount_minors, "currency": "USD"},
+        "creditLeg": {"glAccountCode": "1131", "amount": amount_minors, "currency": "USD"},
+    }
+
+
+def _inbound_messages(*, status_code: str = "ACCP") -> list[dict]:
+    """The two `paymentMessages` docs an inbound payment carries: the received pacs.008
+    (direction INBOUND, purpose CREDIT_TRANSFER) and the transmitted pacs.002 (direction
+    OUTBOUND on an INBOUND payment — the two axes are orthogonal)."""
+    return [
+        {"paymentMessageId": "PM-0001", "paymentId": _PAY,
+         "direction": "INBOUND", "purpose": "CREDIT_TRANSFER",
+         "messageFormat": "pacs.008.001.08", "rawMessage": {}},
+        {"paymentMessageId": "PM-0002", "paymentId": _PAY,
+         "direction": "OUTBOUND", "purpose": "STATUS_RESPONSE",
+         "messageFormat": "pacs.002.001.08", "statusCode": status_code},
+    ]
+
+
+def _inbound_payment() -> dict:
+    """A SETTLED inbound payment. Carries `direction: INBOUND`; carries NO execution record
+    (not seeded, not even an empty list — the collection read returns nothing, which is
+    the whole point of the branch under test)."""
+    return {**_payment(rail="WIRE", state="SETTLED", journal_ref=_JNL),
+            "direction": "INBOUND"}
+
+
+def test_inbound_leg1_matches_without_any_execution_record():
+    """FR-8.IN1 — THE pin. No paymentExecutions doc exists, and leg 1 still matches: the
+    received message and the transmitted ACCP pacs.002 against the posted clearing debit.
+    This is the test that fails if the inbound branch is removed and leg 1 falls back to
+    reading the (absent) execution record."""
+    c = FakeConnection()
+    c.seed("payments", [_inbound_payment()])
+    # ⚠️ No paymentExecutions — deliberate, that is the inbound condition.
+    c.seed("paymentMessages", _inbound_messages())
+    c.seed("settlementPositions", [_position()])
+    c.seed("ledgerEvents", [_inbound_principal_event(), _inbound_settlement_event()])
+    c.seed("subLedgerEntries", [_subledger(_EVT_SET)])
+
+    check = compute_reconciliation(_PAY, c, "db")
+
+    assert [lg.result for lg in check.legs] == [LEG_MATCH, LEG_MATCH, LEG_MATCH]
+    assert check.overall == RECONCILED
+
+
+def test_inbound_leg1_is_pending_until_the_pacs002_is_transmitted():
+    """Message received but the sender not yet answered — PENDING, retried next batch,
+    no exception (a quiet state, not operator work)."""
+    c = FakeConnection()
+    c.seed("payments", [_inbound_payment()])
+    c.seed("paymentMessages", [_inbound_messages()[0]])  # the pacs.008 only
+    c.seed("settlementPositions", [_position()])
+    c.seed("ledgerEvents", [_inbound_principal_event(), _inbound_settlement_event()])
+
+    check = compute_reconciliation(_PAY, c, "db")
+
+    assert check.legs[0].result == LEG_PENDING
+    assert "pacs.002" in check.legs[0].detail
+    assert check.overall == PENDING
+
+
+def test_inbound_leg1_mismatches_when_the_posted_credit_differs():
+    """The comparison that matters: what we told the sender we would apply (the ACCP
+    pacs.002) against what the ledger actually posted. A divergence is a real
+    discrepancy — the exception the operator needs."""
+    c = FakeConnection()
+    c.seed("payments", [_inbound_payment()])
+    c.seed("paymentMessages", _inbound_messages())
+    c.seed("settlementPositions", [_position()])
+    c.seed("ledgerEvents", [
+        _inbound_principal_event(amount_minors=_MIN - 2500),
+        _inbound_settlement_event(amount_minors=_MIN - 2500),
+    ])
+
+    check = compute_reconciliation(_PAY, c, "db")
+
+    assert check.legs[0].result == LEG_MISMATCH
+    assert check.overall == DISCREPANT

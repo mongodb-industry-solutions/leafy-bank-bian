@@ -78,23 +78,42 @@ class ScreeningOutcome:
 
 def screen(
     *,
-    creditor_name: Optional[str],
-    creditor_country: Optional[str],
+    creditor_name: Optional[str] = None,
+    creditor_country: Optional[str] = None,
     purpose_code: Optional[str] = None,
+    party_name: Optional[str] = None,
+    party_country: Optional[str] = None,
+    party_label: str = "Beneficiary",
 ) -> ScreeningOutcome:
-    """Screen the beneficiary. Total: always returns an outcome, never raises."""
-    if not creditor_name and not creditor_country:
+    """Screen a party against the simulated lists. Total: always returns an outcome.
+
+    Outbound screens the **beneficiary** — the party we are sending funds to — via the
+    `creditor_*` arguments, which every existing caller uses and which stay as they are.
+
+    Inbound screens the **originator** instead (FR-3.IN1). Her L703: incoming needs the
+    mirror control performed earlier in the lifecycle, *"screening the party Leafy Bank is
+    about to accept funds from, before any credit is posted — accepting funds is itself a
+    compliance-relevant act, not just releasing them."* The `party_*` arguments express
+    that, and `party_label` keeps the emitted prose honest about which side was screened.
+
+    The RULES are identical for both directions and deliberately not duplicated: a denied
+    party is denied whichever way the money flows. Only the subject changes.
+    """
+    name = party_name if party_name is not None else creditor_name
+    country = party_country if party_country is not None else creditor_country
+    if not name and not country:
         return ScreeningOutcome(
             PENDING,
-            "Beneficiary carries neither a name nor a country, so no screening was "
+            f"{party_label} carries neither a name nor a country, so no screening was "
             f"possible. Recorded PENDING rather than CLEAR ({PROVIDER}).",
         )
+    creditor_name, creditor_country = name, country
 
     country = (creditor_country or "").upper()
     if country in _RESTRICTED_COUNTRIES:
         return ScreeningOutcome(
             BLOCKED,
-            f"Beneficiary country {country} is under comprehensive restriction "
+            f"{party_label} country {country} is under comprehensive restriction "
             f"({PROVIDER}, SIMULATED).",
             matched=country,
         )
@@ -103,7 +122,7 @@ def screen(
     if name in _DENIED_PARTIES:
         return ScreeningOutcome(
             HIT,
-            f"Beneficiary '{creditor_name}' matches a denied-party entry "
+            f"{party_label} '{creditor_name}' matches a denied-party entry "
             f"({PROVIDER}, SIMULATED).",
             matched=name,
         )
