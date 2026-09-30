@@ -36,6 +36,9 @@ MAPPING_VERSION = "1.3.0"
 EVENT_PAYMENT_PRINCIPAL = "PAYMENT_PRINCIPAL"
 EVENT_PAYMENT_FEE = "FEE"
 EVENT_PAYMENT_SETTLEMENT = "SETTLEMENT"
+# Operator-approved correction for a short-settled wire whose charges the bank bears
+# (chargeBearer DEBT) — Sep 17 L1286: "financial corrections … under human approval".
+EVENT_SETTLEMENT_ADJUSTMENT = "SETTLEMENT_ADJUSTMENT"
 
 # Accounting sides.
 SIDE_DEBIT = "DEBIT"
@@ -53,6 +56,9 @@ BANK_GL_ACCOUNT_BY_EVENT_TYPE: dict[str, str] = {
     # `4211 Transaction Fee Income` is the leaf: level 4, normalBalance CREDIT, ACTIVE,
     # "Payment and transaction processing fees".
     EVENT_PAYMENT_FEE: "4211",
+    # `5214 Correspondent Charges` — the correspondent deducted its fee from a wire whose
+    # charges Leafy Bank bears (DEBT), so the bank absorbs it as an operating expense.
+    EVENT_SETTLEMENT_ADJUSTMENT: "5214",
 }
 
 
@@ -240,6 +246,58 @@ def decompose_fee(
             amount_minor=amount_minor,
             currency=currency,
             account_id=debtor_account["accountId"],
+        ),
+    ]
+    assert_balanced(legs)
+    return legs
+
+
+def decompose_settlement_adjustment(
+    *,
+    amount: float | str | Decimal,
+    currency: str,
+    clearing_account: dict,
+    settlement_account_code: str,
+    coa: ChartOfAccounts,
+) -> list[PostingLeg]:
+    """The approved short-pay correction: Dr 5214 Correspondent Charges / Cr nostro.
+
+    The settlement event posted the full amount out of the nostro; the correspondent kept
+    ``amount`` as its fee on a DEBT wire, so the bank is charged that much more. Returns
+    ``[]`` when the chart of accounts has no active 5214 leaf — degrade, never crash the
+    worker (defect 2026-07-01), same as ``decompose_fee``.
+    """
+    amount_minor = to_minor_units(amount)
+    if amount_minor <= 0:
+        return []
+    expense_code = BANK_GL_ACCOUNT_BY_EVENT_TYPE[EVENT_SETTLEMENT_ADJUSTMENT]
+    try:
+        coa.require_active_posting_account(expense_code)
+    except (ValueError, KeyError):
+        logger.warning(
+            "settlement adjustment of %s %s not posted: no active %s posting leaf in the "
+            "chart of accounts — run the sample seed to add it.",
+            amount, currency, expense_code,
+        )
+        return []
+    coa.require_active_posting_account(settlement_account_code)
+
+    legs = [
+        PostingLeg(
+            event_type=EVENT_SETTLEMENT_ADJUSTMENT,
+            side=SIDE_DEBIT,
+            gl_account_code=expense_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=clearing_account["accountId"],
+        ),
+        PostingLeg(
+            event_type=EVENT_SETTLEMENT_ADJUSTMENT,
+            side=SIDE_CREDIT,
+            gl_account_code=settlement_account_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=clearing_account["accountId"],
         ),
     ]
     assert_balanced(legs)

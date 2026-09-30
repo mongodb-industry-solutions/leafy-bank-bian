@@ -317,7 +317,17 @@ def compute_reconciliation(
         expected_minors = _majors_to_minors(expected)
         posted_minors = _signed_leg_amount(settlement_event.get("debitLeg"))
         settled = position.get("settlementStatus") == "SETTLED"
-        if expected_minors is None:
+        # Sep 17 L1264-1270: the rail can settle short ($24,975) while the GL settlement
+        # posting carries the full $25,000. Compare what actually settled, when recorded.
+        actual_minors = _majors_to_minors(position.get("actualAmount"))
+        if settled and actual_minors is not None and actual_minors != posted_minors:
+            legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_MISMATCH,
+                                  left_amount=posted_minors,
+                                  right_amount=actual_minors,
+                                  detail=(f"Settlement position {position.get('actualAmount')} "
+                                          f"!= GL settlement posting {expected} — "
+                                          "rail settled short.")))
+        elif expected_minors is None:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
                                   detail="settlementPositions.expectedAmount is missing."))
         elif expected_minors == posted_minors and settled:

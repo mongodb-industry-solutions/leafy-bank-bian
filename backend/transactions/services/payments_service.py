@@ -24,6 +24,8 @@ import random
 from datetime import date, datetime, timezone
 from typing import Optional
 
+from pymongo.errors import DuplicateKeyError
+
 from database.connection import MongoDBConnection
 from process import inbound_lifecycle, payment_lifecycle
 from process.exceptions import (
@@ -37,6 +39,9 @@ from process.exceptions import (
     CATEGORY_SETTLEMENT_RETURNED,
     CATEGORY_SETTLEMENT_UNMATCHED,
     CATEGORY_UTA,
+    ExceptionActionNotLegal,
+    ExceptionConflict,
+    ExceptionNotFound,
     STATUS_DISMISSED,
     STATUS_OPEN,
     STATUS_RESOLVED,
@@ -50,6 +55,31 @@ from contexts.payment_order_initiation.domain import checks, lifecycle
 from process.payment_context import PaymentCollections, PaymentContext
 
 logger = logging.getLogger(__name__)
+
+
+def _settlement_adjustment_for(payment: dict, exc: dict) -> Optional[dict]:
+    """The correcting entry an accepted short-settlement needs, keyed off `chargeBearer`.
+
+    Sep 17 L1264-1270: the rail settled short while the GL posted the full amount. Who
+    bears the correspondent's charge decides whether the bank books anything:
+      * DEBT — Leafy Bank's customer pays all charges, so the bank absorbs the deduction:
+        post it (Dr 5214 Correspondent Charges / Cr nostro).
+      * CRED / SHAR / SLEV — the beneficiary bears (or shares under scheme rules) the
+        correspondent's charge; the short credit is theirs, no bank entry. The accept is
+        the record.
+    Returns None when no entry is due.
+    """
+    if payment.get("chargeBearer") != "DEBT":
+        return None
+    amount = ((exc.get("detail") or {}).get("discrepancyAmount")) or 0
+    if amount <= 0:
+        return None
+    return {
+        "amount": amount,
+        "currency": payment.get("currency", "USD"),
+        "chargeBearer": "DEBT",
+        "exceptionId": exc.get("exceptionId"),
+    }
 
 
 class PaymentsService:
@@ -846,23 +876,23 @@ class PaymentsService:
 
         exc = self.db["exceptions"].find_one({"exceptionId": exception_id})
         if exc is None:
-            raise ValueError(f"Exception {exception_id} not found.")
+            raise ExceptionNotFound(f"Exception {exception_id} not found.")
         if exc["status"] != STATUS_OPEN:
-            raise ValueError(
+            raise ExceptionConflict(
                 f"Exception {exception_id} is {exc['status']}, not OPEN — only an open "
                 "exception can be resolved."
             )
         category = exc["category"]
         legal = _LEGAL.get(category, set())
         if action not in legal:
-            raise ValueError(
+            raise ExceptionActionNotLegal(
                 f"Action {action} is not legal for a {category} exception "
                 f"(legal: {sorted(legal)})."
             )
 
         payment = self.payments.find_one({"paymentId": exc["paymentId"]})
         if payment is None:
-            raise ValueError(
+            raise ExceptionNotFound(
                 f"Payment {exc['paymentId']} for exception {exception_id} not found."
             )
 
@@ -876,7 +906,7 @@ class PaymentsService:
             # caller gets a 409 and the exception stays OPEN and retryable.
             retry_state = (payment.get("lifecycle") or {}).get("currentState")
             if retry_state != "IN_PROGRESS":
-                raise ValueError(
+                raise ExceptionConflict(
                     f"Payment {exc['paymentId']} is {retry_state}, not OPEN to settlement — "
                     "a retry is only possible while the payment is IN_PROGRESS. The "
                     f"exception {exception_id} stays open."
@@ -904,14 +934,23 @@ class PaymentsService:
                     exc["paymentId"], outcome=new_settlement_outcome or "MATCHED",
                 )
             except Exception:
-                self.db["exceptions"].update_one(
-                    {"_id": exc["_id"]},
-                    {"$set": {
-                        "status": STATUS_OPEN,
-                        "resolution": None,
-                        "updatedAt": datetime.now(timezone.utc),
-                    }},
-                )
+                try:
+                    self.db["exceptions"].update_one(
+                        {"_id": exc["_id"]},
+                        {"$set": {
+                            "status": STATUS_OPEN,
+                            "resolution": None,
+                            "updatedAt": datetime.now(timezone.utc),
+                        }},
+                    )
+                except DuplicateKeyError:
+                    # settle_payment wrote a fresh OPEN occurrence before raising, so it
+                    # already holds the (paymentId, category) OPEN slot — leave ours closed
+                    # and surface the original error, not the index collision.
+                    logger.warning(
+                        "resolve_exception: %s already has a fresh OPEN %s; not re-opening %s",
+                        exc["paymentId"], category, exception_id,
+                    )
                 logger.warning(
                     "resolve_exception: RETRY_SETTLEMENT on %s failed — re-opened %s",
                     exc["paymentId"], exception_id, exc_info=True,
@@ -937,13 +976,17 @@ class PaymentsService:
             # resolution note (the cause, e.g. "correspondent fee"). The state axis (SETTLED)
             # is untouched — this is an axis flip, not a state transition.
             if category == CATEGORY_RECONCILIATION_DISCREPANCY:
-                self.payments.update_one(
-                    {"paymentId": exc["paymentId"]},
-                    {"$set": {
-                        "lifecycle.reconciliationStatus": "RECONCILED",
-                        "updatedAt": now,
-                    }},
-                )
+                update = {
+                    "lifecycle.reconciliationStatus": "RECONCILED",
+                    "updatedAt": now,
+                }
+                adjustment = _settlement_adjustment_for(payment, exc)
+                if adjustment:
+                    # The approved correction (Sep 17 L1286). The ledger's settlement_worker
+                    # sees this update on the SETTLED payment and posts Dr 5214 / Cr nostro,
+                    # idempotent on {paymentId}-ADJ — ledgerEvents stay a ledger write.
+                    update["clearing.settlementAdjustment"] = adjustment
+                self.payments.update_one({"paymentId": exc["paymentId"]}, {"$set": update})
         else:  # ACTION_DISMISS — no money, no axis flip; the resolution log is the only write.
             self._mark_exception_resolved(exc, action, note, now)
 
@@ -987,7 +1030,7 @@ class PaymentsService:
             }},
         )
         if result.matched_count == 0:
-            raise ValueError(
+            raise ExceptionConflict(
                 f"Exception {exc.get('exceptionId')} is no longer OPEN — another resolver "
                 "already acted."
             )

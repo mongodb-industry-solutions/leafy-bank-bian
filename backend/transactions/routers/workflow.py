@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from api_models import ExceptionResolveRequest, UtaResolveRequest
+from process.exceptions import ExceptionActionNotLegal, ExceptionConflict, ExceptionNotFound
 from routers._util import to_json_response
 from services import workflow_read_service
 
@@ -54,9 +55,15 @@ def list_exceptions(
     request: Request,
     limit: int = Query(25, ge=1, le=100),
     skip: int = Query(0, ge=0),
+    status: Optional[str] = Query("OPEN", description="OPEN | RESOLVED | DISMISSED | ALL"),
+    category: Optional[str] = Query(None),
 ) -> JSONResponse:
     connection, db_name = _deps(request)
-    data = workflow_read_service.list_exceptions(connection, db_name, limit=limit, skip=skip)
+    data = workflow_read_service.list_exceptions(
+        connection, db_name, limit=limit, skip=skip,
+        status=None if (status or "").upper() == "ALL" else status,
+        category=category,
+    )
     return to_json_response(data)
 
 
@@ -79,6 +86,14 @@ def resolve_exception(
             new_settlement_outcome=body.newSettlementOutcome,
         )
         return to_json_response(updated)
+    # Typed errors first — the status no longer depends on message wording. The string
+    # fallback below still covers untyped ValueErrors from deeper modules.
+    except ExceptionNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ExceptionConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ExceptionActionNotLegal as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except ValueError as e:
         msg = str(e)
         if "not found" in msg:

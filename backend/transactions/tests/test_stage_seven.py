@@ -83,14 +83,11 @@ def test_delayed_outcome_holds_at_in_progress(service, db):
     assert positions[0]["expectedAmount"] is not None
 
 
-def test_unmatched_outcome_fails_the_payment(service, db):
-    """B4 unmatched → settlementStatus FAILED, currentState FAILED, saga halts.
-
-    FR-7.3 / Doina (Sep 17, L1307-1313): UNMATCHED is a PARTIAL short-pay — the rail settles
-    for less than expected. The discrepancy is the delta (the unmatched portion, e.g. the
-    correspondent fee), not the full amount; actualAmount is what the rail claimed it settled
-    for. The bank treats the partial settlement as FAILED (it did not complete for the full
-    amount); the full expected remains returnable via RETURN_FUNDS.
+def test_unmatched_outcome_settles_short_and_leaves_the_gap_for_stage_8(service, db):
+    """Sep 17 L1264-1270: UNMATCHED is a partial short-pay that still settles — "GL
+    settlement posting: $25,000" against "settlement position: $24,975". Captured like
+    MATCHED (PENDING, then complete_due), with the delta stamped for display and recorded
+    on the position; stage 8 raises the discrepancy, not stage 7.
     """
     from contexts.payment_settlement.settle import _UNMATCHED_DELTA_USD
     _initiate_external(service, settlement_outcome="UNMATCHED")
@@ -99,16 +96,16 @@ def test_unmatched_outcome_fails_the_payment(service, db):
     expected = payment["amount"]
     delta = min(_UNMATCHED_DELTA_USD, expected)
     actual = expected - delta
-    assert payment["lifecycle"]["currentState"] == "FAILED"
-    assert payment["lifecycle"]["settlementStatus"] == "FAILED"
-    assert payment["clearing"]["rejectionCode"] is not None
-    # The discrepancy is the delta (the short-pay), NOT the full amount.
+    assert payment["lifecycle"]["currentState"] == "IN_PROGRESS"
+    assert payment["lifecycle"]["settlementStatus"] == "PENDING"
+    assert payment["clearing"]["settlementAccountCode"] in {"1111", "1121"}
     assert payment["clearing"]["discrepancyAmount"] == delta
-    assert payment["clearing"]["discrepancyReason"] == payment["clearing"]["rejectionCode"]
+    assert payment["clearing"]["discrepancyReason"] == "UNMATCHED_AMOUNT"
 
     positions = _settlement_positions(db)
-    assert len(positions) == 1, "FR-7.4: a position is written even for a rejected settlement"
+    assert len(positions) == 1
     assert positions[0]["outcome"] == "UNMATCHED"
+    assert positions[0]["settlementStatus"] == "SETTLED"
     assert positions[0]["expectedAmount"] == expected
     assert positions[0]["actualAmount"] == actual, "unmatched: the rail settled short, not for zero"
 
@@ -134,9 +131,10 @@ _SPEC_SETTLEMENT_STATUS_ENUM = {"PENDING", "SETTLED", "FAILED", "RETURNED", None
 
 
 @pytest.mark.parametrize("outcome,expected_status", [
-    ("MATCHED", "SETTLED"),
+    # MATCHED and UNMATCHED are captured at PENDING; complete_due flips them to SETTLED.
+    ("MATCHED", "PENDING"),
     ("DELAYED", "PENDING"),
-    ("UNMATCHED", "FAILED"),
+    ("UNMATCHED", "PENDING"),
     ("EXCEPTION", "RETURNED"),
 ])
 def test_every_settlement_status_is_in_the_spec_enum(service, db, outcome, expected_status):

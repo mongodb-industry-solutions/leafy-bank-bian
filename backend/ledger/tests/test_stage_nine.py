@@ -132,3 +132,15 @@ def test_the_ledger_code_enum_constants_match_the_authored_stub():
         SOURCE_STAGE_VALIDATE, SOURCE_STAGE_SETTLE, SOURCE_STAGE_RECONCILE,
     } == set(p["source"]["properties"]["stage"]["enum"])
     assert {SERVICE_TRANSACTIONS, SERVICE_LEDGER} == set(p["source"]["properties"]["service"]["enum"])
+
+
+def test_f6_ledger_record_exception_rejects_a_non_outgoing_category():
+    import pytest
+    from services.exceptions_service import record_exception
+
+    class _Never:
+        def find_one(self, *a, **k):
+            raise AssertionError("guard must run before any read")
+
+    with pytest.raises(ValueError, match="not an outgoing category"):
+        record_exception(_Never(), "PAY-1", "UTA", None, {"stage": "8 reconcile", "service": "ledger-service"})

@@ -310,9 +310,12 @@ def test_get_payment_attaches_none_when_no_routing_snapshot(conn):
 
 # --- exceptions ---------------------------------------------------------------
 
-def test_exceptions_lists_only_terminal_states(conn):
+def test_exceptions_queue_is_driven_by_exceptions_not_terminal_state(conn):
+    """2026-09-30: a terminal payment with no exception is not queue work. The old
+    terminal-OR-open query never drained (every FAILED/RETURNED payment stayed listed)."""
     out = svc.list_exceptions(conn, "db")
-    assert [p["paymentId"] for p in out["items"]] == ["PAY-2"]
+    assert out["items"] == []
+    assert out["total"] == 0
 
 
 def test_intervention_states_track_the_state_machine():
@@ -359,16 +362,14 @@ def test_list_exceptions_joins_the_open_exception_per_payment():
     assert row["exception"]["status"] == "OPEN"
 
 
-def test_list_exceptions_joins_null_when_a_terminal_payment_has_no_exception():
-    """A legacy terminal payment (pre-stage-9) renders with `exception: None` — the
-    stage-8 trace precedent: empty-tolerant, no error."""
+def test_list_exceptions_drops_a_payment_once_its_exception_is_resolved():
+    """The default (OPEN) queue drains: a resolved exception's payment leaves the list."""
     conn = FakeConnection(
-        FakePayments([_payment("PAY-2", status=lifecycle.REJECTED)]),
-        exceptions=None,
+        FakePayments([_payment("PAY-7", status=lifecycle.FAILED)]),
+        exceptions=[_exc_doc("PAY-7", status="RESOLVED", exc_id="EXC-old00007")],
     )
     out = svc.list_exceptions(conn, "db")
-    assert len(out["items"]) == 1
-    assert out["items"][0]["exception"] is None
+    assert out["items"] == [] and out["total"] == 0
 
 
 def test_list_exceptions_falls_back_to_the_latest_resolved_when_no_open():
@@ -379,7 +380,7 @@ def test_list_exceptions_falls_back_to_the_latest_resolved_when_no_open():
         exceptions=[_exc_doc("PAY-7", status="RESOLVED", exc_id="EXC-old00007",
                              category="RECONCILIATION_DISCREPANCY")],
     )
-    out = svc.list_exceptions(conn, "db")
+    out = svc.list_exceptions(conn, "db", status=None)  # history view
     row = out["items"][0]
     assert row["exception"]["exceptionId"] == "EXC-old00007"
     assert row["exception"]["status"] == "RESOLVED"
@@ -423,9 +424,9 @@ def test_list_exceptions_surfaces_a_settled_payment_with_an_open_discrepancy():
     )
     out = svc.list_exceptions(conn, "db")
     ids = [p["paymentId"] for p in out["items"]]
-    # PAY-7 surfaces via its OPEN discrepancy (not its terminal state — SETTLED isn't terminal);
-    # PAY-2 surfaces via its terminal state (REJECTED).
-    assert set(ids) == {"PAY-7", "PAY-2"}
+    # PAY-7 surfaces via its OPEN discrepancy (SETTLED isn't terminal); PAY-2 is REJECTED
+    # with no exception — not queue work.
+    assert ids == ["PAY-7"]
     seven = next(p for p in out["items"] if p["paymentId"] == "PAY-7")
     assert seven["exception"]["category"] == "RECONCILIATION_DISCREPANCY"
     assert seven["exception"]["status"] == "OPEN"
@@ -512,3 +513,16 @@ def test_resolve_miss_returns_none(rconn):
 
 def test_resolve_unknown_prefix_returns_none(rconn):
     assert svc.resolve_ref(rconn, "db", "FOO-1") is None
+
+
+def test_list_exceptions_filters_by_category():
+    """FR-9.IN4 — the queue is filterable by category."""
+    conn = FakeConnection(
+        FakePayments([_payment("PAY-7", status=lifecycle.FAILED),
+                      _payment("PAY-8", status=lifecycle.SETTLED, days_ago=1)]),
+        exceptions=[_exc_doc("PAY-7", category="SETTLEMENT_UNMATCHED", exc_id="EXC-7"),
+                    _exc_doc("PAY-8", category="RECONCILIATION_DISCREPANCY", exc_id="EXC-8")],
+    )
+    out = svc.list_exceptions(conn, "db", category="RECONCILIATION_DISCREPANCY")
+    assert [p["paymentId"] for p in out["items"]] == ["PAY-8"]
+    assert out["total"] == 1

@@ -100,6 +100,20 @@ _SEVERITY_FOR = {
 }
 
 
+# Typed resolve errors. Subclass ValueError so existing callers/tests keep working; the
+# router maps on type, not on message wording.
+class ExceptionNotFound(ValueError):
+    """404 — the exception or its payment does not exist."""
+
+
+class ExceptionConflict(ValueError):
+    """409 — the resolve conflicts with current state (already closed, raced, wrong state)."""
+
+
+class ExceptionActionNotLegal(ValueError):
+    """422 — the action is not legal for this category."""
+
+
 def severity_for(category: str) -> str:
     """The severity the queue assigns to a category. Falls back to ACTION_REQUIRED — the
     safe default for an unknown category, since an uncategorised exception is exactly the

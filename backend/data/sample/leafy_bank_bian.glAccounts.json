@@ -1296,6 +1296,21 @@
     "updatedAt": "2026-01-01T00:00:00.000Z"
   },
   {
+    "accountCode": "5214",
+    "accountName": "Correspondent Charges",
+    "accountType": "EXPENSE",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "currency": "USD",
+    "description": "Correspondent/intermediary bank charges borne by the bank (chargeBearer DEBT)",
+    "isPostingAccount": true,
+    "level": 4,
+    "normalBalance": "DEBIT",
+    "parentAccountCode": "5210",
+    "status": "ACTIVE",
+    "subLedgerType": null,
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
     "_id": {
       "$oid": "9b08a224a7627a3821438c73"
     },

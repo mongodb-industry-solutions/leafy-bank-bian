@@ -700,3 +700,23 @@ def test_inbound_leg1_mismatches_when_the_posted_credit_differs():
 
     assert check.legs[0].result == LEG_MISMATCH
     assert check.overall == DISCREPANT
+
+
+def test_leg2_mismatch_when_the_rail_settled_short_of_the_gl_posting():
+    """Sep 17 L1264-1270 — settlement position $24,975 vs GL settlement posting $25,000:
+    the doc's headline discrepancy. Leg 2 compares what actually settled."""
+    c = FakeConnection()
+    c.seed("payments", [_payment(rail="WIRE", amount=25000.0, state="SETTLED", journal_ref=_JNL)])
+    c.seed("paymentExecutions", [_execution()])
+    pos = _position()
+    pos.update(outcome="UNMATCHED", expectedAmount=25000.0, actualAmount=24975.0)
+    c.seed("settlementPositions", [pos])
+    c.seed("ledgerEvents", [_principal_event(credit_code="1131"), _settlement_event()])
+    c.seed("subLedgerEntries", [_subledger(_EVT_SET)])
+
+    check = compute_reconciliation(_PAY, c, "db")
+
+    leg2 = check.legs[1]
+    assert leg2.result == LEG_MISMATCH
+    assert leg2.left_amount - leg2.right_amount == 2500  # $25 in minor units
+    assert check.overall == DISCREPANT

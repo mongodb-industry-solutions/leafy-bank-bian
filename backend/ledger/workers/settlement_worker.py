@@ -39,10 +39,12 @@ from shared.coa_cache import ChartOfAccounts
 from shared.posting_rules import (
     MAPPING_VERSION,
     EVENT_PAYMENT_SETTLEMENT,
+    EVENT_SETTLEMENT_ADJUSTMENT,
     SIDE_CREDIT,
     SIDE_DEBIT,
     decompose_inbound_settlement,
     decompose_settlement,
+    decompose_settlement_adjustment,
 )
 from shared.refs import PREFIX_GROUP, PREFIX_LEDGER_EVENT, derive_ref
 
@@ -191,6 +193,85 @@ def build_settlement_event(
     }
 
 
+def build_adjustment_event(
+    payment: dict,
+    clearing_account: dict,
+    coa: ChartOfAccounts,
+) -> dict | None:
+    """Pure: the operator-approved short-pay correction, or None when there is none to post.
+
+    Stage 9's ACCEPT_DISCREPANCY stamps ``clearing.settlementAdjustment`` on a DEBT wire the
+    rail settled short (Sep 17 L1264-1286). This worker already sees that update — the
+    payment is SETTLED — so the correction is derived here, keeping ledgerEvents a
+    ledger-service write (the async-CDC firewall). Idempotent on ``{paymentId}-ADJ``.
+    """
+    adj = (payment.get("clearing") or {}).get("settlementAdjustment")
+    settlement_code = (payment.get("clearing") or {}).get("settlementAccountCode")
+    if not adj or not settlement_code:
+        return None
+    legs = decompose_settlement_adjustment(
+        amount=adj.get("amount", 0),
+        currency=adj.get("currency", "USD"),
+        clearing_account=clearing_account,
+        settlement_account_code=settlement_code,
+        coa=coa,
+    )
+    if not legs:
+        return None
+    debit_leg = next(l for l in legs if l.side == SIDE_DEBIT)
+    credit_leg = next(l for l in legs if l.side == SIDE_CREDIT)
+
+    payment_id = payment["paymentId"]
+    oid = ObjectId()
+    occurred_at = _now_utc()
+
+    def _leg(leg) -> dict:
+        return {
+            "glAccountCode": leg.gl_account_code,
+            "controlAccountCode": coa.control_account_for(leg.gl_account_code),
+            "amount": leg.amount_minor,
+            "currency": leg.currency,
+            "functionalAmount": leg.amount_minor,
+            "entityReference": {"entityType": "ACCOUNT", "entityId": leg.account_id},
+        }
+
+    return {
+        "_id": oid,
+        "eventId": derive_ref(PREFIX_LEDGER_EVENT, oid),
+        "idempotencyKey": f"{payment_id}-ADJ",
+        "groupId": derive_ref(PREFIX_GROUP, oid),
+        "occurredAt": occurred_at,
+        "valueDate": occurred_at,
+        "periodName": occurred_at.strftime("%B %Y"),
+        "description": (
+            f"Correspondent charge absorbed (chargeBearer DEBT) — approved on "
+            f"{adj.get('exceptionId')}: {payment_id}"
+        ),
+        "meta": {
+            "subLedgerType": "CLEARING_AND_SETTLEMENT",
+            "periodCode": occurred_at.strftime("%Y-%m"),
+            "sourceSystem": _SOURCE_SYSTEM,
+        },
+        "eventType": EVENT_SETTLEMENT_ADJUSTMENT,
+        "debitLeg": _leg(debit_leg),
+        "creditLeg": _leg(credit_leg),
+        "sourceReference": {
+            "sourceCollection": "exceptions",
+            "sourceId": adj.get("exceptionId") or payment_id,
+            "sourceSystem": _SOURCE_SYSTEM,
+            "sourceType": EVENT_SETTLEMENT_ADJUSTMENT,
+        },
+        "rail": payment.get("rail") or payment.get("paymentType"),
+        "paymentType": payment.get("paymentType"),
+        "postingMode": {"type": "BATCH"},
+        "reversalOf": None,
+        "postingStatus": "PENDING",
+        "postingResult": None,
+        "mappingVersion": MAPPING_VERSION,
+        "createdAt": _now_utc(),
+    }
+
+
 def process_settlement(
     payment: dict,
     connection: MongoDBConnection,
@@ -241,6 +322,20 @@ def process_settlement(
         )
     except DuplicateKeyError:
         logger.info("settlement ledgerEvent already exists for paymentId=%s; skipping", payment_id)
+
+    # Every later update to this SETTLED payment re-delivers it here; the approved
+    # short-pay correction rides on one of those (stage 9 accept).
+    adjustment = build_adjustment_event(payment, clearing_account, coa)
+    if adjustment is not None:
+        try:
+            le_coll.insert_one(adjustment)
+            logger.info(
+                "settlement adjustment ledgerEvent %s created for paymentId=%s (Dr %s / Cr %s)",
+                adjustment["eventId"], payment_id,
+                adjustment["debitLeg"]["glAccountCode"], adjustment["creditLeg"]["glAccountCode"],
+            )
+        except DuplicateKeyError:
+            pass
 
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:

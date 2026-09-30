@@ -39,7 +39,7 @@ from typing import Any, Optional
 
 from contexts.payment_order_initiation.domain import checks
 from contexts.payment_rail import documents
-from process.exceptions import STATUS_OPEN, STATUS_RESOLVED
+from process.exceptions import STATUS_OPEN, STATUS_RESOLVED, ExceptionConflict
 from process.payment_context import PaymentContext
 
 logger = logging.getLogger(__name__)
@@ -124,12 +124,12 @@ def return_of_funds(
             session=session,
         )
         if claim is None:
-            raise ValueError(
+            raise ExceptionConflict(
                 f"return_of_funds: exception {exc_id} is no longer OPEN — another resolver "
                 "already acted. Aborting before any balance change."
             )
         if c.transactions.find_one({"reversalOf": original_txn_id}, {"_id": 1}, session=session):
-            raise ValueError(
+            raise ExceptionConflict(
                 f"return_of_funds: a compensating transaction reversing {original_txn_id} "
                 "already exists — aborting to avoid double compensation."
             )
@@ -193,7 +193,7 @@ def return_of_funds(
             actor="exceptions-service",
             at=now,
         )
-        checks.append_checks(c.payments, payment["_id"], [entry])
+        checks.append_checks(c.payments, payment["_id"], [entry], session=session)
         return rev_doc
 
     with c.db.client.start_session() as session:

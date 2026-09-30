@@ -276,41 +276,62 @@ def _join_exceptions(exc_coll, payment_ids: list) -> dict:
 
 
 def list_exceptions(
-    connection: MongoDBConnection, db_name: str, *, limit: int = 25, skip: int = 0
+    connection: MongoDBConnection,
+    db_name: str,
+    *,
+    limit: int = 25,
+    skip: int = 0,
+    status: Optional[str] = "OPEN",
+    category: Optional[str] = None,
 ) -> dict:
     """Payments that need intervention — the Operations lens (doc 24 §3 step 7).
 
-    A payment belongs here if it ended in a terminal state (FAILED/RETURNED/…) OR
-    carries an OPEN exception. The second case matters because a reconciliation
-    discrepancy (`RECONCILIATION_DISCREPANCY`, site 4) is stamped on a SETTLED/POSTED
-    payment — which is NOT a terminal state, so a terminal-only query would hide it.
-    The exception is the intervention signal, not the state.
+    Driven by the `exceptions` collection, not by payment state: the exception is the
+    intervention signal. The earlier `terminal state OR open exception` query never
+    drained — every FAILED/RETURNED payment on the shared DB stayed listed after its
+    exception was resolved — and it pulled every OPEN paymentId into an unbounded `$in`.
 
-    Each row is joined with its open (or latest) `exceptions` occurrence as `exception`
-    (null for a legacy terminal payment with none — empty-tolerant, the stage-8 trace
-    precedent). The join is per-payment; the `$or`/`$in` filter is handled by both
-    pymongo and the FakeDb suite (`FakeCollection._matches` supports `$in`/`$or`)."""
+    `status` defaults to OPEN (the working queue); pass RESOLVED/DISMISSED for history or
+    None for all. `category` narrows to one category (FR-9.IN4). Rows are ordered by the
+    newest matching exception, one row per payment, each joined with its exception to
+    render (`_pick_exception`: the OPEN one, else the latest).
+    """
     coll = _payments(connection, db_name)
     exc_coll = connection.get_collection(db_name, "exceptions")
-    open_pids = [e["paymentId"] for e in exc_coll.find({"status": "OPEN"}, {"_id": 0, "paymentId": 1})]
-    query = {
-        "$or": [
-            {"status": {"$in": INTERVENTION_STATES}},
-            {"paymentId": {"$in": open_pids}},
-        ]
-    }
-    items = list(
-        coll.find(query, _LIST_PROJECTION).sort("createdAt", -1).skip(skip).limit(limit)
-    )
-    joined = _join_exceptions(exc_coll, [i.get("paymentId") for i in items])
+
+    exc_query: dict = {}
+    if status:
+        exc_query["status"] = status
+    if category:
+        exc_query["category"] = category
+
+    # One row per payment, newest exception first. The matched set is the OPEN queue by
+    # default — small by construction, since resolving removes a row.
+    ordered_pids: list = []
+    seen: set = set()
+    for e in exc_coll.find(exc_query, {"_id": 0, "paymentId": 1, "createdAt": 1}).sort("createdAt", -1):
+        pid = e.get("paymentId")
+        if pid and pid not in seen:
+            seen.add(pid)
+            ordered_pids.append(pid)
+
+    page_pids = ordered_pids[skip:skip + limit]
+    by_pid = {
+        p.get("paymentId"): p
+        for p in coll.find({"paymentId": {"$in": page_pids}}, _LIST_PROJECTION)
+    } if page_pids else {}
+    items = [by_pid[pid] for pid in page_pids if pid in by_pid]
+
+    joined = _join_exceptions(exc_coll, page_pids)
     for item in items:
         item["exception"] = joined.get(item.get("paymentId"))
     return {
         "items": items,
-        "total": coll.count_documents(query),
+        "total": len(ordered_pids),
         "limit": limit,
         "skip": skip,
-        "states": INTERVENTION_STATES,
+        "status": status,
+        "category": category,
     }
 
 

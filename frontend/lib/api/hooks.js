@@ -815,6 +815,10 @@ export function useWorkflowExceptions({ limit = 25, skip = 0 } = {}, refreshKey 
   return { ...data, loading, error };
 }
 
+// Agent investigation polling: 3s × 40 ≈ 2 min, long enough for one LLM investigation.
+const AGENT_POLL_INTERVAL_MS = 3000;
+const AGENT_POLL_MAX_TRIES = 40;
+
 /**
  * One exception's AI investigation — the `exceptions.agent{}` subdoc the Reconciliation
  * Agent recorded (rootCause, evidence, confidence, recommendedResolution). Polled
@@ -829,26 +833,43 @@ export function useReconciliationAgent(exceptionId, refreshKey = 0) {
 
   useEffect(() => {
     let cancelled = false;
+    let timer = null;
     if (!exceptionId) {
       setAgent(null);
-      setLoading(false);
       setError(null);
+      setLoading(false);
       return () => {
         cancelled = true;
       };
     }
+    // The agent writes `agent{}` seconds after the exception opens, so poll until it lands
+    // (or AGENT_POLL_MAX_TRIES runs out — agent disabled/unconfigured). `loading` stays true
+    // while waiting so the panel can show "Investigating…".
+    let tries = 0;
     setLoading(true);
-    agentApi(`reconciliation/${exceptionId}`).then(({ data: d, error: err }) => {
-      if (cancelled) return;
-      if (err) setError(err);
-      else {
-        setAgent(d?.agent ?? null);
-        setError(null);
-      }
-      setLoading(false);
-    });
+    const load = () => {
+      agentApi(`reconciliation/${exceptionId}`).then(({ data: d, error: err }) => {
+        if (cancelled) return;
+        const found = !err && d?.agent;
+        if (found) {
+          setAgent(d.agent);
+          setError(null);
+          setLoading(false);
+          return;
+        }
+        tries += 1;
+        if (tries >= AGENT_POLL_MAX_TRIES) {
+          if (err) setError(err);
+          setLoading(false);
+          return;
+        }
+        timer = setTimeout(load, AGENT_POLL_INTERVAL_MS);
+      });
+    };
+    load();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [exceptionId, refreshKey]);
 

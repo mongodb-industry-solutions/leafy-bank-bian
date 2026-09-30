@@ -72,6 +72,10 @@ def record_exception(
     (paymentId, category), it is returned untouched — site 4 re-checks DISCREPANT
     payments every batch pass, so a repeated DISCREPANT must not double-insert (B3).
     """
+    if category not in _SEVERITY_FOR:
+        # UTA (incoming) or a typo — same guard as the transactions twin.
+        raise ValueError(f"record_exception: category {category!r} is not an outgoing category")
+
     existing = exc_coll.find_one(
         {"paymentId": payment_id, "category": category, "status": STATUS_OPEN}
     )

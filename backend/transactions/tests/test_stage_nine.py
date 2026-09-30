@@ -320,25 +320,22 @@ def _db_payment(db, *, idx=0):
     return pays[idx]
 
 
-def test_an_unmatched_wire_ends_failed_with_an_open_settlement_unmatched_exception(service, db):
+def test_an_unmatched_wire_settles_with_no_stage7_exception(service, db):
+    """Sep 17 L1264-1270: an unmatched settlement still SETTLES — the GL posts the full
+    amount and stage 8 raises the discrepancy. Stage 7 opens no exception."""
+    from contexts.payment_settlement import settle
+    from tests.test_payments_service import FakeConnection
+
     _initiate_external(service, settlement_outcome="UNMATCHED")
     payment = _db_payment(db)
-    assert payment["lifecycle"]["currentState"] == lifecycle.FAILED
-    excs = _exceptions(db)
-    assert len(excs) == 1
-    assert excs[0]["category"] == CATEGORY_SETTLEMENT_UNMATCHED
-    assert excs[0]["status"] == STATUS_OPEN
-    assert excs[0]["severity"] == SEVERITY_ACTION_REQUIRED
-    assert excs[0]["paymentId"] == payment["paymentId"]
-    # Doina's mockup (Sep 17 L1307-1313): UNMATCHED is a PARTIAL short-pay, not a full
-    # rejection — the discrepancy is the delta (the unmatched portion), not the whole
-    # amount; actualAmount is what the rail claimed it settled for (expected − delta).
-    assert excs[0]["detail"]["expectedAmount"] == payment["amount"]
-    assert excs[0]["detail"]["discrepancyAmount"] == 25.0
-    assert excs[0]["detail"]["actualAmount"] == payment["amount"] - 25.0
-    assert excs[0]["source"] == {"stage": "7 settle", "service": "transactions-service"}
-    assert excs[0]["sourceSystem"] == "transactions-service"
+    assert payment["lifecycle"]["currentState"] == lifecycle.IN_PROGRESS
+    assert payment["lifecycle"]["settlementStatus"] == "PENDING"
+    assert _exceptions(db) == []
 
+    assert settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0) == 1
+    settled = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    assert settled["lifecycle"]["currentState"] == lifecycle.SETTLED
+    assert settled["lifecycle"]["settlementStatus"] == "SETTLED"
 
 def test_unmatched_is_a_partial_short_pay_expected_received_discrepancy(service, db):
     """B (Doina mockup) — UNMATCHED settles short: expected / received / discrepancy are
@@ -360,7 +357,7 @@ def test_unmatched_is_a_partial_short_pay_expected_received_discrepancy(service,
     pos = db["settlementPositions"].find_one({"paymentId": payment["paymentId"]})
     assert pos is not None
     assert pos["outcome"] == "UNMATCHED"
-    assert pos["settlementStatus"] == "FAILED"
+    assert pos["settlementStatus"] == "SETTLED"
     assert pos["expectedAmount"] == expected
     assert pos["actualAmount"] == actual
 
@@ -566,27 +563,53 @@ def test_resolve_retry_on_delayed_settles_and_auto_resolves(service, db):
     assert payment_after["lifecycle"]["currentState"] == lifecycle.SETTLED
 
 
-def test_resolve_accept_discrepancy_closes_with_the_note_and_moves_no_money(service, db):
-    _initiate_external(service, settlement_outcome="UNMATCHED")
-    exc = _exc(db)
-    assert exc["category"] == CATEGORY_SETTLEMENT_UNMATCHED
+def _discrepant_wire(service, db, *, charge_bearer=None):
+    """A settled external wire carrying the stage-8 RECONCILIATION_DISCREPANCY, stamped as
+    `_stamp_discrepant` does (the ledger's sweep is not in this suite)."""
+    from process.exceptions import record_exception
+
+    _initiate_external(service, settlement_outcome="MATCHED")
     payment = _db_payment(db)
-    assert payment["lifecycle"]["currentState"] == lifecycle.FAILED
-    debtor_before = db["accounts"].find_one({"accountId": payment["debtor"]["accountId"]})["balance"]["current"]
-
-    updated = service.resolve_exception(
-        exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY,
-        note="Correspondent fee — accepted with cause.",
+    pid = payment["paymentId"]
+    extra = {"lifecycle.reconciliationStatus": "DISCREPANT",
+             "lifecycle.currentState": lifecycle.SETTLED}
+    if charge_bearer:
+        extra["chargeBearer"] = charge_bearer
+    db["payments"].update_one({"paymentId": pid}, {"$set": extra})
+    payment = db["payments"].find_one({"paymentId": pid})
+    record_exception(
+        service._collections(), payment, CATEGORY_RECONCILIATION_DISCREPANCY,
+        detail={"discrepancyAmount": 25.0, "discrepancyReason": "rail settled short",
+                "expectedAmount": 25000.0, "actualAmount": 24975.0,
+                "returnCode": None, "duplicateOf": None},
+        source={"stage": SOURCE_STAGE_RECONCILE, "service": SERVICE_LEDGER},
     )
+    return payment, _exc(db)
 
+
+def test_accept_on_a_debt_wire_records_the_correcting_entry_for_the_ledger(service, db):
+    """chargeBearer DEBT — the bank bears the correspondent's charge, so accepting stamps
+    the approved correction the ledger posts as Dr 5214 / Cr nostro."""
+    payment, exc = _discrepant_wire(service, db, charge_bearer="DEBT")
+    service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY,
+                              note="Correspondent fee — bank absorbs.")
+    after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    adj = after["clearing"]["settlementAdjustment"]
+    assert adj["amount"] == 25.0
+    assert adj["chargeBearer"] == "DEBT"
+    assert adj["exceptionId"] == exc["exceptionId"]
+    assert after["lifecycle"]["reconciliationStatus"] == "RECONCILED"
+
+
+@pytest.mark.parametrize("bearer", ["CRED", "SHAR", "SLEV"])
+def test_accept_when_the_beneficiary_bears_charges_posts_nothing(service, db, bearer):
+    """CRED/SHAR/SLEV — the short credit is the beneficiary's; the accept is the record."""
+    payment, exc = _discrepant_wire(service, db, charge_bearer=bearer)
+    updated = service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)
     assert updated["status"] == STATUS_RESOLVED
-    assert updated["resolution"]["note"] == "Correspondent fee — accepted with cause."
-    # no money moved — debtor balance unchanged; payment still FAILED (B4)
-    debtor_after = db["accounts"].find_one({"accountId": payment["debtor"]["accountId"]})["balance"]["current"]
-    assert debtor_after == debtor_before
-    payment_after = db["payments"].find_one({"paymentId": payment["paymentId"]})
-    assert payment_after["lifecycle"]["currentState"] == lifecycle.FAILED
-
+    after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    assert "settlementAdjustment" not in (after.get("clearing") or {})
+    assert after["lifecycle"]["reconciliationStatus"] == "RECONCILED"
 
 def test_resolve_dismiss_closes_an_informational_duplicate_signal(service, db):
     _initiate_external(service)
@@ -624,8 +647,7 @@ def test_resolve_404_unknown_exception(service, db):
 
 
 def test_resolve_409_on_an_already_resolved_exception(service, db):
-    _initiate_external(service, settlement_outcome="UNMATCHED")
-    exc = _exc(db)
+    _, exc = _discrepant_wire(service, db)
     service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)
     # a second resolve on the now-RESOLVED exception → 409
     with pytest.raises(ValueError, match="not OPEN"):
@@ -633,9 +655,8 @@ def test_resolve_409_on_an_already_resolved_exception(service, db):
 
 
 def test_resolve_422_action_not_legal_for_category(service, db):
-    _initiate_external(service, settlement_outcome="UNMATCHED")
-    exc = _exc(db)
-    # DISMISS is legal only for DUPLICATE_SIGNAL, not SETTLEMENT_UNMATCHED
+    _, exc = _discrepant_wire(service, db)
+    # DISMISS is legal only for DUPLICATE_SIGNAL, not RECONCILIATION_DISCREPANCY
     with pytest.raises(ValueError, match="not legal"):
         service.resolve_exception(exc["exceptionId"], action=ACTION_DISMISS)
 
@@ -806,8 +827,8 @@ def test_b4_resume_restores_the_settlement_outcome_so_unmatched_survives_a_stepu
 ):
     """B4 — the resume path (`_context_from_doc`) must restore `settlement_outcome` from the
     persisted doc. Drive an external wire that hits the step-up hold with UNMATCHED selected,
-    then resume with a second factor; the settlement run must still land UNMATCHED → FAILED,
-    not reset to MATCHED → SETTLED. This is the live demo-breaker the audit flagged: without
+    then resume with a second factor; the settlement run must still land UNMATCHED (short-pay
+    stamped), not reset to MATCHED. This is the live demo-breaker the audit flagged: without
     persist+restore, a held UNMATCHED wire silently became a happy-path SETTLED on resume."""
     from tests.test_payments_service import _ASSERTION
     weak = {"method": "PASSWORD", "factorCount": 1}
@@ -822,6 +843,52 @@ def test_b4_resume_restores_the_settlement_outcome_so_unmatched_survives_a_stepu
     service.resume_payment(pid, customer_ref=held["customerId"], authentication=_ASSERTION)
 
     resumed = db["payments"].find_one({"paymentId": pid})
-    # UNMATCHED survived the resume → FAILED, not SETTLED (the bug reset to MATCHED → SETTLED)
-    assert resumed["lifecycle"]["currentState"] == lifecycle.FAILED
-    assert resumed["lifecycle"].get("settlementStatus") == "FAILED"
+    # UNMATCHED survived the resume: the short-pay is stamped and recorded on the position
+    # (the bug reset to MATCHED, which stamps neither).
+    assert resumed["clearing"]["discrepancyReason"] == "UNMATCHED_AMOUNT"
+    pos = db["settlementPositions"].find_one({"paymentId": pid})
+    assert pos["outcome"] == "UNMATCHED"
+
+
+# --- 2026-09-30 fix pass (plan-stage9-fixes.md F4/F5) ----------------------------------
+
+def test_f5_resolve_errors_are_typed_so_the_router_maps_on_type(service, db):
+    from process.exceptions import (
+        ExceptionActionNotLegal, ExceptionConflict, ExceptionNotFound,
+    )
+    with pytest.raises(ExceptionNotFound):
+        service.resolve_exception("EXC-nonexistent", action=ACTION_DISMISS)
+    _, exc = _discrepant_wire(service, db)
+    with pytest.raises(ExceptionActionNotLegal):
+        service.resolve_exception(exc["exceptionId"], action=ACTION_DISMISS)
+    service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)
+    with pytest.raises(ExceptionConflict):
+        service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)
+
+
+def test_f4_failed_retry_surfaces_the_original_error_when_reopen_collides(service, db, monkeypatch):
+    """A retry whose settle wrote a fresh OPEN occurrence and then raised: the re-open hits
+    idx_exception_open_unique. The operator must see the settle error, not a 500 from the
+    index collision."""
+    from pymongo.errors import DuplicateKeyError
+
+    _initiate_external(service, settlement_outcome="DELAYED")
+    exc = _exc(db)
+
+    def boom(*a, **k):
+        raise RuntimeError("settle blew up")
+    monkeypatch.setattr(service, "settle_payment", boom)
+
+    coll = service.db["exceptions"]
+    real_update = coll.update_one
+
+    def colliding_update(filt, update, *a, **k):
+        if update.get("$set", {}).get("status") == STATUS_OPEN:
+            raise DuplicateKeyError("E11000 idx_exception_open_unique")
+        return real_update(filt, update, *a, **k)
+    monkeypatch.setattr(coll, "update_one", colliding_update)
+
+    with pytest.raises(RuntimeError, match="settle blew up"):
+        service.resolve_exception(
+            exc["exceptionId"], action=ACTION_RETRY_SETTLEMENT, new_settlement_outcome="MATCHED",
+        )

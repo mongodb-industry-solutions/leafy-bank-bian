@@ -1593,7 +1593,7 @@ const EXCEPTION_ACTIONS = {
 const ACTION_LABELS = {
   RETRY_SETTLEMENT: "Retry settlement",
   RETURN_FUNDS: "Return funds",
-  ACCEPT_DISCREPANCY: "Accept with cause",
+  ACCEPT_DISCREPANCY: "Accept discrepancy",
   DISMISS: "Dismiss",
   REPAIR: "Repair — confirm match",
   RETURN: "Return via pacs.004",
@@ -1628,7 +1628,9 @@ const EXCEPTION_EXPLANATION = {
     "The rail returned the payment and no settlement occurred. Return the funds to the debtor.",
   RECONCILIATION_DISCREPANCY:
     "The three-way reconciliation — payment to rail, rail to settlement, settlement to GL — " +
-    "found a mismatch. Accept the discrepancy, or investigate before accepting.",
+    "found a mismatch, e.g. the rail settled short of the GL posting. Accepting approves the " +
+    "correction: if Leafy Bank bears the charges (DEBT) it posts Dr 5214 Correspondent " +
+    "Charges / Cr nostro; otherwise the beneficiary bore it and no entry is needed.",
   DUPLICATE_SIGNAL:
     "This payment resembles an earlier one — a possible duplicate submission. Dismiss if " +
     "the duplication is intentional.",
@@ -1666,12 +1668,21 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
   // The Reconciliation Agent writes `exceptions.agent{}` asynchronously, after the exception
   // opens. Fetch it on a dedicated refresh so the operator sees the agent's findings appear
   // without waiting for the 10s batch tick to re-pull the whole workflow.
-  const { agent: agentBlock } = useReconciliationAgent(baseOpen?.exceptionId, refreshKey);
+  const { agent: agentBlock, loading: agentLoading } = useReconciliationAgent(
+    baseOpen?.exceptionId,
+    refreshKey
+  );
   const open = baseOpen && agentBlock ? { ...baseOpen, agent: agentBlock } : baseOpen;
   const [note, setNote] = useState("");
   const [outcome, setOutcome] = useState("MATCHED");
   const [busy, setBusy] = useState(false);
   const [approving, setApproving] = useState(false);
+  // Errors from this panel's own actions render here, next to the button that failed —
+  // not in the deep-dive's page-level banner, whose copy is about manual review.
+  const [panelError, setPanelError] = useState(null);
+  // The approve route resumes the agent graph but persists nothing on the exception, so
+  // track acknowledgement locally to stop the button being offered twice.
+  const [acknowledged, setAcknowledged] = useState(() => new Set());
   // UTA only. The account an operator confirms as the true beneficiary (Repair), and the
   // ISO reason the sending bank will see (Return). Pre-filled from the exception's own
   // `closestAccountId` so the common case — confirming the match the system already found —
@@ -1701,10 +1712,13 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
   async function doResolve(action) {
     if (!open) return;
     setBusy(true);
+    setPanelError(null);
+    let err = null;
+    try {
     if (UTA_ACTIONS.has(action)) {
       // Different route, different fields — see `UTA_ACTIONS`.
       if (onResolveUta) {
-        await onResolveUta(open.exceptionId, action, {
+        err = await onResolveUta(open.exceptionId, action, {
           matchedAccountId:
             action === "REPAIR" ? repairAccount || suggestedAccount : undefined,
           returnReasonCode: action === "RETURN" ? returnReason : undefined,
@@ -1712,13 +1726,17 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
         });
       }
     } else if (onResolve) {
-      await onResolve(open.exceptionId, action, {
+      err = await onResolve(open.exceptionId, action, {
         note: note || undefined,
         newSettlementOutcome: action === "RETRY_SETTLEMENT" ? outcome : undefined,
       });
     }
-    setBusy(false);
-    setNote("");
+    } finally {
+      setBusy(false);
+    }
+    // Keep the operator's note when the action failed so they can retry without retyping.
+    if (err) setPanelError(`${ACTION_LABELS[action] || action} failed — ${err}`);
+    else setNote("");
   }
 
   return (
@@ -1733,6 +1751,19 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
             <span>What happened here</span>
           </div>
           <Body>{EXCEPTION_EXPLANATION[(open || exceptions[0]).category]}</Body>
+        </div>
+      )}
+      {panelError && <Banner variant="danger">{panelError}</Banner>}
+      {open && !open.agent && agentLoading && (
+        <div className={styles.resolveCallout}>
+          <div className={styles.resolveCalloutTitle}>
+            <Icon glyph="Refresh" />
+            <span>AI investigation in progress…</span>
+          </div>
+          <Body className={styles.muted}>
+            The Reconciliation Agent is gathering the payment&apos;s records. Its findings
+            appear here when it finishes.
+          </Body>
         </div>
       )}
       {rows.map((e) => (
@@ -1775,7 +1806,7 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
                   ))}
                 </ul>
               )}
-              {onAcknowledgeAgent && (
+              {onAcknowledgeAgent && e.status === "OPEN" && !acknowledged.has(e.exceptionId) && (
                 <div className={styles.resolveActions}>
                   <Button
                     size="xsmall"
@@ -1783,8 +1814,15 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
                     disabled={approving}
                     onClick={async () => {
                       setApproving(true);
-                      await onAcknowledgeAgent(e.exceptionId);
-                      setApproving(false);
+                      setPanelError(null);
+                      let err = null;
+                      try {
+                        err = await onAcknowledgeAgent(e.exceptionId);
+                      } finally {
+                        setApproving(false);
+                      }
+                      if (err) setPanelError(`Acknowledge failed — ${err}`);
+                      else setAcknowledged((prev) => new Set(prev).add(e.exceptionId));
                     }}
                   >
                     Acknowledge AI recommendation
@@ -2035,15 +2073,12 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
   // so the resolution log + the compensation evidence (for RETURN_FUNDS) appear.
   async function resolveException(excId, action, { note, newSettlementOutcome } = {}) {
     if (!excId) return;
-    setResolveError(null);
     const { error: err } = await coreApi(
       `workflow/exceptions/${excId}/resolve`,
       { method: "POST", body: { action, note, newSettlementOutcome } }
     );
-    if (err) {
-      setResolveError(err);
-      return;
-    }
+    // The panel renders its own errors next to the action — return, don't banner.
+    if (err) return err;
     setNudge((n) => n + 1);
     // B6: bump the shared refreshKey so the Operations queue refetches — without this, hitting
     // Back after a resolve shows the stale OPEN row (the list hooks never re-ran). The
@@ -2057,15 +2092,11 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
   // nudge and the list's shared key, or hitting Back shows the stale OPEN row.
   async function resolveUta(excId, action, { matchedAccountId, returnReasonCode, note } = {}) {
     if (!excId) return;
-    setResolveError(null);
     const { error: err } = await coreApi(
       `workflow/exceptions/${excId}/uta`,
       { method: "POST", body: { action, matchedAccountId, returnReasonCode, note } }
     );
-    if (err) {
-      setResolveError(err);
-      return;
-    }
+    if (err) return err;
     setNudge((n) => n + 1);
     if (onDataChanged) onDataChanged();
   }
@@ -2081,10 +2112,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
       `reconciliation/${excId}/approve`,
       { method: "POST" }
     );
-    if (err) {
-      setResolveError(err);
-      return;
-    }
+    if (err) return err;
     // Bump the dedicated agent-investigation refresh so the callout re-renders resolved,
     // and the shared refresh so the queue reflects the acknowledged state.
     setNudge((n) => n + 1);

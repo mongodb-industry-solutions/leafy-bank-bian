@@ -25,12 +25,13 @@ service's** `settlement_worker` via CDC on `payments` — never by the transacti
 
 MATCHED → captured at `PENDING`, then flipped to `SETTLED` by `complete_due` after a short
 deferred window (default 30s) · DELAYED → `PENDING` (stays at `IN_PROGRESS`, operator-retried)
-· UNMATCHED → `FAILED` · EXCEPTION → `RETURNED`. Every value comes from the spec's
+· UNMATCHED → settles like MATCHED (short-pay caught at stage 8) · EXCEPTION → `RETURNED`. Every value comes from the spec's
 `settlementStatus` enum — no invented states. The `outcome` classification itself is an enum on
 `settlementPositions` (`MATCHED`/`UNMATCHED`/`DELAYED`/`EXCEPTION`), matched to the spec's
 `settlementStatus` enum via `_OUTCOME_TO_STATUS`. Doina (Sep 17): the four outcomes must be
 reachable and trigger distinct downstream behaviour, not just label the same result — UNMATCHED
-stamps a discrepancy amount + reason on `clearing` for the (deferred) Stage 9 exception queue.
+stamps a discrepancy amount + reason on `clearing`, settles, and stage 8 raises the
+RECONCILIATION_DISCREPANCY (Sep 17 L1264-1270: GL posts $25,000, position shows $24,975).
 
 ## Why MATCHED is deferred (Doina Sep 17)
 
@@ -62,7 +63,6 @@ from contexts.payment_order_initiation.domain import checks, lifecycle
 from process.exceptions import (
     CATEGORY_SETTLEMENT_DELAYED,
     CATEGORY_SETTLEMENT_RETURNED,
-    CATEGORY_SETTLEMENT_UNMATCHED,
     SERVICE_TRANSACTIONS,
     record_exception,
 )
@@ -128,7 +128,9 @@ OUTCOME_VALUES = (MATCHED, DELAYED, UNMATCHED, EXCEPTION)
 _OUTCOME_TO_STATUS: dict[str, str] = {
     MATCHED: "SETTLED",
     DELAYED: "PENDING",
-    UNMATCHED: "FAILED",
+    # Sep 17 L1264-1270: an unmatched settlement still SETTLES — the GL posts the full
+    # amount and stage 8 catches the short-pay (settlement position ≠ GL settlement posting).
+    UNMATCHED: "SETTLED",
     EXCEPTION: "RETURNED",
 }
 
@@ -156,13 +158,11 @@ def _simulated_response(payment_id: str, model: str, outcome: str, expected_amou
     response carries the batch reference, the settlement date, and the outcome-specific
     status/rejection/return code — all written to `payments.clearing.*` by the caller.
 
-    UNMATCHED is a PARTIAL short-pay (Doina's mockup, L1307-1313): the rail settles for less
-    than expected — ``actualAmount = expected − delta`` — and the ``delta`` is the
-    discrepancy the operator investigates. The bank treats the partial settlement as FAILED
-    (it did not complete for the full amount), so ``settlementStatus`` stays FAILED, the
-    settlement ledgerEvent does NOT post (the worker only fires on SETTLED), and the full
-    expected amount remains returnable via RETURN_FUNDS. The "received" figure is the rail's
-    claimed partial settlement — informational on the position, not posted to the GL.
+    UNMATCHED is a PARTIAL short-pay (Sep 17 L1264-1270): the rail settles for less than
+    expected — ``actualAmount = expected − delta``. The payment still SETTLES and the
+    settlement ledgerEvent posts the full amount ("GL settlement posting: $25,000"); the
+    ``delta`` is left for stage 8 to detect as a settlement-position ≠ GL mismatch, which
+    raises the RECONCILIATION_DISCREPANCY the Reconciliation Agent investigates.
     """
     now = datetime.now(timezone.utc)
     batch_ref = f"SIM-SETT-{uuid.uuid4().hex[:8].upper()}"
@@ -189,8 +189,9 @@ def _simulated_response(payment_id: str, model: str, outcome: str, expected_amou
         expected = float(expected_amount or 0.0)
         delta = min(_UNMATCHED_DELTA_USD, expected)
         actual = expected - delta
-        resp["statusCode"] = "RJCT"  # the settlement did not complete for the full amount
-        resp["rejectionCode"] = "UNMATCHED_AMOUNT"
+        resp["settlementDate"] = now.date().isoformat()
+        resp["statusCode"] = "ACCC"  # settled — but for less than expected
+        resp["discrepancyReason"] = "UNMATCHED_AMOUNT"
         resp["actualAmount"] = actual
         resp["discrepancyAmount"] = delta
     elif outcome == EXCEPTION:
@@ -404,7 +405,25 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
         "clearing.batchRef": response["batchRef"],
     }
 
-    if outcome == MATCHED:
+    if outcome == UNMATCHED:
+        # Settles like MATCHED (below); the short-pay is stamped for display and left for
+        # stage 8 to detect against the GL. No stage-7 exception.
+        ctx.collections.payments.update_one(
+            {"_id": ctx.payment_oid},
+            {"$set": {
+                "clearing.discrepancyAmount": response.get("discrepancyAmount"),
+                "clearing.discrepancyReason": response.get("discrepancyReason"),
+                "updatedAt": datetime.now(timezone.utc),
+            }},
+        )
+        _record_check(
+            ctx, "settlement_short_paid", checks.WARN,
+            f"Rail settled {response.get('actualAmount')} against {expected_amount} expected — "
+            f"{response.get('discrepancyAmount')} short. Settling; stage 8 reconciliation will "
+            "flag the discrepancy.",
+        )
+
+    if outcome in (MATCHED, UNMATCHED):
         if defer:
             # Deferred settlement (Doina Sep 17: "wires should settle only when they have
             # reached and completed the clearing & settlement stage"). The settlement is
@@ -492,47 +511,6 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
         )
         ctx.stop(ctx.payment_doc)
         return
-    elif outcome == UNMATCHED:
-        extra["clearing.rejectionCode"] = response.get("rejectionCode")
-        # FR-7.3 / Doina (Sep 17): UNMATCHED feeds Stage 8's mismatch flag with a specific
-        # discrepancy amount and routes toward Stage 9's exception queue. Per her mockup
-        # (L1307-1313) UNMATCHED is a PARTIAL short-pay — the rail settled for less than
-        # expected — so the discrepancy is the delta (the unmatched portion), NOT the whole
-        # payment amount. The bank treats the partial settlement as FAILED (it did not
-        # complete for the full amount); the full expected remains returnable via RETURN_FUNDS.
-        delta = response.get("discrepancyAmount", expected_amount)
-        actual_amount = response.get("actualAmount", 0)
-        extra["clearing.discrepancyAmount"] = delta
-        extra["clearing.discrepancyReason"] = response.get("rejectionCode")
-        lifecycle.advance_ctx(
-            ctx, lifecycle.FAILED,
-            actor="payment-settlement-service",
-            reason=f"SIMULATED settlement rejected — {response.get('rejectionCode')}",
-            extra=extra,
-        )
-        _record_check(
-            ctx, "settlement_rejected", checks.FAIL,
-            f"Settlement rejected — {response.get('rejectionCode')}. Payment FAILED. "
-            f"Discrepancy {delta} (expected {expected_amount}, received {actual_amount}). "
-            f"The clearing position must be reversed (stage 9).",
-        )
-        # Stage 9 — queue the unmatched settlement (doc 24 B3 site 1). The discrepancy
-        # values mirror the clearing.* stamps above so the queue row and the payment agree.
-        record_exception(
-            ctx.collections, ctx.payment_doc or {},
-            CATEGORY_SETTLEMENT_UNMATCHED,
-            detail={
-                "discrepancyAmount": delta,
-                "discrepancyReason": response.get("rejectionCode"),
-                "expectedAmount": expected_amount,
-                "actualAmount": actual_amount,
-                "returnCode": None,
-                "duplicateOf": None,
-            },
-            source={"stage": STAGE, "service": SERVICE_TRANSACTIONS},
-        )
-        ctx.stop(ctx.payment_doc)
-        return
     elif outcome == EXCEPTION:
         extra["clearing.returnCode"] = response.get("returnCode")
         lifecycle.advance_ctx(
@@ -578,9 +556,10 @@ def complete_due(connection, db_name: str, delay_seconds: float = 30.0) -> int:
       * `lifecycle.settlementStatus == PENDING`
       * `lifecycle.currentState == IN_PROGRESS`
       * `clearing.batchRef` present and non-null  (excludes the VOSTRO stub, which sets it null)
-      * `simulatedSettlementOutcome in {None, MATCHED}`  (excludes DELAYED, operator-retried)
+      * `simulatedSettlementOutcome in {None, MATCHED, UNMATCHED}`  (excludes DELAYED, operator-retried)
       * `clearing.submittedAt <= now - delay_seconds`
-    UNMATCHED/EXCEPTION never reach here — `run` marks them FAILED/RETURNED (terminal), not PENDING.
+    EXCEPTION never reaches here — `run` marks it RETURNED (terminal), not PENDING. UNMATCHED
+    completes like MATCHED; its short-pay is caught at stage 8.
 
     Idempotent: completion flips `settlementStatus` to SETTLED, so a later cycle's query cannot
     reselect the same payment. A race between two cycles is closed by `lifecycle.advance`'s
@@ -601,7 +580,7 @@ def complete_due(connection, db_name: str, delay_seconds: float = 30.0) -> int:
         # the stub) and any payment that never reached settlement capture. Missing -> None
         # -> excluded, which is the intent.
         "clearing.batchRef": {"$ne": None},
-        "simulatedSettlementOutcome": {"$in": [None, MATCHED]},
+        "simulatedSettlementOutcome": {"$in": [None, MATCHED, UNMATCHED]},
         "clearing.submittedAt": {"$lte": cutoff},
     }
     completed = 0

@@ -261,3 +261,40 @@ def test_the_clearing_account_is_resolved_from_the_payer_side_for_inbound():
         "the clearing account came off the PAYER side — the customer's deposit (2111) "
         "must not appear in an inbound settlement event"
     )
+
+
+# --- stage 9: the approved short-pay correction (chargeBearer DEBT) -------------
+
+class _StubCoAWith5214(_StubCoA):
+    _CONTROLS = {**_StubCoA._CONTROLS, "5214": "5210"}
+
+
+def test_an_approved_adjustment_posts_dr_5214_cr_nostro():
+    from shared.posting_rules import EVENT_SETTLEMENT_ADJUSTMENT
+    from workers.settlement_worker import build_adjustment_event
+
+    payment = {**_PAYMENT, "clearing": {
+        **_PAYMENT["clearing"],
+        "settlementAdjustment": {"amount": 25.0, "currency": "USD",
+                                 "chargeBearer": "DEBT", "exceptionId": "EXC-1"},
+    }}
+    event = build_adjustment_event(payment, _CLEARING_ACCOUNT, _StubCoAWith5214())
+    assert event["eventType"] == EVENT_SETTLEMENT_ADJUSTMENT
+    assert event["idempotencyKey"] == "PAY-test0001-ADJ"
+    assert event["debitLeg"]["glAccountCode"] == "5214"
+    assert event["creditLeg"]["glAccountCode"] == "1111"
+    assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"] == 2500
+
+
+def test_no_adjustment_event_without_an_approved_adjustment():
+    from workers.settlement_worker import build_adjustment_event
+    assert build_adjustment_event(_PAYMENT, _CLEARING_ACCOUNT, _StubCoAWith5214()) is None
+
+
+def test_a_chart_without_5214_degrades_instead_of_crashing_the_worker():
+    from workers.settlement_worker import build_adjustment_event
+    payment = {**_PAYMENT, "clearing": {
+        **_PAYMENT["clearing"],
+        "settlementAdjustment": {"amount": 25.0, "currency": "USD"},
+    }}
+    assert build_adjustment_event(payment, _CLEARING_ACCOUNT, _COA) is None
