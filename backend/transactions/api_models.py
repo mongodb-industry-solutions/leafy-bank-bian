@@ -38,6 +38,13 @@ InternalTransferTypeLiteral = Literal["OWN_ACCOUNT", "THIRD_PARTY"]
 # enum declared in the consolidated spec. Sourced from the spec, not memory.
 SettlementOutcomeLiteral = Literal["MATCHED", "UNMATCHED", "DELAYED", "EXCEPTION"]
 
+# Reconciliation plan A1. How the correspondent's camt.053 line for this wire differs from our
+# books. A simulation control, authored here (not a spec enum); mirrors
+# `financial_gateway.domain.camt053.STATEMENT_OUTCOMES`.
+StatementOutcomeLiteral = Literal[
+    "CLEAN", "FEE_DEDUCTED", "REFERENCE_ALTERED", "LATE", "AMOUNT_TRANSPOSED",
+]
+
 # Stage 2 (BIAN PartyAuthentication, SD 38917). NOT from the `payments` spec — no
 # authentication field exists there. This is the channel's assertion about an
 # authentication IT performed; the payments hub only verifies and records it
@@ -212,6 +219,10 @@ class PaymentOrderInitiateRequest(BaseModel):
     # NOT a BIAN initiation field — a simulation control, persisted on the payment doc as
     # `simulatedSettlementOutcome` so it survives a step-up / manual-review hold and resume.
     simulatedSettlementOutcome: Optional[SettlementOutcomeLiteral] = None
+    # Reconciliation plan A1 — the correspondent-statement lever. Same contract as the
+    # settlement lever above: external wire only, persisted as `simulatedStatementOutcome`
+    # so it survives a hold and resume. None = CLEAN.
+    simulatedStatementOutcome: Optional[StatementOutcomeLiteral] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -399,6 +410,19 @@ class InboundSimulateRequest(BaseModel):
     scenario: Literal[
         "HAPPY", "PARTIAL", "MISMATCH", "SANCTIONS", "FX", "DUPLICATE",
     ] = "HAPPY"
+    model_config = ConfigDict(extra="forbid")
+
+
+class StatementGenerateRequest(BaseModel):
+    """`POST /FinancialGateway/{id}/Statement/Generate` — the manual statement trigger.
+
+    Books every newly-settled outbound wire on the nostro onto the correspondent's next
+    camt.053 (reconciliation plan A1). `includeOrphan` adds one line with no internal
+    counterpart — the spec's orphaned-settlement case.
+    """
+
+    accountCode: Literal["1111", "1121"] = "1111"
+    includeOrphan: bool = True
     model_config = ConfigDict(extra="forbid")
 
 

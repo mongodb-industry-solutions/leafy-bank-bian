@@ -149,6 +149,9 @@ class PaymentContext:
     # needs UNMATCHED/DELAYED/EXCEPTION outcomes (doc 21 B4, FR-7.3). Values are constrained
     # to the `SettlementOutcomeLiteral` enum at the request boundary.
     settlement_outcome: Optional[str] = None
+    # Reconciliation plan A1: the correspondent-statement lever (`StatementOutcomeLiteral`).
+    # Read by `financial_gateway.application.statement` off the persisted payment, not here.
+    statement_outcome: Optional[str] = None
     # Stage 4b operator-review override (FR-4.13 resume). Set by `resolve_review` when an
     # operator approves/declines a payment held at MANUAL_FRAUD_REVIEW. "APPROVED" makes
     # `evaluate.run` skip the fraud re-score and commit the authorisation the model withheld;

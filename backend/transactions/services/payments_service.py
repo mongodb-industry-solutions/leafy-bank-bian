@@ -178,6 +178,7 @@ class PaymentsService:
         ach_details: Optional[dict] = None,
         internal_details: Optional[dict] = None,
         settlement_outcome: Optional[str] = None,
+        statement_outcome: Optional[str] = None,
     ) -> dict:
         """Initiate a payment order. Returns the persisted payment document.
 
@@ -215,8 +216,19 @@ class PaymentsService:
             reference_data=self.reference_data,
             rail_gateway=self.rail_gateway,
             settlement_outcome=settlement_outcome,
+            statement_outcome=statement_outcome,
         )
         return payment_lifecycle.run(ctx)
+
+    def generate_statement(self, *, account_code: str = "1111", include_orphan: bool = True) -> Optional[dict]:
+        """The correspondent's next camt.053 for a nostro (reconciliation plan A1).
+
+        One code path for the background worker and the manual route, like
+        `simulate_inbound`. Returns None when no settled wire is waiting to be booked.
+        """
+        from contexts.financial_gateway.application.statement import generate_statement
+        return generate_statement(self.db, account_code=account_code,
+                                  include_orphan=include_orphan)
 
     def simulate_inbound(self, scenario: str = "HAPPY", *, account_id: Optional[str] = None) -> dict:
         """Generate one simulated inbound pacs.008 and run it (demo trigger).
@@ -569,6 +581,8 @@ class PaymentsService:
             # UNMATCHED/DELAYED/EXCEPTION to MATCHED. Persisted at initiation; read by
             # settle.run. None for non-wire or pre-B4 docs (→ MATCHED, the safe default).
             settlement_outcome=payment.get("simulatedSettlementOutcome"),
+            # Same B4 rule for the statement lever (plan A1).
+            statement_outcome=payment.get("simulatedStatementOutcome"),
         )
         ctx.payment_oid = payment["_id"]
         ctx.payment_id = payment["paymentId"]

@@ -51,6 +51,8 @@ _ACTOR = "ledger-service"
 _ACTOR_TYPE = "SERVICE"
 # The settlement event's idempotencyKey suffix (`{paymentId}-SETTLEMENT`, settlement_worker).
 _SETTLEMENT_SUFFIX = "-SETTLEMENT"
+# Stage 7's `lifecycle.settlementStatus` while an external wire awaits confirmation.
+_SETTLEMENT_PENDING = "PENDING"
 
 
 def _now_utc() -> datetime:
@@ -192,8 +194,15 @@ def _write_back(
         if result.matched_count:
             updated += 1
 
+        # ⚠️ Not while settlement is still PENDING. A captured external wire sits at
+        # IN_PROGRESS until `settle.complete_due` confirms it (~30s), and that worker only
+        # selects IN_PROGRESS. A GL batch landing inside that window used to move it to
+        # POSTED first, so it never settled, never posted its settlement leg and never
+        # reached a statement (PAY-31f6d99c, 2026-09-30). The posting axis above still
+        # records POSTED; only the state waits, exactly as for a SETTLED internal transfer.
         payments.update_one(
-            {"paymentId": payment_id, "lifecycle.currentState": _IN_PROGRESS},
+            {"paymentId": payment_id, "lifecycle.currentState": _IN_PROGRESS,
+             "lifecycle.settlementStatus": {"$ne": _SETTLEMENT_PENDING}},
             {
                 "$set": {
                     "lifecycle.currentState": _POSTED,

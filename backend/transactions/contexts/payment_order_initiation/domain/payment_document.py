@@ -302,6 +302,9 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         # None for non-wire rails (settlement is atomic in stage 5, the lever is inert). Not in
         # the canonical `payments` spec — see `test_payment_document_spec._KNOWN_EXTRAS`.
         "simulatedSettlementOutcome": ctx.settlement_outcome,
+        # Reconciliation plan A1: how the correspondent's camt.053 books this wire. Read by
+        # the statement generator. Same persistence rule and `_KNOWN_EXTRAS` entry as above.
+        "simulatedStatementOutcome": ctx.statement_outcome,
         # R8 — captured at the entry screen for EVERY rail. Single source of truth: the
         # rail mappers project it outward (pain.001 ReqdExctnDt, NACHA effectiveEntryDate)
         # rather than each envelope holding its own copy.

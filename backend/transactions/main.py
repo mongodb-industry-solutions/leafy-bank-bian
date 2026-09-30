@@ -17,6 +17,7 @@ from api_models import (
     FraudEvaluationRequest,
     InboundMessageRequest,
     InboundSimulateRequest,
+    StatementGenerateRequest,
     PaymentConfirmationRequest,
     PaymentOrderBulkInitiateRequest,
     PaymentOrderInitiateRequest,
@@ -32,7 +33,7 @@ from routers.workflow import router as workflow_router
 from services.payments_service import PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
-from workers import inbound_sim_worker, settlement_completion_worker
+from workers import inbound_sim_worker, settlement_completion_worker, statement_sim_worker
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
@@ -136,6 +137,24 @@ if ENABLE_INBOUND_SIM:
         "started background worker: inbound_sim_worker (interval=%ds)", _inbound_interval,
     )
 
+# Reconciliation plan A1 — the correspondent's camt.053 statement. Default OFF: with no
+# statement, leg 2 has no external record, which is the timing-lag demo state.
+ENABLE_STATEMENT_SIM = os.getenv("ENABLE_STATEMENT_SIM", "false").lower() == "true"
+if ENABLE_STATEMENT_SIM:
+    _statement_interval = int(os.getenv(
+        "STATEMENT_INTERVAL_SECONDS",
+        str(statement_sim_worker.DEFAULT_INTERVAL_SECONDS),
+    ))
+    threading.Thread(
+        target=_restart_loop,
+        args=("statement_sim_worker",
+              statement_sim_worker.run, payments_service, _statement_interval),
+        daemon=True, name="statement_sim_worker",
+    ).start()
+    logger.info(
+        "started background worker: statement_sim_worker (interval=%ds)", _statement_interval,
+    )
+
 app.include_router(workflow_router)
 
 
@@ -217,6 +236,8 @@ def _initiate_kwargs(body) -> dict:
         # Stage 7 simulation lever (FR-7.3). Only affects an external wire (deferred
         # settlement); ignored for internal transfers. Defaults to MATCHED → happy path.
         "settlement_outcome": body.simulatedSettlementOutcome,
+        # Reconciliation plan A1: how the correspondent's statement books this wire.
+        "statement_outcome": body.simulatedStatementOutcome,
     }
 
 
@@ -314,6 +335,39 @@ async def financial_gateway_inbound_simulate(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logging.error("FinancialGateway/Inbound/Simulate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/FinancialGateway/{financialgatewayid}/Statement/Generate")
+async def financial_gateway_statement_generate(
+    financialgatewayid: str,
+    body: StatementGenerateRequest,
+):
+    """Manual trigger for the correspondent-statement simulator (demo control).
+
+    Not a BIAN v14 operation — a simulator route, like Inbound/Simulate. Shares
+    `generate_statement` with the background worker. Returns `generated: false` when no
+    settled wire is waiting to be booked.
+    """
+    try:
+        doc = payments_service.generate_statement(
+            account_code=body.accountCode, include_orphan=body.includeOrphan,
+        )
+        if doc is None:
+            return _bian_response({"generated": False, "accountCode": body.accountCode})
+        return _bian_response({
+            "generated": True,
+            "paymentMessageId": doc["paymentMessageId"],
+            "accountCode": doc["statement"]["accountCode"],
+            "sequence": doc["statement"]["sequence"],
+            "window": doc["statement"]["window"],
+            "entryCount": len(doc["entries"]),
+            "orphanCount": sum(1 for e in doc["entries"] if e.get("simulatedPaymentId") is None),
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("FinancialGateway/Statement/Generate failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal payment processing error.")
 
 

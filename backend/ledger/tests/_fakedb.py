@@ -13,10 +13,18 @@ from typing import Any, Optional
 def _matches(doc: dict, query: dict) -> bool:
     for key, want in query.items():
         have = doc
+        missing = False
         for part in key.split("."):
             if not isinstance(have, dict) or part not in have:
-                return False
+                missing = True
+                break
             have = have[part]
+        if missing:
+            # MongoDB: a missing field matches `$ne` (it is not equal to anything), and
+            # nothing else here.
+            if isinstance(want, dict) and set(want) == {"$ne"} and want["$ne"] is not None:
+                continue
+            return False
         if isinstance(want, dict):
             if "$in" in want and have not in want["$in"]:
                 return False

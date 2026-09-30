@@ -145,6 +145,9 @@ _KNOWN_EXTRAS = {
     # MATCHED → SETTLED, silently destroying the controlled-failure demo. None for non-wire
     # rails. The THIRTEENTH; argued for in `payment_document.build`'s comment, not slipped in.
     "simulatedSettlementOutcome",
+    # 2026-09-30 (reconciliation plan A1): the correspondent-statement lever, persisted for
+    # the same hold-and-resume reason as the settlement lever above. None = CLEAN.
+    "simulatedStatementOutcome",
     # (The FOURTEENTH, `enableEnrichmentAgent`, was retired 2026-09-29 with the Enrichment
     # Agent — Doina struck it from the agentic design. Ordinals below are kept as written.)
     # 2026-09-28 (incoming wire): the three fields the inbound flow adds. Argued for in

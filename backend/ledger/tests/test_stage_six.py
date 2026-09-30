@@ -91,6 +91,21 @@ def test_an_in_progress_payment_reaches_posted_with_exactly_one_new_event():
     assert states == ["IN_PROGRESS", "POSTED"]
 
 
+def test_a_wire_awaiting_settlement_stays_in_progress_but_gains_the_posting_fact():
+    """A GL batch inside the ~30s deferred-settlement window must not move the wire to
+    POSTED: `settle.complete_due` only selects IN_PROGRESS, so the wire would never settle
+    (PAY-31f6d99c, 2026-09-30)."""
+    c = _with_payment("IN_PROGRESS")
+    c.get_collection("db", "payments").docs[0]["lifecycle"]["settlementStatus"] = "PENDING"
+    journal = _post(c)
+    p = c.get_collection("db", "payments").docs[0]
+    assert p["lifecycle"]["currentState"] == "IN_PROGRESS"
+    assert p["status"] == "IN_PROGRESS"
+    assert p["lifecycle"]["postingStatus"] == "POSTED"
+    assert p["refs"]["journalEntryId"] == journal["journalId"]
+    assert [e["state"] for e in p["lifecycle"]["events"]] == ["IN_PROGRESS"]
+
+
 def test_a_settled_payment_keeps_its_state_but_gains_the_posting_fact():
     """POSTED genuinely arrives after SETTLED for an internal transfer — it settles
     synchronously and the batch posts ten minutes later (lifecycle.py:82-84)."""

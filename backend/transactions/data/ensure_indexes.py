@@ -174,6 +174,17 @@ PAYMENT_MESSAGES_INDEXES = [
         "name": "idx_payment_messages_payment_purpose",
         "keys": [("paymentId", ASCENDING), ("purpose", ASCENDING)],
     },
+    # Reconciliation plan A1 — one camt.053 statement per (nostro, window start). Two
+    # concurrent generators compute the same `window.from`; this rejects the loser
+    # (`statement.generate_statement` catches it and returns the winner). Partial on
+    # `purpose` is safe here, unlike the index above: every statement read constrains
+    # `purpose: ACCOUNT_STATEMENT`, so the filter never excludes a query's own rows.
+    {
+        "name": "idx_statement_window_unique",
+        "keys": [("statement.accountCode", ASCENDING), ("statement.window.from", ASCENDING)],
+        "unique": True,
+        "partialFilterExpression": {"purpose": "ACCOUNT_STATEMENT"},
+    },
 ]
 
 # Stage 9 — the `exceptions` queue. One OPEN occurrence per (paymentId, category) is the

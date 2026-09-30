@@ -76,6 +76,15 @@ const SETTLEMENT_OUTCOMES = [
   { value: "UNMATCHED", label: "Unmatched", description: "Rail settles $25 short — reconciliation flags the gap" },
   { value: "EXCEPTION", label: "Exception", description: "Network/correspondent rejected — RETURNED" },
 ];
+// Reconciliation plan A1 — how the correspondent's camt.053 statement books this wire.
+// Mirrors `StatementOutcomeLiteral` (api_models.py).
+const STATEMENT_OUTCOMES = [
+  { value: "CLEAN", label: "Clean", description: "Statement line matches our books exactly" },
+  { value: "FEE_DEDUCTED", label: "Fee deducted", description: "Correspondent takes $25 from the principal" },
+  { value: "REFERENCE_ALTERED", label: "Reference altered", description: "Correspondent re-keys our reference" },
+  { value: "LATE", label: "Late", description: "Line is missing today, booked on the next statement" },
+  { value: "AMOUNT_TRANSPOSED", label: "Amount transposed", description: "Two digits swapped — a keying error" },
+];
 const TRANSFER_TYPES = [
   ["OWN_ACCOUNT", "Own account"],
   ["THIRD_PARTY", "Third party"],
@@ -113,9 +122,17 @@ const EMPTY = {
   transferType: "THIRD_PARTY",
   // stage 7 simulation lever (wire-only; default MATCHED = happy path)
   simulatedSettlementOutcome: "MATCHED",
+  // reconciliation plan A1 lever (wire-only; default CLEAN)
+  simulatedStatementOutcome: "CLEAN",
 };
 
 const isWire = (form) => form.rail === "WIRE";
+
+// A wire whose Demo Controls make the correspondent deduct its $25 charge in flight.
+const feeTakenInFlight = (form) =>
+  isWire(form) &&
+  (form.simulatedStatementOutcome === "FEE_DEDUCTED" ||
+    form.simulatedSettlementOutcome === "UNMATCHED");
 
 function buildPayload(form) {
   const payload = {
@@ -183,6 +200,7 @@ function buildPayload(form) {
     // Stage 7 simulation lever (FR-7.3) — re-enabled for stage 9 (doc 24 §3 step 8): the
     // exceptions queue needs the non-happy settlement paths reachable from the wizard.
     payload.simulatedSettlementOutcome = form.simulatedSettlementOutcome;
+    payload.simulatedStatementOutcome = form.simulatedStatementOutcome;
   } else {
     // An account we hold — name, BIC and address resolve from the snapshot server-side.
     payload.creditor = { accountId: form.creditorAccountId };
@@ -335,13 +353,17 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
     purpose: pick(AUTOFILL_PURPOSES),
     endToEndReference: `E2E-${digits(8)}`,
     clientReference: `INV-${digits(6)}`,
-    chargeBearer: pick(CHARGE_BEARERS)[0],
+    // Coherent with Demo Controls: when the correspondent is set to take a $25 fee, charges
+    // are DEBT so the bank absorbs it and resolution shows the Dr 5214 / Cr 1111 adjustment
+    // (reconciliation plan, Decision 2). Otherwise random, as before.
+    chargeBearer: feeTakenInFlight(form) ? "DEBT" : pick(CHARGE_BEARERS)[0],
     priority: pick(PRIORITIES),
     // B3: preserve the operator's settlement-outcome selection. autofill rebuilds from
     // EMPTY (which defaults this to MATCHED), so without carrying the current value through,
     // picking Unmatched then Autopopulate silently reverts to MATCHED → the wire settles
     // happy-path and the exception queue never fires (defect `autofill-incoherence` class).
     simulatedSettlementOutcome: form.simulatedSettlementOutcome,
+    simulatedStatementOutcome: form.simulatedStatementOutcome,
   };
 
   if (isWire(next)) {
@@ -392,6 +414,7 @@ export default function InitiateWizard({ onInitiated }) {
   const [form, setForm] = useState(EMPTY);
   const [showErrors, setShowErrors] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showDemoControls, setShowDemoControls] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [createdId, setCreatedId] = useState(null);
@@ -540,7 +563,8 @@ export default function InitiateWizard({ onInitiated }) {
       ["Priority", form.priority],
       // Stage 7 outcome row — re-enabled for stage 9 (doc 24 §3 step 8).
       ...(isWire(form)
-        ? [["Settlement outcome", form.simulatedSettlementOutcome]]
+        ? [["Settlement outcome", form.simulatedSettlementOutcome],
+           ["Correspondent statement", form.simulatedStatementOutcome]]
         : []),
       ["Channel", "BRANCH (bank-assisted)"],
     ];
@@ -652,6 +676,74 @@ export default function InitiateWizard({ onInitiated }) {
 
         {!loading && (
           <div className={styles.createGrid}>
+            {isWire(form) && (
+              <SectionCard
+                n={0}
+                title="Demo Controls"
+                subtitle="Simulation levers for the presenter — not part of the payment instruction."
+                className={styles.fullSpan}
+              >
+                <button
+                  type="button"
+                  className={styles.disclosure}
+                  onClick={() => setShowDemoControls((v) => !v)}
+                  aria-expanded={showDemoControls}
+                >
+                  <Icon glyph={showDemoControls ? "ChevronUp" : "ChevronDown"} size={12} />
+                  {showDemoControls ? "Hide demo controls" : "Show demo controls"}
+                </button>
+                {showDemoControls && (
+                  <div className={styles.twoCol}>
+                    <div className={styles.fieldStack}>
+                      {/* Stage 9 — settlement-outcome selector, re-enabled for the exceptions
+                          demo (doc 24 §3 step 8). Was commented out 2026-09-22 (stage 7's enum ask
+                          was schema, not driver); stage 9 needs the non-happy paths reachable to
+                          populate the exception queue. Backend plumbing stayed in place. */}
+                      <Select
+                        label="Simulated settlement outcome"
+                        description="Stage 7 demo control — picks the simulated external settlement response."
+                        value={form.simulatedSettlementOutcome}
+                        onChange={(v) => set("simulatedSettlementOutcome", v)}
+                        allowDeselect={false}
+                      >
+                        {SETTLEMENT_OUTCOMES.map((o) => (
+                          <Option key={o.value} value={o.value} description={o.description}>
+                            {o.label}
+                          </Option>
+                        ))}
+                      </Select>
+                      {form.simulatedSettlementOutcome !== "MATCHED" && (
+                        <div className={styles.infoBox}>
+                          This forces a non-happy-path settlement: the payment will{" "}
+                          {form.simulatedSettlementOutcome === "DELAYED"
+                            ? "hold at IN_PROGRESS (settlement PENDING)"
+                            : form.simulatedSettlementOutcome === "UNMATCHED"
+                              ? "settle $25 short — reconciliation flags the gap for the AI agent and the exception queue"
+                              : "RETURN (network/correspondent rejection)"}{" "}
+                          — for demoing the distinct downstream outcomes (FR-7.3).
+                        </div>
+                      )}
+                    </div>
+                    <div className={styles.fieldStack}>
+                      <Select
+                        label="Simulated correspondent statement"
+                        description="How the correspondent's end-of-day camt.053 books this wire."
+                        value={form.simulatedStatementOutcome}
+                        onChange={(v) => set("simulatedStatementOutcome", v)}
+                        allowDeselect={false}
+                      >
+                        {STATEMENT_OUTCOMES.map((o) => (
+                          <Option key={o.value} value={o.value} description={o.description}>
+                            {o.label}
+                          </Option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                )}
+              </SectionCard>
+            )}
+
             <SectionCard n={1} title="Select Payment Type" className={styles.fullSpan}>
               <div style={{ maxWidth: 420 }}>
                 <Select
@@ -925,34 +1017,6 @@ export default function InitiateWizard({ onInitiated }) {
 
                     {isWire(form) && (
                       <>
-                        {/* Stage 9 — settlement-outcome selector, re-enabled for the exceptions
-                            demo (doc 24 §3 step 8). Was commented out 2026-09-22 (stage 7's enum ask
-                            was schema, not driver); stage 9 needs the non-happy paths reachable to
-                            populate the exception queue. Backend plumbing stayed in place. */}
-                        <Select
-                          label="Simulated settlement outcome"
-                          description="Stage 7 demo control — picks the simulated external settlement response."
-                          value={form.simulatedSettlementOutcome}
-                          onChange={(v) => set("simulatedSettlementOutcome", v)}
-                          allowDeselect={false}
-                        >
-                          {SETTLEMENT_OUTCOMES.map((o) => (
-                            <Option key={o.value} value={o.value} description={o.description}>
-                              {o.label}
-                            </Option>
-                          ))}
-                        </Select>
-                        {form.simulatedSettlementOutcome !== "MATCHED" && (
-                          <div className={styles.infoBox}>
-                            This forces a non-happy-path settlement: the payment will{" "}
-                            {form.simulatedSettlementOutcome === "DELAYED"
-                              ? "hold at IN_PROGRESS (settlement PENDING)"
-                              : form.simulatedSettlementOutcome === "UNMATCHED"
-                                ? "settle $25 short — reconciliation flags the gap for the AI agent and the exception queue"
-                                : "RETURN (network/correspondent rejection)"}{" "}
-                            — for demoing the distinct downstream outcomes (FR-7.3).
-                          </div>
-                        )}
                         <button
                           type="button"
                           className={styles.disclosure}

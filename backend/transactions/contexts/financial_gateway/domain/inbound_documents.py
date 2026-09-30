@@ -11,6 +11,7 @@ under her own rename (L780, D-IN1).
 | received wire   | INBOUND   | `CREDIT_TRANSFER` | FR-1.IN1    |
 | status response | OUTBOUND  | `STATUS_RESPONSE` | FR-5.IN2    |
 | return          | OUTBOUND  | `RETURN`          | FR-9.IN3    |
+| nostro statement| INBOUND   | `ACCOUNT_STATEMENT` | recon plan A1 (camt.053, no paymentId) |
 
 ⚠️ **`direction` here is the MESSAGE's travel, not the payment's.** An INBOUND payment emits
 OUTBOUND pacs.002 and pacs.004 messages — two of the three rows above. The two fields are
@@ -44,6 +45,9 @@ OUTBOUND = "OUTBOUND"
 PURPOSE_CREDIT_TRANSFER = "CREDIT_TRANSFER"
 PURPOSE_STATUS_RESPONSE = "STATUS_RESPONSE"
 PURPOSE_RETURN = "RETURN"
+# The correspondent's camt.053 statement for our nostro (reconciliation plan A1). Not tied to
+# one payment — `paymentId` is None — so it is found by `statement.accountCode/window`.
+PURPOSE_ACCOUNT_STATEMENT = "ACCOUNT_STATEMENT"
 
 # The two response message types. pacs.002 is the status report (FR-5.IN1); pacs.004 is the
 # payment return (FR-9.IN3). Versions match the pacs.008 generation the mapper emits.
@@ -187,6 +191,57 @@ def return_doc(
         "rawMessageRef": None,
         "originalMessageRef": original_message_ref,
         "returnReasonCode": return_reason_code,
+        "transformationAudit": None,
+        "simulated": True,
+        "sourceSystem": SOURCE_SYSTEM,
+        "createdAt": now,
+    }
+
+
+def statement_doc(
+    *,
+    oid: ObjectId,
+    message: dict,
+    account_code: str,
+    currency: str,
+    window_from: datetime,
+    window_to: datetime,
+    sequence: int,
+    opening_balance: float,
+    closing_balance: float,
+    entries: list[dict],
+    now: datetime,
+) -> dict:
+    """The camt.053 statement received from the correspondent (plan-reconciliation-agent §A1).
+
+    `payload` is the ISO message and is never mutated. `entries[]` is our flat projection of
+    its `Ntry[]` — one row per line with a `recon{}` block — so statement matching (A2) can
+    record its result without rewriting the correspondent's message.
+    """
+    from contexts.financial_gateway.domain import camt053
+
+    return {
+        "_id": oid,
+        "paymentMessageId": derive_ref("PM", oid),
+        "paymentId": None,
+        "paymentExecutionId": None,
+        "direction": INBOUND,
+        "purpose": PURPOSE_ACCOUNT_STATEMENT,
+        "messageStandard": camt053.MESSAGE_STANDARD,
+        "messageFormat": camt053.MESSAGE_FORMAT,
+        "mappingVersion": camt053.MAPPING_VERSION,
+        "payload": message,
+        "rawMessage": camt053.to_xml(message),
+        "rawMessageRef": None,
+        "statement": {
+            "accountCode": account_code,
+            "currency": currency,
+            "window": {"from": window_from, "to": window_to},
+            "sequence": sequence,
+            "openingBalance": opening_balance,
+            "closingBalance": closing_balance,
+        },
+        "entries": [{"lineNo": i + 1, **e} for i, e in enumerate(entries)],
         "transformationAudit": None,
         "simulated": True,
         "sourceSystem": SOURCE_SYSTEM,
