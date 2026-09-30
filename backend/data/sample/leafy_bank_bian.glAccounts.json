@@ -1296,6 +1296,9 @@
     "updatedAt": "2026-01-01T00:00:00.000Z"
   },
   {
+    "_id": {
+      "$oid": "c02d8431d14fb16af7bad3cb"
+    },
     "accountCode": "5214",
     "accountName": "Correspondent Charges",
     "accountType": "EXPENSE",

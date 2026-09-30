@@ -51,7 +51,10 @@ def test_an_internal_transfer_is_already_settled_when_settle_runs(service, db):
 
 def test_matched_outcome_settles_the_payment(service, db):
     """B4 matched → settlementStatus SETTLED, currentState SETTLED, settlementPositions written."""
+    from contexts.payment_settlement import settle
+    from tests.test_payments_service import FakeConnection
     _initiate_external(service, settlement_outcome="MATCHED")
+    settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0)  # deferred completion (36215b1)
 
     payment = _payment(db)
     assert payment["lifecycle"]["currentState"] == "SETTLED"

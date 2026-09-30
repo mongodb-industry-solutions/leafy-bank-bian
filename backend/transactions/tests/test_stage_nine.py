@@ -443,7 +443,10 @@ def test_a_same_key_replay_returns_the_winner_with_an_evidence_check_and_no_exce
 def test_a_clean_matched_wire_creates_no_exception(service, db):
     """Regression — the happy path is unchanged: a MATCHED external wire settles with no
     exception row (doc 24 §4 Regression)."""
+    from contexts.payment_settlement import settle
+    from tests.test_payments_service import FakeConnection
     _initiate_external(service, settlement_outcome="MATCHED")
+    settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0)  # deferred completion (36215b1)
     assert _exceptions(db) == []
     assert _db_payment(db)["lifecycle"]["currentState"] == lifecycle.SETTLED
 
@@ -693,7 +696,10 @@ def test_b1_accept_discrepancy_on_reconciliation_discrepancy_flips_the_axis_to_r
 
     # A settled external wire (MATCHED) — the reconciliation pass would normally RECONCILE
     # it; instead simulate a discrepancy by stamping one directly, as _stamp_discrepant does.
+    from contexts.payment_settlement import settle
+    from tests.test_payments_service import FakeConnection
     _initiate_external(service, settlement_outcome="MATCHED")
+    settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0)  # deferred completion (36215b1)
     payment = _db_payment(db)
     pid = payment["paymentId"]
     record_exception(

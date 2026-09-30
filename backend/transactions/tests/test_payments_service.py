@@ -792,9 +792,9 @@ def test_deferred_completion_does_not_auto_settle_a_delayed_wire(service, db):
     """
     from contexts.payment_settlement import settle
 
-    payment = _initiate_external(service, simulatedSettlementOutcome="DELAYED")
+    payment = _initiate_external(service, settlement_outcome="DELAYED")
     pid = payment["paymentId"]
-    assert payment["lifecycle"]["settlementStatus"] == "PENDING"
+    assert db["payments"].find_one({"paymentId": pid})["lifecycle"]["settlementStatus"] == "PENDING"
 
     conn = FakeConnection(db)
     assert settle.complete_due(conn, "leafy_bank_bian", delay_seconds=0) == 0

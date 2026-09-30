@@ -1,9 +1,13 @@
 // Stage 9 manual gate — verify the exceptions/returns path end-to-end on the live cluster.
 //
 // Evidence this checks (doc 24 §3 step 9 + leafy-bian-bian `_state.md`):
-//   [1] UNMATCHED wire → FAILED + clearing.discrepancyAmount/Reason + one OPEN
-//       SETTLEMENT_UNMATCHED exception, and the queue route serves it (the exception is
-//       joined onto the row).
+//   [1] UNMATCHED wire settles SHORT (Sep 17 L1264-1286): SETTLED, the GL posts the full
+//       amount, `settlementPositions.actualAmount = expected − delta`, and stage 8 leg 2
+//       raises RECONCILIATION_DISCREPANCY (stage 7 opens no exception). Once accepted, on a
+//       chargeBearer=DEBT wire: `clearing.settlementAdjustment` stamped, reconciliationStatus
+//       RECONCILED, and a `{pid}-ADJ` ledgerEvent posts Dr 5214 / Cr nostro. Non-DEBT
+//       accepts post nothing. (Interim — the reconciliation-agent plan moves the $25 source
+//       to the camt.053 statement and the DEBT post to an approval-gated POST_ADJUSTMENT.)
 //   [2] Resolve RETURN_FUNDS → debtor balance restored, 1131 nets to zero for that
 //       payment, a compensating `transactions` doc (reversalOf set), and — after
 //       POST /pipeline/batch/trigger — a reversal `ledgerEvents` doc (reversalOf set) AND
@@ -20,7 +24,7 @@
 //   export MONGODB_URI="mongodb+srv://..."
 //   export LEAFYBANK_DB_NAME=fsi-bian-test-db
 //   mongosh "$MONGODB_URI" backend/data/verify_stage9_gate.js
-//   # or verify a specific payment (a FAILED/RETURNED one with an exception):
+//   # or verify a specific payment (one with an exception — UNMATCHED, DELAYED, RETURNED):
 //   mongosh "$MONGODB_URI" backend/data/verify_stage9_gate.js -- PAY-b3d97f83
 //
 // The suite is hermetic and cannot see the change stream — this live run is the only proof.
@@ -52,12 +56,12 @@ if (argPid) {
   if (openExc) {
     p = dbc.payments.findOne({ paymentId: openExc.paymentId });
   } else {
-    // fall back to newest terminal payment
-    p = dbc.payments.find({ status: { $in: ["FAILED", "RETURNED"] } })
-          .sort({ initiatedAt: -1 }).limit(1).next();
+    // fall back to the payment of the newest exception of any status
+    const lastExc = dbc.exceptions.find().sort({ _id: -1 }).limit(1).toArray()[0];
+    if (lastExc) p = dbc.payments.findOne({ paymentId: lastExc.paymentId });
   }
   if (!p) {
-    print(`No terminal payment with an OPEN exception found on ${dbName}.`);
+    print(`No payment with an exception found on ${dbName}.`);
     print(`Initiate a wire with simulatedSettlementOutcome=UNMATCHED or EXCEPTION, then re-run.`);
     quit(1);
   }
@@ -68,19 +72,52 @@ print(`TARGET: ${pid} | db=${dbName} | rail=${p.rail} | amount=${p.amount} ${p.c
 print(`    currentState=${p.lifecycle.currentState}  status=${p.status}`);
 
 // --- [1] the exception queue row -------------------------------------------
-const exc = dbc.exceptions.findOne({ paymentId: pid, status: "OPEN" });
-ok("[1] an OPEN exception exists for the payment", !!exc, exc ? exc.category : "none");
+// OPEN or resolved — [1] must still verify after an UNMATCHED discrepancy was accepted.
+const exc = dbc.exceptions.findOne({ paymentId: pid, status: "OPEN" })
+         || dbc.exceptions.find({ paymentId: pid }).sort({ _id: -1 }).limit(1).toArray()[0];
+ok("[1] an exception exists for the payment", !!exc,
+    exc ? `${exc.category} (${exc.status})` : "none");
 if (exc) {
-  ok("[1] category matches the terminal state",
-      (p.status === "FAILED" && exc.category === "SETTLEMENT_UNMATCHED") ||
+  ok("[1] category matches the payment state",
       (p.status === "RETURNED" && exc.category === "SETTLEMENT_RETURNED") ||
-      (exc.category === "RECONCILIATION_DISCREPANCY"),
-      `category=${exc.category}`);
-  if (p.status === "FAILED") {
-    ok("[1] clearing.discrepancyAmount stamped", p.clearing?.discrepancyAmount != null,
-        `discrepancyAmount=${p.clearing?.discrepancyAmount}`);
-    ok("[1] clearing.discrepancyReason stamped", p.clearing?.discrepancyReason != null,
-        `discrepancyReason=${p.clearing?.discrepancyReason}`);
+      (p.lifecycle.currentState === "IN_PROGRESS" && exc.category === "SETTLEMENT_DELAYED") ||
+      (["SETTLED", "POSTED"].includes(p.lifecycle.currentState) &&
+        ["RECONCILIATION_DISCREPANCY", "SETTLEMENT_DELAYED"].includes(exc.category)),
+      `category=${exc.category} state=${p.lifecycle.currentState}`);
+  ok("[1] no SETTLEMENT_UNMATCHED exception (stage 7 no longer raises one)",
+      dbc.exceptions.countDocuments({ paymentId: pid, category: "SETTLEMENT_UNMATCHED" }) === 0);
+}
+
+if (p.simulatedSettlementOutcome === "UNMATCHED") {
+  ok("[1] UNMATCHED wire settled (short), not FAILED",
+      ["SETTLED", "POSTED"].includes(p.lifecycle.currentState),
+      `currentState=${p.lifecycle.currentState}`);
+  ok("[1] clearing.discrepancyAmount/Reason stamped",
+      p.clearing?.discrepancyAmount != null && p.clearing?.discrepancyReason != null,
+      `${p.clearing?.discrepancyAmount} / ${p.clearing?.discrepancyReason}`);
+  const pos = dbc.settlementPositions.findOne({ paymentId: pid, outcome: "UNMATCHED" });
+  ok("[1] settlementPositions shows the short-pay (actual = expected − delta)",
+      !!pos && Number(pos.actualAmount) === Number(pos.expectedAmount) - Number(p.clearing?.discrepancyAmount),
+      pos ? `expected=${pos.expectedAmount} actual=${pos.actualAmount}` : "no position");
+
+  const disc = dbc.exceptions.findOne({ paymentId: pid, category: "RECONCILIATION_DISCREPANCY" });
+  if (!disc) {
+    print(`  ℹ [1] no RECONCILIATION_DISCREPANCY yet — trigger the GL batch (stage 8 sweep), then re-run`);
+  } else if (disc.status === "RESOLVED" && (disc.resolution || {}).action === "ACCEPT_DISCREPANCY") {
+    ok("[1] accept flipped reconciliationStatus → RECONCILED",
+        p.lifecycle.reconciliationStatus === "RECONCILED", `${p.lifecycle.reconciliationStatus}`);
+    const adjEvent = dbc.ledgerEvents.findOne({ idempotencyKey: `${pid}-ADJ` });
+    if (p.chargeBearer === "DEBT") {
+      ok("[1] DEBT: clearing.settlementAdjustment stamped", !!p.clearing?.settlementAdjustment);
+      ok("[1] DEBT: {pid}-ADJ ledgerEvent posts Dr 5214 / Cr nostro",
+          !!adjEvent && adjEvent.debitLeg.glAccountCode === "5214" &&
+            adjEvent.creditLeg.glAccountCode === p.clearing?.settlementAccountCode,
+          adjEvent ? `Dr ${adjEvent.debitLeg.glAccountCode} / Cr ${adjEvent.creditLeg.glAccountCode}` : "missing");
+    } else {
+      ok(`[1] ${p.chargeBearer}: accept posts no adjustment`, !adjEvent && !p.clearing?.settlementAdjustment);
+    }
+  } else {
+    print(`  ℹ [1] discrepancy ${disc.status} — accept it in the UI, then re-run to check the adjustment`);
   }
 }
 

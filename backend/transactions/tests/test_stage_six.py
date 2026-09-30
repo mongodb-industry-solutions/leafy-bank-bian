@@ -77,7 +77,10 @@ def test_an_external_wire_reaches_the_ledger_via_the_clearing_account(service, d
     doc (payee = the clearing account), so the ledger's CDC path observes it. The payment
     settles via `settle.py` (default outcome: MATCHED) — the boundary document exists, so
     stage 6's write-back and the GL pipeline are reachable."""
+    from contexts.payment_settlement import settle
+    from tests.test_payments_service import FakeConnection
     _initiate_external(service)
+    settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0)  # deferred completion (36215b1)
     assert len(db["transactions"].docs) == 1
     txn = db["transactions"].docs[0]
     assert txn["payee"]["accountId"] == "ACC-CLEARING-WIRE"
