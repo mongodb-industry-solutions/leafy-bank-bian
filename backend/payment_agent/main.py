@@ -1,16 +1,15 @@
-"""Payment Agent service — Phase-1 Enrichment + Reconciliation agents.
+"""Payment Agent service — Phase-1 Reconciliation Agent.
 
-Two LangGraph agents over Atlas Vector Search + Bedrock (Haiku), both in this one service so the
-money-path transactions service stays thin:
+A LangGraph agent over Bedrock (Haiku), in its own service so the money-path transactions
+service stays thin. (The stage-3 Enrichment Agent was retired 2026-09-29 — Doina struck it
+from the agentic design; stage 3 is fully deterministic.)
 
-- **Enrichment Agent** — synchronous, called by the transactions service at the Stage-3 gate.
-  `POST /enrichment/propose` → proposes purpose-code enrichments (option B: proposes only).
 - **Reconciliation Agent** — asynchronous, change-stream-driven. Watches `exceptions` for OPEN
   `RECONCILIATION_DISCREPANCY` inserts, investigates the mismatch, writes findings onto
   `exceptions.agent{}`. `POST /reconciliation/investigate` triggers a run manually;
   `GET /reconciliation/{exception_id}` reads the recorded investigation.
 
-Both share the Bedrock model + `MongoDBSaver` checkpointer (state persists in Atlas).
+Uses a `MongoDBSaver` checkpointer (graph state persists in Atlas).
 
 Run: ``uvicorn main:app --port 8004`` (or ``python -m main``).
 """
@@ -24,35 +23,24 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from bedrock import bedrock_model
 from database.connection import MongoDBConnection
-from enrichment_agent import build_enrichment_agent, propose
 from reconciliation_agent import build_reconciliation_agent, investigate
 from reconciliation_worker import start_reconciliation_worker
-from reference_data import ReferenceData, VoyageEmbedder
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-ENRICHMENT_AGENT: Optional[Any] = None
 RECON_AGENT: Optional[Any] = None
 _DB: Optional[Any] = None
 
 
-def _build(db: Any, checkpointer: Any) -> tuple[Any, Any]:
-    model = bedrock_model()
-    reference_data = ReferenceData(db, embedder=VoyageEmbedder())
-    enrichment = build_enrichment_agent(model, reference_data, checkpointer)
-    reconciliation = build_reconciliation_agent(model, db, checkpointer)
-    return enrichment, reconciliation
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global ENRICHMENT_AGENT, RECON_AGENT, _DB
+    global RECON_AGENT, _DB
     uri = os.getenv("MONGODB_URI")
     if not uri:
         raise RuntimeError("MONGODB_URI is not set (see backend/payment_agent/.env).")
@@ -63,40 +51,18 @@ async def lifespan(app: FastAPI):
         db = connection.get_database(db_name)
         from langgraph.checkpoint.mongodb import MongoDBSaver
         checkpointer = MongoDBSaver(connection.client)
-        ENRICHMENT_AGENT, RECON_AGENT = _build(db, checkpointer)
+        RECON_AGENT = build_reconciliation_agent(bedrock_model(), db, checkpointer)
         _DB = db
-        logger.info("Payment agents built (enrichment + reconciliation).")
+        logger.info("Reconciliation agent built.")
         start_reconciliation_worker(RECON_AGENT, db, connection)
     except Exception:  # noqa: BLE001
-        logger.warning("Payment agents could not be built at startup — endpoints will 503/degrade.",
+        logger.warning("Reconciliation agent could not be built at startup — endpoints will 503/degrade.",
                        exc_info=True)
     yield
-    ENRICHMENT_AGENT = RECON_AGENT = _DB = None
+    RECON_AGENT = _DB = None
 
 
 app = FastAPI(title="Leafy Bank Payment Agent", lifespan=lifespan)
-
-
-class ProposeRequest(BaseModel):
-    paymentId: str
-    payment: dict = Field(..., description="Validated payment snapshot (read-only context).")
-
-
-class Proposal(BaseModel):
-    field: str
-    to: str
-    reason: str = ""
-    source: str = "agent"
-    # HIGH/MEDIUM/LOW free-text label (validated upstream in `parse_proposals`); "" if absent.
-    confidence: str = ""
-    # Real candidate matches captured from `purpose_code_resolve` tool results; empty for
-    # extraction proposals (invoiceNo/reference), which have no candidate trace.
-    considered: list[dict] = []
-
-
-class ProposeResponse(BaseModel):
-    paymentId: str
-    proposals: list[Proposal] = []
 
 
 class InvestigateRequest(BaseModel):
@@ -108,22 +74,8 @@ class InvestigateRequest(BaseModel):
 def health() -> dict:
     return {
         "status": "ok",
-        "enrichmentAgentReady": ENRICHMENT_AGENT is not None,
         "reconciliationAgentReady": RECON_AGENT is not None,
     }
-
-
-@app.post("/enrichment/propose", response_model=ProposeResponse)
-def enrichment_propose(req: ProposeRequest) -> ProposeResponse:
-    if ENRICHMENT_AGENT is None:
-        # 200 with empty proposals — the caller treats [] as "agent had nothing to add".
-        logger.warning("/enrichment/propose called but agent not ready — returning [].")
-        return ProposeResponse(paymentId=req.paymentId, proposals=[])
-    proposals = propose(ENRICHMENT_AGENT, req.payment, req.paymentId)
-    return ProposeResponse(
-        paymentId=req.paymentId,
-        proposals=[Proposal(**p) for p in proposals],
-    )
 
 
 @app.post("/reconciliation/investigate")

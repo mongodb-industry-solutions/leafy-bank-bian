@@ -313,74 +313,9 @@ function EnrichmentDiff({ enrichment }) {
           </div>
           <div className={styles.legRow}>
             <span className={styles.legAmount}>{fmtEnriched(r.to)}</span>
-            {/* `family="purple"` now resolves to a real pillPurple class (StatusPill.js).
-                The wrapper span's `title` carries the agent's reason so the diff tells the
-                why-story even when the AI-enrichment callout above is collapsed. */}
-            <span {...(r.reason ? { title: r.reason } : {})}>
-              <StatusPill
-                family={r.source === "agent" ? "purple" : "gray"}
-                label={r.source === "agent" ? "AI agent" : r.source}
-              />
-            </span>
+            <StatusPill family="gray" label={r.source} />
           </div>
         </Fragment>
-      ))}
-    </div>
-  );
-}
-
-/**
- * The Stage-3 "AI enrichment" callout — the Enrichment Agent's reasoning, surfaced.
- *
- * Mirrors the Reconciliation Agent's "AI investigation" callout in `ExceptionsPanel`: a
- * titled callout with a confidence pill, the remittance text the agent reasoned over, and
- * each applied proposal (field → value + reason). Purpose-code proposals also list the
- * candidate codes the agent weighed with their real vector-search scores (`considered[]`),
- * which is the transparency that makes the agentic step legible.
- *
- * Reads `payments.enrichment.agent{}`, written synchronously at stage 3 by
- * `_apply_agent_proposals` — so unlike the recon agent (which writes async after the
- * exception opens and needs a polling hook), this rides on the existing `usePaymentWorkflow`
- * response as `stage.data.enrichment.agent`. No dedicated hook or endpoint.
- */
-function EnrichmentAgentCallout({ enrichment }) {
-  const agent = enrichment?.agent;
-  if (!agent) return null;
-  const confidenceFamily =
-    agent.confidence === "HIGH" ? "green"
-    : agent.confidence === "MEDIUM" ? "yellow"
-    : "gray";
-  return (
-    <div className={styles.resolveCallout}>
-      <div className={styles.resolveCalloutTitle}>
-        <Icon glyph="InfoWithCircle" />
-        <span>AI enrichment</span>
-        {agent.confidence && (
-          <StatusPill family={confidenceFamily}>{agent.confidence}</StatusPill>
-        )}
-      </div>
-      {agent.remittanceText && (
-        <Body className={styles.muted}>
-          Reasoned over remittance: “{agent.remittanceText}”
-        </Body>
-      )}
-      {(agent.proposals || []).map((p) => (
-        <div key={p.field} className={styles.enrichmentProposal}>
-          <Body>
-            <strong>{p.field}</strong> → {fmtEnriched(p.to)}
-            {p.reason && <span className={styles.muted}> — {p.reason}</span>}
-          </Body>
-          {p.considered && p.considered.length > 0 && (
-            <ul className={styles.agentEvidence}>
-              {p.considered.map((c) => (
-                <li key={c.code}>
-                  {c.code} — {c.name}
-                  {c.score != null && ` (score ${Number(c.score).toFixed(2)})`}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       ))}
     </div>
   );
@@ -412,7 +347,6 @@ function EnrichmentBody({ stage, payment, checkList }) {
       </div>
       <div className={styles.detailBlockWide}>
         <div className={styles.detailBlockTitle}>Progressive enrichment</div>
-        <EnrichmentAgentCallout enrichment={stage.data?.enrichment} />
         <EnrichmentDiff enrichment={stage.data?.enrichment} />
       </div>
     </div>

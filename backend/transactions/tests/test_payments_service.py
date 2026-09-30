@@ -539,21 +539,6 @@ def test_self_transfer_rejected(service, db):
     _assert_rejected(db, reason_match="must differ", at_state="INITIATED")
 
 
-def test_enrichment_agent_toggle_defaults_on_and_persists(service, db):
-    """The per-payment Enrichment Agent toggle is persisted on the doc so a step-up / review
-    resume honors it (same pattern as `simulatedSettlementOutcome`). Default is on."""
-    payment = _initiate(service, instructed_amount=250.0)
-    assert payment["enableEnrichmentAgent"] is True
-
-
-def test_enrichment_agent_toggle_off_persists(service, db):
-    """Initiating with the toggle off records `enableEnrichmentAgent: False`. The service
-    injects a NullEnrichmentAgent for that payment, so Stage 3 runs deterministically
-    (planner owns the bank, no agent callout) — the pre-agent behaviour, per-payment."""
-    payment = _initiate(service, instructed_amount=250.0, enable_enrichment_agent=False)
-    assert payment["enableEnrichmentAgent"] is False
-
-
 def test_debtor_account_not_owned_by_customer_rejected(service, db):
     """Stage 2 entitlement. Refused before validation, so the trail stops at INITIATED."""
     with pytest.raises(ValueError, match="not owned by"):

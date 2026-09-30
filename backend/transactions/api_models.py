@@ -213,22 +213,6 @@ class PaymentOrderInitiateRequest(BaseModel):
     # `simulatedSettlementOutcome` so it survives a step-up / manual-review hold and resume.
     simulatedSettlementOutcome: Optional[SettlementOutcomeLiteral] = None
 
-    # Demo toggle (2026-09-26): when False, this payment's Stage-3 enrichment runs fully
-    # deterministically — the Enrichment Agent is NOT consulted (a NullEnrichmentAgent is
-    # injected), so the planner owns beneficiary-bank resolution and no purpose-code/ref
-    # proposals are made. Persisted on the doc as `enableEnrichmentAgent` so a step-up /
-    # manual-review hold and resume honors the operator's initiation choice (same pattern as
-    # `simulatedSettlementOutcome`).
-    #
-    # ⚠️ Defaults FALSE (2026-09-29, Kiran) — was True so the agent demo story worked with no
-    # configuration. A request that says nothing about the agent now gets the deterministic
-    # planner; the agent is something the operator asks for (the wizard toggle) or a caller
-    # sends explicitly. Note this is the REQUEST default only: a payment doc written before
-    # this flip, or any doc missing the field, still reads True on resume
-    # (`payments_service` / `payment_context`), which is deliberate — those payments were
-    # initiated with the agent on and must resume the way they started.
-    enableEnrichmentAgent: bool = False
-
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")

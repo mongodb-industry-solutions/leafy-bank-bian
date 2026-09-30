@@ -25,10 +25,6 @@ from contexts.payment_order_initiation.ports.reference_data import (
     NullReferenceData,
     ReferenceData,
 )
-from contexts.payment_order_initiation.ports.enrichment_agent import (
-    EnrichmentAgent,
-    NullEnrichmentAgent,
-)
 from contexts.payment_rail.ports.rail import NullRailGateway, RailGateway
 
 
@@ -112,17 +108,6 @@ class PaymentContext:
     # still runs an internal transfer end to end, and a rail-bound payment records a FAILED
     # attempt rather than raising an AttributeError inside the stage.
     rail_gateway: RailGateway = field(default_factory=NullRailGateway)
-    # Phase-1 Enrichment Agent (option B). Defaults to a null agent that proposes nothing,
-    # so a context built without one — or a service with `AGENTS_BACKEND_URL` unset — runs
-    # the whole saga deterministically, identical to pre-phase-1 behaviour. The HTTP adapter
-    # is injected by `PaymentsService`; `domain/enrichment.py` reaches it through this port.
-    enrichment_agent: EnrichmentAgent = field(default_factory=NullEnrichmentAgent)
-    # Demo toggle (2026-09-26): the operator's per-payment choice of whether the Enrichment
-    # Agent runs. `PaymentsService` sets this from the initiate request and pairs it with the
-    # agent instance (Null when False). Persisted on the doc so a step-up/manual-review resume
-    # honors it. `domain/enrichment.py` reads `isinstance(enrichment_agent, NullEnrichmentAgent)`
-    # to decide the planner/agent split — this flag is the source of that decision's persistence.
-    enable_enrichment_agent: bool = True
 
     # --- resolved (stage 1a) -------------------------------------------------
     now: Optional[datetime] = None

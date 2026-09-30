@@ -177,7 +177,7 @@ export async function workflowApi(path, params = null) {
  * because it hits a different service; the UI composing a payment's trace + the agent's
  * findings reads as separate reads, not one parameterised helper.
  *
- * @param {string} path - path after the prefix, e.g. "reconciliation/EXC-1" or "enrichment/propose"
+ * @param {string} path - path after the prefix, e.g. "reconciliation/EXC-1"
  * @param {object} [params] - query params as key-value pairs
  * @param {object} [options]
  * @param {string} [options.method="GET"]

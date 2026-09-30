@@ -1,4 +1,4 @@
-"""Bedrock chat-model factory for the Enrichment Agent.
+"""Bedrock chat-model factory for the payment agents.
 
 Uses `ChatBedrockConverse` (langchain-aws) — the Bedrock variant that supports native
 tool-calling, which `langchain.agents.create_agent` requires. Model: Haiku 4.5 via the

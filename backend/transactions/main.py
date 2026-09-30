@@ -217,8 +217,6 @@ def _initiate_kwargs(body) -> dict:
         # Stage 7 simulation lever (FR-7.3). Only affects an external wire (deferred
         # settlement); ignored for internal transfers. Defaults to MATCHED → happy path.
         "settlement_outcome": body.simulatedSettlementOutcome,
-        # Demo toggle: when False, Stage-3 enrichment runs deterministically (no agent).
-        "enable_enrichment_agent": body.enableEnrichmentAgent,
     }
 
 

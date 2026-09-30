@@ -1381,23 +1381,6 @@
   line-height: 20px;
 }
 
-/* Enrichment Agent toggle field in the InitiateWizard. A label row over a
-   SegmentedControl, matching the vertical rhythm of the surrounding Select fields. */
-.toggleField {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.toggleLabel {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--pw-text, #3d4f58);
-}
-.toggleHint {
-  font-weight: 400;
-  color: var(--pw-muted);
-}
-
 .infoBoxTitle {
   font-weight: 600;
   margin-bottom: 4px;
@@ -1603,13 +1586,6 @@
 }
 .agentEvidence li {
   margin: 2px 0;
-}
-/* One AI-enrichment proposal inside the Stage-3 callout: the field→value+reason line,
-   with the candidate-code list tucked beneath it. */
-.enrichmentProposal {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 .resolutionLog {
   font-size: 12px;

@@ -125,32 +125,17 @@ class EnrichmentPlan:
     # (check_name, result, detail) — applied by the caller through `checks.check`.
     outcomes: list[tuple[str, str, str]] = field(default_factory=list)
 
-    def _set(
-        self, path: str, value: Any, *, before: Any, source: str,
-        reason: Optional[str] = None, confidence: Optional[str] = None,
-    ) -> None:
+    def _set(self, path: str, value: Any, *, before: Any, source: str) -> None:
         """Record a resolution, but only when it actually changes something.
 
         A no-op resolution must not appear in the diff: the before/after panel would then
         show rows where nothing happened, which is exactly the noise that makes a diff
         unreadable.
-
-        `reason` and `confidence` are carried only by agent-sourced resolutions (the
-        Enrichment Agent's rationale + a HIGH/MEDIUM/LOW label) so the UI can surface *why*
-        the AI proposed a value. They are omitted from the record when None, keeping
-        deterministic resolutions on the original four-key shape `{field, from, to, source}`
-        — the subset assertion in `test_every_resolution_names_where_the_value_came_from`
-        allows the extra keys rather than requiring them.
         """
         if before == value or value is None:
             return
         self.updates[path] = value
-        entry: dict[str, Any] = {"field": path, "from": before, "to": value, "source": source}
-        if reason:
-            entry["reason"] = reason
-        if confidence:
-            entry["confidence"] = confidence
-        self.resolved.append(entry)
+        self.resolved.append({"field": path, "from": before, "to": value, "source": source})
 
     @property
     def changed(self) -> bool:
@@ -160,19 +145,12 @@ class EnrichmentPlan:
 def plan(
     payment: dict, reference_data, *, external_creditor: bool,
     debtor_account_currency: Optional[str] = None,
-    skip_external_creditor_bank: bool = False,
 ) -> EnrichmentPlan:
     """Everything stage 3 can resolve for this payment, without writing anything.
 
     `payment` is the persisted document — the same object `original{}` is snapshotted from,
     so a `from` value in the diff is always what was really stored.
 
-    `skip_external_creditor_bank`: when True, the external-creditor bank directory lookup is
-    omitted so the Enrichment Agent can own it (Doina Sep 17 L665-689). The internal-creditor
-    `bank_identity` stamping still runs — that is our own identity, not agent territory. The
-    caller (`enrichment.run`) is responsible for invoking `plan_external_creditor_bank` as the
-    fallback when the agent is configured but produced no usable bank proposal, so the payment
-    always gets bank enrichment.
     """
     p = EnrichmentPlan()
     rail = payment.get("rail")
@@ -181,10 +159,9 @@ def plan(
     _plan_internal_creditor_bank(
         p, payment, reference_data, rail, external_creditor=external_creditor
     )
-    if not skip_external_creditor_bank:
-        plan_external_creditor_bank(
-            p, payment, reference_data, external_creditor=external_creditor, rail=rail
-        )
+    plan_external_creditor_bank(
+        p, payment, reference_data, external_creditor=external_creditor, rail=rail
+    )
     _plan_purpose_codes(p, payment, reference_data)
     _plan_fees(p, payment, rail)
     _plan_initiating_party(p, payment)
@@ -229,10 +206,8 @@ def _plan_internal_creditor_bank(
 ) -> None:
     """R14 — stamp our own clearing member id/code when the beneficiary is held by this bank.
 
-    This is our own identity, not agent territory — it always runs deterministically,
-    regardless of whether the Enrichment Agent is configured. For an external creditor this
-    does nothing; the directory resolution is `plan_external_creditor_bank` (agent-owned, with
-    this function as the fallback).
+    For an external creditor this does nothing; the directory resolution is
+    `plan_external_creditor_bank`.
     """
     if external_creditor:
         return
@@ -259,10 +234,6 @@ def plan_external_creditor_bank(
     external_creditor: bool, rail: Optional[str]
 ) -> None:
     """R7/R13/R14 — resolve an external beneficiary bank from the institution directory.
-
-    Public so `enrichment.run` can call it as the deterministic fallback when the Enrichment
-    Agent is configured but produced no usable bank proposal (agent down, empty proposals, or
-    BIC failed re-validation). When the agent is NOT configured, `plan()` calls this directly.
 
     A miss is a WARN, never a refusal — a thin directory is our gap, not the caller's.
     """

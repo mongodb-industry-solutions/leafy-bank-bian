@@ -145,12 +145,8 @@ _KNOWN_EXTRAS = {
     # MATCHED → SETTLED, silently destroying the controlled-failure demo. None for non-wire
     # rails. The THIRTEENTH; argued for in `payment_document.build`'s comment, not slipped in.
     "simulatedSettlementOutcome",
-    # 2026-09-26: the per-payment Enrichment Agent toggle, persisted at initiation so a
-    # step-up / manual-review hold and resume honors the operator's choice (a payment
-    # initiated with the agent off must not flip back on when resumed). Same persistence
-    # pattern as `simulatedSettlementOutcome`. The FOURTEENTH; argued for in
-    # `payment_document.build`'s comment, not slipped in.
-    "enableEnrichmentAgent",
+    # (The FOURTEENTH, `enableEnrichmentAgent`, was retired 2026-09-29 with the Enrichment
+    # Agent — Doina struck it from the agentic design. Ordinals below are kept as written.)
     # 2026-09-28 (incoming wire): the three fields the inbound flow adds. Argued for in
     # `payment_document.build`'s comments, not slipped in.
     #

@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "payment-agent"
 version = "0.1.0"
-description = "Phase-1 Enrichment Agent for the Leafy Bank payment workflow — a LangGraph agent over Atlas Vector Search + Bedrock (Haiku). Called synchronously by the transactions service at the Stage-3 gate; proposes enrichments, never writes the payment."
+description = "Phase-1 Reconciliation Agent for the Leafy Bank payment workflow — a change-stream-triggered LangGraph agent over Bedrock (Haiku). Investigates reconciliation discrepancies; writes only exceptions.agent{}."
 authors = ["Leafy Bank"]
 
 [tool.poetry.dependencies]
