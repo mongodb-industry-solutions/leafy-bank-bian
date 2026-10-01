@@ -180,6 +180,9 @@ function CommandSearch({ onJump, onFilterCustomer }) {
 // ⚠️ Absent `direction` = outbound: every payment created before the incoming flow
 // existed is outbound, and the field was absent then. Never read absence as "unknown".
 function beneficiaryOf(p) {
+  if (p.subjectRef?.kind === "STATEMENT_LINE") {
+    return { name: "Correspondent statement line", sub: `${p.subjectRef.paymentMessageId} · line ${p.subjectRef.lineNo}` };
+  }
   if (p.direction === "INBOUND") {
     return {
       name: p.debtor?.name || p.debtor?.bankName || "External sender",
@@ -219,6 +222,9 @@ function fmtDiscrepancy(amount) {
 function exceptionLine(exc) {
   if (!exc) return "";
   const d = exc.detail || {};
+  if (exc.category === "ORPHANED_SETTLEMENT") {
+    return `ORPHANED_SETTLEMENT · statement ref ${d.reference || "—"}`;
+  }
   if (exc.category === "DUPLICATE_SIGNAL" && d.duplicateOf) {
     return `DUPLICATE_SIGNAL · resembles ${d.duplicateOf}`;
   }
@@ -238,6 +244,7 @@ const ACTION_LABELS = {
   RETURN_FUNDS: "Return funds",
   ACCEPT_DISCREPANCY: "Accept discrepancy",
   DISMISS: "Dismiss",
+  RECHECK: "Statement line arrived",
   REPAIR: "Repair",
   RETURN: "Return",
 };
@@ -313,11 +320,14 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
             const beneficiary = beneficiaryOf(p);
             const excOpen = p.exception && p.exception.status === "OPEN";
             const excClosed = p.exception && p.exception.status !== "OPEN";
+            // A statement line with no payment (plan A3): there is no deep-dive to open.
+            const isStatementLine = p.subjectRef?.kind === "STATEMENT_LINE";
+            const open = () => { if (!isStatementLine) onSelect(p.paymentId); };
             return (
               <tr
                 key={p.paymentId}
                 className={`${styles.row} ${active ? styles.rowActive : ""} ${excClosed ? styles.rowResolved : ""}`}
-                onClick={() => onSelect(p.paymentId)}
+                onClick={open}
                 // Keyboard parity: the row is the control, so it must be reachable and
                 // activatable without a pointer.
                 tabIndex={0}
@@ -326,7 +336,7 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    onSelect(p.paymentId);
+                    open();
                   }
                 }}
               >
@@ -336,7 +346,7 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                         Inbound gets the accent green (money IN); outbound the muted tag
                         (money out) — the same pairing the status pills use for
                         done-vs-neutral, so the two reads don't compete. */}
-                    <span
+                    {!isStatementLine && <span
                       className={`${styles.directionBadge} ${
                         p.direction === "INBOUND"
                           ? styles.directionIn
@@ -344,7 +354,7 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                       }`}
                     >
                       {p.direction === "INBOUND" ? "IN" : "OUT"}
-                    </span>
+                    </span>}
                     {beneficiary.name}
                   </div>
                   {beneficiary.sub && (

@@ -14,12 +14,12 @@
         },
         "paymentId": {
           "bsonType": "string",
-          "description": "Back-reference to payments.paymentId. The Operations queue joins on this; payments carries no refs[] array of exception ids (doc 24 B2)."
+          "description": "Back-reference to payments.paymentId. The Operations queue joins on this; payments carries no refs[] array of exception ids (doc 24 B2). ORPHANED_SETTLEMENT has no payment: it carries `<statement paymentMessageId>#<lineNo>` here so the OPEN-unique index dedupes per line, and subjectRef names the line (plan A3 D1a)."
         },
         "category": {
           "bsonType": "string",
-          "enum": ["SETTLEMENT_UNMATCHED", "SETTLEMENT_RETURNED", "SETTLEMENT_DELAYED", "RECONCILIATION_DISCREPANCY", "DUPLICATE_SIGNAL", "UTA"],
-          "description": "UTA reserved for the incoming Repair/Return flow (FR-9.IN4) — never written by the outgoing path."
+          "enum": ["SETTLEMENT_UNMATCHED", "SETTLEMENT_RETURNED", "SETTLEMENT_DELAYED", "RECONCILIATION_DISCREPANCY", "RECONCILIATION_MISSING", "ORPHANED_SETTLEMENT", "DUPLICATE_SIGNAL", "UTA"],
+          "description": "UTA reserved for the incoming Repair/Return flow (FR-9.IN4) — never written by the outgoing path. RECONCILIATION_MISSING (an outbound wire with no correspondent statement line by settlementPositions.expectedWindow.by) and ORPHANED_SETTLEMENT (a statement line no payment claims) are written by the ledger (reconciliation plan A3; pending Doina sign-off)."
         },
         "status": {
           "bsonType": "string",
@@ -55,7 +55,21 @@
             "returnCode": {"bsonType": ["string", "null"], "description": "SETTLEMENT_RETURNED: the rail's return code (clearing.returnCode)."},
             "expectedAmount": {"bsonType": ["double", "int", "null"], "description": "Major units."},
             "actualAmount": {"bsonType": ["double", "int", "null"], "description": "Major units; 0 when nothing settled back."},
-            "duplicateOf": {"bsonType": ["string", "null"], "description": "DUPLICATE_SIGNAL: the paymentId this one resembles (duplicate_detection WARN detail)."}
+            "duplicateOf": {"bsonType": ["string", "null"], "description": "DUPLICATE_SIGNAL: the paymentId this one resembles (duplicate_detection WARN detail)."},
+            "expectedWindowBy": {"bsonType": ["date", "null"], "description": "RECONCILIATION_MISSING: when the statement line was due (settlementPositions.expectedWindow.by)."},
+            "settlementPositionId": {"bsonType": ["string", "null"], "description": "RECONCILIATION_MISSING: the position still awaiting its statement line."},
+            "reference": {"bsonType": ["string", "null"], "description": "ORPHANED_SETTLEMENT: the reference as the correspondent booked it."},
+            "currency": {"bsonType": ["string", "null"]},
+            "bookingDate": {"bsonType": ["string", "date", "null"], "description": "ORPHANED_SETTLEMENT: the line's booking date."}
+          }
+        },
+        "subjectRef": {
+          "bsonType": ["object", "null"],
+          "description": "Set when the exception's subject is not a payment. ORPHANED_SETTLEMENT: the camt.053 statement line (paymentMessages, purpose ACCOUNT_STATEMENT) no internal record claims.",
+          "properties": {
+            "kind": {"bsonType": "string", "enum": ["STATEMENT_LINE"]},
+            "paymentMessageId": {"bsonType": "string"},
+            "lineNo": {"bsonType": "int"}
           }
         },
         "resolution": {
@@ -65,8 +79,8 @@
           "properties": {
             "action": {
               "bsonType": "string",
-              "enum": ["RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS", "REPAIR", "RETURN"],
-              "description": "REPAIR/RETURN reserved for incoming UTA (FR-9.IN2) — never written this stage."
+              "enum": ["RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS", "REPAIR", "RETURN", "RECHECK"],
+              "description": "REPAIR/RETURN reserved for incoming UTA (FR-9.IN2) — never written this stage. RECHECK: the ledger auto-resolves a RECONCILIATION_MISSING once the statement line arrives (plan A3 D2); A4 adds it as an operator action."
             },
             "by": {"bsonType": "string", "description": "'payments-operations' for an operator action; a service actor when the system auto-resolves (e.g. RETRY_SETTLEMENT landing MATCHED)."},
             "at": {"bsonType": "date"},

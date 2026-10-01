@@ -11,7 +11,8 @@ Match rule (A2 decision D1a, Kiran 2026-09-30): a line matches a position when
 a unique key, so this is an exact match, not a fuzzy one. The amount is recorded as found:
 an equal amount is `EXACT_KEY`; a different one is `REFERENCE_ONLY`, and leg 2 reports the
 delta (FEE_DEDUCTED's 24,975 vs 25,000). Anything whose reference does not resolve — a
-re-keyed reference, an orphan — stays `UNMATCHED` for A3's watchdog and the agent.
+re-keyed reference, an orphan — stays `UNMATCHED`, and `raise_orphans` (plan A3) queues it
+as `ORPHANED_SETTLEMENT` for the operator and the agent.
 
 Never reads the lines' `simulatedPaymentId` / `simulatedOutcome`: they are the simulator's
 truth, and a real statement does not tell you which payment a line is (a guard test pins it).
@@ -24,6 +25,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database.connection import MongoDBConnection
+from services.exceptions_service import (
+    CATEGORY_ORPHANED_SETTLEMENT,
+    SERVICE_LEDGER,
+    SOURCE_STAGE_RECONCILE,
+    SUBJECT_STATEMENT_LINE,
+    record_exception,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,3 +109,60 @@ def match_statements(connection: MongoDBConnection, db_name: str,
     if result["lines"]:
         logger.info("statement matching: %s", result)
     return result
+
+
+def orphan_key(payment_message_id: str, line_no: int) -> str:
+    """The `exceptions.paymentId` an orphan line is queued under (plan A3 D1a). An orphan has
+    no payment; keying it per line lets the OPEN-unique index dedupe it unchanged."""
+    return f"{payment_message_id}#{line_no}"
+
+
+def raise_orphans(connection: MongoDBConnection, db_name: str) -> dict:
+    """Queue every still-UNMATCHED statement line as `ORPHANED_SETTLEMENT` (plan A3).
+
+    Runs right after `match_statements`. Raised on the first pass that leaves a line
+    unmatched (D3): matching fails only on a reference that resolves to no position, and no
+    later payment can have been on an earlier statement, so waiting would not heal it. A
+    re-keyed line therefore pairs with its payment's later RECONCILIATION_MISSING — the twin
+    A4's LINK_STATEMENT_ENTRY closes. The line is stamped `recon.exceptionId`, so the next
+    pass skips it without touching `exceptions`.
+    """
+    messages = connection.get_collection(db_name, "paymentMessages")
+    exc_coll = connection.get_collection(db_name, "exceptions")
+
+    raised = 0
+    for stmt in messages.find({"purpose": STATEMENT_PURPOSE, "entries.recon.status": RECON_UNMATCHED}):
+        header = stmt.get("statement") or {}
+        message_id = stmt.get("paymentMessageId")
+        entries = stmt.get("entries") or []
+        changed = False
+        for line in entries:
+            recon = line.get("recon") or {}
+            if recon.get("status") != RECON_UNMATCHED or recon.get("exceptionId"):
+                continue
+            line_no = line.get("lineNo")
+            exc = record_exception(
+                exc_coll, orphan_key(message_id, line_no), CATEGORY_ORPHANED_SETTLEMENT,
+                {
+                    "discrepancyAmount": None,
+                    "discrepancyReason": "Correspondent statement line with no matching payment.",
+                    "expectedAmount": None,
+                    "actualAmount": line.get("amount"),
+                    "returnCode": None,
+                    "duplicateOf": None,
+                    "reference": line.get("reference"),
+                    "currency": line.get("currency") or header.get("currency"),
+                    "bookingDate": (header.get("window") or {}).get("to"),
+                },
+                source={"stage": SOURCE_STAGE_RECONCILE, "service": SERVICE_LEDGER},
+                subject_ref={"kind": SUBJECT_STATEMENT_LINE, "paymentMessageId": message_id,
+                             "lineNo": line_no},
+            )
+            line["recon"] = {**recon, "exceptionId": exc["exceptionId"]}
+            changed = True
+            raised += 1
+        if changed:
+            messages.update_one({"_id": stmt["_id"]}, {"$set": {"entries": entries}})
+    if raised:
+        logger.info("statement matching: %d orphan line(s) queued", raised)
+    return {"orphansRaised": raised}

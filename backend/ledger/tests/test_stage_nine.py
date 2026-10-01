@@ -13,6 +13,10 @@ import json
 import pathlib
 
 from services.exceptions_service import (
+    ACTION_RECHECK,
+    CATEGORY_ORPHANED_SETTLEMENT,
+    CATEGORY_RECONCILIATION_MISSING,
+    SUBJECT_STATEMENT_LINE,
     CATEGORY_DUPLICATE_SIGNAL,
     CATEGORY_RECONCILIATION_DISCREPANCY,
     CATEGORY_SETTLEMENT_DELAYED,
@@ -124,8 +128,11 @@ def test_the_ledger_code_enum_constants_match_the_authored_stub():
     assert {
         CATEGORY_SETTLEMENT_UNMATCHED, CATEGORY_SETTLEMENT_RETURNED,
         CATEGORY_SETTLEMENT_DELAYED, CATEGORY_RECONCILIATION_DISCREPANCY,
+        CATEGORY_RECONCILIATION_MISSING, CATEGORY_ORPHANED_SETTLEMENT,
         CATEGORY_DUPLICATE_SIGNAL, CATEGORY_UTA,
     } == set(p["category"]["enum"])
+    assert ACTION_RECHECK in p["resolution"]["properties"]["action"]["enum"]
+    assert {SUBJECT_STATEMENT_LINE} == set(p["subjectRef"]["properties"]["kind"]["enum"])
     assert {STATUS_OPEN, STATUS_RESOLVED, STATUS_DISMISSED} == set(p["status"]["enum"])
     assert {SEVERITY_ACTION_REQUIRED, SEVERITY_INFORMATIONAL} == set(p["severity"]["enum"])
     assert {

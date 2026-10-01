@@ -38,6 +38,8 @@ def _matches(doc: dict, query: dict) -> bool:
                 return False
             if "$gt" in want and not have > want["$gt"]:
                 return False
+            if "$lt" in want and not have < want["$lt"]:
+                return False
             if "$exists" in want:
                 return False          # not needed by any caller yet
         elif have != want:
@@ -131,19 +133,37 @@ class FakeCollection:
     def update_one(self, query: dict, update: dict, session=None, upsert=False):
         self._guard()
         self._owner.journal.append(("update_one", self.name))
-        for d in self.docs:
-            if _matches(d, query):
-                for k, v in update.get("$set", {}).items():
-                    _set_path(d, k, v)
-                for k, v in update.get("$push", {}).items():
-                    d.setdefault(k.split(".")[-1] if "." not in k else k, None)
-                    target = d
-                    parts = k.split(".")
-                    for part in parts[:-1]:
-                        target = target.setdefault(part, {})
-                    target.setdefault(parts[-1], []).append(v)
-                return type("R", (), {"matched_count": 1, "modified_count": 1})()
-        return type("R", (), {"matched_count": 0, "modified_count": 0})()
+        doc = self._apply(query, update, upsert)
+        n = 0 if doc is None else 1
+        return type("R", (), {"matched_count": n, "modified_count": n})()
+
+    def find_one_and_update(self, query: dict, update: dict, upsert=False,
+                            return_document=None, session=None) -> Optional[dict]:
+        """Returns the AFTER document (the only form any caller uses)."""
+        self._guard()
+        self._owner.journal.append(("find_one_and_update", self.name))
+        doc = self._apply(query, update, upsert)
+        return None if doc is None else dict(doc)
+
+    def _apply(self, query: dict, update: dict, upsert: bool) -> Optional[dict]:
+        target_doc = next((d for d in self.docs if _matches(d, query)), None)
+        if target_doc is None:
+            if not upsert:
+                return None
+            # MongoDB upsert: seed from the query's equality fields, then $setOnInsert.
+            target_doc = {k: v for k, v in query.items() if not isinstance(v, dict)}
+            for k, v in update.get("$setOnInsert", {}).items():
+                _set_path(target_doc, k, v)
+            self.docs.append(target_doc)
+        for k, v in update.get("$set", {}).items():
+            _set_path(target_doc, k, v)
+        for k, v in update.get("$push", {}).items():
+            target = target_doc
+            parts = k.split(".")
+            for part in parts[:-1]:
+                target = target.setdefault(part, {})
+            target.setdefault(parts[-1], []).append(v)
+        return target_doc
 
 
 class _FakeSession:

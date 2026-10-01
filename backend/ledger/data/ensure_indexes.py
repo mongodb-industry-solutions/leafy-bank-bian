@@ -259,6 +259,18 @@ PAYMENT_MESSAGES_INDEXES = [
 ]
 
 
+# Plan A3 — the reconciliation sweep upserts one open item per payment
+# (`{paymentId, overallResult: {$ne: RECONCILED}}`) and the trace reads the latest item
+# by payment. Not unique: a `$ne` filter cannot be a unique key (lesson A6 — index the
+# read path, not just the write invariant).
+RECONCILIATION_ITEMS_INDEXES = [
+    {
+        "name": "idx_recon_item_payment_recent",
+        "keys": [("paymentId", ASCENDING), ("checkedAt", DESCENDING)],
+    },
+]
+
+
 def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs: list[dict]) -> list[str]:
     coll = connection.get_collection(db_name, collection)
     ensured = []
@@ -298,6 +310,7 @@ def ensure_ledger_indexes(connection: MongoDBConnection, db_name: str) -> dict[s
         "changeStreamTokens": _ensure(connection, db_name, "changeStreamTokens", STREAM_TOKENS_INDEXES),
         "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
         "paymentMessages": _ensure(connection, db_name, "paymentMessages", PAYMENT_MESSAGES_INDEXES),
+        "reconciliationItems": _ensure(connection, db_name, "reconciliationItems", RECONCILIATION_ITEMS_INDEXES),
         "validators": ensure_validators(connection, db_name),
     }
 

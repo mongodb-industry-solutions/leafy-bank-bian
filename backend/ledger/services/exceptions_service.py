@@ -7,8 +7,9 @@ to `backend/transactions/data/exceptions_schema.json` (asserted on the transacti
 and the constants below are the stub's code-side twin, parity-asserted on the ledger side.
 Same mirror-drift discipline as `bian-alias-map.json` (defects.md).
 
-Only site 4 (`reconciliation_service._stamp_discrepant`) writes from the ledger this
-stage, and only the `RECONCILIATION_DISCREPANCY` category. The full category/constant set
+The ledger writes `RECONCILIATION_DISCREPANCY` (site 4, `_stamp_discrepant`) and, since
+reconciliation plan A3, `RECONCILIATION_MISSING` (the watchdog) and `ORPHANED_SETTLEMENT`
+(`statement_matching.raise_orphans`). The full category/constant set
 is defined anyway so the parity test can assert the whole enum matches the stub — a
 partial twin would let the unstated values drift silently.
 """
@@ -32,12 +33,17 @@ CATEGORY_SETTLEMENT_UNMATCHED = "SETTLEMENT_UNMATCHED"
 CATEGORY_SETTLEMENT_RETURNED = "SETTLEMENT_RETURNED"
 CATEGORY_SETTLEMENT_DELAYED = "SETTLEMENT_DELAYED"
 CATEGORY_RECONCILIATION_DISCREPANCY = "RECONCILIATION_DISCREPANCY"
+CATEGORY_RECONCILIATION_MISSING = "RECONCILIATION_MISSING"   # plan A3 watchdog
+CATEGORY_ORPHANED_SETTLEMENT = "ORPHANED_SETTLEMENT"         # plan A3, keyed per statement line
 CATEGORY_DUPLICATE_SIGNAL = "DUPLICATE_SIGNAL"
 CATEGORY_UTA = "UTA"  # reserved for incoming; never written by the outgoing path
 
 STATUS_OPEN = "OPEN"
 STATUS_RESOLVED = "RESOLVED"
 STATUS_DISMISSED = "DISMISSED"
+
+ACTION_RECHECK = "RECHECK"
+SUBJECT_STATEMENT_LINE = "STATEMENT_LINE"
 
 SEVERITY_ACTION_REQUIRED = "ACTION_REQUIRED"
 SEVERITY_INFORMATIONAL = "INFORMATIONAL"
@@ -54,6 +60,8 @@ _SEVERITY_FOR = {
     CATEGORY_SETTLEMENT_RETURNED: SEVERITY_ACTION_REQUIRED,
     CATEGORY_SETTLEMENT_DELAYED: SEVERITY_ACTION_REQUIRED,
     CATEGORY_RECONCILIATION_DISCREPANCY: SEVERITY_ACTION_REQUIRED,
+    CATEGORY_RECONCILIATION_MISSING: SEVERITY_ACTION_REQUIRED,
+    CATEGORY_ORPHANED_SETTLEMENT: SEVERITY_ACTION_REQUIRED,
     CATEGORY_DUPLICATE_SIGNAL: SEVERITY_INFORMATIONAL,
 }
 
@@ -64,6 +72,7 @@ def record_exception(
     category: str,
     detail: Optional[dict],
     source: dict,
+    subject_ref: Optional[dict] = None,
 ) -> dict:
     """Write one `exceptions` occurrence from the ledger, deduping on the open pair.
 
@@ -95,6 +104,7 @@ def record_exception(
         "detail": detail,
         "resolution": None,
         "agent": None,
+        "subjectRef": subject_ref,
         "createdAt": now,
         "updatedAt": now,
         "sourceSystem": source["service"],

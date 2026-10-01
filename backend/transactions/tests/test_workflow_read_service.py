@@ -526,3 +526,22 @@ def test_list_exceptions_filters_by_category():
     out = svc.list_exceptions(conn, "db", category="RECONCILIATION_DISCREPANCY")
     assert [p["paymentId"] for p in out["items"]] == ["PAY-8"]
     assert out["total"] == 1
+
+
+def test_list_exceptions_shows_an_orphan_statement_line_as_its_own_row():
+    """Reconciliation plan A3 D1a — an ORPHANED_SETTLEMENT is keyed `<msgId>#<lineNo>` and
+    has no payment, so the queue builds its row from the exception, not the payments join."""
+    orphan = {**_exc_doc("PM-STMT0001#3", category="ORPHANED_SETTLEMENT", exc_id="EXC-orph0001"),
+              "subjectRef": {"kind": "STATEMENT_LINE", "paymentMessageId": "PM-STMT0001", "lineNo": 3},
+              "detail": {"actualAmount": 3400.0, "currency": "USD", "reference": "ORPH-1A2B3C4D"},
+              "sourceSystem": "ledger-service"}
+    conn = FakeConnection(FakePayments([]), exceptions=[orphan])
+
+    out = svc.list_exceptions(conn, "db")
+
+    (row,) = out["items"]
+    assert out["total"] == 1
+    assert row["paymentId"] == "PM-STMT0001#3"
+    assert row["subjectRef"]["kind"] == "STATEMENT_LINE"
+    assert row["amount"] == 3400.0 and row["status"] is None
+    assert row["exception"]["exceptionId"] == "EXC-orph0001"

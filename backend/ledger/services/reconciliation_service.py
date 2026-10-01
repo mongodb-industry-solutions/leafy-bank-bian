@@ -28,8 +28,12 @@ from typing import Optional
 
 from database.connection import MongoDBConnection
 from services.exceptions_service import (
+    ACTION_RECHECK,
     CATEGORY_RECONCILIATION_DISCREPANCY,
+    CATEGORY_RECONCILIATION_MISSING,
     SERVICE_LEDGER,
+    STATUS_OPEN,
+    STATUS_RESOLVED,
     SOURCE_STAGE_RECONCILE,
     record_exception,
 )
@@ -67,6 +71,7 @@ LEG_MATCH = "MATCH"
 LEG_MISMATCH = "MISMATCH"
 LEG_NOT_APPLICABLE = "NOT_APPLICABLE"
 LEG_PENDING = "PENDING"
+REASON_AWAITING_STATEMENT = "AWAITING_STATEMENT"
 
 LEG_PAYMENT_RAIL = "PAYMENT_RAIL"
 LEG_RAIL_SETTLEMENT = "RAIL_SETTLEMENT"
@@ -96,6 +101,9 @@ class LegResult:
     left_amount: Optional[int] = None   # minor units, signed where applicable
     right_amount: Optional[int] = None  # minor units
     detail: str = ""
+    # Machine-readable cause for a PENDING leg (plan A3), so callers never string-match
+    # `detail`. Only AWAITING_STATEMENT is set today.
+    reason: Optional[str] = None
 
     def as_dict(self) -> dict:
         return {
@@ -104,6 +112,7 @@ class LegResult:
             "leftAmount": self.left_amount,
             "rightAmount": self.right_amount,
             "detail": self.detail,
+            "reason": self.reason,
         }
 
 
@@ -114,7 +123,13 @@ class ReconciliationCheck:
     overall: str = PENDING            # RECONCILED | DISCREPANT | PENDING
     journal_entry_id: Optional[str] = None
     settlement_position_id: Optional[str] = None
+    # settlementPositions.expectedWindow.by — when the statement line is due (plan A3).
+    expected_window_by: Optional[datetime] = None
     checked_at: datetime = field(default_factory=_now_utc)
+
+    @property
+    def awaiting_statement(self) -> bool:
+        return any(lg.reason == REASON_AWAITING_STATEMENT for lg in self.legs)
 
     @property
     def is_reconciled(self) -> bool:
@@ -335,7 +350,8 @@ def compute_reconciliation(
             # actual at arrival and never appear on a statement, so they skip this.
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
                                   left_amount=posted_minors,
-                                  detail="Awaiting the correspondent statement line for this settlement."))
+                                  detail="Awaiting the correspondent statement line for this settlement.",
+                                  reason=REASON_AWAITING_STATEMENT))
         elif expected_minors is None:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
                                   detail="settlementPositions.expectedAmount is missing."))
@@ -428,6 +444,7 @@ def compute_reconciliation(
         overall=overall,
         journal_entry_id=journal_entry_id,
         settlement_position_id=settlement_position_id,
+        expected_window_by=((position or {}).get("expectedWindow") or {}).get("by"),
     )
 
 
@@ -455,22 +472,39 @@ _SOURCE_SYSTEM = "ledger-service"
 _ELIGIBLE_STATES = ("SETTLED", "POSTED")
 
 
-def _reconciliation_item_doc(check: ReconciliationCheck) -> dict:
-    """Build the `reconciliationItems` document from a check (B4 shape)."""
+def _upsert_reconciliation_item(ri_coll, check: ReconciliationCheck) -> dict:
+    """Write the check onto the payment's one open `reconciliationItems` doc (B4 shape).
+
+    Plan A3: a DISCREPANT or overdue payment is re-checked every batch, and inserting each
+    time grew one item per payment per cycle. The open item (any result but RECONCILED) is
+    updated in place, so `reconciliationItemId` stays stable across re-checks; a RECONCILED
+    item is history and never rewritten. Not unique-indexed — a `$ne` filter cannot be a
+    unique key — so a sweep racing `POST /pipeline/reconcile/{id}` can at worst leave a second
+    open item, never lose one.
+    """
     from bson import ObjectId
+    from pymongo import ReturnDocument
     from shared.refs import PREFIX_RECONCILIATION_ITEM, derive_ref
     oid = ObjectId()
-    return {
-        "_id": oid,
-        "reconciliationItemId": derive_ref(PREFIX_RECONCILIATION_ITEM, oid),
-        "paymentId": check.payment_id,
-        "legs": [lg.as_dict() for lg in check.legs],
-        "overallResult": check.overall,
-        "journalEntryId": check.journal_entry_id,
-        "settlementPositionId": check.settlement_position_id,
-        "checkedAt": check.checked_at,
-        "sourceSystem": _SOURCE_SYSTEM,
-    }
+    return ri_coll.find_one_and_update(
+        {"paymentId": check.payment_id, "overallResult": {"$ne": RECONCILED}},
+        {
+            "$set": {
+                "legs": [lg.as_dict() for lg in check.legs],
+                "overallResult": check.overall,
+                "journalEntryId": check.journal_entry_id,
+                "settlementPositionId": check.settlement_position_id,
+                "checkedAt": check.checked_at,
+                "sourceSystem": _SOURCE_SYSTEM,
+            },
+            "$setOnInsert": {
+                "_id": oid,
+                "reconciliationItemId": derive_ref(PREFIX_RECONCILIATION_ITEM, oid),
+            },
+        },
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
 
 
 def _stamp_reconciled(payments, payment_id: str, check: ReconciliationCheck, ri_coll) -> None:
@@ -481,8 +515,7 @@ def _stamp_reconciled(payments, payment_id: str, check: ReconciliationCheck, ri_
     sweep filter, so this only fires once per payment.
     """
     now = _now_utc()
-    item = _reconciliation_item_doc(check)
-    ri_coll.insert_one(item)
+    item = _upsert_reconciliation_item(ri_coll, check)
 
     payments.update_one(
         {"paymentId": payment_id, "lifecycle.currentState": {"$in": list(_ELIGIBLE_STATES)}},
@@ -510,8 +543,7 @@ def _stamp_reconciled(payments, payment_id: str, check: ReconciliationCheck, ri_
 def _stamp_discrepant(payments, payment_id: str, check: ReconciliationCheck, ri_coll, exc_coll) -> None:
     """Record a discrepancy without advancing state. The payment stays at SETTLED/POSTED and
     feeds stage 9's exception queue (doc 24 B3 site 4)."""
-    item = _reconciliation_item_doc(check)
-    ri_coll.insert_one(item)
+    item = _upsert_reconciliation_item(ri_coll, check)
 
     payments.update_one(
         {"paymentId": payment_id},
@@ -556,17 +588,116 @@ def _stamp_discrepant(payments, payment_id: str, check: ReconciliationCheck, ri_
     )
 
 
-def reconcile_settled_payments(connection: MongoDBConnection, db_name: str) -> dict:
-    """Post-batch: reconcile every eligible payment. Returns a counts dict.
+def _stamp_missing(check: ReconciliationCheck, ri_coll, exc_coll) -> None:
+    """Plan A3 watchdog — the wire settled but the correspondent's statement line did not
+    arrive by `expectedWindow.by` (Sep 17's flagship agent case). Records the overdue check
+    and queues `RECONCILIATION_MISSING`; the payment's `reconciliationStatus` is untouched —
+    missing is "not yet", not DISCREPANT, so the sweep keeps re-checking and a late line
+    still reconciles it."""
+    _upsert_reconciliation_item(ri_coll, check)
+    leg = next((lg for lg in check.legs if lg.reason == REASON_AWAITING_STATEMENT), None)
+    expected_min = leg.left_amount if leg is not None else None
+    by = check.expected_window_by
+    record_exception(
+        exc_coll, check.payment_id, CATEGORY_RECONCILIATION_MISSING,
+        {
+            "discrepancyAmount": None,
+            "discrepancyReason": f"No correspondent statement line by {by.isoformat() if by else 'the expected window'}.",
+            "expectedAmount": expected_min / 100.0 if expected_min is not None else None,
+            "actualAmount": None,
+            "returnCode": None,
+            "duplicateOf": None,
+            "expectedWindowBy": by,
+            "settlementPositionId": check.settlement_position_id,
+        },
+        source={"stage": SOURCE_STAGE_RECONCILE, "service": SERVICE_LEDGER},
+    )
 
-    Eligible = `currentState` in {SETTLED, POSTED} AND `reconciliationStatus != RECONCILED`.
-    A payment whose legs are not all checkable yet (PENDING) is left for the next cycle — this
-    is why RECONCILED arrives one batch after the settlement journal posts, like POSTED.
+
+def _resolve_missing(exc_coll, payment_id: str, now: datetime) -> None:
+    """Plan A3 D2 — the statement line has arrived, so an open MISSING is no longer true.
+    Conditional on OPEN, so an operator who resolved it first wins cleanly."""
+    result = exc_coll.update_one(
+        {"paymentId": payment_id, "category": CATEGORY_RECONCILIATION_MISSING, "status": STATUS_OPEN},
+        {"$set": {
+            "status": STATUS_RESOLVED,
+            "resolution": {"action": ACTION_RECHECK, "by": _ACTOR, "at": now,
+                           "note": "Correspondent statement line arrived."},
+            "updatedAt": now,
+        }},
+    )
+    if result.matched_count:
+        logger.info("reconciliation: RECONCILIATION_MISSING auto-resolved for %s", payment_id)
+
+
+def _is_overdue(check: ReconciliationCheck, now: datetime) -> bool:
+    by = check.expected_window_by
+    if not check.awaiting_statement or by is None:
+        return False  # pre-A2 positions carry no window — never raised
+    if by.tzinfo is None:  # PyMongo returns naive UTC datetimes by default
+        by = by.replace(tzinfo=timezone.utc)
+    return by < now
+
+
+# Outcomes of one `reconcile_payment` call.
+OUTCOME_MISSING = "MISSING"
+
+
+def reconcile_payment(payment_id: str, connection: MongoDBConnection, db_name: str,
+                      now: Optional[datetime] = None) -> tuple[Optional[ReconciliationCheck], Optional[str]]:
+    """Check one payment and stamp the result. Returns (check, outcome), where outcome is
+    RECONCILED | DISCREPANT | PENDING | MISSING; (None, None) if the payment does not exist.
+
+    Shared by the post-batch sweep and `POST /pipeline/reconcile/{paymentId}` (plan A3, the
+    spec's "re-run reconciliation" step). The caller decides eligibility.
     """
+    now = now or _now_utc()
     payments = connection.get_collection(db_name, "payments")
     ri_coll = connection.get_collection(db_name, "reconciliationItems")
     exc_coll = connection.get_collection(db_name, "exceptions")
 
+    check = compute_reconciliation(payment_id, connection, db_name)
+    if check is None:
+        return None, None
+    if not check.awaiting_statement:
+        _resolve_missing(exc_coll, payment_id, now)
+
+    if check.overall == RECONCILED:
+        _stamp_reconciled(payments, payment_id, check, ri_coll)
+        logger.info("reconciliation RECONCILED paymentId=%s", payment_id)
+        return check, RECONCILED
+    if check.overall == DISCREPANT:
+        _stamp_discrepant(payments, payment_id, check, ri_coll, exc_coll)
+        logger.warning(
+            "reconciliation DISCREPANT paymentId=%s — legs: %s",
+            payment_id, [lg.result for lg in check.legs],
+        )
+        return check, DISCREPANT
+    if _is_overdue(check, now):
+        _stamp_missing(check, ri_coll, exc_coll)
+        logger.warning("reconciliation MISSING paymentId=%s — statement line overdue", payment_id)
+        return check, OUTCOME_MISSING
+    return check, PENDING
+
+
+def is_eligible(payment: dict) -> bool:
+    """SETTLED (external) or POSTED (internal), and not yet RECONCILED."""
+    lifecycle = payment.get("lifecycle") or {}
+    return (lifecycle.get("currentState") in _ELIGIBLE_STATES
+            and lifecycle.get("reconciliationStatus") != RECONCILED)
+
+
+def reconcile_settled_payments(connection: MongoDBConnection, db_name: str,
+                               now: Optional[datetime] = None) -> dict:
+    """Post-batch: reconcile every eligible payment. Returns a counts dict.
+
+    Eligible = `currentState` in {SETTLED, POSTED} AND `reconciliationStatus != RECONCILED`.
+    A payment whose legs are not all checkable yet (PENDING) is left for the next cycle — this
+    is why RECONCILED arrives one batch after the settlement journal posts, like POSTED. A
+    PENDING outbound wire past its statement window is raised as MISSING (plan A3).
+    """
+    now = now or _now_utc()
+    payments = connection.get_collection(db_name, "payments")
     eligible = list(payments.find(
         {
             "lifecycle.currentState": {"$in": list(_ELIGIBLE_STATES)},
@@ -575,36 +706,25 @@ def reconcile_settled_payments(connection: MongoDBConnection, db_name: str) -> d
         {"_id": 0, "paymentId": 1},
     ))
 
-    reconciled = 0
-    discrepant = 0
-    pending = 0
+    counts = {RECONCILED: 0, DISCREPANT: 0, PENDING: 0, OUTCOME_MISSING: 0}
     for doc in eligible:
         payment_id = doc.get("paymentId")
         if not payment_id:
             continue
-        check = compute_reconciliation(payment_id, connection, db_name)
-        if check is None:
-            continue
-        if check.overall == RECONCILED:
-            _stamp_reconciled(payments, payment_id, check, ri_coll)
-            reconciled += 1
-            logger.info("reconciliation RECONCILED paymentId=%s", payment_id)
-        elif check.overall == DISCREPANT:
-            _stamp_discrepant(payments, payment_id, check, ri_coll, exc_coll)
-            discrepant += 1
-            logger.warning(
-                "reconciliation DISCREPANT paymentId=%s — legs: %s",
-                payment_id, [lg.result for lg in check.legs],
-            )
-        else:  # PENDING
-            pending += 1
+        _, outcome = reconcile_payment(payment_id, connection, db_name, now=now)
+        if outcome is not None:
+            counts[outcome] += 1
 
     if eligible:
         logger.info(
-            "post-batch reconciliation: %d reconciled, %d discrepant, %d pending of %d eligible",
-            reconciled, discrepant, pending, len(eligible),
+            "post-batch reconciliation: %d reconciled, %d discrepant, %d pending (%d missing) of %d eligible",
+            counts[RECONCILED], counts[DISCREPANT], counts[PENDING] + counts[OUTCOME_MISSING],
+            counts[OUTCOME_MISSING], len(eligible),
         )
-    return {"reconciled": reconciled, "discrepant": discrepant, "pending": pending, "eligible": len(eligible)}
+    # `pending` keeps its old meaning (not yet reconcilable) and includes the overdue ones.
+    return {"reconciled": counts[RECONCILED], "discrepant": counts[DISCREPANT],
+            "pending": counts[PENDING] + counts[OUTCOME_MISSING],
+            "missing": counts[OUTCOME_MISSING], "eligible": len(eligible)}
 
 
 def signed_amount(amount: int, side: str) -> int:

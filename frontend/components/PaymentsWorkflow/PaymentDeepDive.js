@@ -1587,6 +1587,9 @@ const EXCEPTION_ACTIONS = {
   SETTLEMENT_UNMATCHED: ["RETURN_FUNDS", "ACCEPT_DISCREPANCY"],
   SETTLEMENT_RETURNED: ["RETURN_FUNDS"],
   RECONCILIATION_DISCREPANCY: ["ACCEPT_DISCREPANCY"],
+  // Reconciliation plan A3 — raised by the ledger; their resolve actions arrive with A4.
+  RECONCILIATION_MISSING: [],
+  ORPHANED_SETTLEMENT: [],
   DUPLICATE_SIGNAL: ["DISMISS"],
   // Inbound only (FR-9.IN2). Structurally different from every action above: REPAIR
   // resumes the payment at stage 3 after an operator confirms the beneficiary, RETURN
@@ -1635,6 +1638,14 @@ const EXCEPTION_EXPLANATION = {
     "found a mismatch, e.g. the rail settled short of the GL posting. Accepting approves the " +
     "correction: if Leafy Bank bears the charges (DEBT) it posts Dr 5214 Correspondent " +
     "Charges / Cr nostro; otherwise the beneficiary bore it and no entry is needed.",
+  RECONCILIATION_MISSING:
+    "The payment settled, but the correspondent bank's statement has not shown it within " +
+    "the expected window. It may be a timing lag, a reference the correspondent re-keyed, " +
+    "or a booking that never happened. It clears on its own if the statement line arrives.",
+  ORPHANED_SETTLEMENT:
+    "The correspondent bank's statement shows a booking that no Leafy Bank payment claims. " +
+    "It may belong to a payment whose reference the correspondent changed, or be an entry " +
+    "the bank did not originate.",
   DUPLICATE_SIGNAL:
     "This payment resembles an earlier one — a possible duplicate submission. Dismiss if " +
     "the duplication is intentional.",

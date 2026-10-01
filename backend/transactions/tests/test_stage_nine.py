@@ -21,6 +21,7 @@ import pytest
 from process.exceptions import (
     ACTION_ACCEPT_DISCREPANCY,
     ACTION_DISMISS,
+    ACTION_RECHECK,
     ACTION_REPAIR,
     ACTION_RETRY_SETTLEMENT,
     ACTION_RETURN,
@@ -91,13 +92,14 @@ def test_the_category_status_severity_action_enums_are_the_authored_set():
     p = _stub_schema()["properties"]
     assert set(p["category"]["enum"]) == {
         "SETTLEMENT_UNMATCHED", "SETTLEMENT_RETURNED", "SETTLEMENT_DELAYED",
-        "RECONCILIATION_DISCREPANCY", "DUPLICATE_SIGNAL", "UTA",
+        "RECONCILIATION_DISCREPANCY", "RECONCILIATION_MISSING", "ORPHANED_SETTLEMENT",
+        "DUPLICATE_SIGNAL", "UTA",
     }
     assert set(p["status"]["enum"]) == {"OPEN", "RESOLVED", "DISMISSED"}
     assert set(p["severity"]["enum"]) == {"ACTION_REQUIRED", "INFORMATIONAL"}
     assert set(p["resolution"]["properties"]["action"]["enum"]) == {
         "RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS",
-        "REPAIR", "RETURN",
+        "REPAIR", "RETURN", "RECHECK",
     }
     assert set(p["source"]["properties"]["stage"]["enum"]) == {
         "3 validate", "7 settle", "8 reconcile",
@@ -211,7 +213,7 @@ def test_the_code_enum_constants_match_the_authored_stub():
     assert {SEVERITY_ACTION_REQUIRED, SEVERITY_INFORMATIONAL} == set(p["severity"]["enum"])
     assert {
         ACTION_RETRY_SETTLEMENT, ACTION_RETURN_FUNDS, ACTION_ACCEPT_DISCREPANCY,
-        ACTION_DISMISS, ACTION_REPAIR, ACTION_RETURN,
+        ACTION_DISMISS, ACTION_REPAIR, ACTION_RETURN, ACTION_RECHECK,
     } == set(p["resolution"]["properties"]["action"]["enum"])
     assert {
         SOURCE_STAGE_VALIDATE, SOURCE_STAGE_SETTLE, SOURCE_STAGE_RECONCILE,

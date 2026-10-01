@@ -394,7 +394,7 @@ def test_post_batch_reconciles_an_internal_transfer_one_batch_after_posted():
 
     result = reconcile_settled_payments(c, "db")
 
-    assert result == {"reconciled": 1, "discrepant": 0, "pending": 0, "eligible": 1}
+    assert result == {"reconciled": 1, "discrepant": 0, "pending": 0, "missing": 0, "eligible": 1}
     p = c.get_collection("db", "payments").docs[0]
     assert p["lifecycle"]["currentState"] == "RECONCILED"
     assert p["status"] == "RECONCILED"
@@ -434,7 +434,7 @@ def test_post_batch_leaves_a_pending_payment_for_next_cycle():
 
     result = reconcile_settled_payments(c, "db")
 
-    assert result == {"reconciled": 0, "discrepant": 0, "pending": 1, "eligible": 1}
+    assert result == {"reconciled": 0, "discrepant": 0, "pending": 1, "missing": 0, "eligible": 1}
     p = c.get_collection("db", "payments").docs[0]
     assert p["lifecycle"]["currentState"] == "SETTLED"   # unchanged
     assert c.get_collection("db", "reconciliationItems").docs == []
@@ -450,7 +450,7 @@ def test_post_batch_flags_a_discrepancy_without_advancing_state():
 
     result = reconcile_settled_payments(c, "db")
 
-    assert result == {"reconciled": 0, "discrepant": 1, "pending": 0, "eligible": 1}
+    assert result == {"reconciled": 0, "discrepant": 1, "pending": 0, "missing": 0, "eligible": 1}
     p = c.get_collection("db", "payments").docs[0]
     assert p["lifecycle"]["currentState"] == "SETTLED"   # NOT advanced
     assert p["lifecycle"]["reconciliationStatus"] == "DISCREPANT"
@@ -468,7 +468,7 @@ def test_a_failed_payment_is_never_swept():
 
     result = reconcile_settled_payments(c, "db")
 
-    assert result == {"reconciled": 0, "discrepant": 0, "pending": 0, "eligible": 0}
+    assert result == {"reconciled": 0, "discrepant": 0, "pending": 0, "missing": 0, "eligible": 0}
 
 
 def test_an_already_reconciled_payment_is_not_re_swept():

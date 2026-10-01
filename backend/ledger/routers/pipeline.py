@@ -3,7 +3,8 @@
 These routes are intentionally separate from routers/financial_accounting.py.
 They serve the UI only and are not part of the BIAN FinancialAccounting contract.
 
-All routes:  GET-only, prefix /pipeline
+Routes are GET-only, prefix /pipeline, except the triggers (batch, statement matching,
+per-payment reconcile), which write.
 """
 
 from __future__ import annotations
@@ -131,8 +132,35 @@ def trigger_batch(request: Request) -> JSONResponse:
 @router.post("/statements/match")
 def match_statements(request: Request) -> JSONResponse:
     """Reconciliation plan A2 — match correspondent statement lines to settlement positions."""
-    result = statement_matching.match_statements(request.app.state.connection, request.app.state.db_name)
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    result = statement_matching.match_statements(connection, db_name)
+    result.update(statement_matching.raise_orphans(connection, db_name))
     return to_json_response(result)
+
+
+@router.post("/reconcile/{payment_id}")
+def reconcile_payment(
+    payment_id: str,
+    request: Request,
+    match: bool = Query(False, description="Run statement matching + orphan raise first"),
+) -> JSONResponse:
+    """Plan A3 — re-run the three-way reconciliation for one payment (the spec's
+    "re-run reconciliation" step; A4's RECHECK calls it with `match=true`)."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    payment = connection.get_collection(db_name, "payments").find_one(
+        {"paymentId": payment_id}, {"_id": 0, "lifecycle": 1})
+    if payment is None:
+        raise HTTPException(status_code=404, detail=f"payment {payment_id} not found")
+    if not reconciliation_service.is_eligible(payment):
+        lifecycle = payment.get("lifecycle") or {}
+        raise HTTPException(status_code=409, detail=(
+            f"payment {payment_id} is not reconcilable: currentState="
+            f"{lifecycle.get('currentState')}, reconciliationStatus={lifecycle.get('reconciliationStatus')}"))
+    if match:
+        statement_matching.match_statements(connection, db_name)
+        statement_matching.raise_orphans(connection, db_name)
+    check, outcome = reconciliation_service.reconcile_payment(payment_id, connection, db_name)
+    return to_json_response({"outcome": outcome, "check": check.as_dict()})
 
 
 @router.get("/reconciliation")

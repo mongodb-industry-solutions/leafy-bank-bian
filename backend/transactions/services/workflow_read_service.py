@@ -275,6 +275,26 @@ def _join_exceptions(exc_coll, payment_ids: list) -> dict:
     return {pid: _pick_exception(excs) for pid, excs in by_payment.items()}
 
 
+def _statement_line_row(key: str, exc: Optional[dict]) -> Optional[dict]:
+    """A queue row for an exception whose subject is a statement line, not a payment
+    (ledger `ORPHANED_SETTLEMENT`, reconciliation plan A3). Its `paymentId` is the line key
+    `<paymentMessageId>#<lineNo>`, so the payment join finds nothing; without this row the
+    queue would count it in `total` and never show it."""
+    subject = (exc or {}).get("subjectRef") or {}
+    if subject.get("kind") != "STATEMENT_LINE":
+        return None
+    detail = exc.get("detail") or {}
+    return {
+        "paymentId": key,
+        "subjectRef": subject,
+        "createdAt": exc.get("createdAt"),
+        "amount": detail.get("actualAmount"),
+        "currency": detail.get("currency"),
+        "status": None,
+        "direction": None,
+    }
+
+
 def list_exceptions(
     connection: MongoDBConnection,
     db_name: str,
@@ -320,11 +340,17 @@ def list_exceptions(
         p.get("paymentId"): p
         for p in coll.find({"paymentId": {"$in": page_pids}}, _LIST_PROJECTION)
     } if page_pids else {}
-    items = [by_pid[pid] for pid in page_pids if pid in by_pid]
-
     joined = _join_exceptions(exc_coll, page_pids)
-    for item in items:
-        item["exception"] = joined.get(item.get("paymentId"))
+    items = []
+    for pid in page_pids:
+        if pid in by_pid:
+            item = by_pid[pid]
+        else:
+            item = _statement_line_row(pid, joined.get(pid))
+            if item is None:
+                continue
+        item["exception"] = joined.get(pid)
+        items.append(item)
     return {
         "items": items,
         "total": len(ordered_pids),

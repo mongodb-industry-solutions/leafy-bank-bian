@@ -669,7 +669,10 @@ export function buildLifecycleStages(payment, trace) {
               ? "reconciled"
               : trace.reconciliation.overallResult === "DISCREPANT"
                 ? "discrepancy"
-                : "awaiting the GL batch")
+                : (payment?.exceptions || []).some(
+                      (e) => e.category === "RECONCILIATION_MISSING" && e.status === "OPEN")
+                  ? "statement overdue"
+                  : "awaiting the GL batch")
           : (reached("RECONCILED") ? "reconciled" : "stage 8"),
       intro:
         "Runs the three-way match — payment to rail, rail to settlement account, settlement " +
