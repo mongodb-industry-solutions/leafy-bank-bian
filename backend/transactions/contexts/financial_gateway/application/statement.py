@@ -54,9 +54,16 @@ def _as_datetime(value) -> Optional[datetime]:
     return datetime.fromisoformat(str(value))
 
 
+def _live_statements(account_code: str) -> dict:
+    # Plan B: backfilled history (`statement.historical`) is off the live chain — it must
+    # neither be the previous window nor count a payment as already booked.
+    return {"purpose": PURPOSE_ACCOUNT_STATEMENT, "statement.accountCode": account_code,
+            "statement.historical": {"$ne": True}}
+
+
 def _previous_statement(messages, account_code: str) -> Optional[dict]:
     statements = list(messages.find(
-        {"purpose": PURPOSE_ACCOUNT_STATEMENT, "statement.accountCode": account_code},
+        _live_statements(account_code),
         {"statement": 1, "entries.simulatedPaymentId": 1, "paymentMessageId": 1},
     ))
     if not statements:
@@ -80,7 +87,7 @@ def _settled_wires(payments, account_code: str) -> list[dict]:
 def _booked_payment_ids(messages, account_code: str) -> set[str]:
     booked = set()
     for s in messages.find(
-        {"purpose": PURPOSE_ACCOUNT_STATEMENT, "statement.accountCode": account_code},
+        _live_statements(account_code),
         {"entries.simulatedPaymentId": 1},
     ):
         booked.update(e.get("simulatedPaymentId") for e in s.get("entries", []))

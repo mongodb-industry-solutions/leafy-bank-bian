@@ -120,6 +120,17 @@
             }
           }
         },
+        "historical": {
+          "bsonType": ["object", "null"],
+          "description": "Plan B — set only on backfilled precedent rows (backend/data/generate_statements.py): agent evidence, never live queue work. Their paymentId is a synthetic HIST- id with no payments doc, so the facts the agent groups precedents by live here. Absent on every live exception.",
+          "properties": {
+            "correspondentBic": {"bsonType": "string"},
+            "chargeBearer": {"bsonType": "string", "enum": ["DEBT", "CRED", "SHAR", "SLEV"]},
+            "statementOutcome": {"bsonType": "string", "enum": ["FEE_DEDUCTED", "REFERENCE_ALTERED", "LATE", "AMOUNT_TRANSPOSED", "ORPHAN"]},
+            "paymentMessageId": {"bsonType": "string"},
+            "lineNo": {"bsonType": "int"}
+          }
+        },
         "createdAt": {"bsonType": "date"},
         "updatedAt": {"bsonType": "date"},
         "sourceSystem": {

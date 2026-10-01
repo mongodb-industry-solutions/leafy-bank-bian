@@ -41,6 +41,11 @@ RECON_AUTO_MATCHED = "AUTO_MATCHED"
 MATCHED_BY_EXACT_KEY = "EXACT_KEY"
 MATCHED_BY_REFERENCE_ONLY = "REFERENCE_ONLY"
 
+# Plan B: backfilled statements (`statement.historical`) are agent evidence — precedents and
+# correspondent lag — never live books, so neither matching nor orphan-raising reads them.
+_LIVE_UNMATCHED = {"purpose": STATEMENT_PURPOSE, "entries.recon.status": RECON_UNMATCHED,
+                   "statement.historical": {"$ne": True}}
+
 
 def _to_minors(amount) -> Optional[int]:
     return None if amount is None else round(float(amount) * 100)
@@ -69,7 +74,7 @@ def match_statements(connection: MongoDBConnection, db_name: str,
     positions = connection.get_collection(db_name, "settlementPositions")
 
     result = {"lines": 0, "matched": 0, "unmatched": 0}
-    for stmt in messages.find({"purpose": STATEMENT_PURPOSE, "entries.recon.status": RECON_UNMATCHED}):
+    for stmt in messages.find(_LIVE_UNMATCHED):
         header = stmt.get("statement") or {}
         account_code = header.get("accountCode")
         entries = stmt.get("entries") or []
@@ -131,7 +136,7 @@ def raise_orphans(connection: MongoDBConnection, db_name: str) -> dict:
     exc_coll = connection.get_collection(db_name, "exceptions")
 
     raised = 0
-    for stmt in messages.find({"purpose": STATEMENT_PURPOSE, "entries.recon.status": RECON_UNMATCHED}):
+    for stmt in messages.find(_LIVE_UNMATCHED):
         header = stmt.get("statement") or {}
         message_id = stmt.get("paymentMessageId")
         entries = stmt.get("entries") or []

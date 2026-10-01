@@ -319,7 +319,8 @@ def list_exceptions(
     coll = _payments(connection, db_name)
     exc_coll = connection.get_collection(db_name, "exceptions")
 
-    exc_query: dict = {}
+    # Plan B: backfilled precedents (`historical{}`) are agent evidence, not queue work.
+    exc_query: dict = {"historical": None}
     if status:
         exc_query["status"] = status
     if category:

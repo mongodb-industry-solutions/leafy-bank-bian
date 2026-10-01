@@ -212,3 +212,21 @@ def test_leg2_does_not_wait_on_a_statement_for_an_inbound_payment():
     positions.update_one({"paymentId": "PAY-A"}, {"$set": {"actualAmount": 25000.0}})
 
     assert compute_reconciliation("PAY-A", c, "db").legs[1].result != LEG_PENDING
+
+
+def test_a_historical_statement_is_never_matched_nor_raises_orphans():
+    """Plan B (D1a): backfilled history is agent evidence, not live books. Its lines must never
+    claim a live position or open an exception — even an unmatched one."""
+    from services.statement_matching import raise_orphans
+
+    c = FakeConnection()
+    stmt = _statement([_line(1, "PAY-A", 25000.0), _line(2, "ORPH-0000AAAA", 1250.0,
+                                                       simulated_outcome="ORPHAN")])
+    stmt["statement"]["historical"] = True
+    c.seed("paymentMessages", [stmt])
+    c.seed("settlementPositions", [_position("PAY-A")])
+
+    assert match_statements(c, "db", now=_NOW) == {"lines": 0, "matched": 0, "unmatched": 0}
+    assert raise_orphans(c, "db")["orphansRaised"] == 0
+    assert _pos(c, "PAY-A")["actualAmount"] is None
+    assert c.get_collection("db", "exceptions").find_one({}) is None

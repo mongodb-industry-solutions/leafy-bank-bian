@@ -545,3 +545,19 @@ def test_list_exceptions_shows_an_orphan_statement_line_as_its_own_row():
     assert row["subjectRef"]["kind"] == "STATEMENT_LINE"
     assert row["amount"] == 3400.0 and row["status"] is None
     assert row["exception"]["exceptionId"] == "EXC-orph0001"
+
+
+def test_historical_precedents_never_reach_the_operations_queue():
+    """Plan B: backfilled precedents are agent evidence — not queue rows, under any filter."""
+    hist = _exc_doc("HIST-0000aaaa", category="RECONCILIATION_DISCREPANCY", status="RESOLVED",
+                    exc_id="EXC-hist0001")
+    hist["historical"] = {"correspondentBic": "BARCGB22", "chargeBearer": "DEBT",
+                          "statementOutcome": "FEE_DEDUCTED"}
+    conn = FakeConnection(
+        FakePayments([_payment("PAY-9", status=lifecycle.FAILED, amount=25000.0)]),
+        exceptions=[hist, _exc_doc("PAY-9", status="RESOLVED")],
+    )
+    for status in ("RESOLVED", None):
+        out = svc.list_exceptions(conn, "db", status=status)
+        assert [i["paymentId"] for i in out["items"]] == ["PAY-9"]
+        assert out["total"] == 1

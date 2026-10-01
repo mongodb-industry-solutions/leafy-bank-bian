@@ -144,3 +144,24 @@ def test_an_unknown_statement_outcome_is_rejected_at_the_contract():
     from api_models import PaymentOrderInitiateRequest
     with pytest.raises(ValidationError):
         PaymentOrderInitiateRequest.model_validate({"simulatedStatementOutcome": "BOGUS"})
+
+
+def test_a_historical_statement_never_moves_the_live_chain(service, db):
+    """Plan B (D1a): backfilled history sits off the live chain. A historical statement with a
+    later window and a higher sequence must not become the live `previous`, and a payment it
+    names must still be booked live."""
+    pid = _settled_wire(service, db)
+    db["paymentMessages"].insert_one({
+        "paymentMessageId": "PM-HIST0001", "purpose": "ACCOUNT_STATEMENT",
+        "statement": {"accountCode": SETTLEMENT_ACCOUNT, "currency": "USD", "sequence": 99,
+                      "historical": True,
+                      "window": {"from": _later(-60), "to": _later(30)},
+                      "openingBalance": 0.0, "closingBalance": -1.0},
+        "entries": [{"lineNo": 1, "simulatedPaymentId": pid}],
+    })
+
+    live = generate_statement(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False, now=_later(1))
+
+    assert live["statement"]["sequence"] == 1
+    assert live["statement"]["openingBalance"] == 0.0
+    assert _line(live, pid)

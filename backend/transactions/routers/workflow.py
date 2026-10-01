@@ -4,7 +4,7 @@ Intentionally separate from the BIAN `/PaymentOrderInitiation/*` contract routes
 serve the Payments Workflow UI only. Same split, and the same rationale, as the ledger
 service's `routers/pipeline.py`.
 
-Routes:  GET-only reads, prefix /workflow — PLUS the one operational write route
+Routes:  GET-only reads, prefix /workflow — PLUS the two `/demo/*` simulator triggers (plan B3) and the operational write route
 `POST /workflow/exceptions/{exceptionId}/resolve` (doc 24 B6). No BIAN service domain for
 exceptions (row 9: modeled within the originating domain), so the resolve endpoint rides the
 ops namespace, sanctioned by the ledger's `POST /pipeline/batch/trigger` precedent.
@@ -184,3 +184,31 @@ def get_payment(request: Request, payment_id: str) -> JSONResponse:
     if payment is None:
         raise HTTPException(status_code=404, detail=f"payment {payment_id} not found")
     return to_json_response(payment)
+
+
+# Plan B3 — demo controls for the reconciliation agent scenarios. Simulator routes, like
+# `/FinancialGateway/{id}/Statement/Generate`: no BIAN operation, ops namespace.
+@router.post("/demo/recon-scenarios")
+def load_recon_scenarios(request: Request) -> JSONResponse:
+    """Initiate R1–R4 through the real saga, settle them, book one statement with the R5
+    orphan. Then trigger the ledger's GL batch to raise the exceptions."""
+    from contexts.financial_gateway.application import recon_scenarios
+
+    connection, db_name = _deps(request)
+    try:
+        return to_json_response(recon_scenarios.run(request.app.state.payments_service,
+                                                    connection, db_name))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/demo/advance-cycle")
+def advance_statement_cycle(request: Request) -> JSONResponse:
+    """Settle what is due and book the next statement (R3's late line lands here)."""
+    from contexts.financial_gateway.application import recon_scenarios
+
+    connection, db_name = _deps(request)
+    doc = recon_scenarios.advance_cycle(request.app.state.payments_service, connection, db_name)
+    return to_json_response({"generated": doc is not None,
+                             "paymentMessageId": doc and doc["paymentMessageId"],
+                             "entryCount": len(doc["entries"]) if doc else 0})

@@ -55,7 +55,8 @@ Usage (MONGODB_URI in env — same convention as the sibling loaders):
     python load_reference_seed.py --db fsi-bian-test-db --apply    # load + verify
     python load_reference_seed.py --db fsi-bian-test-db --verify   # check only
 
-Idempotent: re-running reports every row "already present" and writes nothing.
+Idempotent: re-running reports every row "already present" and writes nothing. On an existing
+row the only fields ever written are FACT_FIELDS (plan B1), and only when they differ.
 """
 
 from __future__ import annotations
@@ -78,6 +79,10 @@ TARGETS = {
     "purposeCodes": ("code", {}),
     "correspondentBanks": ("swiftCode", {"recordType": BIC_DIRECTORY}),
 }
+
+# Reconciliation facts (plan B1) the agent cites. These are the ONLY fields ever written onto
+# a row that already exists — everything else on it may belong to another demo.
+FACT_FIELDS = ("chargePolicy", "referenceFormat")
 
 
 def log(msg: str = "") -> None:
@@ -109,9 +114,18 @@ def load(db, collection: str, key: str, scope: dict, apply: bool) -> tuple[int, 
         ref = doc[key]
         query = {key: ref, **scope}
 
-        if coll.find_one(query, {"_id": 1}):
+        existing = coll.find_one(query, {"_id": 1, **{f: 1 for f in FACT_FIELDS}})
+        if existing:
             present += 1
-            log(f"  {ref:12s} already present — leaving alone")
+            facts = {f: doc[f] for f in FACT_FIELDS
+                     if f in doc and existing.get(f) != doc[f]}
+            if not facts:
+                log(f"  {ref:12s} already present — leaving alone")
+            elif not apply:
+                log(f"  {ref:12s} already present — would $set {sorted(facts)}")
+            else:
+                coll.update_one(query, {"$set": facts})
+                log(f"  {ref:12s} already present — $set {sorted(facts)}")
             continue
 
         if not apply:
@@ -170,7 +184,8 @@ def verify(db) -> bool:
         db["correspondentBanks"].find(
             scope,
             {"_id": 0, "swiftCode": 1, "bankName": 1, "country": 1,
-             "clearingSystemCode": 1, "clearingSystemMemberId": 1},
+             "clearingSystemCode": 1, "clearingSystemMemberId": 1,
+             "chargePolicy": 1, "referenceFormat": 1},
         )
     )
     log(f"\n  correspondentBanks[{BIC_DIRECTORY}]: {len(banks)} rows")
@@ -180,6 +195,13 @@ def verify(db) -> bool:
             f"{(b.get('clearingSystemMemberId') or '-'):>10s}  {b.get('bankName','')}")
 
     by_bic = {b.get("swiftCode") for b in banks}
+
+    # Plan B1: the reconciliation agent cites these on every correspondent a wire routes via.
+    correspondents = {"BARCGB22", "DEUTDEFF", "UBSWCHZH", "ROYCCAT2"}
+    for b in banks:
+        if b.get("swiftCode") in correspondents and not (b.get("chargePolicy") and b.get("referenceFormat")):
+            log(f"  MISSING chargePolicy/referenceFormat on {b['swiftCode']}")
+            ok = False
     # LEAFUS33 is us: without it our own outbound wire has no ABA, which is the exact
     # reason D10 called the wire_domestic sample unsendable. CHASUS33 is her sample's
     # beneficiary.
