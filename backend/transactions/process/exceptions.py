@@ -86,6 +86,11 @@ ACTION_REPAIR = "REPAIR"
 ACTION_RETURN = "RETURN"
 # The ledger auto-resolves RECONCILIATION_MISSING with this once the line arrives (A3 D2).
 ACTION_RECHECK = "RECHECK"
+# Plan A4 — operator/agent resolution routes. RECHECK and LINK execute on the ledger (D1a).
+ACTION_LINK_STATEMENT_ENTRY = "LINK_STATEMENT_ENTRY"
+ACTION_POST_ADJUSTMENT = "POST_ADJUSTMENT"
+# Not a resolution: recorded in `escalation{}`, the exception stays OPEN (A4 D4).
+ACTION_ESCALATE_TO_CORRESPONDENT = "ESCALATE_TO_CORRESPONDENT"
 
 SOURCE_STAGE_VALIDATE = "3 validate"
 SOURCE_STAGE_SETTLE = "7 settle"

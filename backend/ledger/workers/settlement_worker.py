@@ -336,6 +336,12 @@ def process_settlement(
             )
         except DuplicateKeyError:
             pass
+        # Plan A4 D2 — POST_ADJUSTMENT set this on the position so reconciliation waits for
+        # the event instead of re-raising the discrepancy; the event now exists.
+        connection.get_collection(db_name, "settlementPositions").update_many(
+            {"paymentId": payment_id, "adjustmentPending": True},
+            {"$set": {"adjustmentPending": False}},
+        )
 
 
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:

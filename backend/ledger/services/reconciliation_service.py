@@ -72,6 +72,8 @@ LEG_MISMATCH = "MISMATCH"
 LEG_NOT_APPLICABLE = "NOT_APPLICABLE"
 LEG_PENDING = "PENDING"
 REASON_AWAITING_STATEMENT = "AWAITING_STATEMENT"
+# Plan A4 D2 — POST_ADJUSTMENT was approved but the `-ADJ` event has not posted yet.
+REASON_AWAITING_ADJUSTMENT = "AWAITING_ADJUSTMENT"
 
 LEG_PAYMENT_RAIL = "PAYMENT_RAIL"
 LEG_RAIL_SETTLEMENT = "RAIL_SETTLEMENT"
@@ -204,6 +206,7 @@ def compute_reconciliation(
             payment_id,
             f"{payment_id}-FEE",
             f"{payment_id}-SETTLEMENT",
+            f"{payment_id}-ADJ",
         ]}},
         {"_id": 0},
     ))
@@ -212,6 +215,9 @@ def compute_reconciliation(
     )
     settlement_event = next(
         (e for e in all_events if e.get("idempotencyKey") == f"{payment_id}-SETTLEMENT"), None
+    )
+    adjustment_event = next(
+        (e for e in all_events if e.get("idempotencyKey") == f"{payment_id}-ADJ"), None
     )
 
     # --- Leg 1: Payment ↔ Rail ---------------------------------------------------
@@ -335,7 +341,21 @@ def compute_reconciliation(
         # Sep 17 L1264-1270: the rail can settle short ($24,975) while the GL settlement
         # posting carries the full $25,000. Compare what actually settled, when recorded.
         actual_minors = _majors_to_minors(position.get("actualAmount"))
-        if settled and actual_minors is not None and actual_minors != posted_minors:
+        # Plan A4 D2 — an approved DEBT correction (Dr 5214 / Cr nostro) books the
+        # correspondent's charge, so the nostro moved by posted − adjustment, which is what
+        # the statement shows. Reconciliation closes the leg itself; the action never does.
+        if adjustment_event is not None:
+            posted_minors -= _signed_leg_amount(adjustment_event.get("creditLeg"))
+        if (settled and adjustment_event is None and position.get("adjustmentPending")
+                and actual_minors is not None and actual_minors != posted_minors):
+            # Approved but not yet posted. Without this the sweep would read MISMATCH and
+            # open a fresh DISCREPANCY behind the one POST_ADJUSTMENT just closed (B1 class).
+            legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
+                                  left_amount=posted_minors,
+                                  right_amount=actual_minors,
+                                  detail="Correspondent-charge adjustment approved; awaiting its ledger event.",
+                                  reason=REASON_AWAITING_ADJUSTMENT))
+        elif settled and actual_minors is not None and actual_minors != posted_minors:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_MISMATCH,
                                   left_amount=posted_minors,
                                   right_amount=actual_minors,
@@ -352,6 +372,14 @@ def compute_reconciliation(
                                   left_amount=posted_minors,
                                   detail="Awaiting the correspondent statement line for this settlement.",
                                   reason=REASON_AWAITING_STATEMENT))
+        elif settled and adjustment_event is not None:
+            # Reached only when actual == posted − adjustment (the mismatch branch above
+            # took every other case), so the correction ties the nostro out.
+            legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_MATCH,
+                                  left_amount=posted_minors,
+                                  right_amount=actual_minors,
+                                  detail=(f"Statement actual {position.get('actualAmount')} == settlement "
+                                          "posting net of the approved correspondent-charge adjustment.")))
         elif expected_minors is None:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
                                   detail="settlementPositions.expectedAmount is missing."))

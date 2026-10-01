@@ -247,3 +247,63 @@ def statement_doc(
         "sourceSystem": SOURCE_SYSTEM,
         "createdAt": now,
     }
+
+
+# Plan A4 — the investigation request ESCALATE_TO_CORRESPONDENT sends. camt.026
+# UnableToApply is the ISO message for "we cannot reconcile this entry; tell us what it is",
+# which covers all three escalated cases (orphan line, overdue line, amount mismatch).
+PURPOSE_INVESTIGATION_REQUEST = "INVESTIGATION_REQUEST"
+INVESTIGATION_MESSAGE_FORMAT = "camt.026.001.07"
+
+
+def investigation_request_doc(
+    *,
+    oid: ObjectId,
+    exception: dict,
+    note: Optional[str],
+    now: datetime,
+) -> dict:
+    """The camt.026-shaped case we send the correspondent about one reconciliation exception.
+
+    Cites whichever subject the exception has: a payment, or (for an orphan) the statement
+    line. The demo has no counterparty that replies (A4 D4); the exception stays OPEN.
+    """
+    subject = exception.get("subjectRef") or {}
+    detail = exception.get("detail") or {}
+    is_line = subject.get("kind") == "STATEMENT_LINE"
+    payment_id = None if is_line else exception.get("paymentId")
+    case_id = derive_ref("CASE", oid)
+    return {
+        "_id": oid,
+        "paymentMessageId": derive_ref("PM", oid),
+        "paymentId": payment_id,
+        "paymentExecutionId": None,
+        "direction": OUTBOUND,
+        "purpose": PURPOSE_INVESTIGATION_REQUEST,
+        "messageStandard": pacs008.MESSAGE_STANDARD,
+        "messageFormat": INVESTIGATION_MESSAGE_FORMAT,
+        "mappingVersion": pacs008.MAPPING_VERSION,
+        "payload": {
+            "Document": {"UblToApply": {
+                "Assgnmt": {"Id": case_id, "CreDtTm": now.isoformat()},
+                "Case": {"Id": case_id, "Cretr": "LEAFYBANK"},
+                "Undrlyg": (
+                    {"StmtRef": subject.get("paymentMessageId"), "NtryNb": subject.get("lineNo"),
+                     "NtryRef": detail.get("reference")}
+                    if is_line else {"OrgnlEndToEndId": payment_id}
+                ),
+                "Justfn": {
+                    "Ctgy": exception.get("category"),
+                    "AddtlInf": note or detail.get("discrepancyReason"),
+                },
+            }}
+        },
+        "rawMessage": None,
+        "rawMessageRef": None,
+        "exceptionId": exception.get("exceptionId"),
+        "subjectRef": subject or None,
+        "transformationAudit": None,
+        "simulated": True,
+        "sourceSystem": SOURCE_SYSTEM,
+        "createdAt": now,
+    }

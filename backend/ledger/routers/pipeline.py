@@ -16,7 +16,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from routers._util import to_json_response
-from services import pipeline_read_service, reconciliation_service, statement_matching
+from pydantic import BaseModel, ConfigDict
+
+from services import pipeline_read_service, reconciliation_service, resolution_service, statement_matching
 from workers import gl_batch
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
@@ -161,6 +163,47 @@ def reconcile_payment(
         statement_matching.raise_orphans(connection, db_name)
     check, outcome = reconciliation_service.reconcile_payment(payment_id, connection, db_name)
     return to_json_response({"outcome": outcome, "check": check.as_dict()})
+
+
+class _ActionBody(BaseModel):
+    note: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+
+class _LinkBody(_ActionBody):
+    # ORPHANED_SETTLEMENT: the payment the line belongs to. MISSING: the line.
+    paymentId: Optional[str] = None
+    paymentMessageId: Optional[str] = None
+    lineNo: Optional[int] = None
+
+
+def _resolution_call(fn, *args, **kwargs) -> JSONResponse:
+    try:
+        return to_json_response(fn(*args, **kwargs))
+    except resolution_service.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except resolution_service.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except resolution_service.NotLegal as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/exceptions/{exception_id}/recheck")
+def recheck_exception(exception_id: str, request: Request,
+                      body: Optional[_ActionBody] = None) -> JSONResponse:
+    """Plan A4 RECHECK — match statements, re-run the tie-out, resolve only on RECONCILED."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    return _resolution_call(resolution_service.recheck, connection, db_name, exception_id,
+                            note=body.note if body else None)
+
+
+@router.post("/exceptions/{exception_id}/link")
+def link_exception(exception_id: str, body: _LinkBody, request: Request) -> JSONResponse:
+    """Plan A4 LINK_STATEMENT_ENTRY — pair a statement line with a payment; closes both twins."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    return _resolution_call(resolution_service.link, connection, db_name, exception_id,
+                            payment_id=body.paymentId, payment_message_id=body.paymentMessageId,
+                            line_no=body.lineNo, note=body.note)
 
 
 @router.get("/reconciliation")

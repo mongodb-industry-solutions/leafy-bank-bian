@@ -815,6 +815,38 @@ export function useWorkflowExceptions({ limit = 25, skip = 0 } = {}, refreshKey 
   return { ...data, loading, error };
 }
 
+/**
+ * Plan A4 — the other half of a LINK_STATEMENT_ENTRY twin. A RECONCILIATION_MISSING pairs
+ * with an open ORPHANED_SETTLEMENT line and vice versa, so the picker lists the open
+ * exceptions of the opposite category. No scoring: ranking candidates is the agent's job
+ * (Part C). The ledger re-checks nostro and currency when the link is posted.
+ */
+const LINK_TWIN = {
+  RECONCILIATION_MISSING: "ORPHANED_SETTLEMENT",
+  ORPHANED_SETTLEMENT: "RECONCILIATION_MISSING",
+};
+
+export function useLinkCandidates(category, refreshKey = 0) {
+  const twin = LINK_TWIN[category];
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    if (!twin) {
+      setItems([]);
+      return undefined;
+    }
+    let cancelled = false;
+    workflowApi("exceptions", { category: twin, limit: 100 }).then(({ data }) => {
+      if (!cancelled) setItems((data?.items ?? []).map((row) => row.exception).filter(Boolean));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [twin, refreshKey]);
+
+  return items;
+}
+
 // Agent investigation polling: 3s × 40 ≈ 2 min, long enough for one LLM investigation.
 const AGENT_POLL_INTERVAL_MS = 3000;
 const AGENT_POLL_MAX_TRIES = 40;

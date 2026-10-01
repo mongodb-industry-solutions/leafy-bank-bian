@@ -31,10 +31,16 @@ from process import inbound_lifecycle, payment_lifecycle
 from process.exceptions import (
     ACTION_ACCEPT_DISCREPANCY,
     ACTION_DISMISS,
+    ACTION_ESCALATE_TO_CORRESPONDENT,
+    ACTION_LINK_STATEMENT_ENTRY,
+    ACTION_POST_ADJUSTMENT,
+    ACTION_RECHECK,
     ACTION_RETRY_SETTLEMENT,
     ACTION_RETURN_FUNDS,
     CATEGORY_DUPLICATE_SIGNAL,
+    CATEGORY_ORPHANED_SETTLEMENT,
     CATEGORY_RECONCILIATION_DISCREPANCY,
+    CATEGORY_RECONCILIATION_MISSING,
     CATEGORY_SETTLEMENT_DELAYED,
     CATEGORY_SETTLEMENT_RETURNED,
     CATEGORY_SETTLEMENT_UNMATCHED,
@@ -887,7 +893,12 @@ class PaymentsService:
             CATEGORY_SETTLEMENT_DELAYED: {ACTION_RETRY_SETTLEMENT},
             CATEGORY_SETTLEMENT_UNMATCHED: {ACTION_RETURN_FUNDS, ACTION_ACCEPT_DISCREPANCY},
             CATEGORY_SETTLEMENT_RETURNED: {ACTION_RETURN_FUNDS},
-            CATEGORY_RECONCILIATION_DISCREPANCY: {ACTION_ACCEPT_DISCREPANCY},
+            # Plan A4. The bearer gate below narrows DISCREPANCY to one closing action.
+            CATEGORY_RECONCILIATION_DISCREPANCY: {
+                ACTION_ACCEPT_DISCREPANCY, ACTION_POST_ADJUSTMENT, ACTION_ESCALATE_TO_CORRESPONDENT,
+            },
+            CATEGORY_RECONCILIATION_MISSING: {ACTION_ESCALATE_TO_CORRESPONDENT},
+            CATEGORY_ORPHANED_SETTLEMENT: {ACTION_ESCALATE_TO_CORRESPONDENT, ACTION_DISMISS},
             CATEGORY_DUPLICATE_SIGNAL: {ACTION_DISMISS},
         }
 
@@ -900,6 +911,12 @@ class PaymentsService:
                 "exception can be resolved."
             )
         category = exc["category"]
+        if action in (ACTION_RECHECK, ACTION_LINK_STATEMENT_ENTRY):
+            # A4 D1a — both run where the statement, position and tie-out live.
+            raise ExceptionActionNotLegal(
+                f"{action} runs on the ledger: POST /pipeline/exceptions/{exception_id}/"
+                f"{'recheck' if action == ACTION_RECHECK else 'link'}."
+            )
         legal = _LEGAL.get(category, set())
         if action not in legal:
             raise ExceptionActionNotLegal(
@@ -907,11 +924,29 @@ class PaymentsService:
                 f"(legal: {sorted(legal)})."
             )
 
-        payment = self.payments.find_one({"paymentId": exc["paymentId"]})
-        if payment is None:
+        # An orphan statement line has no payment (A3 D1a keys it `<msgId>#<lineNo>`).
+        is_line = (exc.get("subjectRef") or {}).get("kind") == "STATEMENT_LINE"
+        payment = None if is_line else self.payments.find_one({"paymentId": exc["paymentId"]})
+        if payment is None and not is_line:
             raise ExceptionNotFound(
                 f"Payment {exc['paymentId']} for exception {exception_id} not found."
             )
+
+        if category == CATEGORY_RECONCILIATION_DISCREPANCY:
+            # Parent plan Decision 2, enforced here and not only in the UI or the agent:
+            # chargeBearer decides the books. DEBT → the bank absorbs the charge, so the only
+            # closing entry is POST_ADJUSTMENT; any other bearer → ACCEPT, no entry (A4 D3).
+            bearer = payment.get("chargeBearer")
+            if action == ACTION_ACCEPT_DISCREPANCY and bearer == "DEBT":
+                raise ExceptionActionNotLegal(
+                    f"Payment {exc['paymentId']} has chargeBearer DEBT — the bank absorbs the "
+                    "correspondent's charge, so close it with POST_ADJUSTMENT, not ACCEPT."
+                )
+            if action == ACTION_POST_ADJUSTMENT and bearer != "DEBT":
+                raise ExceptionActionNotLegal(
+                    f"Payment {exc['paymentId']} has chargeBearer {bearer} — the beneficiary "
+                    "bears the charge, so no bank entry is due; close it with ACCEPT_DISCREPANCY."
+                )
 
         now = datetime.now(timezone.utc)
 
@@ -997,30 +1032,111 @@ class PaymentsService:
                     "lifecycle.reconciliationStatus": "RECONCILED",
                     "updatedAt": now,
                 }
-                adjustment = _settlement_adjustment_for(payment, exc)
-                if adjustment:
-                    # The approved correction (Sep 17 L1286). The ledger's settlement_worker
-                    # sees this update on the SETTLED payment and posts Dr 5214 / Cr nostro,
-                    # idempotent on {paymentId}-ADJ — ledgerEvents stay a ledger write.
-                    update["clearing.settlementAdjustment"] = adjustment
+                # ACCEPT never books anything (A4): a DEBT wire is refused above.
                 self.payments.update_one({"paymentId": exc["paymentId"]}, {"$set": update})
+        elif action == ACTION_POST_ADJUSTMENT:
+            self._post_adjustment(payment, exc, note, now)
+        elif action == ACTION_ESCALATE_TO_CORRESPONDENT:
+            self._escalate(exc, note, now)
         else:  # ACTION_DISMISS — no money, no axis flip; the resolution log is the only write.
             self._mark_exception_resolved(exc, action, note, now)
 
-        checks.append_checks(self.payments, payment["_id"], [
-            checks.check(
-                "9 exceptions", "exception_resolved", checks.PASS,
-                mode=checks.SYNC,
-                detail=(
-                    f"Exception {exception_id} ({category}) resolved by payments-operations "
-                    f"via {action}."
-                ),
-                actor="payments-operations", at=now,
-            )
-        ])
+        if payment is not None:
+            verb = ("escalated to the correspondent" if action == ACTION_ESCALATE_TO_CORRESPONDENT
+                    else "resolved")
+            checks.append_checks(self.payments, payment["_id"], [
+                checks.check(
+                    "9 exceptions", "exception_resolved", checks.PASS,
+                    mode=checks.SYNC,
+                    detail=(
+                        f"Exception {exception_id} ({category}) {verb} by payments-operations "
+                        f"via {action}."
+                    ),
+                    actor="payments-operations", at=now,
+                )
+            ])
 
         updated = self.db["exceptions"].find_one({"exceptionId": exception_id})
         return updated
+
+    def _post_adjustment(self, payment: dict, exc: dict, note: Optional[str], now: datetime) -> None:
+        """Approve a DEBT wire's correspondent-charge correction (plan A4).
+
+        One ACID txn: the conditional OPEN→RESOLVED claim first (B2 — a second resolver's
+        claim matches 0 and aborts before anything is stamped), then the stamp the ledger's
+        settlement_worker turns into Dr 5214 / Cr nostro, idempotent on {paymentId}-ADJ.
+        `reconciliationStatus` is NOT flipped: reconciliation nets the posted -ADJ event and
+        closes the leg itself (D2). `adjustmentPending` on the position holds leg 2 PENDING
+        until that event exists, so the sweep cannot re-raise the discrepancy meanwhile.
+        """
+        adjustment = _settlement_adjustment_for(payment, exc)
+        if adjustment is None:
+            raise ExceptionActionNotLegal(
+                f"Exception {exc.get('exceptionId')} carries no positive discrepancyAmount — "
+                "there is no correspondent charge to book."
+            )
+
+        def callback(session) -> None:
+            claim = self.db["exceptions"].find_one_and_update(
+                {"_id": exc["_id"], "status": STATUS_OPEN},
+                {"$set": {
+                    "status": STATUS_RESOLVED,
+                    "resolution": {"action": ACTION_POST_ADJUSTMENT, "by": "payments-operations",
+                                   "at": now, "note": note},
+                    "updatedAt": now,
+                }},
+                session=session,
+            )
+            if claim is None:
+                raise ExceptionConflict(
+                    f"Exception {exc.get('exceptionId')} is no longer OPEN — another resolver "
+                    "already acted. Nothing was posted."
+                )
+            self.db["settlementPositions"].update_many(
+                {"paymentId": payment["paymentId"]},
+                {"$set": {"adjustmentPending": True}},
+                session=session,
+            )
+            self.payments.update_one(
+                {"paymentId": payment["paymentId"]},
+                {"$set": {"clearing.settlementAdjustment": adjustment, "updatedAt": now}},
+                session=session,
+            )
+
+        with self.db.client.start_session() as session:
+            session.with_transaction(callback)
+
+    def _escalate(self, exc: dict, note: Optional[str], now: datetime) -> None:
+        """Send the correspondent a camt.026 case and keep the exception OPEN (A4 D4).
+
+        Claimed first (conditional on OPEN and not yet escalated), so a double-click sends
+        one request; the message insert shares the claim's ACID txn.
+        """
+        from bson import ObjectId
+        from contexts.financial_gateway.domain.inbound_documents import investigation_request_doc
+
+        oid = ObjectId()
+        message = investigation_request_doc(oid=oid, exception=exc, note=note, now=now)
+
+        def callback(session) -> None:
+            claim = self.db["exceptions"].find_one_and_update(
+                {"_id": exc["_id"], "status": STATUS_OPEN, "awaitingCounterparty": {"$ne": True}},
+                {"$set": {
+                    "awaitingCounterparty": True,
+                    "escalation": {"paymentMessageId": message["paymentMessageId"],
+                                   "by": "payments-operations", "at": now, "note": note},
+                    "updatedAt": now,
+                }},
+                session=session,
+            )
+            if claim is None:
+                raise ExceptionConflict(
+                    f"Exception {exc.get('exceptionId')} is already escalated or no longer OPEN."
+                )
+            self.payment_messages.insert_one(message, session=session)
+
+        with self.db.client.start_session() as session:
+            session.with_transaction(callback)
 
     def _mark_exception_resolved(
         self, exc: dict, action: str, note: Optional[str], now: datetime,

@@ -77,6 +77,14 @@ class FakeCollection:
                 return type("R", (), {"modified_count": 1, "matched_count": 1})()
         return type("R", (), {"modified_count": 0, "matched_count": 0})()
 
+    def update_many(self, flt, update, *a, **kw):
+        n = 0
+        for d in self.docs:
+            if self._matches(d, flt):
+                self._apply(d, update)
+                n += 1
+        return type("R", (), {"modified_count": n, "matched_count": n})()
+
     def find_one_and_update(self, flt, update, *a, **kw):
         for d in self.docs:
             if self._matches(d, flt):

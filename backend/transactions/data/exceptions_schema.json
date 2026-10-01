@@ -79,10 +79,24 @@
           "properties": {
             "action": {
               "bsonType": "string",
-              "enum": ["RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS", "REPAIR", "RETURN", "RECHECK"],
-              "description": "REPAIR/RETURN reserved for incoming UTA (FR-9.IN2) — never written this stage. RECHECK: the ledger auto-resolves a RECONCILIATION_MISSING once the statement line arrives (plan A3 D2); A4 adds it as an operator action."
+              "enum": ["RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS", "REPAIR", "RETURN", "RECHECK", "LINK_STATEMENT_ENTRY", "POST_ADJUSTMENT"],
+              "description": "REPAIR/RETURN reserved for incoming UTA (FR-9.IN2) — never written this stage. RECHECK: the ledger auto-resolves a RECONCILIATION_MISSING once the statement line arrives (plan A3 D2); A4 adds it as an operator action. LINK_STATEMENT_ENTRY (A4): an operator paired a statement line with a payment — closes the MISSING + ORPHANED twin together. POST_ADJUSTMENT (A4): a DEBT wire's correspondent charge booked Dr 5214 / Cr nostro; reconciliation closes the leg once the -ADJ event posts. ESCALATE_TO_CORRESPONDENT is never a resolution — it is recorded in escalation{} and the exception stays OPEN."
             },
             "by": {"bsonType": "string", "description": "'payments-operations' for an operator action; a service actor when the system auto-resolves (e.g. RETRY_SETTLEMENT landing MATCHED)."},
+            "at": {"bsonType": "date"},
+            "note": {"bsonType": ["string", "null"]}
+          }
+        },
+        "awaitingCounterparty": {
+          "bsonType": ["bool", "null"],
+          "description": "Plan A4 — true once ESCALATE_TO_CORRESPONDENT sent an investigation request. The exception stays OPEN until RECHECK / LINK / POST_ADJUSTMENT / DISMISS closes it."
+        },
+        "escalation": {
+          "bsonType": ["object", "null"],
+          "description": "Plan A4 — the investigation request sent to the correspondent (paymentMessages, purpose INVESTIGATION_REQUEST, camt.029-style).",
+          "properties": {
+            "paymentMessageId": {"bsonType": "string"},
+            "by": {"bsonType": "string"},
             "at": {"bsonType": "date"},
             "note": {"bsonType": ["string", "null"]}
           }

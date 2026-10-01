@@ -30,8 +30,8 @@ import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
-import { usePaymentWorkflow, usePipelineTrace, useBatchTick, useReconciliationAgent } from "@/lib/api/hooks";
-import { coreApi, agentApi } from "@/lib/api/client";
+import { usePaymentWorkflow, usePipelineTrace, useBatchTick, useReconciliationAgent, useLinkCandidates } from "@/lib/api/hooks";
+import { coreApi, agentApi, pipelineApi } from "@/lib/api/client";
 import {
   checkPillFamily,
   fmtAmount,
@@ -135,7 +135,7 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
 }
 
 /** Zone 2 — vertical spine of expandable rows; the selected row expands to its full detail. */
-function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve, onResolveException, onResolveUta, onAcknowledgeAgent, refreshKey = 0 }) {
+function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
   const failedIdx = states.indexOf("failed");
   return (
     <div className={styles.timeline}>
@@ -193,6 +193,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                       onResolve={onResolve}
                       onResolveException={onResolveException}
                       onResolveUta={onResolveUta}
+                      onLedgerAction={onLedgerAction}
                       onAcknowledgeAgent={onAcknowledgeAgent}
                       refreshKey={refreshKey}
                     />
@@ -204,6 +205,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
                       onResolve={onResolve}
                       onResolveException={onResolveException}
                       onResolveUta={onResolveUta}
+                      onLedgerAction={onLedgerAction}
                       onAcknowledgeAgent={onAcknowledgeAgent}
                       refreshKey={refreshKey}
                     />
@@ -226,7 +228,7 @@ function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setR
  * per-panel heads lets the reader name each accounting fact before its legs, instead of six
  * anonymous columns that read as separate top-level stages.
  */
-function GroupStageBody({ group, payment, onApprove, onResolve, onResolveException, onResolveUta, onAcknowledgeAgent, refreshKey = 0 }) {
+function GroupStageBody({ group, payment, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
   return (
     <div className={styles.groupBody}>
       {group.intro && (
@@ -249,6 +251,7 @@ function GroupStageBody({ group, payment, onApprove, onResolve, onResolveExcepti
             onResolve={onResolve}
             onResolveException={onResolveException}
             onResolveUta={onResolveUta}
+            onLedgerAction={onLedgerAction}
             onAcknowledgeAgent={onAcknowledgeAgent}
           />
         </section>
@@ -1297,7 +1300,7 @@ function RoutingDecision({ snapshot }) {
   );
 }
 
-function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveException, onResolveUta, onAcknowledgeAgent, refreshKey = 0 }) {
+function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
   // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
   // must sit above the early returns (rules of hooks).
   const [showRaw, setShowRaw] = useState(false);
@@ -1544,7 +1547,9 @@ function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveExcept
         {(stage.exceptions || []).length > 0 && (
           <ExceptionsPanel
             exceptions={stage.exceptions}
+            payment={payment}
             onResolve={onResolveException}
+            onLedgerAction={onLedgerAction}
             onResolveUta={onResolveUta}
             onAcknowledgeAgent={onAcknowledgeAgent}
             reversalEvent={stage.reversalEvent}
@@ -1600,10 +1605,10 @@ const EXCEPTION_ACTIONS = {
   SETTLEMENT_DELAYED: ["RETRY_SETTLEMENT"],
   SETTLEMENT_UNMATCHED: ["RETURN_FUNDS", "ACCEPT_DISCREPANCY"],
   SETTLEMENT_RETURNED: ["RETURN_FUNDS"],
-  RECONCILIATION_DISCREPANCY: ["ACCEPT_DISCREPANCY"],
-  // Reconciliation plan A3 — raised by the ledger; their resolve actions arrive with A4.
-  RECONCILIATION_MISSING: [],
-  ORPHANED_SETTLEMENT: [],
+  // Plan A4. DISCREPANCY's closing action depends on chargeBearer — see `actionsFor`.
+  RECONCILIATION_DISCREPANCY: ["RECHECK", "ACCEPT_DISCREPANCY", "POST_ADJUSTMENT", "ESCALATE_TO_CORRESPONDENT"],
+  RECONCILIATION_MISSING: ["RECHECK", "LINK_STATEMENT_ENTRY", "ESCALATE_TO_CORRESPONDENT"],
+  ORPHANED_SETTLEMENT: ["LINK_STATEMENT_ENTRY", "ESCALATE_TO_CORRESPONDENT", "DISMISS"],
   DUPLICATE_SIGNAL: ["DISMISS"],
   // Inbound only (FR-9.IN2). Structurally different from every action above: REPAIR
   // resumes the payment at stage 3 after an operator confirms the beneficiary, RETURN
@@ -1618,7 +1623,34 @@ const ACTION_LABELS = {
   DISMISS: "Dismiss",
   REPAIR: "Repair — confirm match",
   RETURN: "Return via pacs.004",
+  RECHECK: "Re-check statement",
+  LINK_STATEMENT_ENTRY: "Link statement line",
+  POST_ADJUSTMENT: "Book correspondent charge",
+  ESCALATE_TO_CORRESPONDENT: "Escalate to correspondent",
 };
+
+// Plan A4 — these two run on the ledger (`/pipeline/exceptions/{id}/…`), not `/resolve`.
+const LEDGER_ACTIONS = { RECHECK: "recheck", LINK_STATEMENT_ENTRY: "link" };
+
+// Mirrors the backend's chargeBearer gate (parent plan Decision 2): DEBT means the bank
+// absorbs the correspondent's charge and books it; any other bearer accepts with no entry.
+// The backend refuses the wrong one either way — this only hides a button that would 422.
+function actionsFor(exception, payment) {
+  const actions = EXCEPTION_ACTIONS[exception.category] || [];
+  if (exception.category !== "RECONCILIATION_DISCREPANCY") return actions;
+  const isDebt = payment?.chargeBearer === "DEBT";
+  return actions.filter((a) =>
+    a === "POST_ADJUSTMENT" ? isDebt : a === "ACCEPT_DISCREPANCY" ? !isDebt : true
+  );
+}
+
+function linkCandidateLabel(exc) {
+  const d = exc.detail || {};
+  if (exc.category === "ORPHANED_SETTLEMENT") {
+    return `${d.reference || "line"} · ${d.currency || ""} ${d.actualAmount ?? "?"}`;
+  }
+  return `${exc.paymentId} · expected ${d.expectedAmount ?? "?"}`;
+}
 
 // The UTA actions post to `/workflow/exceptions/{id}/uta`, not `/resolve`. Named here so
 // the panel routes by data rather than by a hardcoded category check at the call site.
@@ -1649,17 +1681,19 @@ const EXCEPTION_EXPLANATION = {
     "The rail returned the payment and no settlement occurred. Return the funds to the debtor.",
   RECONCILIATION_DISCREPANCY:
     "The three-way reconciliation — payment to rail, rail to settlement, settlement to GL — " +
-    "found a mismatch, e.g. the rail settled short of the GL posting. Accepting approves the " +
-    "correction: if Leafy Bank bears the charges (DEBT) it posts Dr 5214 Correspondent " +
-    "Charges / Cr nostro; otherwise the beneficiary bore it and no entry is needed.",
+    "found a mismatch, e.g. the rail settled short of the GL posting. Who bears the charges " +
+    "decides the fix: if Leafy Bank does (DEBT), book the charge (Dr 5214 Correspondent " +
+    "Charges / Cr nostro) and reconciliation closes once it posts; otherwise the beneficiary " +
+    "bore it, so accept the discrepancy with no entry.",
   RECONCILIATION_MISSING:
     "The payment settled, but the correspondent bank's statement has not shown it within " +
     "the expected window. It may be a timing lag, a reference the correspondent re-keyed, " +
-    "or a booking that never happened. It clears on its own if the statement line arrives.",
+    "or a booking that never happened. It clears on its own if the statement line arrives; " +
+    "re-check now, link it to an unclaimed statement line, or escalate to the correspondent.",
   ORPHANED_SETTLEMENT:
     "The correspondent bank's statement shows a booking that no Leafy Bank payment claims. " +
     "It may belong to a payment whose reference the correspondent changed, or be an entry " +
-    "the bank did not originate.",
+    "the bank did not originate. Link it to the payment it belongs to, escalate, or dismiss it.",
   DUPLICATE_SIGNAL:
     "This payment resembles an earlier one — a possible duplicate submission. Dismiss if " +
     "the duplication is intentional.",
@@ -1692,7 +1726,7 @@ function exceptionDetailText(exc) {
   return "—";
 }
 
-function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, reversalLegs, refreshKey = 0, onAcknowledgeAgent }) {
+function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedgerAction, reversalEvent, reversalLegs, refreshKey = 0, onAcknowledgeAgent }) {
   const baseOpen = exceptions.find((e) => e?.status === "OPEN");
   // The Reconciliation Agent writes `exceptions.agent{}` asynchronously, after the exception
   // opens. Fetch it on a dedicated refresh so the operator sees the agent's findings appear
@@ -1718,6 +1752,8 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
   // is one click, which is exactly what her demo panel shows.
   const [repairAccount, setRepairAccount] = useState("");
   const [returnReason, setReturnReason] = useState("AC01");
+  const [linkTarget, setLinkTarget] = useState("");
+  const linkCandidates = useLinkCandidates(baseOpen?.category, refreshKey);
 
   if (!exceptions.length) {
     return <Body className={styles.muted}>No exceptions recorded for this payment.</Body>;
@@ -1731,7 +1767,8 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
     ? exceptions.map((e) => (e.exceptionId === open.exceptionId ? open : e))
     : exceptions;
 
-  const actions = open ? EXCEPTION_ACTIONS[open.category] || [] : [];
+  const actions = open ? actionsFor(open, payment) : [];
+  const canLink = actions.includes("LINK_STATEMENT_ENTRY");
   const needsOutcome = actions.includes("RETRY_SETTLEMENT");
   const isUta = open?.category === "UTA";
   // The account the system found but could not confirm. Offered as the default so the
@@ -1744,7 +1781,23 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
     setPanelError(null);
     let err = null;
     try {
-    if (UTA_ACTIONS.has(action)) {
+    if (LEDGER_ACTIONS[action]) {
+      if (onLedgerAction) {
+        const twin = linkCandidates.find((c) => c.exceptionId === linkTarget);
+        err = await onLedgerAction(open.exceptionId, LEDGER_ACTIONS[action], {
+          note: note || undefined,
+          // From an orphan the target is a payment; from a MISSING it is the orphan's line.
+          ...(action === "LINK_STATEMENT_ENTRY" && twin
+            ? open.category === "ORPHANED_SETTLEMENT"
+              ? { paymentId: twin.paymentId }
+              : {
+                  paymentMessageId: twin.subjectRef?.paymentMessageId,
+                  lineNo: twin.subjectRef?.lineNo,
+                }
+            : {}),
+        });
+      }
+    } else if (UTA_ACTIONS.has(action)) {
       // Different route, different fields — see `UTA_ACTIONS`.
       if (onResolveUta) {
         err = await onResolveUta(open.exceptionId, action, {
@@ -1765,7 +1818,10 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
     }
     // Keep the operator's note when the action failed so they can retry without retyping.
     if (err) setPanelError(`${ACTION_LABELS[action] || action} failed — ${err}`);
-    else setNote("");
+    else {
+      setNote("");
+      setLinkTarget("");
+    }
   }
 
   return (
@@ -1803,6 +1859,9 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
               {SEVERITY_LABEL[e.severity] || e.severity}
             </span>
             <span className={styles.exceptionStatus}>{e.status}</span>
+            {e.status === "OPEN" && e.awaitingCounterparty && (
+              <StatusPill family="yellow">Awaiting correspondent</StatusPill>
+            )}
           </div>
           <div className={styles.exceptionDetail}>{exceptionDetailText(e)}</div>
           {e.agent && (
@@ -1874,7 +1933,7 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
         </div>
       ))}
 
-      {open && (onResolve || onResolveUta) && actions.length > 0 && (
+      {open && (onResolve || onResolveUta || onLedgerAction) && actions.length > 0 && (
         <div className={styles.resolveCallout}>
           <div className={styles.resolveCalloutTitle}>
             <Icon glyph="Diagram3" />
@@ -1923,6 +1982,29 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
               </div>
             </>
           )}
+          {canLink && (
+            <div className={styles.resolveField}>
+              <label className={styles.resolveFieldLabel} htmlFor="exc-link-target">
+                {open.category === "ORPHANED_SETTLEMENT"
+                  ? "Payment this line belongs to"
+                  : "Unclaimed statement line"}
+              </label>
+              <Select
+                id="exc-link-target"
+                size="small"
+                placeholder={linkCandidates.length ? "Select…" : "No open candidates"}
+                value={linkTarget}
+                onChange={setLinkTarget}
+                disabled={!linkCandidates.length}
+              >
+                {linkCandidates.map((c) => (
+                  <Option key={c.exceptionId} value={c.exceptionId}>
+                    {linkCandidateLabel(c)}
+                  </Option>
+                ))}
+              </Select>
+            </div>
+          )}
           {needsOutcome && (
             <div className={styles.resolveField}>
               <label className={styles.resolveFieldLabel} htmlFor="exc-settlement-outcome">
@@ -1964,7 +2046,12 @@ function ExceptionsPanel({ exceptions, onResolve, onResolveUta, reversalEvent, r
                 variant={a === "DISMISS" || a === "RETURN" ? "default" : "primary"}
                 // Repair needs an account: either the operator typed one or the system
                 // suggested one. Without this the button posts an empty id and 422s.
-                disabled={busy || (a === "REPAIR" && !repairAccount && !suggestedAccount)}
+                disabled={
+                  busy ||
+                  (a === "REPAIR" && !repairAccount && !suggestedAccount) ||
+                  (a === "LINK_STATEMENT_ENTRY" && !linkTarget) ||
+                  (a === "ESCALATE_TO_CORRESPONDENT" && open.awaitingCounterparty)
+                }
                 onClick={() => doResolve(a)}
               >
                 {ACTION_LABELS[a] || a}
@@ -2130,6 +2217,21 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
     if (onDataChanged) onDataChanged();
   }
 
+  // Plan A4 — RECHECK and LINK_STATEMENT_ENTRY run on the ledger. A recheck that finds
+  // nothing new is a 200 with the exception still OPEN; say so rather than look inert.
+  async function ledgerAction(excId, route, body = {}) {
+    if (!excId) return;
+    const { data, error: err } = await pipelineApi(
+      `exceptions/${excId}/${route}`, null, { method: "POST", body }
+    );
+    if (err) return err;
+    setNudge((n) => n + 1);
+    if (onDataChanged) onDataChanged();
+    if (route === "recheck" && data?.exception?.status === "OPEN") {
+      return `still ${data.outcome?.toLowerCase() || "open"} — no new statement evidence yet`;
+    }
+  }
+
   // HITL approval gate (Phase 2.5): the Reconciliation Agent's graph paused at its `approval`
   // node via `interrupt()`, surfacing its AI investigation for operator review. This
   // resumes the graph with the operator's acknowledgement. The operator THEN resolves
@@ -2292,6 +2394,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
               onResolve={resolveReview}
               onResolveException={resolveException}
               onResolveUta={resolveUta}
+              onLedgerAction={ledgerAction}
               onAcknowledgeAgent={acknowledgeAgent}
               refreshKey={nudge}
             />

@@ -14,6 +14,7 @@ import pathlib
 
 from services.exceptions_service import (
     ACTION_RECHECK,
+    ACTION_LINK_STATEMENT_ENTRY,
     CATEGORY_ORPHANED_SETTLEMENT,
     CATEGORY_RECONCILIATION_MISSING,
     SUBJECT_STATEMENT_LINE,
@@ -132,6 +133,7 @@ def test_the_ledger_code_enum_constants_match_the_authored_stub():
         CATEGORY_DUPLICATE_SIGNAL, CATEGORY_UTA,
     } == set(p["category"]["enum"])
     assert ACTION_RECHECK in p["resolution"]["properties"]["action"]["enum"]
+    assert ACTION_LINK_STATEMENT_ENTRY in p["resolution"]["properties"]["action"]["enum"]
     assert {SUBJECT_STATEMENT_LINE} == set(p["subjectRef"]["properties"]["kind"]["enum"])
     assert {STATUS_OPEN, STATUS_RESOLVED, STATUS_DISMISSED} == set(p["status"]["enum"])
     assert {SEVERITY_ACTION_REQUIRED, SEVERITY_INFORMATIONAL} == set(p["severity"]["enum"])

@@ -321,6 +321,9 @@ class TransactionAuthorizationResolveRequest(BaseModel):
 # simulated outcome to re-drive settlement with); it reuses the stage-7 settlement enum.
 ResolveActionLiteral = Literal[
     "RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS",
+    # Plan A4. RECHECK / LINK_STATEMENT_ENTRY are accepted here only so the service can
+    # answer with the ledger route that runs them (D1a), rather than a bare enum error.
+    "POST_ADJUSTMENT", "ESCALATE_TO_CORRESPONDENT", "RECHECK", "LINK_STATEMENT_ENTRY",
 ]
 
 

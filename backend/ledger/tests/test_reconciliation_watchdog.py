@@ -270,3 +270,55 @@ def test_the_route_refuses_a_reconciled_payment_and_an_unknown_one():
 
     assert _call(c, "PAY-A")[0] == 409
     assert _call(c, "PAY-NOPE")[0] == 404
+
+
+# --- plan A4 D2: reconciliation closes a POST_ADJUSTMENT itself ----------------
+
+def _adj_event(amount_minor=2500):
+    return {"eventId": "EVT-ADJ", "idempotencyKey": "PAY-A-ADJ", "postingStatus": "POSTED",
+            "debitLeg": {"glAccountCode": "5214", "amount": amount_minor, "currency": "USD"},
+            "creditLeg": {"glAccountCode": "1111", "amount": amount_minor, "currency": "USD"}}
+
+
+def _fee_wire(c):
+    """A DEBT fee wire matched short (24,975 vs 25,000) and already DISCREPANT."""
+    _wire_fixture(c, 24975.0)
+    match_statements(c, "db", now=_NOW)
+    reconcile_settled_payments(c, "db", now=_NOW)
+
+
+def test_an_approved_adjustment_awaiting_its_event_raises_no_fresh_discrepancy():
+    c = FakeConnection()
+    _fee_wire(c)
+    exc = c.get_collection("db", "exceptions")
+    exc.update_one({"category": CATEGORY_RECONCILIATION_DISCREPANCY}, {"$set": {"status": "RESOLVED"}})
+    c.get_collection("db", "settlementPositions").update_one(
+        {"paymentId": "PAY-A"}, {"$set": {"adjustmentPending": True}})
+
+    for _ in range(2):
+        result = reconcile_settled_payments(c, "db", now=_NOW)
+
+    assert result["pending"] == 1 and result["discrepant"] == 0
+    assert [e["status"] for e in _excs(c, CATEGORY_RECONCILIATION_DISCREPANCY)] == ["RESOLVED"]
+
+
+def test_the_posted_adjustment_closes_leg_two_and_reconciles():
+    c = FakeConnection()
+    _fee_wire(c)
+    c.get_collection("db", "payments").update_one(
+        {"paymentId": "PAY-A"}, {"$set": {"lifecycle.reconciliationStatus": "DISCREPANT"}})
+    c.seed("ledgerEvents", [_adj_event()])
+
+    result = reconcile_settled_payments(c, "db", now=_NOW)
+
+    assert result["reconciled"] == 1
+    payment = c.get_collection("db", "payments").find_one({"paymentId": "PAY-A"})
+    assert payment["lifecycle"]["reconciliationStatus"] == "RECONCILED"
+
+
+def test_an_adjustment_of_the_wrong_amount_still_mismatches():
+    c = FakeConnection()
+    _fee_wire(c)
+    c.seed("ledgerEvents", [_adj_event(1000)])
+
+    assert reconcile_settled_payments(c, "db", now=_NOW)["discrepant"] == 1

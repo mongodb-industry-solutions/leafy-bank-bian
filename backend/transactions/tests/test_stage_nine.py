@@ -22,6 +22,11 @@ from process.exceptions import (
     ACTION_ACCEPT_DISCREPANCY,
     ACTION_DISMISS,
     ACTION_RECHECK,
+    ACTION_LINK_STATEMENT_ENTRY,
+    ACTION_POST_ADJUSTMENT,
+    ACTION_ESCALATE_TO_CORRESPONDENT,
+    ExceptionActionNotLegal,
+    ExceptionConflict,
     ACTION_REPAIR,
     ACTION_RETRY_SETTLEMENT,
     ACTION_RETURN,
@@ -99,7 +104,7 @@ def test_the_category_status_severity_action_enums_are_the_authored_set():
     assert set(p["severity"]["enum"]) == {"ACTION_REQUIRED", "INFORMATIONAL"}
     assert set(p["resolution"]["properties"]["action"]["enum"]) == {
         "RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS",
-        "REPAIR", "RETURN", "RECHECK",
+        "REPAIR", "RETURN", "RECHECK", "LINK_STATEMENT_ENTRY", "POST_ADJUSTMENT",
     }
     assert set(p["source"]["properties"]["stage"]["enum"]) == {
         "3 validate", "7 settle", "8 reconcile",
@@ -214,6 +219,7 @@ def test_the_code_enum_constants_match_the_authored_stub():
     assert {
         ACTION_RETRY_SETTLEMENT, ACTION_RETURN_FUNDS, ACTION_ACCEPT_DISCREPANCY,
         ACTION_DISMISS, ACTION_REPAIR, ACTION_RETURN, ACTION_RECHECK,
+        ACTION_LINK_STATEMENT_ENTRY, ACTION_POST_ADJUSTMENT,
     } == set(p["resolution"]["properties"]["action"]["enum"])
     assert {
         SOURCE_STAGE_VALIDATE, SOURCE_STAGE_SETTLE, SOURCE_STAGE_RECONCILE,
@@ -566,18 +572,108 @@ def _discrepant_wire(service, db, *, charge_bearer=None):
     return payment, _exc(db)
 
 
-def test_accept_on_a_debt_wire_records_the_correcting_entry_for_the_ledger(service, db):
-    """chargeBearer DEBT — the bank bears the correspondent's charge, so accepting stamps
-    the approved correction the ledger posts as Dr 5214 / Cr nostro."""
+def test_post_adjustment_on_a_debt_wire_stamps_the_correction_for_the_ledger(service, db):
+    """Plan A4 — chargeBearer DEBT: the bank bears the correspondent's charge, so the
+    approved POST_ADJUSTMENT stamps the correction the ledger posts as Dr 5214 / Cr nostro.
+    It does NOT flip reconciliationStatus: reconciliation nets the -ADJ event and closes the
+    leg itself (D2), held PENDING meanwhile by the position's `adjustmentPending`."""
     payment, exc = _discrepant_wire(service, db, charge_bearer="DEBT")
-    service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY,
-                              note="Correspondent fee — bank absorbs.")
+    db["settlementPositions"].insert_one({"paymentId": payment["paymentId"]})
+
+    updated = service.resolve_exception(exc["exceptionId"], action=ACTION_POST_ADJUSTMENT,
+                                        note="Correspondent fee — bank absorbs.")
+
+    assert updated["status"] == STATUS_RESOLVED
+    assert updated["resolution"]["action"] == ACTION_POST_ADJUSTMENT
     after = db["payments"].find_one({"paymentId": payment["paymentId"]})
     adj = after["clearing"]["settlementAdjustment"]
     assert adj["amount"] == 25.0
     assert adj["chargeBearer"] == "DEBT"
     assert adj["exceptionId"] == exc["exceptionId"]
-    assert after["lifecycle"]["reconciliationStatus"] == "RECONCILED"
+    assert after["lifecycle"]["reconciliationStatus"] == "DISCREPANT"
+    position = db["settlementPositions"].find_one({"paymentId": payment["paymentId"]})
+    assert position["adjustmentPending"] is True
+
+
+def test_a_second_post_adjustment_is_refused_and_stamps_nothing_twice(service, db):
+    payment, exc = _discrepant_wire(service, db, charge_bearer="DEBT")
+    service.resolve_exception(exc["exceptionId"], action=ACTION_POST_ADJUSTMENT)
+    # A racing resolver that read the exception while it was still OPEN.
+    with pytest.raises(ExceptionConflict):
+        service._post_adjustment(payment, exc, None, datetime.now(timezone.utc))
+
+
+def test_accept_on_a_debt_wire_is_refused(service, db):
+    """A4 D3 — DEBT's only closing action is POST_ADJUSTMENT."""
+    payment, exc = _discrepant_wire(service, db, charge_bearer="DEBT")
+    with pytest.raises(ExceptionActionNotLegal, match="POST_ADJUSTMENT"):
+        service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)
+    assert _exc(db)["status"] == STATUS_OPEN
+    after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    assert "settlementAdjustment" not in (after.get("clearing") or {})
+
+
+@pytest.mark.parametrize("bearer", ["CRED", "SHAR", "SLEV"])
+def test_post_adjustment_is_refused_when_the_beneficiary_bears_charges(service, db, bearer):
+    payment, exc = _discrepant_wire(service, db, charge_bearer=bearer)
+    with pytest.raises(ExceptionActionNotLegal, match="ACCEPT_DISCREPANCY"):
+        service.resolve_exception(exc["exceptionId"], action=ACTION_POST_ADJUSTMENT)
+    assert _exc(db)["status"] == STATUS_OPEN
+
+
+@pytest.mark.parametrize("action", ["RECHECK", "LINK_STATEMENT_ENTRY"])
+def test_ledger_owned_actions_point_at_the_ledger_route(service, db, action):
+    _, exc = _discrepant_wire(service, db, charge_bearer="SHAR")
+    with pytest.raises(ExceptionActionNotLegal, match="/pipeline/exceptions/"):
+        service.resolve_exception(exc["exceptionId"], action=action)
+
+
+def test_escalate_sends_one_investigation_request_and_keeps_the_exception_open(service, db):
+    payment, exc = _discrepant_wire(service, db, charge_bearer="SHAR")
+
+    updated = service.resolve_exception(
+        exc["exceptionId"], action=ACTION_ESCALATE_TO_CORRESPONDENT, note="Please confirm fee.")
+
+    assert updated["status"] == STATUS_OPEN
+    assert updated["awaitingCounterparty"] is True
+    msg = db["paymentMessages"].find_one(
+        {"paymentMessageId": updated["escalation"]["paymentMessageId"]})
+    assert msg["purpose"] == "INVESTIGATION_REQUEST"
+    assert msg["messageFormat"].startswith("camt.026")
+    assert msg["payload"]["Document"]["UblToApply"]["Undrlyg"]["OrgnlEndToEndId"] == payment["paymentId"]
+    with pytest.raises(ExceptionConflict):
+        service.resolve_exception(exc["exceptionId"], action=ACTION_ESCALATE_TO_CORRESPONDENT)
+    assert db["paymentMessages"].count_documents({"purpose": "INVESTIGATION_REQUEST"}) == 1
+    # Still closable afterwards by the bearer-correct action.
+    assert service.resolve_exception(
+        exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)["status"] == STATUS_RESOLVED
+
+
+def test_an_orphan_line_escalates_and_dismisses_without_a_payment(service, db):
+    """ORPHANED_SETTLEMENT has no payment (A3 D1a key `<msgId>#<lineNo>`), seeded here the
+    way the ledger's raise_orphans writes it."""
+    now = datetime.now(timezone.utc)
+    db["exceptions"].insert_one({
+        "_id": "oid-orph", "exceptionId": "EXC-ORPH", "paymentId": "PM-STMT#3", "category": "ORPHANED_SETTLEMENT",
+        "status": STATUS_OPEN, "severity": "ACTION_REQUIRED",
+        "source": {"stage": SOURCE_STAGE_RECONCILE, "service": SERVICE_LEDGER},
+        "detail": {"actualAmount": 1250.0, "reference": "8EBAA746/LEAFYBK",
+                   "discrepancyReason": "Correspondent statement line with no matching payment."},
+        "subjectRef": {"kind": "STATEMENT_LINE", "paymentMessageId": "PM-STMT", "lineNo": 3},
+        "resolution": None, "agent": None, "createdAt": now, "updatedAt": now,
+        "sourceSystem": SERVICE_LEDGER,
+    })
+
+    escalated = service.resolve_exception("EXC-ORPH", action=ACTION_ESCALATE_TO_CORRESPONDENT)
+    msg = db["paymentMessages"].find_one({"purpose": "INVESTIGATION_REQUEST"})
+    assert msg["paymentId"] is None
+    assert msg["payload"]["Document"]["UblToApply"]["Undrlyg"] == {
+        "StmtRef": "PM-STMT", "NtryNb": 3, "NtryRef": "8EBAA746/LEAFYBK"}
+    assert escalated["status"] == STATUS_OPEN
+
+    dismissed = service.resolve_exception("EXC-ORPH", action=ACTION_DISMISS,
+                                          note="Confirmed another bank's entry.")
+    assert dismissed["status"] == STATUS_DISMISSED
 
 
 @pytest.mark.parametrize("bearer", ["CRED", "SHAR", "SLEV"])
