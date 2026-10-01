@@ -91,13 +91,26 @@ if (exc) {
       dbc.exceptions.countDocuments({ paymentId: pid, category: "SETTLEMENT_UNMATCHED" }) === 0);
 }
 
-if (p.simulatedSettlementOutcome === "UNMATCHED") {
-  ok("[1] UNMATCHED wire settled (short), not FAILED",
+// A2 made the fee wire reachable two ways: the legacy settlement lever
+// (simulatedSettlementOutcome=UNMATCHED, aliased to a FEE_DEDUCTED line at initiation) and
+// the statement lever alone (simulatedSettlementOutcome=MATCHED + simulatedStatementOutcome=
+// FEE_DEDUCTED — settlement runs matched; only the correspondent's line is short). Gate on
+// either lever, or the second shape silently skips every deep [1] check below. The position
+// lookup must not filter on outcome=UNMATCHED for the same reason — an A2 fee wire's
+// settlement run is MATCHED; take the latest position for the payment.
+const isFeeWire = p.simulatedSettlementOutcome === "UNMATCHED" ||
+                  p.simulatedStatementOutcome === "FEE_DEDUCTED";
+if (isFeeWire) {
+  ok("[1] fee wire settled (short), not FAILED",
       ["SETTLED", "POSTED"].includes(p.lifecycle.currentState),
       `currentState=${p.lifecycle.currentState}`);
-  ok("[1] UNMATCHED aliases a FEE_DEDUCTED statement line",
+  ok("[1] the fee is carried as a FEE_DEDUCTED statement line",
       p.simulatedStatementOutcome === "FEE_DEDUCTED", `simulatedStatementOutcome=${p.simulatedStatementOutcome}`);
-  const pos = dbc.settlementPositions.findOne({ paymentId: pid, outcome: "UNMATCHED" });
+  // Cursor form, not findOne(filter, {sort}) — mongosh's second findOne arg is the
+  // projection slot, so a sort there returns null silently (the position's actual exists,
+  // the lookup just never reached it).
+  const pos = dbc.settlementPositions.find({ paymentId: pid })
+    .sort({ createdAt: -1 }).limit(1).toArray()[0];
   if (!pos || pos.actualAmount == null) {
     print(`  ℹ [1] position has no actual yet — generate the statement, then trigger the GL batch, then re-run`);
   } else {

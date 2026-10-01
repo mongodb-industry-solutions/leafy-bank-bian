@@ -646,19 +646,31 @@ export function buildLifecycleStages(payment, trace) {
       // legs were checked against. `reached` is true once the check has run at all — a PENDING
       // check still counts as reached, so the panel renders "awaiting the GL batch" rather than
       // "not reached".
+      //
+      // The rail's tick is the reconciliation AXIS closing, not the raw numbers matching.
+      // An operator-accepted discrepancy flips `lifecycle.reconciliationStatus` to RECONCILED
+      // (the B1 axis flip) while the live tie-out honestly keeps leg 2 at MISMATCH — keying
+      // the status on the live overall alone left an accepted wire "in flight" forever. Tick
+      // on the axis; the tie-out panel below keeps the raw DISCREPANT rows as evidence.
       key: "reconciliation",
       label: "Reconciliation",
       icon: "Checkmark",
       stage: 8,
       reached: reached("RECONCILED") || !!trace?.reconciliation,
-      status: trace?.reconciliation?.overallResult || undefined,
-      meta: trace?.reconciliation
-        ? (trace.reconciliation.overallResult === "RECONCILED"
-            ? "reconciled"
-            : trace.reconciliation.overallResult === "DISCREPANT"
-              ? "discrepancy"
-              : "awaiting the GL batch")
-        : (reached("RECONCILED") ? "reconciled" : "stage 8"),
+      status: payment?.lifecycle?.reconciliationStatus === "RECONCILED"
+        ? "RECONCILED"
+        : (trace?.reconciliation?.overallResult || undefined),
+      meta: payment?.lifecycle?.reconciliationStatus === "RECONCILED"
+        ? (trace?.reconciliation?.overallResult === "DISCREPANT"
+            ? "discrepancy accepted"
+            : "reconciled")
+        : trace?.reconciliation
+          ? (trace.reconciliation.overallResult === "RECONCILED"
+              ? "reconciled"
+              : trace.reconciliation.overallResult === "DISCREPANT"
+                ? "discrepancy"
+                : "awaiting the GL batch")
+          : (reached("RECONCILED") ? "reconciled" : "stage 8"),
       intro:
         "Runs the three-way match — payment to rail, rail to settlement account, settlement " +
         "account to the general ledger — and flags any discrepancy. Runs in the ledger service " +

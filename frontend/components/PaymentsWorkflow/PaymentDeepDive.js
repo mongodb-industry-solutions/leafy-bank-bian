@@ -481,7 +481,11 @@ function ReconciliationTieOut({ data, payment }) {
     },
     {
       label: "Settlement account",
-      amount: position?.grossAmount,
+      // leg2's ✗ compares the ACTUAL settled amount (statement-sourced via A2's matcher,
+      // null until the correspondent's line matches) against the GL posting — display that
+      // actual, not the gross, or a short-settled wire shows the crossed row carrying the
+      // same figure as the ticked rows.
+      amount: position?.actualAmount ?? position?.grossAmount,
       leg: leg2,
       naText: "N/A — book transfer",
     },
