@@ -4,8 +4,10 @@ Reconciliation plan A1. Each cycle books every newly-settled outbound wire onto 
 statement (`statement.generate_statement`). Periodic, like `inbound_sim_worker`: the trigger
 is time, the way a correspondent's end-of-day statement is.
 
-Off by default (`ENABLE_STATEMENT_SIM`). With it off no statement arrives, which is itself a
-demo state: leg 2 has no external record to confirm against (the timing-lag case).
+On by default (`ENABLE_STATEMENT_SIM`, flipped 2026-10-01): the normal flow — the
+correspondent's confirmation arrives on the cycle. With it off no statement arrives, which
+is itself a demo state: leg 2 has no external record to confirm against (the timing-lag
+case the agentic scenarios present).
 
 Same 2026-07-08 rules as the inbound simulator: the loop always sleeps one interval, and
 `run` never returns normally.
@@ -18,7 +20,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_INTERVAL_SECONDS = 300
+DEFAULT_INTERVAL_SECONDS = 30  # demo pacing: a wire goes green within ~one cycle
 
 
 # Both settlement accounts `settle._select_model` can route a wire to: 1111 (a correspondent

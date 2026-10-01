@@ -137,9 +137,11 @@ if ENABLE_INBOUND_SIM:
         "started background worker: inbound_sim_worker (interval=%ds)", _inbound_interval,
     )
 
-# Reconciliation plan A1 — the correspondent's camt.053 statement. Default OFF: with no
-# statement, leg 2 has no external record, which is the timing-lag demo state.
-ENABLE_STATEMENT_SIM = os.getenv("ENABLE_STATEMENT_SIM", "false").lower() == "true"
+# Reconciliation plan A1 — the correspondent's camt.053 statement. Default ON
+# (Kiran, 2026-10-01): the normal flow — the correspondent books its statement on the
+# cycle and a clean wire reconciles itself, no exception. Set `false` to hold the external
+# confirmation back, the timing-lag demo state the agentic scenarios present.
+ENABLE_STATEMENT_SIM = os.getenv("ENABLE_STATEMENT_SIM", "true").lower() == "true"
 if ENABLE_STATEMENT_SIM:
     _statement_interval = int(os.getenv(
         "STATEMENT_INTERVAL_SECONDS",

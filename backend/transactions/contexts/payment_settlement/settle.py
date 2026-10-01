@@ -104,9 +104,13 @@ _SETTLEMENT_MODELS: dict[str, dict] = {
 _WIRE_CLEARING_CODE = "1131"
 
 # Reconciliation plan A2/A3 — how long after settling a correspondent statement line is due.
-# Default two statement cycles (2 × STATEMENT_INTERVAL_SECONDS' 300s default); A3's watchdog
-# raises RECONCILIATION_MISSING past `expectedWindow.by`.
-_STATEMENT_EXPECTED_WITHIN_SECONDS = int(os.getenv("STATEMENT_EXPECTED_WITHIN_SECONDS", "600"))
+# Default two statement cycles (2 × STATEMENT_INTERVAL_SECONDS), derived so the window
+# tracks the cycle wherever either is tuned; A3's watchdog raises RECONCILIATION_MISSING
+# past `expectedWindow.by`.
+_STATEMENT_EXPECTED_WITHIN_SECONDS = int(os.getenv(
+    "STATEMENT_EXPECTED_WITHIN_SECONDS",
+    str(2 * int(os.getenv("STATEMENT_INTERVAL_SECONDS", "30"))),
+))
 
 
 def _stamp_expected_window(db, payment_id: str, settled_at: datetime) -> None:

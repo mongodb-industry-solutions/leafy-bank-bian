@@ -11,9 +11,8 @@
 //
 //   mongosh "$MONGODB_URI" --eval 'globalThis._passedArgs = ["PAY-…"];' backend/data/verify_a3_gate.js
 //
-// ⚠️ Read the TARGET line first — an arg that did not arrive retargets nothing here, it
-//    fails loudly, but check the count on the verdict line against the checks below
-//    (defect 2026-10-01: a skipped block prints nothing).
+// ⚠️ Read the TARGET line first, and check the count on the verdict line against the
+//    expected count it prints (defect 2026-10-01: a skipped block prints nothing).
 
 const dbName = process.env.LEAFYBANK_DB_NAME || "fsi-bian-test-db";
 const dbc = db.getSiblingDB(dbName);
@@ -49,9 +48,12 @@ if (pos?.actualAmount == null) {
 const items = dbc.reconciliationItems.find({ paymentId: pid }).toArray();
 const openItems = items.filter((i) => i.overallResult !== "RECONCILED");
 ok("[2] at most one open reconciliationItems doc", openItems.length <= 1, `${items.length} total, ${openItems.length} open`);
-ok("[2] payment refs the current item",
-   !items.length || items.some((i) => i.reconciliationItemId === p.refs?.reconciliationItemId),
-   p.refs?.reconciliationItemId);
+// refs are stamped only on a verdict item (RECONCILED/DISCREPANT). The MISSING path's
+// item is an overdue PENDING record — refs stays unset until a verdict lands.
+const verdict = items.filter((i) => i.overallResult !== "PENDING");
+ok("[2] payment refs the current verdict item",
+   !verdict.length || verdict.some((i) => i.reconciliationItemId === p.refs?.reconciliationItemId),
+   p.refs?.reconciliationItemId || "unset (pending — expected while MISSING)");
 
 // --- [3] orphans: every unmatched statement line is queued exactly once -------
 let lines = 0, queued = 0, dupes = 0;
@@ -67,6 +69,8 @@ ok("[3] every unmatched statement line has its ORPHANED_SETTLEMENT", queued === 
 ok("[3] no line queued twice", dupes === 0, `${dupes} duplicated`);
 
 print("");
-// 8 checks expected (both [1] branches print 2 after the 2 shared ones).
-if (fail === 0) { print(`A3 GATE: PASS (${pass}/8 checks)`); quit(0); }
-print(`A3 GATE: FAIL — ${fail} failed (${pass} passed, 8 expected)`); quit(1);
+// 8 checks while the statement line is unmatched; 7 once matched — the
+// "not marked DISCREPANT" check belongs to the unmatched branch only.
+const expected = (pos?.actualAmount == null) ? 8 : 7;
+if (fail === 0) { print(`A3 GATE: PASS (${pass}/${expected} checks)`); quit(0); }
+print(`A3 GATE: FAIL — ${fail} failed (${pass} passed, ${expected} expected)`); quit(1);
