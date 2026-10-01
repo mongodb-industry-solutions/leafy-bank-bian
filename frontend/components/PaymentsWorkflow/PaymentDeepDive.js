@@ -433,8 +433,11 @@ function Legs({ legs }) {
  *
  * The rows are derived from `trace.reconciliation.legs` (the ledger's three-leg result) plus the
  * settlementPosition. Legs 1/2 are NOT_APPLICABLE for a book transfer (no rail, no settlement
- * run) and render "N/A — book transfer" rather than a tick. A PENDING leg (the settlement
- * journal has not posted yet) renders "awaiting the GL batch". The whole thing falls back to a
+ * run) and render "N/A — book transfer" rather than a tick. A PENDING leg renders on its
+ * structured `reason` (never its detail text): AWAITING_STATEMENT — the journal is posted and
+ * the correspondent's camt.053 line has not arrived — renders "awaiting the correspondent
+ * statement"; anything else (the settlement journal has not posted yet) renders "awaiting
+ * the GL batch". The whole thing falls back to a
  * single "not yet checked" line when the reconciliation block is absent (a pre-stage-8 payment).
  */
 function ReconciliationTieOut({ data, payment }) {
@@ -512,12 +515,17 @@ function ReconciliationTieOut({ data, payment }) {
           const result = r.leg?.result;
           const isNA = result === "NOT_APPLICABLE";
           const isPending = result === "PENDING";
+          // Keyed on the leg's reason, never its detail text (plan A3).
+          const pendingText =
+            r.leg?.reason === "AWAITING_STATEMENT"
+              ? "awaiting the correspondent statement"
+              : "awaiting the GL batch";
           return (
             <div className={styles.reconRow} key={r.label}>
               <span className={styles.reconLabel}>{r.label}</span>
               <span className={styles.reconAmount}>
                 {isNA || isPending
-                  ? (isNA ? r.naText : "awaiting the GL batch")
+                  ? (isNA ? r.naText : pendingText)
                   : (r.amount != null ? fmtAmount(r.amount, currency) : "—")}
               </span>
               <StatusPill family={verdictVariant(result)}>{verdictLabel(result)}</StatusPill>
@@ -527,7 +535,13 @@ function ReconciliationTieOut({ data, payment }) {
       </div>
       <div className={styles.reconVerdict}>
         <StatusPill family={overall === "RECONCILED" ? "green" : overall === "DISCREPANT" ? "red" : "blue"}>
-          {overall === "RECONCILED" ? "=> RECONCILED" : overall === "DISCREPANT" ? "DISCREPANT — discrepancy flagged" : "=> pending the GL batch"}
+          {overall === "RECONCILED"
+            ? "=> RECONCILED"
+            : overall === "DISCREPANT"
+              ? "DISCREPANT — discrepancy flagged"
+              : (check.legs || []).some((l) => l.reason === "AWAITING_STATEMENT")
+                ? "=> pending the correspondent statement"
+                : "=> pending the GL batch"}
         </StatusPill>
       </div>
       {leg1?.detail && (
