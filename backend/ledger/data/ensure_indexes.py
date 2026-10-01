@@ -247,6 +247,18 @@ _JOURNAL_BALANCE_VALIDATOR = {
 }
 
 
+# Reconciliation plan A2 — the statement matcher's read path (`purpose` + any UNMATCHED
+# line). Declared here because the ledger issues the query; the transactions service owns
+# the collection's write-side indexes. Partial on `purpose` is safe: the query constrains it.
+PAYMENT_MESSAGES_INDEXES = [
+    {
+        "name": "idx_statement_unmatched_lines",
+        "keys": [("purpose", ASCENDING), ("entries.recon.status", ASCENDING)],
+        "partialFilterExpression": {"purpose": "ACCOUNT_STATEMENT"},
+    },
+]
+
+
 def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs: list[dict]) -> list[str]:
     coll = connection.get_collection(db_name, collection)
     ensured = []
@@ -285,6 +297,7 @@ def ensure_ledger_indexes(connection: MongoDBConnection, db_name: str) -> dict[s
         "journalEntries": _ensure(connection, db_name, "journalEntries", JOURNAL_ENTRIES_INDEXES),
         "changeStreamTokens": _ensure(connection, db_name, "changeStreamTokens", STREAM_TOKENS_INDEXES),
         "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
+        "paymentMessages": _ensure(connection, db_name, "paymentMessages", PAYMENT_MESSAGES_INDEXES),
         "validators": ensure_validators(connection, db_name),
     }
 

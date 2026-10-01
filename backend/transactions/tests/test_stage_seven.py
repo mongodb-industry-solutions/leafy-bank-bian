@@ -86,31 +86,35 @@ def test_delayed_outcome_holds_at_in_progress(service, db):
     assert positions[0]["expectedAmount"] is not None
 
 
-def test_unmatched_outcome_settles_short_and_leaves_the_gap_for_stage_8(service, db):
-    """Sep 17 L1264-1270: UNMATCHED is a partial short-pay that still settles — "GL
-    settlement posting: $25,000" against "settlement position: $24,975". Captured like
-    MATCHED (PENDING, then complete_due), with the delta stamped for display and recorded
-    on the position; stage 8 raises the discrepancy, not stage 7.
-    """
-    from contexts.payment_settlement.settle import _UNMATCHED_DELTA_USD
+def test_unmatched_outcome_settles_like_matched_and_leaves_the_gap_to_the_statement(service, db):
+    """Sep 17 L1264-1270 + reconciliation plan Decision 1: UNMATCHED still settles, captured
+    like MATCHED (PENDING, then complete_due). The $24,975 arrives on the correspondent's
+    camt.053 (FEE_DEDUCTED), so stage 7 records no actual amount and no discrepancy."""
     _initiate_external(service, settlement_outcome="UNMATCHED")
 
     payment = _payment(db)
-    expected = payment["amount"]
-    delta = min(_UNMATCHED_DELTA_USD, expected)
-    actual = expected - delta
     assert payment["lifecycle"]["currentState"] == "IN_PROGRESS"
     assert payment["lifecycle"]["settlementStatus"] == "PENDING"
     assert payment["clearing"]["settlementAccountCode"] in {"1111", "1121"}
-    assert payment["clearing"]["discrepancyAmount"] == delta
-    assert payment["clearing"]["discrepancyReason"] == "UNMATCHED_AMOUNT"
+    assert payment["clearing"]["discrepancyAmount"] is None
 
     positions = _settlement_positions(db)
     assert len(positions) == 1
     assert positions[0]["outcome"] == "UNMATCHED"
     assert positions[0]["settlementStatus"] == "SETTLED"
-    assert positions[0]["expectedAmount"] == expected
-    assert positions[0]["actualAmount"] == actual, "unmatched: the rail settled short, not for zero"
+    assert positions[0]["expectedAmount"] == payment["amount"]
+    assert positions[0]["actualAmount"] is None
+
+
+def test_the_settled_flip_stamps_when_the_statement_line_is_due(service, db):
+    """A2/A3 — `expectedWindow` is written at completion, when the correspondent can book."""
+    from contexts.payment_settlement import settle
+    from tests.test_payments_service import FakeConnection
+    _initiate_external(service)
+    assert settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0) == 1
+
+    window = _settlement_positions(db)[0]["expectedWindow"]
+    assert (window["by"] - window["from"]).total_seconds() == settle._STATEMENT_EXPECTED_WITHIN_SECONDS
 
 
 def test_exception_outcome_returns_the_payment(service, db):

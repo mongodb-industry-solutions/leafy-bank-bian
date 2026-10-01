@@ -327,6 +327,15 @@ def compute_reconciliation(
                                   detail=(f"Settlement position {position.get('actualAmount')} "
                                           f"!= GL settlement posting {expected} — "
                                           "rail settled short.")))
+        elif (settled and actual_minors is None
+              and payment.get("direction") != "INBOUND"):
+            # Reconciliation plan A2 — an outbound wire's actual amount comes only from the
+            # correspondent's camt.053 line (`statement_matching`). Until one is matched the
+            # external record is missing, so the leg waits. Inbound positions carry their
+            # actual at arrival and never appear on a statement, so they skip this.
+            legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
+                                  left_amount=posted_minors,
+                                  detail="Awaiting the correspondent statement line for this settlement."))
         elif expected_minors is None:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
                                   detail="settlementPositions.expectedAmount is missing."))

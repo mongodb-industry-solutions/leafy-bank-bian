@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from routers._util import to_json_response
-from services import pipeline_read_service, reconciliation_service
+from services import pipeline_read_service, reconciliation_service, statement_matching
 from workers import gl_batch
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
@@ -125,6 +125,13 @@ def trigger_batch(request: Request) -> JSONResponse:
     db_name = request.app.state.db_name
     coa = request.app.state.coa
     result = gl_batch.run_one_cycle(connection, db_name, coa)
+    return to_json_response(result)
+
+
+@router.post("/statements/match")
+def match_statements(request: Request) -> JSONResponse:
+    """Reconciliation plan A2 — match correspondent statement lines to settlement positions."""
+    result = statement_matching.match_statements(request.app.state.connection, request.app.state.db_name)
     return to_json_response(result)
 
 

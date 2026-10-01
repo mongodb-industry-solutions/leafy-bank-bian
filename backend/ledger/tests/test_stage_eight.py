@@ -105,8 +105,13 @@ def _execution(amount: float = 25000.0, ack_code: str | None = "ACCC") -> dict:
     }
 
 
+_STATEMENT_MATCHED = object()
+
+
 def _position(gross: float = 25000.0, status: str = "SETTLED",
-              clearing_code: str = "1131") -> dict:
+              clearing_code: str = "1131", actual=_STATEMENT_MATCHED) -> dict:
+    # Default = a position whose correspondent statement line has been matched (A2), so the
+    # actual equals the gross. Pass `actual=None` for one still awaiting its statement.
     return {
         "settlementPositionId": _SP,
         "paymentId": _PAY,
@@ -115,6 +120,7 @@ def _position(gross: float = 25000.0, status: str = "SETTLED",
         "clearingAccountCode": clearing_code,
         "settlementAccountCode": "1111",
         "grossAmount": gross,
+        "actualAmount": gross if actual is _STATEMENT_MATCHED else actual,
         "currency": "USD",
         "outcome": "MATCHED",
         "settlementStatus": status,

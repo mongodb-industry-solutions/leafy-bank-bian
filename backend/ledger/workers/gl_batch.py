@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from database.connection import MongoDBConnection
 from services.journal_service import run_batch
 from services.reconciliation_service import reconcile_all_accounts, reconcile_settled_payments
+from services.statement_matching import match_statements
 from shared.coa_cache import ChartOfAccounts
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,12 @@ def run_one_cycle(connection: MongoDBConnection, db_name: str, coa: ChartOfAccou
 
     Returns: {"skipped": bool, "written": int, "reason": str | None}
     """
+    # Reconciliation plan A2 — match the correspondent's statement lines first, so the
+    # post-batch pass sees this cycle's actual amounts. Never blocks the batch.
+    try:
+        match_statements(connection, db_name)
+    except Exception:
+        logger.exception("statement matching failed — batch continues")
     if not _reconcile(connection, db_name):
         return {"skipped": True, "written": 0, "reason": "pre-batch reconciliation break"}
     written = run_batch(connection, db_name, coa=coa)

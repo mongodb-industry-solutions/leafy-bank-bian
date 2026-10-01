@@ -1,9 +1,12 @@
 // Stage 9 manual gate — verify the exceptions/returns path end-to-end on the live cluster.
 //
 // Evidence this checks (doc 24 §3 step 9 + leafy-bian-bian `_state.md`):
-//   [1] UNMATCHED wire settles SHORT (Sep 17 L1264-1286): SETTLED, the GL posts the full
-//       amount, `settlementPositions.actualAmount = expected − delta`, and stage 8 leg 2
-//       raises RECONCILIATION_DISCREPANCY (stage 7 opens no exception). Once accepted, on a
+//   [1] UNMATCHED wire (alias for a FEE_DEDUCTED statement line, reconciliation plan A2):
+//       SETTLED, the GL posts the full amount, the correspondent's camt.053 books it $25
+//       short, statement matching sets `settlementPositions.actualAmount` from that line,
+//       and stage 8 leg 2 raises RECONCILIATION_DISCREPANCY (stage 7 opens no exception).
+//       Order: wait 30s → POST :8002/FinancialGateway/GW-WIRE-01/Statement/Generate → trigger
+//       the GL batch (which matches statements first). Once accepted, on a
 //       chargeBearer=DEBT wire: `clearing.settlementAdjustment` stamped, reconciliationStatus
 //       RECONCILED, and a `{pid}-ADJ` ledgerEvent posts Dr 5214 / Cr nostro. Non-DEBT
 //       accepts post nothing. (Interim — the reconciliation-agent plan moves the $25 source
@@ -92,13 +95,16 @@ if (p.simulatedSettlementOutcome === "UNMATCHED") {
   ok("[1] UNMATCHED wire settled (short), not FAILED",
       ["SETTLED", "POSTED"].includes(p.lifecycle.currentState),
       `currentState=${p.lifecycle.currentState}`);
-  ok("[1] clearing.discrepancyAmount/Reason stamped",
-      p.clearing?.discrepancyAmount != null && p.clearing?.discrepancyReason != null,
-      `${p.clearing?.discrepancyAmount} / ${p.clearing?.discrepancyReason}`);
+  ok("[1] UNMATCHED aliases a FEE_DEDUCTED statement line",
+      p.simulatedStatementOutcome === "FEE_DEDUCTED", `simulatedStatementOutcome=${p.simulatedStatementOutcome}`);
   const pos = dbc.settlementPositions.findOne({ paymentId: pid, outcome: "UNMATCHED" });
-  ok("[1] settlementPositions shows the short-pay (actual = expected − delta)",
-      !!pos && Number(pos.actualAmount) === Number(pos.expectedAmount) - Number(p.clearing?.discrepancyAmount),
-      pos ? `expected=${pos.expectedAmount} actual=${pos.actualAmount}` : "no position");
+  if (!pos || pos.actualAmount == null) {
+    print(`  ℹ [1] position has no actual yet — generate the statement, then trigger the GL batch, then re-run`);
+  } else {
+    ok("[1] statement matching recorded the short-pay (actual = expected − 25)",
+        Number(pos.expectedAmount) - Number(pos.actualAmount) === 25 && !!pos.sourceMessageRef,
+        `expected=${pos.expectedAmount} actual=${pos.actualAmount} source=${pos.sourceMessageRef}`);
+  }
 
   const disc = dbc.exceptions.findOne({ paymentId: pid, category: "RECONCILIATION_DISCREPANCY" });
   if (!disc) {

@@ -57,9 +57,8 @@ LATE = "LATE"
 AMOUNT_TRANSPOSED = "AMOUNT_TRANSPOSED"
 STATEMENT_OUTCOMES = (CLEAN, FEE_DEDUCTED, REFERENCE_ALTERED, LATE, AMOUNT_TRANSPOSED)
 
-# The intermediary's deducted charge. Same value as `settle._UNMATCHED_DELTA_USD` on purpose:
-# both tell Doina's $25 story (Sep 17 L1264-1270). A2 retires the settle.py copy, leaving this
-# as the single source.
+# The intermediary's deducted charge — Doina's $25 story (Sep 17 L1264-1270). The single
+# source since A2 retired settle.py's copy (reconciliation plan Decision 1).
 CORRESPONDENT_CHARGE = 25.0
 
 # The correspondent's own suffix when it re-keys a reference (REFERENCE_ALTERED).

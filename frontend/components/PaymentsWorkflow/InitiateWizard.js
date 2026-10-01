@@ -65,7 +65,8 @@ const PRIORITIES = ["NORMAL", "HIGH", "URGENT"];
 // Stage 7 FR-7.3 — the four simulated settlement outcomes (Doina Sep 17). A demo lever on
 // the back-office wizard so all four are drivable from the screen and their distinct
 // downstream behaviour is observable. MATCHED is the happy path; the others fork the
-// lifecycle (DELAYED → PENDING, UNMATCHED → settles $25 short → stage 8 discrepancy,
+// lifecycle (DELAYED → PENDING, UNMATCHED → settles, the correspondent's statement books it
+// $25 short (FEE_DEDUCTED alias) → stage 8 discrepancy,
 // EXCEPTION → RETURNED).
 // Internal transfers settle atomically in stage 5 and ignore this — the control is wire-only.
 const SETTLEMENT_OUTCOMES = [
@@ -73,7 +74,7 @@ const SETTLEMENT_OUTCOMES = [
   // DELAYED disabled — no real external rail to wait on, so a PENDING hold with no path to
   // resolve it reads as a stuck payment in the demo. Re-enable when a rail re-query hook lands.
   // { value: "DELAYED", label: "Delayed", description: "No confirmation yet within the window — PENDING" },
-  { value: "UNMATCHED", label: "Unmatched", description: "Rail settles $25 short — reconciliation flags the gap" },
+  { value: "UNMATCHED", label: "Fee deducted by correspondent", description: "Settles, but the statement books it $25 short — reconciliation flags the gap" },
   { value: "EXCEPTION", label: "Exception", description: "Network/correspondent rejected — RETURNED" },
 ];
 // Reconciliation plan A1 — how the correspondent's camt.053 statement books this wire.
@@ -718,7 +719,7 @@ export default function InitiateWizard({ onInitiated }) {
                           {form.simulatedSettlementOutcome === "DELAYED"
                             ? "hold at IN_PROGRESS (settlement PENDING)"
                             : form.simulatedSettlementOutcome === "UNMATCHED"
-                              ? "settle $25 short — reconciliation flags the gap for the AI agent and the exception queue"
+                              ? "settle, then appear $25 short on the correspondent's statement — reconciliation flags the gap for the AI agent and the exception queue"
                               : "RETURN (network/correspondent rejection)"}{" "}
                           — for demoing the distinct downstream outcomes (FR-7.3).
                         </div>

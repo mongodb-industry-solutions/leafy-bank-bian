@@ -12,6 +12,12 @@ from typing import Any, Optional
 
 def _matches(doc: dict, query: dict) -> bool:
     for key, want in query.items():
+        head, _, rest = key.partition(".")
+        if rest and isinstance(doc.get(head), list):
+            # MongoDB: a dotted path through an array matches if any element matches.
+            if not any(isinstance(el, dict) and _matches(el, {rest: want}) for el in doc[head]):
+                return False
+            continue
         have = doc
         missing = False
         for part in key.split("."):

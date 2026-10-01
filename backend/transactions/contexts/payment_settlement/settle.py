@@ -25,13 +25,14 @@ service's** `settlement_worker` via CDC on `payments` — never by the transacti
 
 MATCHED → captured at `PENDING`, then flipped to `SETTLED` by `complete_due` after a short
 deferred window (default 30s) · DELAYED → `PENDING` (stays at `IN_PROGRESS`, operator-retried)
-· UNMATCHED → settles like MATCHED (short-pay caught at stage 8) · EXCEPTION → `RETURNED`. Every value comes from the spec's
+· UNMATCHED → settles like MATCHED (an alias for a fee-deducted statement line) · EXCEPTION → `RETURNED`. Every value comes from the spec's
 `settlementStatus` enum — no invented states. The `outcome` classification itself is an enum on
 `settlementPositions` (`MATCHED`/`UNMATCHED`/`DELAYED`/`EXCEPTION`), matched to the spec's
 `settlementStatus` enum via `_OUTCOME_TO_STATUS`. Doina (Sep 17): the four outcomes must be
 reachable and trigger distinct downstream behaviour, not just label the same result — UNMATCHED
-stamps a discrepancy amount + reason on `clearing`, settles, and stage 8 raises the
-RECONCILIATION_DISCREPANCY (Sep 17 L1264-1270: GL posts $25,000, position shows $24,975).
+settles, the correspondent's camt.053 books it $25 short (FEE_DEDUCTED, set at initiation), and
+stage 8 raises the RECONCILIATION_DISCREPANCY (Sep 17 L1264-1270: GL posts $25,000, statement
+shows $24,975). Reconciliation plan Decision 1: the statement is the only source of the $25.
 
 ## Why MATCHED is deferred (Doina Sep 17)
 
@@ -55,6 +56,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+import os
 from typing import Optional
 
 from bson import ObjectId
@@ -101,13 +103,23 @@ _SETTLEMENT_MODELS: dict[str, dict] = {
 # The clearing account code for wire ( seeded in step 1).
 _WIRE_CLEARING_CODE = "1131"
 
-# The simulated "unmatched" shortfall — the correspondent-fee-style delta the rail settles
-# short by on an UNMATCHED outcome. Doina's Sep 17 mockup (L1307-1313) is "$25,000 expected /
-# $24,975 received / $25 discrepancy" — a PARTIAL short-pay, not a full rejection. The
-# discrepancy shown to the operator is this delta, not the whole payment amount. Capped at
-# the expected amount so a sub-$25 payment degrades to a full rejection (actual = 0) rather
-# than a negative settlement.
-_UNMATCHED_DELTA_USD = 25.0
+# Reconciliation plan A2/A3 — how long after settling a correspondent statement line is due.
+# Default two statement cycles (2 × STATEMENT_INTERVAL_SECONDS' 300s default); A3's watchdog
+# raises RECONCILIATION_MISSING past `expectedWindow.by`.
+_STATEMENT_EXPECTED_WITHIN_SECONDS = int(os.getenv("STATEMENT_EXPECTED_WITHIN_SECONDS", "600"))
+
+
+def _stamp_expected_window(db, payment_id: str, settled_at: datetime) -> None:
+    """Record on the settlement position when its statement line is due (DR-7.1 drift).
+    Written at the SETTLED flip, the moment the correspondent can book the wire."""
+    db["settlementPositions"].update_one(
+        {"paymentId": payment_id, "settlementStatus": "SETTLED"},
+        {"$set": {"expectedWindow": {
+            "from": settled_at,
+            "by": settled_at + timedelta(seconds=_STATEMENT_EXPECTED_WITHIN_SECONDS),
+        }}},
+    )
+
 
 # --- her four outcomes (B4, L630, FR-7.3) → spec settlementStatus enum -------
 # delayed is PENDING with a future settlementDate — a timing property, not a state
@@ -129,7 +141,7 @@ _OUTCOME_TO_STATUS: dict[str, str] = {
     MATCHED: "SETTLED",
     DELAYED: "PENDING",
     # Sep 17 L1264-1270: an unmatched settlement still SETTLES — the GL posts the full
-    # amount and stage 8 catches the short-pay (settlement position ≠ GL settlement posting).
+    # amount and stage 8 catches the short-pay (statement line ≠ GL settlement posting).
     UNMATCHED: "SETTLED",
     EXCEPTION: "RETURNED",
 }
@@ -151,18 +163,12 @@ def _select_model(ctx: PaymentContext) -> str:
     return "CENTRAL_BANK"
 
 
-def _simulated_response(payment_id: str, model: str, outcome: str, expected_amount: float = 0.0) -> dict:
+def _simulated_response(payment_id: str, model: str, outcome: str) -> dict:
     """R8/R9 — a simulated settlement response, labelled SIMULATED.
 
     The demo does not connect to a real payment network (her L629, her own bold). The
     response carries the batch reference, the settlement date, and the outcome-specific
     status/rejection/return code — all written to `payments.clearing.*` by the caller.
-
-    UNMATCHED is a PARTIAL short-pay (Sep 17 L1264-1270): the rail settles for less than
-    expected — ``actualAmount = expected − delta``. The payment still SETTLES and the
-    settlement ledgerEvent posts the full amount ("GL settlement posting: $25,000"); the
-    ``delta`` is left for stage 8 to detect as a settlement-position ≠ GL mismatch, which
-    raises the RECONCILIATION_DISCREPANCY the Reconciliation Agent investigates.
     """
     now = datetime.now(timezone.utc)
     batch_ref = f"SIM-SETT-{uuid.uuid4().hex[:8].upper()}"
@@ -179,21 +185,14 @@ def _simulated_response(payment_id: str, model: str, outcome: str, expected_amou
         "returnCode": None,
     }
 
-    if outcome == MATCHED:
+    if outcome in (MATCHED, UNMATCHED):
+        # UNMATCHED settles like MATCHED; its $25 arrives on the correspondent's camt.053
+        # (FEE_DEDUCTED alias, reconciliation plan Decision 1), never on this response.
         resp["settlementDate"] = now.date().isoformat()
         resp["statusCode"] = "ACCC"  # ISO 20022: Accepted - Settlement Completed
     elif outcome == DELAYED:
         resp["settlementDate"] = (now + timedelta(days=1)).date().isoformat()
         resp["statusCode"] = "ACSP"  # Accepted - Settlement In Progress
-    elif outcome == UNMATCHED:
-        expected = float(expected_amount or 0.0)
-        delta = min(_UNMATCHED_DELTA_USD, expected)
-        actual = expected - delta
-        resp["settlementDate"] = now.date().isoformat()
-        resp["statusCode"] = "ACCC"  # settled — but for less than expected
-        resp["discrepancyReason"] = "UNMATCHED_AMOUNT"
-        resp["actualAmount"] = actual
-        resp["discrepancyAmount"] = delta
     elif outcome == EXCEPTION:
         resp["statusCode"] = "RJCT"
         resp["returnCode"] = "RETURNED_EXCEPTION"
@@ -214,9 +213,9 @@ def _write_settlement_position(ctx: PaymentContext, response: dict, model: str) 
     so 1131 nets to zero; no FX conversion leg.
 
     Written for EVERY outcome (matched/delayed/unmatched/exception), not just matched, so a
-    non-matched settlement leaves a stored record of the discrepancy. `actualAmount` is the
-    clearing amount for matched, 0 for unmatched/exception (nothing settled), None for
-    delayed (still pending).
+    non-matched settlement leaves a stored record. `actualAmount` is None for matched/unmatched
+    (the correspondent's statement line supplies it — reconciliation plan A2), 0 for exception
+    (nothing settled), None for delayed (still pending).
 
     The collection is absent from the canonical spec (0 matches, doc 21 §0) and from
     Doina's field-level sections — she names it at L744/L926 and never specifies it. This
@@ -241,15 +240,11 @@ def _write_settlement_position(ctx: PaymentContext, response: dict, model: str) 
     expected_currency = txn.get("currency", "USD")
 
     outcome = response["outcome"]
-    if outcome == MATCHED:
-        actual_amount = expected_amount
-        actual_currency = expected_currency
-    elif outcome == UNMATCHED:
-        # Partial short-pay: the rail settled for `actualAmount = expected − delta`
-        # (Doina's mockup). The discrepancy (delta) is the unmatched portion; the "received"
-        # figure is the rail's claimed partial settlement, informational on the position.
-        actual_amount = response.get("actualAmount", 0)
-        actual_currency = expected_currency
+    if outcome in (MATCHED, UNMATCHED):
+        # Reconciliation plan A2: the actual amount comes only from the correspondent's
+        # statement line (the ledger's `statement_matching`). Until then leg 2 waits.
+        actual_amount = None
+        actual_currency = None
     elif outcome == EXCEPTION:
         actual_amount = 0
         actual_currency = expected_currency
@@ -380,8 +375,7 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
     # Default outcome is MATCHED. The BIAN route (step 7) can override this for demo
     # scenarios that need unmatched/delayed/exception outcomes.
     outcome = ctx.settlement_outcome or MATCHED
-    expected_amount = (ctx.payment_doc or {}).get("amount", 0)
-    response = _simulated_response(ctx.payment_id, model, outcome, expected_amount=expected_amount)
+    response = _simulated_response(ctx.payment_id, model, outcome)
 
     _record_check(
         ctx, "settlement_response_received", checks.PASS,
@@ -391,7 +385,7 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
 
     # --- R12: write the settlementPositions document (every outcome) -------------
     # FR-7.4: record expected vs actual for ALL four outcomes, not just matched, so a
-    # non-matched settlement leaves a stored discrepancy for stage-8 reconciliation
+    # non-matched settlement leaves a stored record for stage-8 reconciliation
     # (otherwise legs 2/3 sit PENDING forever with no signal). FR-7.6 records the FX
     # exchange on the doc when stage 3 levied an FX rate.
     _write_settlement_position(ctx, response, model)
@@ -404,24 +398,6 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
         "lifecycle.settlementStatus": _OUTCOME_TO_STATUS[outcome],
         "clearing.batchRef": response["batchRef"],
     }
-
-    if outcome == UNMATCHED:
-        # Settles like MATCHED (below); the short-pay is stamped for display and left for
-        # stage 8 to detect against the GL. No stage-7 exception.
-        ctx.collections.payments.update_one(
-            {"_id": ctx.payment_oid},
-            {"$set": {
-                "clearing.discrepancyAmount": response.get("discrepancyAmount"),
-                "clearing.discrepancyReason": response.get("discrepancyReason"),
-                "updatedAt": datetime.now(timezone.utc),
-            }},
-        )
-        _record_check(
-            ctx, "settlement_short_paid", checks.WARN,
-            f"Rail settled {response.get('actualAmount')} against {expected_amount} expected — "
-            f"{response.get('discrepancyAmount')} short. Settling; stage 8 reconciliation will "
-            "flag the discrepancy.",
-        )
 
     if outcome in (MATCHED, UNMATCHED):
         if defer:
@@ -474,6 +450,7 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
             ),
             extra=extra,
         )
+        _stamp_expected_window(ctx.collections.db, ctx.payment_id, datetime.fromisoformat(now_iso))
         _record_check(
             ctx, "settlement_completed", checks.PASS,
             f"Payment SETTLED via {model_info['label']}. Clearing account {_WIRE_CLEARING_CODE} "
@@ -559,7 +536,7 @@ def complete_due(connection, db_name: str, delay_seconds: float = 30.0) -> int:
       * `simulatedSettlementOutcome in {None, MATCHED, UNMATCHED}`  (excludes DELAYED, operator-retried)
       * `clearing.submittedAt <= now - delay_seconds`
     EXCEPTION never reaches here — `run` marks it RETURNED (terminal), not PENDING. UNMATCHED
-    completes like MATCHED; its short-pay is caught at stage 8.
+    completes like MATCHED; its short-pay arrives on the correspondent's statement.
 
     Idempotent: completion flips `settlementStatus` to SETTLED, so a later cycle's query cannot
     reselect the same payment. A race between two cycles is closed by `lifecycle.advance`'s
@@ -604,6 +581,7 @@ def complete_due(connection, db_name: str, delay_seconds: float = 30.0) -> int:
                 "complete_due: payment %s no longer at IN_PROGRESS (race); skipping", payment_id,
             )
             continue
+        _stamp_expected_window(connection.get_database(db_name), payment_id, now)
         checks.append_checks(
             payments, payment_oid,
             [checks.check(

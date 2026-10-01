@@ -337,47 +337,21 @@ def test_an_unmatched_wire_settles_with_no_stage7_exception(service, db):
     assert settled["lifecycle"]["currentState"] == lifecycle.SETTLED
     assert settled["lifecycle"]["settlementStatus"] == "SETTLED"
 
-def test_unmatched_is_a_partial_short_pay_expected_received_discrepancy(service, db):
-    """B (Doina mockup) — UNMATCHED settles short: expected / received / discrepancy are
-    three distinct numbers, and the discrepancy is a small delta (the correspondent fee),
-    not the full payment amount. The settlementPositions doc carries all three so the
-    Operations queue + the deep-dive can render Doina's "$25,000 / $24,975 / $25" row."""
-    from contexts.payment_settlement.settle import _UNMATCHED_DELTA_USD
+def test_unmatched_is_an_alias_for_a_fee_deducted_statement_line(service, db):
+    """Reconciliation plan Decision 1 — the statement is the only source of the $25.
+    UNMATCHED settles like MATCHED, writes no discrepancy and no actual amount of its own,
+    and books the correspondent's line as FEE_DEDUCTED (camt053 caps the charge at the
+    amount, so a sub-$25 wire cannot go negative)."""
     _initiate_external(service, settlement_outcome="UNMATCHED")
     payment = _db_payment(db)
-    expected = payment["amount"]
-    delta = min(_UNMATCHED_DELTA_USD, expected)
-    actual = expected - delta
 
-    # the clearing block carries the discrepancy (the delta), not the full amount
-    assert payment["clearing"]["discrepancyAmount"] == delta
-    assert payment["clearing"]["discrepancyReason"] == "UNMATCHED_AMOUNT"
-
-    # the settlementPositions doc carries expected / actual / outcome
+    assert payment["simulatedStatementOutcome"] == "FEE_DEDUCTED"
+    assert payment["clearing"]["discrepancyAmount"] is None
     pos = db["settlementPositions"].find_one({"paymentId": payment["paymentId"]})
-    assert pos is not None
     assert pos["outcome"] == "UNMATCHED"
     assert pos["settlementStatus"] == "SETTLED"
-    assert pos["expectedAmount"] == expected
-    assert pos["actualAmount"] == actual
-
-    # the discrepancy is NOT the full amount (the bug was it equalled `expected`)
-    assert pos["actualAmount"] > 0
-    assert pos["expectedAmount"] - pos["actualAmount"] == delta
-    assert delta < expected  # a partial short-pay, not a full rejection
-
-
-def test_unmatched_on_a_sub_delta_payment_degrades_to_full_rejection(service, db):
-    """The delta is capped at the expected amount, so a payment smaller than the delta
-    degrades to actual = 0 (a full rejection) rather than a negative settlement."""
-    from contexts.payment_settlement.settle import _UNMATCHED_DELTA_USD
-    _initiate_external(service, settlement_outcome="UNMATCHED", instructed_amount=10.0)
-    payment = _db_payment(db)
-    assert payment["amount"] == 10.0
-    pos = db["settlementPositions"].find_one({"paymentId": payment["paymentId"]})
-    # delta capped at 10 → actual = 0
-    assert pos["actualAmount"] == 0
-    assert pos["expectedAmount"] == 10.0
+    assert pos["expectedAmount"] == payment["amount"]
+    assert pos["actualAmount"] is None, "A2: only the statement line supplies the actual"
 
 
 def test_an_exception_wire_ends_returned_with_an_open_settlement_returned_exception(service, db):
@@ -833,8 +807,8 @@ def test_b4_resume_restores_the_settlement_outcome_so_unmatched_survives_a_stepu
 ):
     """B4 — the resume path (`_context_from_doc`) must restore `settlement_outcome` from the
     persisted doc. Drive an external wire that hits the step-up hold with UNMATCHED selected,
-    then resume with a second factor; the settlement run must still land UNMATCHED (short-pay
-    stamped), not reset to MATCHED. This is the live demo-breaker the audit flagged: without
+    then resume with a second factor; the settlement run must still land UNMATCHED (fee-deducted
+    alias persisted), not reset to MATCHED. This is the live demo-breaker the audit flagged: without
     persist+restore, a held UNMATCHED wire silently became a happy-path SETTLED on resume."""
     from tests.test_payments_service import _ASSERTION
     weak = {"method": "PASSWORD", "factorCount": 1}
@@ -849,9 +823,9 @@ def test_b4_resume_restores_the_settlement_outcome_so_unmatched_survives_a_stepu
     service.resume_payment(pid, customer_ref=held["customerId"], authentication=_ASSERTION)
 
     resumed = db["payments"].find_one({"paymentId": pid})
-    # UNMATCHED survived the resume: the short-pay is stamped and recorded on the position
-    # (the bug reset to MATCHED, which stamps neither).
-    assert resumed["clearing"]["discrepancyReason"] == "UNMATCHED_AMOUNT"
+    # UNMATCHED survived the resume: the fee-deducted statement alias is persisted and the
+    # position records the outcome (the bug reset to MATCHED, which carries neither).
+    assert resumed["simulatedStatementOutcome"] == "FEE_DEDUCTED"
     pos = db["settlementPositions"].find_one({"paymentId": pid})
     assert pos["outcome"] == "UNMATCHED"
 

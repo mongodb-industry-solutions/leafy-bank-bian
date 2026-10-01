@@ -216,7 +216,10 @@ class PaymentsService:
             reference_data=self.reference_data,
             rail_gateway=self.rail_gateway,
             settlement_outcome=settlement_outcome,
-            statement_outcome=statement_outcome,
+            # Reconciliation plan Decision 1: UNMATCHED is an alias for a fee-deducted
+            # correspondent statement line — the statement is the only source of the $25.
+            statement_outcome=("FEE_DEDUCTED" if settlement_outcome == "UNMATCHED"
+                               else statement_outcome),
         )
         return payment_lifecycle.run(ctx)
 
