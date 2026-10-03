@@ -121,6 +121,16 @@
   margin: 0;
 }
 
+.beat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border-left: 4px solid #016bf8;
+  border-radius: 4px;
+  background: #f4f7fb;
+}
+
 .note {
   color: #00684a;
 }

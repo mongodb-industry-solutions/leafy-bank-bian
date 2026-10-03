@@ -9,7 +9,7 @@ import Button from "@leafygreen-ui/button";
 import Badge from "@leafygreen-ui/badge";
 import Card from "@leafygreen-ui/card";
 import Stepper, { Step } from "@leafygreen-ui/stepper";
-import { H2, Body } from "@leafygreen-ui/typography";
+import { H2, Body, Overline } from "@leafygreen-ui/typography";
 import { agentApi, coreApi, pipelineApi } from "@/lib/api/client";
 import { usePaymentWorkflow, usePipelineTrace, useWorkflowExceptions } from "@/lib/api/hooks";
 import { CATEGORY, OVERDUE_SECONDS, scenarioByKey, stepsFor } from "./scenarios";
@@ -235,10 +235,16 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
           <div className={styles.narrationHead}>
             <Badge variant="blue">{scenario.key}</Badge>
             <H2 className={styles.narrationTitle}>
-              {index + 1}. {step.label}
+              {index + 1}. {step.title}
             </H2>
           </div>
           <Body>{step.narration}</Body>
+          {scenario.beats?.[step.key] && (
+            <div className={styles.beat}>
+              <Overline>This scenario</Overline>
+              <Body>{scenario.beats[step.key]}</Body>
+            </div>
+          )}
           {note && <Body className={styles.note}>{note}</Body>}
           {error && <Body className={styles.error}>{error}</Body>}
           {step.final && outcome && (
