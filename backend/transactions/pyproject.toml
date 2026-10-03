@@ -11,7 +11,20 @@ pymongo = "^4.10.1"
 python-dotenv = "^1.0.1"
 fastapi = "^0.115.4"
 uvicorn = "^0.32.0"
+# BIAN PartyAuthentication (SD 38917) — the accounts service signs an assessment token,
+# the transactions service verifies it. A dependency rather than 40 lines of stdlib HMAC:
+# never hand-roll crypto, and a shared library across the two services cannot drift the
+# way a mirrored module can.
+pyjwt = "^2.9.0"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+
+[tool.pytest.ini_options]
+# Put backend/transactions (the rootdir) on sys.path so tests can import services/, shared/, etc.
+# Mirrors backend/ledger/pyproject.toml.
+pythonpath = ["."]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["poetry-core"]

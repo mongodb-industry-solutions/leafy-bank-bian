@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import threading
+import time
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -11,19 +13,39 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from api_models import PaymentOrderBulkInitiateRequest, PaymentOrderInitiateRequest
+from api_models import (
+    FraudEvaluationRequest,
+    InboundMessageRequest,
+    InboundSimulateRequest,
+    StatementGenerateRequest,
+    PaymentConfirmationRequest,
+    PaymentOrderBulkInitiateRequest,
+    PaymentOrderInitiateRequest,
+    PaymentOrderResumeRequest,
+    PaymentSettlementInitiateRequest,
+    TransactionAuthorizationResolveRequest,
+)
+from shared import party_authentication_token as party_auth
 from database.connection import MongoDBConnection
+from contexts.payment_rail.domain import pacs008
 from encoder.json_encoder import MyJSONEncoder
+from routers.workflow import router as workflow_router
 from services.payments_service import PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
+from workers import inbound_sim_worker, settlement_completion_worker, statement_sim_worker
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 MONGODB_URI = os.getenv("MONGODB_URI")
 DB_NAME = os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")
-PAYMENT_LIMIT_USD = float(os.getenv("PAYMENT_LIMIT_USD", "500"))
+# Stage-1 sanity bound on a malformed amount, not an entitlement limit — stage 2 owns
+# the real per-payment decision, keyed on `customers.segment`
+# (`contexts/party_authentication/domain/entitlement_policy.py`). Kept above every
+# segment limit so it never vetoes a payment entitlement would have allowed.
+PAYMENT_LIMIT_USD = float(os.getenv("PAYMENT_LIMIT_USD", "1000000"))
 
 app = FastAPI(title="Leafy Bank — Payments (BIAN PaymentOrderInitiation)")
 
@@ -38,6 +60,104 @@ app.add_middleware(
 connection = MongoDBConnection(MONGODB_URI)
 payments_service = PaymentsService(connection, DB_NAME, PAYMENT_LIMIT_USD)
 transactions_service = TransactionsService(connection, DB_NAME)
+
+# The /workflow routers resolve their dependencies from app.state rather than closing over
+# the module globals, matching the ledger service's router convention.
+app.state.connection = connection
+app.state.db_name = DB_NAME
+# Stage 9 — the /workflow exception-resolve route reaches the saga-owning service through
+# app.state (the workflow router stays free of module globals, per the ledger convention).
+app.state.payments_service = payments_service
+
+# Stage 7 deferred-settlement completion. `settle.run` captures a default wire at
+# `settlementStatus=PENDING`; this periodic worker flips it to SETTLED after
+# SETTLEMENT_COMPLETION_DELAY_SECONDS (default 30s) so the clearing-and-settlement stage is
+# visible on the list instead of an instant green SETTLED pill (Doina Sep 17). A periodic
+# scan, not a change stream — the trigger is time, not a write. Disable with
+# ENABLE_SETTLEMENT_COMPLETION=false (note: with the worker off, captured wires stay PENDING
+# until an operator re-triggers settlement via /PaymentSettlement/Initiate).
+ENABLE_SETTLEMENT_COMPLETION = os.getenv("ENABLE_SETTLEMENT_COMPLETION", "true").lower() == "true"
+
+
+def _restart_loop(name: str, fn, *args, restart_delay: int = 5) -> None:
+    while True:
+        try:
+            fn(*args)
+        except Exception:
+            logger.exception("%s crashed; restarting in %ds", name, restart_delay)
+            time.sleep(restart_delay)
+            continue
+        # fn returned without raising: it exited on purpose. Do NOT re-invoke — that would
+        # busy-loop with no sleep and flood the logs (the 2026-07-08 eod_topup_worker defect).
+        logger.info("%s exited; not restarting", name)
+        return
+
+
+if ENABLE_SETTLEMENT_COMPLETION:
+    _poll = int(os.getenv("SETTLEMENT_COMPLETION_POLL_SECONDS", str(settlement_completion_worker.DEFAULT_POLL_INTERVAL)))
+    _delay = float(os.getenv("SETTLEMENT_COMPLETION_DELAY_SECONDS", str(settlement_completion_worker.DEFAULT_DELAY)))
+    threading.Thread(
+        target=_restart_loop,
+        args=("settlement_completion_worker",
+              settlement_completion_worker.run, connection, DB_NAME, _poll, _delay),
+        daemon=True, name="settlement_completion_worker",
+    ).start()
+    logger.info(
+        "started background worker: settlement_completion_worker (poll=%ds, delay=%ss)",
+        _poll, _delay,
+    )
+
+# The inbound simulator (2026-09-29): one simulated incoming pacs.008 per interval, default
+# 5 minutes. Set ENABLE_INBOUND_SIM=true to run it, or INBOUND_SIM_INTERVAL_SECONDS to change
+# the cadence. The worker shares the manual route's code path
+# (`payments_service.simulate_inbound`), so the two triggers cannot drift apart. No disabled
+# branch inside `run` — this flag is what keeps it out of `_restart_loop` entirely (the
+# 2026-07-08 eod_topup_worker lesson).
+#
+# ⚠️ Default OFF (2026-09-29, Kiran). It shipped default-ON so the demo would show inbound
+# traffic with no configuration, and that is genuinely nicer for a demo — but an ambient
+# writer that needs no opt-in is the wrong default while inbound data is being repaired:
+# it lands fresh payments mid-repair, and it accumulated the rows that made the wrong-leg
+# backfill a 25-payment cleanup instead of a 2-payment one. The demo path is the explicit
+# one (the Activity-header button, or /Inbound/Simulate); ambient traffic is an opt-in.
+# Flip back to default-ON only once the repair is verified green AND you want it in staging.
+ENABLE_INBOUND_SIM = os.getenv("ENABLE_INBOUND_SIM", "false").lower() == "true"
+if ENABLE_INBOUND_SIM:
+    _inbound_interval = int(os.getenv(
+        "INBOUND_SIM_INTERVAL_SECONDS",
+        str(inbound_sim_worker.DEFAULT_INTERVAL_SECONDS),
+    ))
+    threading.Thread(
+        target=_restart_loop,
+        args=("inbound_sim_worker",
+              inbound_sim_worker.run, payments_service, _inbound_interval),
+        daemon=True, name="inbound_sim_worker",
+    ).start()
+    logger.info(
+        "started background worker: inbound_sim_worker (interval=%ds)", _inbound_interval,
+    )
+
+# Reconciliation plan A1 — the correspondent's camt.053 statement. Default ON
+# (Kiran, 2026-10-01): the normal flow — the correspondent books its statement on the
+# cycle and a clean wire reconciles itself, no exception. Set `false` to hold the external
+# confirmation back, the timing-lag demo state the agentic scenarios present.
+ENABLE_STATEMENT_SIM = os.getenv("ENABLE_STATEMENT_SIM", "true").lower() == "true"
+if ENABLE_STATEMENT_SIM:
+    _statement_interval = int(os.getenv(
+        "STATEMENT_INTERVAL_SECONDS",
+        str(statement_sim_worker.DEFAULT_INTERVAL_SECONDS),
+    ))
+    threading.Thread(
+        target=_restart_loop,
+        args=("statement_sim_worker",
+              statement_sim_worker.run, payments_service, _statement_interval),
+        daemon=True, name="statement_sim_worker",
+    ).start()
+    logger.info(
+        "started background worker: statement_sim_worker (interval=%ds)", _statement_interval,
+    )
+
+app.include_router(workflow_router)
 
 
 def _bian_response(envelope: dict) -> Response:
@@ -66,26 +186,80 @@ def health_check():
     return {"status": "healthy"}
 
 
+def _resolve_identity(body, authorization: Optional[str]) -> dict:
+    """Who is this, per the token — or per the body if there is no token and none is required.
+
+    Raises HTTP 401 rather than letting the AuthenticationError surface as a 500. Kept out
+    of `_initiate_kwargs` so the single and bulk paths resolve identity once each, visibly,
+    rather than inside a mapper that looks like pure field shuffling.
+    """
+    try:
+        return party_auth.resolve_identity(authorization, body.customerId)
+    except party_auth.AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+def _initiate_kwargs(body) -> dict:
+    """Map a validated request onto `initiate_payment`'s keyword arguments.
+
+    Shared by Initiate and BulkInitiate so the two entry points cannot drift — a field
+    added to the contract but wired into only one of them is the classic way a bulk path
+    starts writing a different document shape than the single path.
+    """
+    creditor = body.creditor
+    remittance = body.remittance
+    return {
+        "customer_ref": body.customerId,
+        "debtor_account_ref": body.debtor.accountId,
+        # None for an external beneficiary; the snapshot then rides on creditor_party.
+        "creditor_account_ref": creditor.accountId,
+        "creditor_party": creditor.model_dump(exclude={"accountId"}),
+        "instructed_amount": body.instructedAmount,
+        "instructed_currency": body.instructedCurrency,
+        "payment_type": body.type,
+        "payment_rail": body.rail,
+        "remittance_unstructured": remittance.unstructured if remittance else None,
+        "remittance_reference": remittance.reference if remittance else None,
+        "remittance_invoice_no": remittance.invoiceNo if remittance else None,
+        "priority": body.priority,
+        "charge_bearer": body.chargeBearer,
+        "category_purpose": body.categoryPurpose,
+        "requested_execution_date": body.requestedExecutionDate,
+        "channel": body.channel,
+        "client_reference": body.clientReference,
+        # Stage 2 (doc 15 B1). The body's assertion is the pre-token fallback: it wins
+        # when no token is presented (`_resolve_identity` omits the `authentication` key so
+        # the merge below does not clobber it), and is overridden by verified claims when one
+        # is. A claim the caller made about itself must never outrank one the bank signed.
+        "authentication": body.authentication.model_dump() if body.authentication else None,
+        "wire_details": body.wireDetails.model_dump() if body.wireDetails else None,
+        "ach_details": body.achDetails.model_dump() if body.achDetails else None,
+        "internal_details": body.internalDetails.model_dump() if body.internalDetails else None,
+        # Stage 7 simulation lever (FR-7.3). Only affects an external wire (deferred
+        # settlement); ignored for internal transfers. Defaults to MATCHED → happy path.
+        "settlement_outcome": body.simulatedSettlementOutcome,
+        # Reconciliation plan A1: how the correspondent's statement books this wire.
+        "statement_outcome": body.simulatedStatementOutcome,
+    }
+
+
 @app.post("/PaymentOrderInitiation/Initiate")
 async def payment_order_procedure_initiate(
     body: PaymentOrderInitiateRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
+    identity = _resolve_identity(body, authorization)
     try:
         payment_doc = payments_service.initiate_payment(
-            customer_ref=body.customerId,
-            debtor_account_ref=body.debtor.accountId,
-            creditor_account_ref=body.creditor.accountId,
-            instructed_amount=body.instructedAmount,
-            instructed_currency=body.instructedCurrency,
-            payment_type=body.type,
-            payment_rail=body.rail,
-            remittance_unstructured=(body.remittance.unstructured if body.remittance else None),
-            idempotency_key=idempotency_key,
+            idempotency_key=idempotency_key or body.idempotencyKey,
+            **{**_initiate_kwargs(body), **identity},
         )
         return _bian_response({
             "paymentId": payment_doc["paymentId"],
             "status": payment_doc["status"],
+            "stepUpRequired": payment_doc.get("stepUpRequired", False),
+            "stepUpReason": payment_doc.get("stepUpReason"),
             "payment": _strip(payment_doc),
         })
     except HTTPException:
@@ -97,8 +271,152 @@ async def payment_order_procedure_initiate(
         raise HTTPException(status_code=500, detail="Internal payment processing error.")
 
 
+@app.post("/FinancialGateway/{financialgatewayid}/Inbound/Initiate")
+async def financial_gateway_inbound_initiate(
+    financialgatewayid: str,
+    body: InboundMessageRequest,
+):
+    """BIAN FinancialGateway (SD 30542) — an external pacs.008 arrives (FR-1.IN1..3).
+
+    The inbound entry point, and a real v14 operation (verified against the local BIAN KG:
+    `/FinancialGateway/{financialgatewayid}/Inbound/Initiate`). `financialgatewayid`
+    identifies the channel the message arrived on — which is what fixes the rail as WIRE
+    without any caller choosing it (her L385).
+
+    Runs the whole inbound lifecycle synchronously, like `Initiate` does outbound. A payment
+    held as Unable to Apply returns 200 with its UTA status: the message WAS received and
+    processed correctly, and the hold is a business outcome for an operator, not an error
+    for the sending gateway to retry.
+    """
+    try:
+        payment_doc = payments_service.receive_inbound(body.message)
+        return _bian_response({
+            "paymentId": payment_doc["paymentId"],
+            "status": payment_doc["status"],
+            "direction": payment_doc.get("direction"),
+            "beneficiaryResolution": payment_doc.get("beneficiaryResolution"),
+            "acceptanceDecision": payment_doc.get("acceptanceDecision"),
+            "payment": _strip(payment_doc),
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        # Includes MessageRejected. The raw message is already persisted (FR-1.IN1), so a
+        # 400 here never means the message was lost.
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("FinancialGateway/Inbound/Initiate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/FinancialGateway/{financialgatewayid}/Inbound/Simulate")
+async def financial_gateway_inbound_simulate(
+    financialgatewayid: str,
+    body: InboundSimulateRequest,
+):
+    """Manual trigger for the inbound simulator (demo control).
+
+    Shares `simulate_inbound` with the background worker, so a manual fire and a scheduled
+    one behave identically. The scenario is caller-chosen — including SANCTIONS and
+    DUPLICATE, which the worker's rotation never fires on its own (a standing sanctions
+    refusal in the queue reads as a broken bank, not a demo beat).
+    """
+    try:
+        payment_doc = payments_service.simulate_inbound(body.scenario)
+        return _bian_response({
+            "paymentId": payment_doc["paymentId"],
+            "status": payment_doc["status"],
+            "direction": payment_doc.get("direction"),
+            "scenario": body.scenario.upper(),
+            "beneficiaryResolution": payment_doc.get("beneficiaryResolution"),
+            "acceptanceDecision": payment_doc.get("acceptanceDecision"),
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("FinancialGateway/Inbound/Simulate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/FinancialGateway/{financialgatewayid}/Statement/Generate")
+async def financial_gateway_statement_generate(
+    financialgatewayid: str,
+    body: StatementGenerateRequest,
+):
+    """Manual trigger for the correspondent-statement simulator (demo control).
+
+    Not a BIAN v14 operation — a simulator route, like Inbound/Simulate. Shares
+    `generate_statement` with the background worker. Returns `generated: false` when no
+    settled wire is waiting to be booked.
+    """
+    try:
+        doc = payments_service.generate_statement(
+            account_code=body.accountCode, include_orphan=body.includeOrphan,
+        )
+        if doc is None:
+            return _bian_response({"generated": False, "accountCode": body.accountCode})
+        return _bian_response({
+            "generated": True,
+            "paymentMessageId": doc["paymentMessageId"],
+            "accountCode": doc["statement"]["accountCode"],
+            "sequence": doc["statement"]["sequence"],
+            "window": doc["statement"]["window"],
+            "entryCount": len(doc["entries"]),
+            "orphanCount": sum(1 for e in doc["entries"] if e.get("simulatedPaymentId") is None),
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("FinancialGateway/Statement/Generate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/PaymentOrderProcedure/Resume")
+async def payment_order_procedure_resume(
+    body: PaymentOrderResumeRequest,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Re-enter a payment held at the step-up gate with a now-sufficient (second-factor)
+    assertion.
+
+    Runs the SAME payment from stage 2 — one document, one id through the whole lifecycle
+    (Kiran, 2026-09-09). The assertion is read off the Authorization bearer token, exactly
+    as it is on Initiate, so the channel just completes the step-up and re-submits.
+    """
+    payment = payments_service.payments.find_one({"paymentId": body.paymentId})
+    if payment is None:
+        raise HTTPException(status_code=404, detail=f"Payment {body.paymentId} not found.")
+    try:
+        identity = party_auth.resolve_identity(authorization, payment["customerId"])
+    except party_auth.AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    try:
+        payment_doc = payments_service.resume_payment(
+            body.paymentId,
+            customer_ref=identity["customer_ref"],
+            authentication=identity.get("authentication"),
+        )
+        return _bian_response({
+            "paymentId": payment_doc["paymentId"],
+            "status": payment_doc["status"],
+            "payment": _strip(payment_doc),
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("PaymentOrderProcedure/Resume failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
 @app.post("/PaymentOrderInitiation/BulkInitiate")
-async def payment_order_procedure_bulk_initiate(body: PaymentOrderBulkInitiateRequest):
+async def payment_order_procedure_bulk_initiate(
+    body: PaymentOrderBulkInitiateRequest,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     """Initiate a batch of payment orders sequentially. Each item reuses the single
     initiate path; per-item validation failures are captured in the response so a
     bad item can't abort the batch. Returns settled/failed counts plus per-item results."""
@@ -106,15 +424,13 @@ async def payment_order_procedure_bulk_initiate(body: PaymentOrderBulkInitiateRe
     settled = 0
     for idx, item in enumerate(body.items):
         try:
+            # Per item: a batch may legitimately name several customers, and an operator
+            # token authorises that. A customer token does not, and each item is checked
+            # against it — one bad item is a per-item error, not a failed batch.
+            identity = party_auth.resolve_identity(authorization, item.customerId)
             payment_doc = payments_service.initiate_payment(
-                customer_ref=item.customerId,
-                debtor_account_ref=item.debtor.accountId,
-                creditor_account_ref=item.creditor.accountId,
-                instructed_amount=item.instructedAmount,
-                instructed_currency=item.instructedCurrency,
-                payment_type=item.type,
-                payment_rail=item.rail,
-                remittance_unstructured=(item.remittance.unstructured if item.remittance else None),
+                idempotency_key=item.idempotencyKey,
+                **{**_initiate_kwargs(item), **identity},
             )
             settled += 1
             results.append({
@@ -123,6 +439,8 @@ async def payment_order_procedure_bulk_initiate(body: PaymentOrderBulkInitiateRe
                 "paymentId": payment_doc["paymentId"],
                 "status": payment_doc["status"],
             })
+        except party_auth.AuthenticationError as e:
+            results.append({"index": idx, "ok": False, "error": str(e)})
         except ValueError as e:
             results.append({"index": idx, "ok": False, "error": str(e)})
         except Exception as e:
@@ -155,3 +473,278 @@ async def payment_order_initiation_retrieve(paymentorderinitiationid: str):
     except Exception as e:
         logging.error("PaymentOrderInitiation/Retrieve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+# --- Stage 4 — orchestration & authorization ---------------------------------
+#
+# ⚠️ **These routes do not run stage 4.** Orchestration and authorization execute inside the
+# payment saga (`process/payment_lifecycle.py`), between validation and rail execution — a
+# payment cannot be routed or authorised out of band, and re-running either against a settled
+# payment would produce a second routing decision for a payment already in flight. So the
+# two Retrieve operations read what the saga recorded, and the two Evaluate operations score
+# **without persisting** — which is exactly what BIAN's `Evaluate` behaviour qualifier means,
+# and what makes them useful to an operator asking "what would this score?".
+#
+# URL convention: `PaymentOrchestration` (48782) and `PaymentConfirmation` (47766) carry NO
+# published semantic API in v14, so D8 governs their URLs. `FraudEvaluation` (44625) and
+# `TransactionAuthorization` (43343) DO have published operations, and these match them.
+#
+# ⚠️ Doina's stage table names `PaymentAuthorization`. That SD does not exist in v14 (zero
+# rows across the 341-SD landscape); `TransactionAuthorization` is the real name, and her own
+# demo-display heading at L509 already reads "TRANSACTION AUTHORIZATION" (doc 18 B3, D7).
+
+def _stage_four_artifacts(payment_id: str) -> dict:
+    payment = payments_service.retrieve_payment(payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="paymentId not found.")
+    payment.pop("_txn", None)
+    refs = payment.get("refs") or {}
+    return {
+        "payment": payment,
+        "routingSnapshot": payments_service.routing_snapshots.find_one(
+            {"routingSnapshotId": refs.get("routingSnapshotId")}
+        ) if refs.get("routingSnapshotId") else None,
+        # The commitment was folded into `payments.order` per Doina's Aug 27 target model
+        # (L427-429); no separate collection to look up.
+        "paymentOrder": payment.get("order"),
+    }
+
+
+@app.get("/PaymentOrchestration/{paymentorchestrationid}/Retrieve")
+async def payment_orchestration_retrieve(paymentorchestrationid: str):
+    """The routing decision as taken, plus the payment order it led to.
+
+    `paymentorchestrationid` is the `paymentId` — orchestration has no identity of its own in
+    this model; the routing snapshot and the payment order are its control records.
+    """
+    try:
+        found = _stage_four_artifacts(paymentorchestrationid)
+        payment = found["payment"]
+        return _bian_response({
+            "paymentId": payment["paymentId"],
+            "state": (payment.get("lifecycle") or {}).get("currentState"),
+            "clearingNetwork": (payment.get("wireDetails") or {}).get("network"),
+            "routingSnapshot": _strip(found["routingSnapshot"]) if found["routingSnapshot"] else None,
+            "paymentOrder": _strip(found["paymentOrder"]) if found["paymentOrder"] else None,
+            "checks": [
+                c for c in (payment.get("checks") or [])
+                if str(c.get("stage", "")).startswith("4 orchestrate")
+            ],
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("PaymentOrchestration/Retrieve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+@app.get("/TransactionAuthorization/{transactionauthorizationid}/Retrieve")
+async def transaction_authorization_retrieve(transactionauthorizationid: str):
+    """The authorization decision, the fraud assessment, and the screening result."""
+    try:
+        found = _stage_four_artifacts(transactionauthorizationid)
+        payment = found["payment"]
+        order = found["paymentOrder"] or {}
+        return _bian_response({
+            "paymentId": payment["paymentId"],
+            "state": (payment.get("lifecycle") or {}).get("currentState"),
+            "fraud": payment.get("fraud"),
+            "sanctionsCheck": (payment.get("correspondent") or {}).get("sanctionsCheck"),
+            "authorisedAt": (payment.get("clearing") or {}).get("authorisedAt"),
+            "authorization": order.get("authorization"),
+            "checks": [
+                c for c in (payment.get("checks") or [])
+                if str(c.get("stage", "")).startswith("4 authorize")
+            ],
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("TransactionAuthorization/Retrieve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+@app.post("/TransactionAuthorization/Resolve")
+async def transaction_authorization_resolve(
+    body: TransactionAuthorizationResolveRequest,
+):
+    """An operator's manual-review decision on a payment HELD at MANUAL_FRAUD_REVIEW (FR-4.13).
+
+    `decision: "APPROVED"` commits the authorisation the fraud model withheld and continues
+    the SAME payment through stage 5 to settlement — one document, one id. `"REJECTED"`
+    terminates it to REJECTED (no money has moved). Only a payment at MANUAL_FRAUD_REVIEW can be
+    resolved; anything else is a 400.
+    """
+    if body.decision not in ("APPROVED", "REJECTED"):
+        raise HTTPException(
+            status_code=400,
+            detail="decision must be APPROVED or REJECTED.",
+        )
+    try:
+        payment_doc = payments_service.resolve_review(
+            body.paymentId, decision=body.decision
+        )
+        return _bian_response({
+            "paymentId": payment_doc["paymentId"],
+            "status": payment_doc["status"],
+            "payment": _strip(payment_doc),
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("TransactionAuthorization/Resolve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal authorization error.")
+
+
+# --- Stage 5: PaymentRail (SD 47741) ---------------------------------------
+#
+# ⚠️ These URLs are the **published v14 ones**, taken from the KG rather than invented:
+# `kg PaymentRail -s bian` lists `GET /PaymentRail/{paymentrailid}/Retrieve`
+# (`PaymentRailOperatingSession/Retrieve`) and
+# `GET /PaymentRail/{paymentrailid}/OutboundTransaction/{outboundtransactionid}/Retrieve`.
+# Doc 19 §3 step 7 planned a `/CanonicalJson/Retrieve` of our own; the real API has a proper
+# behaviour qualifier for it, so the plan's version is dropped. Verifying an SD's URLs against
+# the KG before writing them is the standing rule from defect 2026-07-06.
+#
+# `paymentrailid` is the `paymentId`: in this model the rail's operating session is scoped to
+# the payment being executed, and `outboundtransactionid` is the `paymentExecutionId` — one
+# outbound transaction per execution attempt, which is exactly her L854 grain.
+#
+# Both are GET retrieves. The saga owns the write path (stage 4's same deviation): a payment is
+# executed by `POST /PaymentOrderInitiation/Initiate` running the lifecycle, never by calling
+# the rail directly.
+
+@app.get("/PaymentRail/{paymentrailid}/Retrieve")
+async def payment_rail_retrieve(paymentrailid: str):
+    """The rail operating session for one payment: every execution attempt, in order."""
+    try:
+        payment = payments_service.retrieve_payment(paymentrailid)
+        if not payment:
+            raise HTTPException(status_code=404, detail="paymentId not found.")
+        executions = payments_service.list_payment_executions(paymentrailid)
+        return _bian_response({
+            "paymentId": payment["paymentId"],
+            "state": (payment.get("lifecycle") or {}).get("currentState"),
+            "rail": payment.get("rail"),
+            "clearingNetwork": (payment.get("wireDetails") or {}).get("network"),
+            "clearing": payment.get("clearing"),
+            "attempts": [_strip(e) for e in executions],
+            "checks": [
+                c for c in (payment.get("checks") or [])
+                if str(c.get("stage", "")).startswith("5 execute")
+            ],
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("PaymentRail/Retrieve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+@app.get("/PaymentRail/{paymentrailid}/OutboundTransaction/{outboundtransactionid}/Retrieve")
+async def payment_rail_outbound_transaction_retrieve(
+    paymentrailid: str, outboundtransactionid: str
+):
+    """One execution attempt: the pacs.008 as sent, plus the stored message record.
+
+    This is what the demo's ISO VIEW reads — the business half comes from
+    `paymentMessages.payload`, the ISO half from `paymentExecutions.message`.
+    """
+    try:
+        execution = payments_service.get_payment_execution(outboundtransactionid)
+        if not execution or execution.get("paymentId") != paymentrailid:
+            raise HTTPException(status_code=404, detail="paymentExecutionId not found.")
+        message = payments_service.get_payment_message(execution.get("paymentMessageId"))
+        return _bian_response({
+            "paymentId": execution["paymentId"],
+            "paymentExecutionId": execution["paymentExecutionId"],
+            "attempt": execution.get("attempt"),
+            "messageStandard": execution.get("messageStandard"),
+            "messageFormat": execution.get("messageFormat"),
+            "message": execution.get("message"),
+            # Derived, not stored — see `workflow_read_service._with_xml`.
+            "messageXml": (
+                pacs008.to_xml(execution["message"]) if execution.get("message") else None
+            ),
+            "status": execution.get("status"),
+            "railStatus": execution.get("railStatus"),
+            "simulated": execution.get("simulated"),
+            "canonicalPayload": (message or {}).get("payload"),
+            "mappingVersion": (message or {}).get("mappingVersion"),
+            "transformationAudit": (message or {}).get("transformationAudit"),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("PaymentRail/OutboundTransaction/Retrieve failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal retrieve error.")
+
+
+@app.post("/FraudEvaluation/Evaluate")
+async def fraud_evaluation_evaluate(body: FraudEvaluationRequest):
+    """Score a payment's rules WITHOUT persisting anything.
+
+    Reads the stored payment and re-runs the rule set over it, so an operator can see which
+    rules fired and why. Non-mutating on purpose: the score that counts is the one stage 4b
+    wrote at the AUTHORISED transition, and a second, later score would invite the question
+    of which one authorised the payment.
+    """
+    try:
+        result = payments_service.evaluate_fraud(body.paymentId)
+        if result is None:
+            raise HTTPException(status_code=404, detail="paymentId not found.")
+        return _bian_response(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("FraudEvaluation/Evaluate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal evaluation error.")
+
+
+@app.post("/PaymentConfirmation/Execute")
+async def payment_confirmation_execute(body: PaymentConfirmationRequest):
+    """Re-send the originator confirmation for a payment that has an execution path.
+
+    Her L502 places this *"once orchestration has committed to an execution path, independent
+    of the final settlement confirmation much later."* Stage 4b records it automatically; this
+    operation exists for an operator re-sending it, and refuses when there is nothing to
+    confirm — a confirmation for an uncommitted payment would be a false statement to the
+    customer.
+    """
+    try:
+        result = payments_service.confirm_to_originator(body.paymentId)
+        if result is None:
+            raise HTTPException(status_code=404, detail="paymentId not found.")
+        return _bian_response(result)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("PaymentConfirmation/Execute failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal confirmation error.")
+
+
+@app.post("/PaymentSettlement/Initiate")
+async def payment_settlement_initiate(body: PaymentSettlementInitiateRequest):
+    """BIAN `POST /PaymentSettlement/Initiate` (doc 21 B6 — SD 40033, no published API).
+
+    Triggers or re-triggers settlement for one payment at IN_PROGRESS. The `outcome`
+    field drives the simulated settlement response (B4): matched (default), delayed,
+    unmatched, or exception. This is the operator-facing endpoint for demo scenarios
+    that need a specific settlement outcome — the saga's own default is matched.
+    """
+    try:
+        result = payments_service.settle_payment(body.paymentId, body.outcome)
+        if result is None:
+            raise HTTPException(status_code=404, detail="paymentId not found.")
+        return _bian_response(result)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("PaymentSettlement/Initiate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal settlement error.")

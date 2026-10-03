@@ -97,6 +97,15 @@ def test_source_reference_has_source_system_and_type():
         assert e["sourceReference"]["sourceType"] == "LEDGER_EVENT"
 
 
+def test_each_entry_carries_its_leg_event_type():
+    """DR-7.3 / Doina Sep 18 — the label travels with the leg: each subLedgerEntry carries the
+    ledger event's `eventType` (SETTLEMENT vs PAYMENT_PRINCIPAL), so the leg can be identified
+    as settlement-leg vs posting-leg without a lookup."""
+    entries = build_subledger_entries(_event())
+    for e in entries:
+        assert e["eventType"] == "PAYMENT_PRINCIPAL"
+
+
 def test_period_code_derived_from_occurred_at():
     entries = build_subledger_entries(_event())
     for e in entries:

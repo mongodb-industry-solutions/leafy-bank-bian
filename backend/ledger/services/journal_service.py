@@ -16,6 +16,7 @@ from bson import Int64, ObjectId
 from pymongo.errors import DuplicateKeyError
 
 from database.connection import MongoDBConnection
+from services.posting_writeback_service import write_back
 from shared.posting_rules import MAPPING_VERSION
 from shared.refs import PREFIX_JOURNAL_ENTRY, derive_ref
 
@@ -63,7 +64,8 @@ def build_journal_entry(
     Batch path: one line per (controlAccountCode, side) summarizing many txns.
     Realtime path: same shape with count=1 rows — one journal per transaction.
 
-    agg_rows: list of {_id:{controlAccountCode,side}, amount, currency, count, subLedgerIds, eventIds}.
+    agg_rows: list of {_id:{controlAccountCode,side}, amount, currency, count, subLedgerIds,
+                       eventIds, eventTypes}.
     idempotency_key / source_type / source_id default to the batch values.
     Returns (journal_doc, all_subLedgerIds, all_eventIds).
     """
@@ -93,6 +95,9 @@ def build_journal_entry(
             "currency": r.get("currency") or "USD",
             "functionalAmount": amount,
             "lineDescription": f"Sum of {r['count']} {side.lower()} postings to control account {code} — {label}",
+            # The source accounting-leg identities (SETTLEMENT / PAYMENT_PRINCIPAL) feeding this
+            # line. Labels the merged-period line as "settlement" vs "posting" legs (DR-7.3).
+            "sourceEventTypes": r.get("eventTypes") or [],
         })
         sub_ids.extend(r["subLedgerIds"])
         event_ids.extend(r["eventIds"])
@@ -178,6 +183,12 @@ def write_journal(
         "journal %s posted (period=%s, lines=%d)",
         journal_id, journal["periodCode"], len(journal["entries"]),
     )
+
+    # OUTSIDE the transaction, by design (doc 20 B1). The journal is already committed; a
+    # failure here is a stale pointer on `payments`, never a lost or rolled-back journal.
+    # `write_back` swallows its own exceptions for that reason.
+    write_back(journal_id, event_ids, connection, db_name)
+
     return True
 
 
@@ -244,6 +255,11 @@ def run_batch(
             "count": {"$sum": 1},
             "subLedgerIds": {"$push": "$subLedgerId"},
             "eventIds": {"$addToSet": "$sourceReference.sourceId"},
+            # The source accounting-leg identities feeding this line (SETTLEMENT vs
+            # PAYMENT_PRINCIPAL) — carried so a journal line can be labelled "settlement" vs
+            # "posting" (DR-7.3 / Doina Sep 18). A line groups by (period, controlAccount,
+            # side), which in practice is homogeneous per eventType for wires.
+            "eventTypes": {"$addToSet": "$eventType"},
         }},
     ]
     rows = list(sl_coll.aggregate(pipeline))

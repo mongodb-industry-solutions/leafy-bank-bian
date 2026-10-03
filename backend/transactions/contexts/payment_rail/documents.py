@@ -1,0 +1,290 @@
+"""Pure document builders for the execution stage. No I/O, no clock.
+
+Moved verbatim from `services/payments_service.py`. BIAN PaymentRail (SD 47741).
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+
+from bson import ObjectId
+
+from contexts.payment_order_initiation.domain.bank_identity import (
+    OUR_BANK_COUNTRY,
+    OUR_BIC,
+)
+from shared.refs import derive_ref
+
+
+def transaction_doc(
+    *,
+    payment_oid: ObjectId,
+    payment_id: str,
+    debtor_account: dict,
+    debtor_customer: dict,
+    creditor_account: dict,
+    creditor_customer: dict,
+    debtor_after: dict,
+    amount: float,
+    currency: str,
+    payment_rail: str,
+    txn_code: str,
+    is_internal: bool,
+    now: datetime,
+    payment_execution_id: Optional[str] = None,
+    fee_amount: float = 0.0,
+    fee_currency: Optional[str] = None,
+    direction: str = "OUTBOUND",
+) -> dict:
+    """One v4_21 transactions doc: the confirmed payer->payee movement. NOT an accounting record
+    (no legs, no gl) — the ledger service derives DR/CR ledgerEvents from this via CDC. The ledger
+    stamps a `journalEntryId` back-pointer on this doc after the GL batch posts (stage 6), so the
+    original transaction record carries the journal that posted it; that pointer is a convenience
+    reference, not accounting data."""
+    debtor_name = (debtor_customer.get("identification") or {}).get("legalName")
+    # An external creditor has no customer record — the name lives in the payment's payee
+    # snapshot, not in a `customers` lookup. The clearing account (stage 7 B1) is the
+    # `creditor_account` for an external wire, and `creditor_customer` is None.
+    creditor_name = ((creditor_customer or {}).get("identification") or {}).get("legalName")
+    return {
+        "_id": ObjectId(),
+        "txnId": derive_ref("TXN", payment_oid),
+        "paymentId": payment_id,
+        "bankRef": f"LEAFY-BOOK-{payment_id.split('-', 1)[-1]}",
+        "rail": payment_rail,
+        "paymentType": "CREDIT_TRANSFER",
+        # D-IN2 (2026-09-28): `OUTBOUND`/`INBOUND`, matching `payments.direction` and
+        # `paymentMessages.direction`. Was the literal `"OUTGOING"` — one collection using a
+        # third vocabulary for the same axis, which the incoming flow would have made a
+        # standing trap. Readers that compare against the old value are updated in the same
+        # pass: `accounts_service` (`viewerDirection`) and the frontend's `CdtDbtInd`.
+        #
+        # ⚠️ `viewerDirection` is NOT this field. This one is the bank's view of the payment;
+        # `viewerDirection` is re-framed per reader at query time (money in vs money out for
+        # whoever is looking), and both sides of an internal transfer read one stored doc.
+        "direction": direction,
+        "txnCode": txn_code,
+        "amount": amount,
+        "currency": currency,
+        "baseAmount": amount,
+        "valueDate": now.date().isoformat(),
+        "bookingDate": now.date().isoformat(),
+        "description": f"Transfer to {creditor_account.get('accountNumber')}",
+        "balanceAfter": (debtor_after.get("balance", {}) or {}).get("current"),
+        "channel": "API",
+        "payer": {
+            "accountId": debtor_account["accountId"],
+            "accountNo": debtor_account.get("accountNumber"),
+            "name": debtor_name,
+            "bic": OUR_BIC,
+            "country": OUR_BANK_COUNTRY,
+            "isInternal": True,
+        },
+        "payee": {
+            "accountId": creditor_account["accountId"],
+            "accountNo": creditor_account.get("accountNumber"),
+            "name": creditor_name,
+            "bic": OUR_BIC,
+            "country": OUR_BANK_COUNTRY,
+            "isInternal": is_internal,
+        },
+        "transactionCategory": "AccountTransfer",
+        "isReversed": False,
+        "reversalTxnId": None,
+        "transactionDates": [
+            {"date": now, "type": "TransactionInitiatedDate"},
+            {"date": now, "type": "TransactionCompletedDate"},
+        ],
+        "transactionStatus": "Completed",
+        "isCompleted": True,
+        "isNotified": False,
+        "createdAt": now,
+        "createdBy": "SERVICE-PAYMENTS",
+        "sourceSystem": "leafy-bank-payments-service",
+        # Stage 5 (doc 19 B6). Her L868 lists `paymentExecutionId` on this record; the
+        # canonical spec's `transactions` collection does **not** declare it (0 matches
+        # spec-wide), so it is a non-spec field pending ratification — Q37.
+        #
+        # ⚠️ **This is the stage's only boundary change, and it is additive only.** The
+        # ledger's `ingest_worker` reads `amount, paymentId, currency, payer{accountId},
+        # payee{accountId}, paymentType, rail, settledAt, updatedAt, sourceSystem` (doc 12
+        # §1) and ignores everything else. Nothing above is renamed, retyped or removed.
+        #
+        # Null on a book transfer, which writes no execution artifact (doc 19 B4) — so today
+        # it is null in practice and non-null the moment a rail-bound payment can also settle
+        # (stage 7). Written now because the boundary document is the one place where a later
+        # edit is expensive.
+        "paymentExecutionId": payment_execution_id,
+        # Stage 6 (doc 20 B3(a)). The charge stage 3 recorded on `payments.fees[]`, carried
+        # across the boundary so the ledger can post a fee leg without reading `payments`
+        # (B1 forbids the derivation path from reading it).
+        #
+        # ⚠️ **Additive only, exactly like `paymentExecutionId` above.** In particular
+        # `amount` is untouched: `enrichment_plan.py:264` — *"`amount` must not change. It is
+        # the settlement amount and the ledger's primary input"* — so a fee is an ADDITIONAL
+        # balanced leg pair, never a deduction from the principal.
+        #
+        # 0.0 on an internal transfer: stage 3 levies a charge on `rail == "WIRE"` only.
+        "feeAmount": fee_amount,
+        "feeCurrency": fee_currency or currency,
+        # Stage 6 — a back-pointer to the journal entry that posted this transaction,
+        # stamped by the ledger's `posting_writeback_service` after the GL batch runs
+        # (Doina Sep 17: "the journal identifier written back to the original transaction
+        # record once posting completes"). `null` at build; the ledger fills it. NOT an
+        # accounting record (still no legs, no gl) — this is a convenience pointer, the
+        # same one `payments.refs.journalEntryId` carries. Safe from the change-stream
+        # feedback loop because `ingest_worker` watches inserts only.
+        "journalEntryId": None,
+        "postedAt": None,
+    }
+
+
+def compensating_transaction_doc(
+    *,
+    original_txn: dict,
+    debtor_after: dict,
+    now: datetime,
+) -> dict:
+    """The return-of-funds transaction — a NEW ``transactions`` doc that reverses the
+    original (doc 24 B5, DR-5.1: never an overwrite). Inherits the original's production
+    shape (payer/payee/rail/amount/currency) so the ledger's ``ingest_worker`` sees a
+    familiar doc; ``reversalOf`` points at the original ``txnId`` and is what tells
+    ``ingest_worker`` to post swapped legs (Dr clearing / Cr customer deposit). The original
+    doc is byte-unchanged (R7) — the link lives here, on the new doc.
+
+    Built from the original txn (a production writer's output) per the fixture-fidelity
+    rule, rather than re-derived from accounts/customers. ``feeAmount`` is zeroed: a
+    return-of-funds moves the principal back only — the fee leg is not reversed this stage
+    (out of scope), and a non-zero fee would make ``ingest_worker`` post a second fee event.
+    ``paymentExecutionId`` is cleared: the reversal is not a rail execution.
+    """
+    oid = ObjectId()
+    return {
+        **original_txn,
+        "_id": oid,
+        "txnId": derive_ref("TXN", oid),
+        # The reversal marker — ingest_worker keys off this to swap the legs.
+        "reversalOf": original_txn["txnId"],
+        "isReversed": False,
+        "reversalTxnId": None,
+        "description": f"Return of funds — reversal of {original_txn['txnId']}",
+        "balanceAfter": (debtor_after.get("balance", {}) or {}).get("current"),
+        "valueDate": now.date().isoformat(),
+        "bookingDate": now.date().isoformat(),
+        "transactionDates": [
+            {"date": now, "type": "TransactionInitiatedDate"},
+            {"date": now, "type": "TransactionCompletedDate"},
+        ],
+        # Zeroed — see the docstring. The original's fee/execution refs do not carry.
+        "feeAmount": 0.0,
+        "feeCurrency": original_txn.get("currency", "USD"),
+        "paymentExecutionId": None,
+        "createdAt": now,
+        "updatedAt": now,
+        "journalEntryId": None,
+        "postedAt": None,
+    }
+
+
+def build_notifications(
+    *,
+    payment_oid: ObjectId,
+    payment_id: str,
+    txn_id: str,
+    debtor_account: dict,
+    creditor_account: dict,
+    debtor_customer: dict,
+    debtor_after: dict,
+    amount: float,
+    currency: str,
+    payment_rail: str,
+    is_internal: bool,
+    now: datetime,
+    direction: str = "OUTBOUND",
+    originator_name: Optional[str] = None,
+) -> list[dict]:
+    """Build the customer-side notification for a payment.
+
+    Leafy Bank UX: exactly one notification, to the Leafy Bank customer the payment
+    concerns. **Which customer that is depends on the direction** — outbound notifies the
+    debtor (they sent money), inbound notifies the creditor (they received it). On an
+    inbound payment the debtor is another bank's customer and is not ours to notify.
+
+    `txn_id` is the single v4_21 transaction doc's txnId.
+    """
+    debtor_balance = (debtor_after.get("balance", {}) or {}).get("current")
+    creditor_name = creditor_account.get("accountNumber") or creditor_account.get("accountId")
+
+    if direction == "INBOUND":
+        # The RECIPIENT is the notified party, and the balance that matters is theirs.
+        creditor_balance = (creditor_account.get("balance", {}) or {}).get("current")
+        notif_oid = ObjectId()
+        return [
+            {
+                "_id": notif_oid,
+                "notificationId": derive_ref("NOTIF", notif_oid),
+                "eventType": "PaymentReceived",
+                "message": (
+                    f"You received {currency} {amount} from "
+                    f"{originator_name or 'an external sender'}. "
+                    f"New balance: {currency} {creditor_balance}."
+                ),
+                "notificationDate": now,
+                "recipient": {
+                    "customerId": (creditor_account.get("customerSnapshot") or {}).get(
+                        "customerId"
+                    )
+                },
+                "transactionId": txn_id,
+                "paymentId": payment_id,
+                "accounts": {
+                    # The clearing account is the sender of record for an inbound credit.
+                    "senderAccountId": debtor_account.get("accountId"),
+                    "receiverAccountId": creditor_account["accountId"],
+                },
+                "createdAt": now,
+                "createdBy": "SERVICE-PAYMENTS",
+                "sourceSystem": "leafy-bank-payments-service",
+            }
+        ]
+
+    if is_internal:
+        event_type = "InternalTransfer"
+        message = (
+            f"You transferred {currency} {amount} between your accounts. "
+            f"New balance on {debtor_account['accountId']}: {currency} {debtor_balance}."
+        )
+    elif payment_rail == "INTERNAL":
+        event_type = "TransferSent"
+        message = (
+            f"You sent {currency} {amount} to {creditor_name}. "
+            f"New balance: {currency} {debtor_balance}."
+        )
+    else:
+        event_type = "PaymentMade"
+        message = (
+            f"You paid {currency} {amount} to {creditor_name}. "
+            f"New balance: {currency} {debtor_balance}."
+        )
+
+    notif_oid = ObjectId()
+    return [
+        {
+            "_id": notif_oid,
+            "notificationId": derive_ref("NOTIF", notif_oid),
+            "eventType": event_type,
+            "message": message,
+            "notificationDate": now,
+            "recipient": {"customerId": debtor_customer["customerId"]},
+            "transactionId": txn_id,
+            "paymentId": payment_id,
+            "accounts": {
+                "senderAccountId": debtor_account["accountId"],
+                "receiverAccountId": creditor_account["accountId"],
+            },
+            "createdAt": now,
+            "createdBy": "SERVICE-PAYMENTS",
+            "sourceSystem": "leafy-bank-payments-service",
+        }
+    ]

@@ -47,6 +47,11 @@ def build_subledger_entries(event: dict) -> list[dict]:
             "idempotencyKey": f"{event_id}-{side}",
             "controlAccountCode": leg["controlAccountCode"],
             "subLedgerType": sub_ledger_type,
+            # The accounting leg's identity: SETTLEMENT (stage 7, external settlement posting)
+            # vs PAYMENT_PRINCIPAL (stage 6, initial posting) — carried down from the ledger event
+            # so a leg can be labelled "settlement" vs "posting" without looking up the event
+            # (DR-7.3 / Doina Sep 18). Distinct values come from the spec's ledgerEvents.eventType enum.
+            "eventType": event.get("eventType"),
             "entityReference": leg["entityReference"],
             "side": side,
             "amount": leg["amount"],

@@ -194,7 +194,20 @@ make kill-ports        # free the dev ports if they are stuck
 
 ### Seed Data
 
-Sample data ships in `backend/data/sample/`. Import each file into the `leafy_bank_bian` database with [MongoDB Compass](https://www.mongodb.com/products/tools/compass) or `mongoimport`:
+Sample data ships in `backend/data/sample/`. The one-command loader is
+[`backend/data/load_sample_seed.py`](backend/data/load_sample_seed.py) — it upserts all
+four collections by business key (inserts new rows, applies new columns only to the
+demo's own rows, never overwrites runtime balances; dry-run by default):
+
+```bash
+export MONGODB_URI="mongodb+srv://..."          # the service's connection string
+python backend/data/load_sample_seed.py --db fsi-bian-test-db --apply
+```
+
+`--db` is your `LEAFYBANK_DB_NAME`: `fsi-bian-test-db` for local dev, `leafy-bank-bian`
+in the Kanopy `environment/*.yaml`.
+
+(The same files can be imported individually with [MongoDB Compass](https://www.mongodb.com/products/tools/compass) or `mongoimport`, but the script is idempotent and safe to re-run after a stage adds rows.)
 
 
 | File                                | Collection     |
@@ -217,7 +230,26 @@ MONGODB_URI=                       # required — your replica-set / Atlas conne
 LEAFYBANK_DB_NAME=leafy_bank_bian  # optional, this is the default
 
 # transactions only:
-PAYMENT_LIMIT_USD=500              # optional, per-payment ceiling (default 500)
+PAYMENT_LIMIT_USD=1000000          # optional, malformed-input bound (default 1000000).
+                                   # NOT the entitlement limit — stage 2 decides that per
+                                   # customer segment (entitlement_policy.py). Overridable
+                                   # per segment via ENTITLEMENT_PER_PAYMENT_LIMIT_<SEGMENT>,
+                                   # ENTITLEMENT_DUAL_APPROVAL_THRESHOLD_<SEGMENT>,
+                                   # ENTITLEMENT_STEP_UP_THRESHOLD_<SEGMENT>.
+
+# accounts AND transactions — BIAN PartyAuthentication (SD 38917).
+# accounts SIGNS the assessment token, transactions VERIFIES it, so the value must be
+# IDENTICAL in both .env files or every payment is 401.
+PARTY_AUTH_SECRET=                 # optional; both services fall back to a built-in demo
+                                   # secret and log a warning. HS256 is symmetric: anyone
+                                   # holding this can mint a token for any customer.
+PARTY_AUTH_TOKEN_TTL_SECONDS=3600  # optional, accounts only (default 3600)
+
+# transactions only:
+REQUIRE_AUTHENTICATION=false       # optional (default false). false = a request with no
+                                   # token still works off the body's customerId, and
+                                   # stage 2 records the authentication check as SKIP.
+                                   # true = an initiate without a valid token is 401.
 
 # ledger only:
 GL_BATCH_INTERVAL_SECONDS=600      # optional, GL batch cadence (default 600)

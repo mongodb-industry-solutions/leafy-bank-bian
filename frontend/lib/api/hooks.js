@@ -2,7 +2,7 @@
 
 import { useUser } from "@/lib/context/UserContext";
 import { useEffect, useState } from "react";
-import { coreApi, pipelineApi } from "./client";
+import { coreApi, pipelineApi, workflowApi, agentApi } from "./client";
 
 // BIAN backend field names differ from what composed hooks expect.
 // These helpers normalize the wire shape once so composed hooks need no changes.
@@ -30,9 +30,14 @@ function normalizeTransaction(t) {
     BookgDt: t.bookingDate,
     Amt: { value: t.amount },
     // Direction and counterparty are framed relative to the viewer by the backend
-    // (viewerDirection/counterparty). Fall back to the stored sender-oriented fields
-    // for any doc that predates that framing.
-    CdtDbtInd: (t.viewerDirection || t.direction) === "OUTGOING" ? "DBIT" : "CRDT",
+    // (viewerDirection/counterparty). Fall back to the stored sender-oriented field for
+    // any doc that predates that framing — which is why two vocabularies appear here:
+    // `viewerDirection` is per-reader ("OUTGOING"), while the stored
+    // `transactions.direction` is the bank's view ("OUTBOUND", D-IN2). Documents written
+    // before that rename still carry "OUTGOING", so both spellings mean money out.
+    CdtDbtInd: ["OUTGOING", "OUTBOUND"].includes(t.viewerDirection || t.direction)
+      ? "DBIT"
+      : "CRDT",
     Cdtr: { Nm: (t.counterparty || t.payee)?.name },
     AddtlNtryInf: t.description,
     // BIAN txnCode is "PMNT-MCRD-POSD": family is the SECOND segment (MCRD=card),
@@ -616,7 +621,7 @@ export function useLoansPageData() {
  * pipeline is incomplete (journal not yet posted). Stops once the journal entry
  * lands, on a 404, or when disabled.
  */
-export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
+export function usePipelineTrace(paymentId, enabled, intervalMs = 2000, resumeKey = 0) {
   const [trace, setTrace] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -644,8 +649,14 @@ export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
       setTrace(data);
       setLoading(false);
 
-      // Keep polling until the journal entry is posted.
-      if (!data?.journalEntry) {
+      // Keep polling until the principal journal has posted AND every ledger event so far
+      // is POSTED. Stopping at the first journal hid later events (the stage-7 settlement
+      // event, the stage-9 reversal) which post on subsequent GL batches — the accounting
+      // panel would go stale until a manual refresh. A brand-new event can still appear
+      // after all current ones are POSTED; the deep-dive's batch-tick re-arm catches that.
+      const events = data?.allLedgerEvents || [];
+      const allPosted = events.length > 0 && events.every((e) => e?.postingStatus === "POSTED");
+      if (!data?.journalEntry || !allPosted) {
         timer = setTimeout(poll, intervalMs);
       }
     };
@@ -658,7 +669,7 @@ export function usePipelineTrace(paymentId, enabled, intervalMs = 2000) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [paymentId, enabled, intervalMs]);
+  }, [paymentId, enabled, intervalMs, resumeKey]);
 
   return { trace, loading, error };
 }
@@ -698,19 +709,18 @@ export function useBatchTick(enabled = true, intervalMs = 30000) {
 
 /**
  * GL dashboard snapshot — one call feeds all dashboard blocks (KPI tiles,
- * journal-status donut, reconciliation roll-up, top control accounts).
+ * journal-status donut, reconciliation roll-up, control accounts).
  * Monthly granularity. Pass a periodCode for a single month, or omit it to
  * roll up the last `months` months (default 3, including the current month).
  * Amounts are minor units (int) — divide by 100 for display.
  *
  * @param {string|null} periodCode - "YYYY-MM" for a single month, or null for the rolling window
  * @param {boolean} enabled - gate the fetch (e.g. only when the page is shown)
- * @param {number} [topN=5] - number of top control accounts to return
  * @param {number} [months=3] - window size when periodCode is null
  * @param {*} [refreshKey] - change this to force a refetch (e.g. useBatchTick())
  * @returns {{dashboard: object|null, loading: boolean, error: string|null}}
  */
-export function useGlDashboard(periodCode, enabled, topN = 5, months = 3, refreshKey) {
+export function useGlDashboard(periodCode, enabled, months = 3, refreshKey) {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -722,7 +732,7 @@ export function useGlDashboard(periodCode, enabled, topN = 5, months = 3, refres
     setLoading(true);
     setError(null);
     // Only send months for the rolling-window case; a fixed periodCode ignores it.
-    const params = periodCode ? { periodCode, topN } : { topN, months };
+    const params = periodCode ? { periodCode } : { months };
     pipelineApi("gl-dashboard", params).then(({ data, error: err }) => {
       if (cancelled) return;
       if (err) {
@@ -736,7 +746,292 @@ export function useGlDashboard(periodCode, enabled, topN = 5, months = 3, refres
     return () => {
       cancelled = true;
     };
-  }, [periodCode, enabled, topN, months, refreshKey]);
+  }, [periodCode, enabled, months, refreshKey]);
 
   return { dashboard, loading, error };
+}
+
+/**
+ * Back-office payments list. One fetch per filter/refresh change — no polling.
+ *
+ * Deliberately not a poller: the list is a working surface an analyst reads and filters,
+ * and a 2s refresh under a cursor is hostile. The page's single poll (per
+ * GlPipelineView's one-owner rule) belongs to the selected payment's trace, which is the
+ * only thing that actually changes while you watch it.
+ *
+ * `filters` is destructured into the dependency list rather than passed whole, so a caller
+ * re-creating the object literal each render does not refetch forever.
+ */
+export function usePaymentsList({ status, rail, customerId, from, to, limit = 25, skip = 0 } = {}, refreshKey = 0) {
+  const [data, setData] = useState({ items: [], total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    workflowApi("payments", { status, rail, customerId, from, to, limit, skip }).then(
+      ({ data: d, error: err }) => {
+        if (cancelled) return;
+        if (err) setError(err);
+        else {
+          setData({ items: d?.items ?? [], total: d?.total ?? 0 });
+          setError(null);
+        }
+        setLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [status, rail, customerId, from, to, limit, skip, refreshKey]);
+
+  return { ...data, loading, error };
+}
+
+/** Payments that ended in a terminal state — the Operations lens. */
+export function useWorkflowExceptions({ limit = 25, skip = 0 } = {}, refreshKey = 0) {
+  const [data, setData] = useState({ items: [], total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    workflowApi("exceptions", { limit, skip }).then(({ data: d, error: err }) => {
+      if (cancelled) return;
+      if (err) setError(err);
+      else {
+        setData({ items: d?.items ?? [], total: d?.total ?? 0 });
+        setError(null);
+      }
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [limit, skip, refreshKey]);
+
+  return { ...data, loading, error };
+}
+
+/**
+ * Plan A4 — the other half of a LINK_STATEMENT_ENTRY twin. A RECONCILIATION_MISSING pairs
+ * with an open ORPHANED_SETTLEMENT line and vice versa, so the picker lists the open
+ * exceptions of the opposite category. No scoring: ranking candidates is the agent's job
+ * (Part C). The ledger re-checks nostro and currency when the link is posted.
+ */
+const LINK_TWIN = {
+  RECONCILIATION_MISSING: "ORPHANED_SETTLEMENT",
+  ORPHANED_SETTLEMENT: "RECONCILIATION_MISSING",
+};
+
+export function useLinkCandidates(category, refreshKey = 0) {
+  const twin = LINK_TWIN[category];
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    if (!twin) {
+      setItems([]);
+      return undefined;
+    }
+    let cancelled = false;
+    workflowApi("exceptions", { category: twin, limit: 100 }).then(({ data }) => {
+      if (!cancelled) setItems((data?.items ?? []).map((row) => row.exception).filter(Boolean));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [twin, refreshKey]);
+
+  return items;
+}
+
+// Agent investigation polling: 3s × 40 ≈ 2 min, long enough for one LLM investigation.
+const AGENT_POLL_INTERVAL_MS = 3000;
+const AGENT_POLL_MAX_TRIES = 40;
+
+/**
+ * One exception's AI investigation — the `exceptions.agent{}` subdoc the Reconciliation
+ * Agent recorded (rootCause, evidence, confidence, recommendedResolution). Polled
+ * by the inline ExceptionsPanel so the operator sees the agent's findings alongside the
+ * discrepancy, and by the Activity list's exception subline. A 404/empty is the state
+ * where no investigation has run yet (agent unconfigured or not yet triggered).
+ */
+export function useReconciliationAgent(exceptionId, refreshKey = 0) {
+  const [agent, setAgent] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer = null;
+    if (!exceptionId) {
+      setAgent(null);
+      setError(null);
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    // The agent writes `agent{}` seconds after the exception opens, so poll until it lands
+    // (or AGENT_POLL_MAX_TRIES runs out — agent disabled/unconfigured). `loading` stays true
+    // while waiting so the panel can show "Investigating…".
+    let tries = 0;
+    setLoading(true);
+    const load = () => {
+      agentApi(`reconciliation/${exceptionId}`).then(({ data: d, error: err }) => {
+        if (cancelled) return;
+        const found = !err && d?.agent;
+        if (found) {
+          setAgent(d.agent);
+          setError(null);
+          setLoading(false);
+          return;
+        }
+        tries += 1;
+        if (tries >= AGENT_POLL_MAX_TRIES) {
+          if (err) setError(err);
+          setLoading(false);
+          return;
+        }
+        timer = setTimeout(load, AGENT_POLL_INTERVAL_MS);
+      });
+    };
+    load();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [exceptionId, refreshKey]);
+
+  return { agent, loading, error };
+}
+
+/**
+ * One payment's stage-1..4 record: lifecycle.events[], checks[], envelopes.
+ *
+ * The stages-5..8 half of the trace comes from usePipelineTrace against the ledger. The
+ * UI composes them; neither service reads the other's collections (doc 16 B2).
+ *
+ * A 404 is not an error here — it is the empty state before a payment is selected or
+ * after one is deleted, and rendering a red banner for it would be wrong.
+ */
+export function usePaymentWorkflow(paymentId, refreshKey = 0, pollMs = 3000) {
+  const [payment, setPayment] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!paymentId) {
+      setPayment(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    let timer = null;
+
+    // Keep polling while ANY axis is still in flight: the money lifecycle hasn't reached a
+    // terminal state (RECONCILED or a hard reject/cancel/reverse/refund), OR posting is still
+    // PENDING, OR settlement is still PENDING. A payment at SETTLED with postingStatus PENDING
+    // (book transfer, GL batch pending) is NOT done — and a deferred wire at settlementStatus
+    // PENDING must keep polling or the SETTLED flip at ~30s is invisible (the bug that made
+    // stage 7 read "stuck"). Self-terminates once every axis is settled, like usePipelineTrace.
+    const TERMINAL_STATES = [
+      "RECONCILED", "REJECTED", "FAILED", "RETURNED", "CANCELLED", "REVERSED", "REFUNDED",
+    ];
+    const isDone = (p) => {
+      const lc = p?.lifecycle || {};
+      return (
+        TERMINAL_STATES.includes(lc.currentState) &&
+        lc.postingStatus !== "PENDING" &&
+        lc.settlementStatus !== "PENDING"
+      );
+    };
+
+    const poll = async () => {
+      const { data, error: err } = await workflowApi(`payments/${encodeURIComponent(paymentId)}`);
+      if (cancelled) return;
+      if (err) {
+        setPayment(null);
+        setError(err.startsWith("404") ? null : err);
+        setLoading(false);
+        return; // stop polling on error (incl. 404)
+      }
+      setPayment(data);
+      setError(null);
+      setLoading(false);
+      if (pollMs > 0 && !isDone(data)) {
+        timer = setTimeout(poll, pollMs);
+      }
+    };
+
+    setLoading(true);
+    poll();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [paymentId, refreshKey, pollMs]);
+
+  return { payment, loading, error };
+}
+
+
+/**
+ * Customers and their accounts, for the bank-assisted initiation wizard.
+ *
+ * Bank-assisted initiation needs the whole directory, not the logged-in user's own
+ * accounts: the employee picks who they are acting for first. Reuses the two BIAN
+ * directory calls useBeneficiaryAccounts already makes, but keeps the customer→accounts
+ * grouping the wizard's step 1 needs rather than flattening to a picker list.
+ *
+ * GL/NOSTRO/VOSTRO accounts are excluded — internal ledger accounts are not payment
+ * counterparties. Same filter as useBeneficiaryAccounts.
+ */
+export function useBankAssistedParties() {
+  const [customers, setCustomers] = useState([]);
+  const [allAccounts, setAllAccounts] = useState([]);
+  const [accountsByCustomer, setAccountsByCustomer] = useState(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      coreApi("CurrentAccount/Request", { method: "POST", body: {} }),
+      coreApi("PartyReferenceDataDirectory/Request", { method: "POST", body: {} }),
+    ]).then(([accountsRes, customersRes]) => {
+      if (cancelled) return;
+      const custs = customersRes.data?.customers ?? [];
+      const nameById = new Map(custs.map((c) => [c.customerId, c.identification?.legalName]));
+
+      const accts = (accountsRes.data?.accounts ?? [])
+        .filter((a) => a.type === "CURRENT" || a.type === "SAVINGS")
+        .map((a) => ({
+          ...a,
+          customerId: a.customerSnapshot?.customerId ?? null,
+          ownerName: nameById.get(a.customerSnapshot?.customerId) ?? null,
+        }));
+
+      const grouped = new Map();
+      for (const a of accts) {
+        if (!a.customerId) continue;
+        if (!grouped.has(a.customerId)) grouped.set(a.customerId, []);
+        grouped.get(a.customerId).push(a);
+      }
+
+      // Only customers we can actually debit are offerable.
+      setCustomers(custs.filter((c) => grouped.has(c.customerId)));
+      setAllAccounts(accts);
+      setAccountsByCustomer(grouped);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { customers, allAccounts, accountsByCustomer, loading };
 }

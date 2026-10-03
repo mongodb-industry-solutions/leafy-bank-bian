@@ -1,0 +1,112 @@
+{
+  "_provenance": {
+    "source": "repos/payments-processing/fsi-payments-processing/backend/data/fsi-payments-processing.format_specifications.json",
+    "collection": "fsi-payments-processing.format_specifications",
+    "owner": "fsi-payments-processing (Agentic Payments) demo",
+    "copiedAt": "2026-09-02",
+    "why": "A COPY, not a cross-repo read: this repo is checked out on its own, and a test that reaches into a sibling repo fails for reasons unrelated to the code under test. Accepted mirror-drift risk, same discipline as bian-alias-map.json.",
+    "refresh": "Re-copy the pacs.008 entry from the source above if that demo's format spec changes. The rows are also live on ist-shared.leafy_bank_bian in `format_specifications`.",
+    "isNotAnXsd": "This is that demo's 16-field SUBSET, not the ISO 20022 schema. No pacs.008 XSD exists anywhere in this workspace (they are behind ISO registration), so a green test proves cross-demo path agreement, NOT schema conformance."
+  },
+  "_id": "pacs.008",
+  "format_type": "ISO20022",
+  "description": "Customer Credit Transfer (FI to FI)",
+  "supported_fields": {
+    "messageId": {
+      "path": "Document.FIToFICstmrCdtTrf.GrpHdr.MsgId",
+      "description": "Unique message identifier",
+      "required": true,
+      "type": "string"
+    },
+    "creationDateTime": {
+      "path": "Document.FIToFICstmrCdtTrf.GrpHdr.CreDtTm",
+      "description": "Message creation timestamp",
+      "required": true,
+      "type": "string"
+    },
+    "transactionRef": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.PmtId.InstrId",
+      "description": "Instruction identification",
+      "required": true,
+      "type": "string"
+    },
+    "endToEndId": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.PmtId.EndToEndId",
+      "description": "End-to-end identification for tracking",
+      "required": false,
+      "type": "string"
+    },
+    "amount": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.IntrBkSttlmAmt.#text",
+      "description": "Interbank settlement amount",
+      "required": true,
+      "type": "decimal"
+    },
+    "currency": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.IntrBkSttlmAmt.@Ccy",
+      "description": "Currency code (ISO 4217)",
+      "required": true,
+      "type": "string"
+    },
+    "valueDate": {
+      "path": "Document.FIToFICstmrCdtTrf.GrpHdr.IntrBkSttlmDt",
+      "description": "Interbank settlement date",
+      "required": true,
+      "type": "string"
+    },
+    "debtorName": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.Dbtr.Nm",
+      "description": "Debtor/sender name",
+      "required": true,
+      "type": "string"
+    },
+    "debtorAccount": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.DbtrAcct.Id.IBAN",
+      "description": "Debtor account IBAN",
+      "required": false,
+      "type": "string"
+    },
+    "debtorBank": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.DbtrAgt.FinInstnId.BICFI",
+      "description": "Debtor agent BIC",
+      "required": true,
+      "type": "string"
+    },
+    "creditorName": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.Cdtr.Nm",
+      "description": "Creditor/receiver name",
+      "required": true,
+      "type": "string"
+    },
+    "creditorAccount": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.CdtrAcct.Id.IBAN",
+      "description": "Creditor account IBAN",
+      "required": false,
+      "type": "string"
+    },
+    "creditorBank": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.CdtrAgt.FinInstnId.BICFI",
+      "description": "Creditor agent BIC",
+      "required": true,
+      "type": "string"
+    },
+    "remittanceInfo": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.RmtInf.Ustrd",
+      "description": "Unstructured remittance information",
+      "required": false,
+      "type": "string"
+    },
+    "chargeBearer": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.ChrgBr",
+      "description": "Charge bearer code (SHAR/DEBT/CRED)",
+      "required": false,
+      "type": "string"
+    },
+    "intermediaryBank": {
+      "path": "Document.FIToFICstmrCdtTrf.CdtTrfTxInf.IntrmyAgt1.FinInstnId.BICFI",
+      "description": "Intermediary agent BIC",
+      "required": false,
+      "type": "string"
+    }
+  }
+}

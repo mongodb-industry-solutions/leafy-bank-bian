@@ -1,0 +1,153 @@
+{
+  "collection": "exceptions",
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "title": "PaymentException",
+      "description": "Stage 9 — one document per exception occurrence (doc 24 B2): a settlement that came back unmatched/returned/delayed, a reconciliation discrepancy, or a duplicate-content signal. Doina's alignment row 9 (Sep 17 L1577) says 'exceptions created' and names no v14 domain ('modeled as a state/action within the originating domain'); the collection is her TBD #13 (L1414) — 0 matches in the canonical spec (verified by count), so the shape is authored here and ratified via Q60. The reserved nullable agent{} subdoc is where the Reconciliation Agent's output lands (L1319-1323, Q61); category 'UTA' and actions 'REPAIR'/'RETURN' are reserved for the incoming flow (FR-9.IN4 / DR-9.IN1, Q64) and are never written by the outgoing path. No collection validator is applied (Q9, like every prior authored collection).",
+      "required": ["exceptionId", "paymentId", "category", "status", "severity", "source", "sourceSystem", "createdAt", "updatedAt"],
+      "properties": {
+        "_id": {"bsonType": "objectId"},
+        "exceptionId": {
+          "bsonType": "string",
+          "description": "EXC-… natural key, derive_ref('EXC', oid)."
+        },
+        "paymentId": {
+          "bsonType": "string",
+          "description": "Back-reference to payments.paymentId. The Operations queue joins on this; payments carries no refs[] array of exception ids (doc 24 B2). ORPHANED_SETTLEMENT has no payment: it carries `<statement paymentMessageId>#<lineNo>` here so the OPEN-unique index dedupes per line, and subjectRef names the line (plan A3 D1a)."
+        },
+        "category": {
+          "bsonType": "string",
+          "enum": ["SETTLEMENT_UNMATCHED", "SETTLEMENT_RETURNED", "SETTLEMENT_DELAYED", "RECONCILIATION_DISCREPANCY", "RECONCILIATION_MISSING", "ORPHANED_SETTLEMENT", "DUPLICATE_SIGNAL", "UTA"],
+          "description": "UTA reserved for the incoming Repair/Return flow (FR-9.IN4) — never written by the outgoing path. RECONCILIATION_MISSING (an outbound wire with no correspondent statement line by settlementPositions.expectedWindow.by) and ORPHANED_SETTLEMENT (a statement line no payment claims) are written by the ledger (reconciliation plan A3; pending Doina sign-off)."
+        },
+        "status": {
+          "bsonType": "string",
+          "enum": ["OPEN", "RESOLVED", "DISMISSED"],
+          "description": "OPEN until an operator resolves (RESOLVED) or dismisses (DISMISSED) via POST /workflow/exceptions/{id}/resolve. The payment's own terminal state never reopens (doc 24 B4)."
+        },
+        "severity": {
+          "bsonType": "string",
+          "enum": ["ACTION_REQUIRED", "INFORMATIONAL"],
+          "description": "DUPLICATE_SIGNAL is the only INFORMATIONAL category this stage writes."
+        },
+        "source": {
+          "bsonType": "object",
+          "required": ["stage", "service"],
+          "properties": {
+            "stage": {
+              "bsonType": "string",
+              "enum": ["3 validate", "7 settle", "8 reconcile"],
+              "description": "The lifecycle stage whose detection raised the exception."
+            },
+            "service": {
+              "bsonType": "string",
+              "enum": ["transactions-service", "ledger-service"]
+            }
+          }
+        },
+        "detail": {
+          "bsonType": ["object", "null"],
+          "description": "Per-category payload, populated from the stamps the producers already write. Amounts are MAJOR units (float dollars), matching payments.amount / clearing.discrepancyAmount. Nullable members; only the keys relevant to the category are set.",
+          "properties": {
+            "discrepancyAmount": {"bsonType": ["double", "int", "null"], "description": "SETTLEMENT_UNMATCHED / RECONCILIATION_DISCREPANCY: expected minus received, major units."},
+            "discrepancyReason": {"bsonType": ["string", "null"]},
+            "returnCode": {"bsonType": ["string", "null"], "description": "SETTLEMENT_RETURNED: the rail's return code (clearing.returnCode)."},
+            "expectedAmount": {"bsonType": ["double", "int", "null"], "description": "Major units."},
+            "actualAmount": {"bsonType": ["double", "int", "null"], "description": "Major units; 0 when nothing settled back."},
+            "duplicateOf": {"bsonType": ["string", "null"], "description": "DUPLICATE_SIGNAL: the paymentId this one resembles (duplicate_detection WARN detail)."},
+            "expectedWindowBy": {"bsonType": ["date", "null"], "description": "RECONCILIATION_MISSING: when the statement line was due (settlementPositions.expectedWindow.by)."},
+            "settlementPositionId": {"bsonType": ["string", "null"], "description": "RECONCILIATION_MISSING: the position still awaiting its statement line."},
+            "reference": {"bsonType": ["string", "null"], "description": "ORPHANED_SETTLEMENT: the reference as the correspondent booked it."},
+            "currency": {"bsonType": ["string", "null"]},
+            "bookingDate": {"bsonType": ["string", "date", "null"], "description": "ORPHANED_SETTLEMENT: the line's booking date."}
+          }
+        },
+        "subjectRef": {
+          "bsonType": ["object", "null"],
+          "description": "Set when the exception's subject is not a payment. ORPHANED_SETTLEMENT: the camt.053 statement line (paymentMessages, purpose ACCOUNT_STATEMENT) no internal record claims.",
+          "properties": {
+            "kind": {"bsonType": "string", "enum": ["STATEMENT_LINE"]},
+            "paymentMessageId": {"bsonType": "string"},
+            "lineNo": {"bsonType": "int"}
+          }
+        },
+        "resolution": {
+          "bsonType": ["object", "null"],
+          "description": "Null while OPEN. Written by the resolve endpoint (doc 24 B4): the action taken, by whom, when, and the operator's note (the resolution log, R5).",
+          "required": ["action", "by", "at"],
+          "properties": {
+            "action": {
+              "bsonType": "string",
+              "enum": ["RETRY_SETTLEMENT", "RETURN_FUNDS", "ACCEPT_DISCREPANCY", "DISMISS", "REPAIR", "RETURN", "RECHECK", "LINK_STATEMENT_ENTRY", "POST_ADJUSTMENT"],
+              "description": "REPAIR/RETURN reserved for incoming UTA (FR-9.IN2) — never written this stage. RECHECK: the ledger auto-resolves a RECONCILIATION_MISSING once the statement line arrives (plan A3 D2); A4 adds it as an operator action. LINK_STATEMENT_ENTRY (A4): an operator paired a statement line with a payment — closes the MISSING + ORPHANED twin together. POST_ADJUSTMENT (A4): a DEBT wire's correspondent charge booked Dr 5214 / Cr nostro; reconciliation closes the leg once the -ADJ event posts. ESCALATE_TO_CORRESPONDENT is never a resolution — it is recorded in escalation{} and the exception stays OPEN."
+            },
+            "by": {"bsonType": "string", "description": "'payments-operations' for an operator action; a service actor when the system auto-resolves (e.g. RETRY_SETTLEMENT landing MATCHED)."},
+            "at": {"bsonType": "date"},
+            "note": {"bsonType": ["string", "null"]}
+          }
+        },
+        "awaitingCounterparty": {
+          "bsonType": ["bool", "null"],
+          "description": "Plan A4 — true once ESCALATE_TO_CORRESPONDENT sent an investigation request. The exception stays OPEN until RECHECK / LINK / POST_ADJUSTMENT / DISMISS closes it."
+        },
+        "escalation": {
+          "bsonType": ["object", "null"],
+          "description": "Plan A4 — the investigation request sent to the correspondent (paymentMessages, purpose INVESTIGATION_REQUEST, camt.029-style).",
+          "properties": {
+            "paymentMessageId": {"bsonType": "string"},
+            "by": {"bsonType": "string"},
+            "at": {"bsonType": "date"},
+            "note": {"bsonType": ["string", "null"]}
+          }
+        },
+        "agent": {
+          "bsonType": ["object", "null"],
+          "description": "Null until the Reconciliation Agent runs (Sep 17 L1319-1323; shape Q61, extended by recon plan Part C). Written ONLY by backend/payment_agent/reconciliation_agent.py — its own annotation, merged field by field (`set_agent_fields`). Status changes and money movements never land here; they go through the transactions/ledger resolve routes.",
+          "properties": {
+            "cause": {"bsonType": ["string", "null"], "enum": ["TIMING_LAG", "REFERENCE_MISMATCH", "AMOUNT_MISMATCH", "FEE", "ORPHANED", null], "description": "The agent's classification. Selects the permitted actions in payment_agent/policy.py `allowed_actions`."},
+            "investigation": {"bsonType": ["string", "null"]},
+            "rootCause": {"bsonType": ["string", "null"]},
+            "evidence": {"bsonType": "array", "items": {"bsonType": "string"}},
+            "confidence": {
+              "bsonType": ["string", "null"],
+              "enum": ["HIGH", "MEDIUM", "LOW", null],
+              "description": "A free-text LABEL, not a numeric score — an LLM's numeric confidence is not calibrated, so the operator sees the label. Validated against this same set in `reconciliation_agent._CONFIDENCE_VALUES` before the write; an out-of-set value is refused, not coerced."
+            },
+            "recommendedResolution": {"bsonType": ["string", "null"], "description": "The proposed action's name, mirrored from proposedAction.action for older readers."},
+            "candidates": {"bsonType": "array", "description": "Deterministically scored pairings from `find_statement_candidates` (recon_evidence.rank_candidates). LINK may only name one of these by index."},
+            "proposedAction": {"bsonType": ["object", "null"], "description": "{action, params{amount, candidateIndex, target}, rationale, at}. Cleared after verification."},
+            "approval": {"bsonType": ["object", "null"], "description": "{decision: APPROVE|REJECT, by, note, at}."},
+            "actionsTaken": {"bsonType": "array", "description": "[{action, at, result, detail}] — rechecks, executed proposals, refusals."},
+            "verification": {"bsonType": ["object", "null"], "description": "{result: RESOLVED|ESCALATED|STILL_OPEN|REFUSED, at}. RESOLVED only when the exception is no longer OPEN."},
+            "nextCheckAt": {"bsonType": ["date", "null"], "description": "When the recheck sweep next wakes the agent (timing lag). Capped by policy.MAX_RECHECK_MINUTES."},
+            "recheckCount": {"bsonType": ["int", "long", "null"]},
+            "startedAt": {"bsonType": ["string", "null"]},
+            "recordedAt": {
+              "bsonType": ["string", "null"],
+              "description": "ISO 8601 string, not a BSON date — the agent service writes `datetime.now(timezone.utc).isoformat()` so the value survives the JSON hop to the UI unchanged."
+            }
+          }
+        },
+        "historical": {
+          "bsonType": ["object", "null"],
+          "description": "Plan B — set only on backfilled precedent rows (backend/data/generate_statements.py): agent evidence, never live queue work. Their paymentId is a synthetic HIST- id with no payments doc, so the facts the agent groups precedents by live here. Absent on every live exception.",
+          "properties": {
+            "correspondentBic": {"bsonType": "string"},
+            "chargeBearer": {"bsonType": "string", "enum": ["DEBT", "CRED", "SHAR", "SLEV"]},
+            "statementOutcome": {"bsonType": "string", "enum": ["FEE_DEDUCTED", "REFERENCE_ALTERED", "LATE", "AMOUNT_TRANSPOSED", "ORPHAN"]},
+            "paymentMessageId": {"bsonType": "string"},
+            "lineNo": {"bsonType": "int"}
+          }
+        },
+        "createdAt": {"bsonType": "date"},
+        "updatedAt": {"bsonType": "date"},
+        "sourceSystem": {
+          "bsonType": "string",
+          "enum": ["transactions-service", "ledger-service"],
+          "description": "Which service wrote the occurrence. Follows the reconciliationItems convention ('ledger-service'), NOT the payments/transactions docs' 'leafy-bank-payments-service'."
+        }
+      }
+    }
+  }
+}

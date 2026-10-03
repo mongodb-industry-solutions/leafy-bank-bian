@@ -186,3 +186,116 @@ def test_event_id_and_group_id_have_correct_prefixes():
     assert event["eventId"].startswith("LE-")
     assert event["groupId"].startswith("GRP-")
 
+
+
+# --- Stage 9: reversal branch (doc 24 B5) -------------------------------------
+
+def _coa_with_clearing() -> ChartOfAccounts:
+    """A CoA that includes the 1131 wire-clearing leaf alongside customer deposits, so a
+    reversal (Dr 1131 / Cr customer deposit) can be decomposed."""
+    return ChartOfAccounts([
+        {"accountCode": "1100", "accountName": "Clearing & Settlement", "isPostingAccount": False, "status": "ACTIVE", "parentAccountCode": None},
+        {"accountCode": "1130", "accountName": "Clearing & Settlement - Control", "isPostingAccount": False, "status": "ACTIVE", "parentAccountCode": "1100"},
+        {"accountCode": "1131", "accountName": "Wire Clearing", "isPostingAccount": True, "status": "ACTIVE", "parentAccountCode": "1130"},
+        {"accountCode": "2100", "accountName": "Customer Deposits", "isPostingAccount": False, "status": "ACTIVE", "parentAccountCode": None},
+        {"accountCode": "2110", "accountName": "Current Accounts - Control", "isPostingAccount": False, "status": "ACTIVE", "parentAccountCode": "2100"},
+        {"accountCode": "2111", "accountName": "Personal Current Accounts", "isPostingAccount": True, "status": "ACTIVE", "parentAccountCode": "2110"},
+    ])
+
+
+def test_a_reversal_txn_builds_a_balanced_event_with_swapped_legs_and_reversalOf_set():
+    """The compensating transactions doc carries `reversalOf`; ingest_worker detects it and
+    posts the principal's legs SWAPPED: Dr the clearing account (1131) / Cr the customer
+    deposit (2111) — the mirror image, so 1131 nets back to zero. Balanced by construction."""
+    coa = _coa_with_clearing()
+    debtor = _account("ACC-debtor", "2111")
+    clearing = _account("ACC-CLEARING-WIRE", "1131")
+    txn = _txn(
+        reversalOf="TXN-original0001",
+        payer={"accountId": "ACC-debtor"},     # same as original
+        payee={"accountId": "ACC-CLEARING-WIRE"},
+    )
+
+    event = build_ledger_event(txn, payer_account=debtor, payee_account=clearing, coa=coa)
+
+    # reversalOf is stamped from the transactions doc
+    assert event["reversalOf"] == "TXN-original0001"
+    # distinct idempotency key — a reversal is a second event, not a collision with the
+    # principal (paymentId), fee (-FEE) or settlement (-SETTLEMENT)
+    assert event["idempotencyKey"] == "PAY-abc12345-REV"
+    # legs swapped vs the principal: Dr 1131 (clearing) / Cr 2111 (customer deposit)
+    assert event["debitLeg"]["glAccountCode"] == "1131"
+    assert event["creditLeg"]["glAccountCode"] == "2111"
+    assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"]   # balanced
+    # mappingVersion bumped (1.3.0)
+    from shared.posting_rules import MAPPING_VERSION
+    assert event["mappingVersion"] == MAPPING_VERSION == "1.3.0"
+    # eventType stays PAYMENT_PRINCIPAL (no invented enum value)
+    assert event["eventType"] == "PAYMENT_PRINCIPAL"
+    assert "reversal of TXN-original0001" in event["description"]
+
+
+def test_the_reversal_branch_is_the_swap_of_the_principal_and_keys_off_the_txn_doc():
+    """The reversal event's legs are exactly the principal's legs with DR/CR exchanged —
+    proving the branch derives from the `transactions` doc's `reversalOf` + the accounts it
+    names, never from `payments` (the firewall guard's concern)."""
+    coa = _coa_with_clearing()
+    debtor = _account("ACC-debtor", "2111")
+    clearing = _account("ACC-CLEARING-WIRE", "1131")
+    txn = _txn(payer={"accountId": "ACC-debtor"}, payee={"accountId": "ACC-CLEARING-WIRE"})
+
+    principal = build_ledger_event(txn, debtor, clearing, coa)
+    reversal = build_ledger_event({**txn, "reversalOf": "TXN-orig"}, debtor, clearing, coa)
+
+    # principal: Dr debtor (2111) / Cr clearing (1131); reversal: swapped
+    assert principal["debitLeg"]["glAccountCode"] == "2111"
+    assert principal["creditLeg"]["glAccountCode"] == "1131"
+    assert reversal["debitLeg"]["glAccountCode"] == "1131"
+    assert reversal["creditLeg"]["glAccountCode"] == "2111"
+    # same accounts, swapped sides — the reversal keys off `reversalOf` on the txn doc
+    assert reversal["reversalOf"] == "TXN-orig"
+    assert principal["reversalOf"] is None
+
+
+def test_a_reversal_txn_does_not_build_a_fee_event():
+    """The compensating doc zeroes feeAmount (a return moves the principal only), so
+    build_fee_event returns None — no second fee leg is posted on a reversal."""
+    from workers.ingest_worker import build_fee_event
+    coa = _coa_with_clearing()
+    debtor = _account("ACC-debtor", "2111")
+    txn = _txn(reversalOf="TXN-orig", feeAmount=0.0, feeCurrency="USD",
+               payer={"accountId": "ACC-debtor"}, payee={"accountId": "ACC-CLEARING-WIRE"})
+    assert build_fee_event(txn, payer_account=debtor, coa=coa) is None
+
+
+# --- the incoming wire: the mirror posting (FR-6.IN1) -------------------------
+
+def test_an_inbound_transaction_posts_the_mirror_legs_with_no_rule_change():
+    """FR-6.IN1 — `Dr Wire Clearing / Cr Customer Deposit`, the reverse of outbound FR-6.3.
+
+    Her L1036: *"the entire pipeline is reused unchanged ... what's different: only the
+    direction of the debit/credit legs."* This test is the evidence for that claim.
+
+    The ledger has **no inbound branch and needs none**: `_principal_gl_account` reads each
+    account's own `gl.accountCode` rather than consulting a side-to-code table, so an
+    inbound transaction — payer = clearing, payee = customer — decomposes to the mirrored
+    pair by construction. If someone later adds a `direction` check to the posting rules,
+    this test is what says it was unnecessary.
+    """
+    coa = _coa_with_clearing()
+    clearing = _account("ACC-CLEARING-WIRE", "1131")
+    customer = _account("ACC-beneficiary", "2111")
+    txn = _txn(
+        payer={"accountId": "ACC-CLEARING-WIRE"},
+        payee={"accountId": "ACC-beneficiary"},
+        direction="INBOUND",
+    )
+
+    event = build_ledger_event(txn, clearing, customer, coa)
+
+    assert event["debitLeg"]["glAccountCode"] == "1131", "clearing must be DEBITED inbound"
+    assert event["creditLeg"]["glAccountCode"] == "2111", "the customer must be CREDITED"
+    assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"]
+    # The idempotency key is unchanged — `trace_payment` looks the principal event up by
+    # exactly `paymentId`, for inbound as for outbound.
+    assert event["idempotencyKey"] == txn["paymentId"]

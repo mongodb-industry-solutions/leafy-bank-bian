@@ -3,7 +3,8 @@
 These routes are intentionally separate from routers/financial_accounting.py.
 They serve the UI only and are not part of the BIAN FinancialAccounting contract.
 
-All routes:  GET-only, prefix /pipeline
+Routes are GET-only, prefix /pipeline, except the triggers (batch, statement matching,
+per-payment reconcile), which write.
 """
 
 from __future__ import annotations
@@ -15,7 +16,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from routers._util import to_json_response
-from services import pipeline_read_service, reconciliation_service
+from pydantic import BaseModel, ConfigDict
+
+from services import pipeline_read_service, reconciliation_service, resolution_service, statement_matching
 from workers import gl_batch
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
@@ -38,12 +41,11 @@ def gl_dashboard(
     request: Request,
     period_code: Optional[str] = Query(None, alias="periodCode"),
     months: int = Query(3, ge=1, le=24),
-    top_n: int = Query(5, ge=1, le=50, alias="topN"),
 ) -> JSONResponse:
     connection = request.app.state.connection
     db_name = request.app.state.db_name
     data = pipeline_read_service.get_gl_dashboard(
-        connection, db_name, period_code=period_code, months=months, top_n=top_n
+        connection, db_name, period_code=period_code, months=months
     )
     return to_json_response(data)
 
@@ -127,6 +129,81 @@ def trigger_batch(request: Request) -> JSONResponse:
     coa = request.app.state.coa
     result = gl_batch.run_one_cycle(connection, db_name, coa)
     return to_json_response(result)
+
+
+@router.post("/statements/match")
+def match_statements(request: Request) -> JSONResponse:
+    """Reconciliation plan A2 — match correspondent statement lines to settlement positions."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    result = statement_matching.match_statements(connection, db_name)
+    result.update(statement_matching.raise_orphans(connection, db_name))
+    return to_json_response(result)
+
+
+@router.post("/reconcile/{payment_id}")
+def reconcile_payment(
+    payment_id: str,
+    request: Request,
+    match: bool = Query(False, description="Run statement matching + orphan raise first"),
+) -> JSONResponse:
+    """Plan A3 — re-run the three-way reconciliation for one payment (the spec's
+    "re-run reconciliation" step; A4's RECHECK calls it with `match=true`)."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    payment = connection.get_collection(db_name, "payments").find_one(
+        {"paymentId": payment_id}, {"_id": 0, "lifecycle": 1})
+    if payment is None:
+        raise HTTPException(status_code=404, detail=f"payment {payment_id} not found")
+    if not reconciliation_service.is_eligible(payment):
+        lifecycle = payment.get("lifecycle") or {}
+        raise HTTPException(status_code=409, detail=(
+            f"payment {payment_id} is not reconcilable: currentState="
+            f"{lifecycle.get('currentState')}, reconciliationStatus={lifecycle.get('reconciliationStatus')}"))
+    if match:
+        statement_matching.match_statements(connection, db_name)
+        statement_matching.raise_orphans(connection, db_name)
+    check, outcome = reconciliation_service.reconcile_payment(payment_id, connection, db_name)
+    return to_json_response({"outcome": outcome, "check": check.as_dict()})
+
+
+class _ActionBody(BaseModel):
+    note: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+
+class _LinkBody(_ActionBody):
+    # ORPHANED_SETTLEMENT: the payment the line belongs to. MISSING: the line.
+    paymentId: Optional[str] = None
+    paymentMessageId: Optional[str] = None
+    lineNo: Optional[int] = None
+
+
+def _resolution_call(fn, *args, **kwargs) -> JSONResponse:
+    try:
+        return to_json_response(fn(*args, **kwargs))
+    except resolution_service.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except resolution_service.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except resolution_service.NotLegal as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/exceptions/{exception_id}/recheck")
+def recheck_exception(exception_id: str, request: Request,
+                      body: Optional[_ActionBody] = None) -> JSONResponse:
+    """Plan A4 RECHECK — match statements, re-run the tie-out, resolve only on RECONCILED."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    return _resolution_call(resolution_service.recheck, connection, db_name, exception_id,
+                            note=body.note if body else None)
+
+
+@router.post("/exceptions/{exception_id}/link")
+def link_exception(exception_id: str, body: _LinkBody, request: Request) -> JSONResponse:
+    """Plan A4 LINK_STATEMENT_ENTRY — pair a statement line with a payment; closes both twins."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    return _resolution_call(resolution_service.link, connection, db_name, exception_id,
+                            payment_id=body.paymentId, payment_message_id=body.paymentMessageId,
+                            line_no=body.lineNo, note=body.note)
 
 
 @router.get("/reconciliation")
