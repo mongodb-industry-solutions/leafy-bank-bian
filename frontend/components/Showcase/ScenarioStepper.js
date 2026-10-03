@@ -36,7 +36,7 @@ async function runAction(kind, scenarioKey) {
     if (error) throw new Error(error);
     return {
       patch: { init: data, paymentId: data.paymentId },
-      note: `Initiated ${data.paymentId} — ${data.status}.`,
+      note: `Payment ${data.paymentId} initiated (${data.status}).`,
     };
   }
   if (kind === "settle") {
@@ -44,26 +44,29 @@ async function runAction(kind, scenarioKey) {
     if (error) throw new Error(error);
     return {
       patch: { settledAt: Date.now() },
-      note: data?.settled ? `Settled ${data.settled} due wire(s).` : "Already settled — the settlement worker got there first.",
+      note: data?.settled ? "Settlement confirmed." : "Already settled by the settlement worker.",
     };
   }
   if (kind === "batch") {
     const { error } = await pipelineApi("batch/trigger", null, { method: "POST" });
     if (error) throw new Error(error);
-    return { patch: {}, note: "GL batch ran." };
+    return { patch: {}, note: "GL batch complete." };
   }
   if (kind === "statement" || kind === "statementLate") {
     const { data, error } = await generateStatement(scenarioKey === "R5");
     if (error) throw new Error(error);
     if (!data?.generated) {
-      if (scenarioKey === "R5") throw new Error("No statement generated — nothing waiting to be booked.");
-      return { patch: {}, note: "No new statement — the line was already booked (is ENABLE_STATEMENT_SIM off?)." };
+      // R5 needs its injected orphan line, which only a fresh statement carries.
+      if (scenarioKey === "R5") {
+        throw new Error("No statement generated: this wire is already on a statement. Start the scenario again.");
+      }
+      return { patch: {}, note: "This wire is already on a statement." };
     }
-    const orphans = data.orphanCount ? `, ${data.orphanCount} unknown` : "";
+    const orphans = data.orphanCount ? ` (${data.orphanCount} unknown)` : "";
     const patch = kind === "statementLate" ? {} : { statementId: data.paymentMessageId };
     return {
       patch,
-      note: `Statement ${data.paymentMessageId} booked: ${data.entryCount} line(s)${orphans}.`,
+      note: `Statement ${data.paymentMessageId} received: ${data.entryCount} line${data.entryCount === 1 ? "" : "s"}${orphans}.`,
     };
   }
   return { patch: {}, note: null };
@@ -178,14 +181,14 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   function waitingReason() {
     if (step.countdown && countdownLeft > 0) return `Statement window closes in ${countdownLeft}s`;
     if (step.gate === "proposal") {
-      if (!followedId) return "Waiting for the exception to appear…";
+      if (!followedId) return "Waiting for the exception…";
       if (!agent?.proposedAction && !agent?.verification) return "Agent investigating…";
     }
     if (step.gate === "recheck") {
-      if (!followedId) return "Waiting for the MISSING exception to appear…";
+      if (!followedId) return "Waiting for the missing-line exception…";
       if (!agent?.nextCheckAt && !agent?.recheckCount && !agent?.verification) return "Agent investigating…";
     }
-    if (step.gate === "decided" && !ctx.decision) return "Approve or reject the proposal →";
+    if (step.gate === "decided" && !ctx.decision) return "Approve or reject the proposal";
     if (step.final && !outcome) {
       return scenarioKey === "TL" ? "Waiting for the agent's next sweep…" : "Waiting for the outcome…";
     }
@@ -212,14 +215,14 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
 
   function onDecided(decision) {
     setCtx((c) => ({ ...c, decision, followedId }));
-    setNote(decision === "APPROVE" ? "Approved — the agent executed and verified." : "Rejected — the run ended.");
+    setNote(decision === "APPROVE" ? "Approved. The agent executed the action and verified it." : "Rejected. The run has ended.");
     setIndex((i) => Math.min(i + 1, steps.length - 1));
     setTick((t) => t + 1);
   }
 
   return (
     <div className={styles.walkthrough}>
-      <div className={styles.stepperBar}>
+      <div>
         <Stepper currentStep={index} maxDisplayedSteps={steps.length}>
           {steps.map((s) => (
             <Step key={s.key}>{s.label}</Step>
@@ -235,8 +238,8 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
               {index + 1}. {step.label}
             </H2>
           </div>
-          <Body className={styles.narrationBody}>{step.narration}</Body>
-          {note && <Body className={styles.note}>✓ {note}</Body>}
+          <Body>{step.narration}</Body>
+          {note && <Body className={styles.note}>{note}</Body>}
           {error && <Body className={styles.error}>{error}</Body>}
           {step.final && outcome && (
             <div className={styles.outcome}>
@@ -248,12 +251,12 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
         <div className={styles.narrationActions}>
           {!step.final && (
             <Button variant="primary" size="large" disabled={running || !!waiting} onClick={next}>
-              {running ? "Running…" : step.gate ? "Continue →" : "Next →"}
+              {running ? "Running…" : "Next"}
             </Button>
           )}
           {waiting && <Body className={styles.muted}>{waiting}</Body>}
-          <Button size="small" onClick={onReset}>
-            Choose another scenario
+          <Button size="small" variant="default" onClick={onReset}>
+            All scenarios
           </Button>
         </div>
       </Card>

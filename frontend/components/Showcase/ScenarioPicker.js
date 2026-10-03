@@ -2,7 +2,7 @@
 
 import Card from "@leafygreen-ui/card";
 import Badge from "@leafygreen-ui/badge";
-import { H3, Body, Disclaimer } from "@leafygreen-ui/typography";
+import { H3, Body } from "@leafygreen-ui/typography";
 import { SCENARIOS } from "./scenarios";
 import styles from "./Showcase.module.css";
 
@@ -22,14 +22,15 @@ export default function ScenarioPicker({ onPick }) {
             <Badge variant="blue">{s.key}</Badge>
             <H3 className={styles.cardTitle}>{s.title}</H3>
           </div>
-          <Body className={styles.cardStory}>{s.story}</Body>
-          <Body className={styles.cardMeta}>
-            {[s.bank, s.amount].filter(Boolean).join(" · ")}
-          </Body>
-          <Body className={styles.cardExpected}>
-            <strong>Expected:</strong> {s.expected}
-          </Body>
-          <Disclaimer className={styles.muted}>{s.talkingPoint}</Disclaimer>
+          <Body>{s.story}</Body>
+          <Body className={styles.muted}>{s.talkingPoint}</Body>
+          <div className={styles.cardFacts}>
+            <Body className={styles.muted}>{s.bank}</Body>
+            <Body className={styles.muted}>USD {s.amount}</Body>
+            <Body>
+              <strong>Outcome:</strong> {s.expected}
+            </Body>
+          </div>
         </Card>
       ))}
     </div>

@@ -1,27 +1,31 @@
+/* Type comes from LeafyGreen at baseFontSize 16 (ShowcaseView). Do not set font-size here
+   except for code blocks; spacing uses the 4/8/16/24/32 scale. */
+
 .root {
   max-width: 1440px;
   margin: 0 auto;
   padding: 24px 32px 48px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
 }
 
 .header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 16px;
 }
 
 .title {
-  margin: 0;
+  margin: 0 0 4px;
 }
 
 .health {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
+  white-space: nowrap;
 }
 
 .dot {
@@ -39,14 +43,6 @@
   background: #db3030;
 }
 
-.banner {
-  margin: 0;
-}
-
-.lead {
-  font-size: 17px;
-}
-
 .muted {
   color: #5c6c75;
 }
@@ -62,48 +58,42 @@
 /* Picker */
 .pickerGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 24px;
 }
 
 .scenarioCard {
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .cardHead {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .cardTitle {
   margin: 0;
 }
 
-.cardStory {
-  font-size: 16px;
-}
-
-.cardMeta {
-  font-weight: 600;
-}
-
-.cardExpected {
-  font-size: 15px;
+.cardFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid #e8edeb;
 }
 
 /* Walkthrough */
 .walkthrough {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-}
-
-.stepperBar {
-  padding: 8px 0;
+  gap: 24px;
 }
 
 .narration {
@@ -117,23 +107,18 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  max-width: 820px;
 }
 
 .narrationHead {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .narrationTitle {
   margin: 0;
-}
-
-.narrationBody {
-  font-size: 18px;
-  line-height: 28px;
-  max-width: 820px;
 }
 
 .note {
@@ -143,22 +128,34 @@
 .outcome {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .narrationActions {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 12px;
+  gap: 8px;
   min-width: 220px;
 }
 
 .panes {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  gap: 24px;
   align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .panes {
+    grid-template-columns: 1fr;
+  }
+  .narration {
+    flex-direction: column;
+  }
+  .narrationActions {
+    align-items: flex-start;
+  }
 }
 
 .pane {
@@ -167,7 +164,7 @@
   padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -178,15 +175,14 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .factRow {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  font-size: 15px;
+  gap: 8px;
 }
 
 /* Payment tracker */
@@ -194,11 +190,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.amount {
-  font-size: 24px;
-  font-weight: 600;
 }
 
 .stageList {
@@ -211,26 +202,18 @@
 
 .stageRow {
   display: grid;
-  grid-template-columns: 28px 1fr auto auto;
+  grid-template-columns: 24px 1fr auto auto;
   align-items: center;
-  gap: 12px;
+  gap: 8px 16px;
   padding: 8px 0;
   border-bottom: 1px solid #f0f3f2;
-  font-size: 15px;
 }
 
 .stageNum {
   color: #889397;
-  font-weight: 600;
-}
-
-.stageLabel {
-  font-weight: 500;
 }
 
 .stageMeta {
-  color: #5c6c75;
-  font-size: 13px;
   text-align: right;
 }
 
@@ -242,14 +225,9 @@
   border-left: 2px solid #e8edeb;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   max-height: 480px;
   overflow-y: auto;
-}
-
-.tlItem {
-  font-size: 15px;
-  line-height: 22px;
 }
 
 .tlThought {
@@ -261,30 +239,20 @@
   color: #016bf8;
 }
 
-.tlResult {
-  color: #5c6c75;
-}
-
 .tlPre {
   white-space: pre-wrap;
   font-size: 12px;
-  margin: 6px 0 0;
-}
-
-.prose {
-  font-size: 16px;
-  line-height: 24px;
+  margin: 8px 0 0;
 }
 
 .evidence {
   margin: 0;
-  padding-left: 20px;
-  font-size: 14px;
+  padding-left: 24px;
 }
 
 .proposal {
   border-top: 1px solid #e8edeb;
-  padding-top: 14px;
+  padding-top: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -296,5 +264,5 @@
 
 .actions {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }

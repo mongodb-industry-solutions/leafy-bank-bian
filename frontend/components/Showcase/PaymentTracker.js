@@ -23,7 +23,7 @@ export default function PaymentTracker({ init, payment, trace, exceptions }) {
     return (
       <div className={styles.pane}>
         <H3 className={styles.paneTitle}>Payment</H3>
-        <Body className={styles.muted}>Click Next to initiate the scenario's wire.</Body>
+        <Body className={styles.muted}>Click Next to initiate the payment.</Body>
       </div>
     );
   }
@@ -37,22 +37,23 @@ export default function PaymentTracker({ init, payment, trace, exceptions }) {
     <div className={styles.pane}>
       <H3 className={styles.paneTitle}>Payment</H3>
       <div className={styles.paymentHead}>
-        <span className={styles.mono}>{init.paymentId}</span>
-        <span className={styles.amount}>
+        <H3 as="p" className={styles.paneTitle}>
           {payment?.currency || "USD"} {Number(init.amount ?? payment?.amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-        </span>
-        <span className={styles.muted}>
-          bearer {init.chargeBearer || payment?.chargeBearer || "—"} · {init.bic || payment?.creditor?.bic || "—"}
-          {init.bankName ? ` · ${init.bankName}` : ""}
-        </span>
+        </H3>
+        <Body className={styles.mono}>{init.paymentId}</Body>
+        <Body className={styles.muted}>
+          {[init.bankName, init.bic || payment?.creditor?.bic, `charges ${init.chargeBearer || payment?.chargeBearer || "—"}`]
+            .filter(Boolean)
+            .join(" · ")}
+        </Body>
       </div>
 
       <ol className={styles.stageList}>
         {stages.map((s) => (
           <li key={s.key} className={styles.stageRow}>
-            <span className={styles.stageNum}>{s.stage}</span>
-            <span className={styles.stageLabel}>{s.label}</span>
-            <span className={styles.stageMeta}>{s.reached ? s.meta : ""}</span>
+            <Body as="span" className={styles.stageNum}>{s.stage}</Body>
+            <Body as="span">{s.label}</Body>
+            <Body as="span" className={`${styles.stageMeta} ${styles.muted}`}>{s.reached ? s.meta : ""}</Body>
             <Badge variant={badgeVariant(s.status, s.reached)}>
               {s.reached ? s.status || "reached" : "—"}
             </Badge>
@@ -62,7 +63,7 @@ export default function PaymentTracker({ init, payment, trace, exceptions }) {
 
       {railLeg && railLeg.rightAmount != null && (
         <div className={styles.section}>
-          <Overline>Statement line vs posted</Overline>
+          <Overline>Statement vs books</Overline>
           <Body className={styles.factRow}>
             Posted {money(railLeg.leftAmount)} · Statement {money(railLeg.rightAmount)}{" "}
             <Badge variant={badgeVariant(railLeg.result, true)}>{railLeg.result}</Badge>

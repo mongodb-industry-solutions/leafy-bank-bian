@@ -6,11 +6,17 @@
 import { useEffect, useState } from "react";
 import Button from "@leafygreen-ui/button";
 import Badge from "@leafygreen-ui/badge";
-import { H3, Body, Overline, Disclaimer } from "@leafygreen-ui/typography";
+import { H3, Body, Overline } from "@leafygreen-ui/typography";
 import { agentApi } from "@/lib/api/client";
 import styles from "./Showcase.module.css";
 
 const STEPS_POLL_MS = 2000;
+
+const Item = ({ className, children }) => (
+  <li>
+    <Body as="div" className={className}>{children}</Body>
+  </li>
+);
 
 function shortArgs(args) {
   if (!args || typeof args !== "object") return "";
@@ -64,15 +70,15 @@ function useAgentSteps(exceptionId, active) {
 function StepItem({ step }) {
   if (step.kind === "tool_call") {
     return (
-      <li className={`${styles.tlItem} ${styles.tlTool}`}>
+      <Item className={styles.tlTool}>
         → {step.tool}({shortArgs(step.args)})
-      </li>
+      </Item>
     );
   }
   if (step.kind === "tool_result") {
     const text = String(step.text || "");
     return (
-      <li className={`${styles.tlItem} ${styles.tlResult}`}>
+      <Item className={styles.muted}>
         <details>
           <summary>
             {step.tool ? `${step.tool} returned` : "result"} · {text.slice(0, 70)}
@@ -80,13 +86,13 @@ function StepItem({ step }) {
           </summary>
           <pre className={styles.tlPre}>{text}</pre>
         </details>
-      </li>
+      </Item>
     );
   }
   if (step.kind === "note") {
-    return <li className={`${styles.tlItem} ${styles.muted}`}>{step.text}</li>;
+    return <Item className={styles.muted}>{step.text}</Item>;
   }
-  return <li className={`${styles.tlItem} ${styles.tlThought}`}>{step.text}</li>;
+  return <Item className={styles.tlThought}>{step.text}</Item>;
 }
 
 export default function AgentThinking({
@@ -122,7 +128,7 @@ export default function AgentThinking({
     return (
       <div className={styles.pane}>
         <H3 className={styles.paneTitle}>Reconciliation agent</H3>
-        <Body className={styles.muted}>Idle — no exception for this payment yet.</Body>
+        <Body className={styles.muted}>Idle until reconciliation opens an exception.</Body>
       </div>
     );
   }
@@ -138,7 +144,7 @@ export default function AgentThinking({
       </Body>
 
       <ol className={styles.timeline}>
-        {!started && <li className={`${styles.tlItem} ${styles.muted}`}>Waiting for the agent to start…</li>}
+        {!started && <Item className={styles.muted}>Waiting for the agent to start…</Item>}
         {steps.map((s, i) => (
           <StepItem key={i} step={s} />
         ))}
@@ -146,22 +152,22 @@ export default function AgentThinking({
 
       {agent?.cause && (
         <div className={styles.section}>
-          <Overline>Recorded finding</Overline>
+          <Overline>Finding</Overline>
           <div className={styles.factRow}>
             <Badge variant="red">{agent.cause}</Badge>{" "}
-            {agent.confidence && <Badge variant="lightgray">confidence {agent.confidence}</Badge>}{" "}
+            {agent.confidence && <Badge variant="lightgray">Confidence {agent.confidence}</Badge>}{" "}
             {agent.nextCheckAt && !verified && (
-              <Badge variant="blue">recheck scheduled · {agent.recheckCount ?? 0}/3</Badge>
+              <Badge variant="blue">Recheck {agent.recheckCount ?? 0} of 3 scheduled</Badge>
             )}
             {verified && <Badge variant="green">{verified}</Badge>}
           </div>
-          {agent.rootCause && <Body className={styles.prose}>{agent.rootCause}</Body>}
+          {agent.rootCause && <Body>{agent.rootCause}</Body>}
           {(agent.evidence || []).length > 0 && (
-            <ul className={styles.evidence}>
+            <Body as="ul" className={styles.evidence}>
               {agent.evidence.map((ev, i) => (
                 <li key={i}>{typeof ev === "string" ? ev : JSON.stringify(ev)}</li>
               ))}
-            </ul>
+            </Body>
           )}
         </div>
       )}
@@ -169,13 +175,13 @@ export default function AgentThinking({
       {proposal && (
         <div className={styles.proposal}>
           <Overline>Proposed action</Overline>
-          <Body className={styles.prose}>
+          <Body>
             <strong>{proposal.action}</strong>
             {proposal.params?.amount != null ? ` · ${proposal.params.amount}` : ""}
             {proposal.params?.candidateIndex != null ? ` · candidate #${proposal.params.candidateIndex}` : ""}
           </Body>
           {proposal.rationale && <Body className={styles.muted}>{proposal.rationale}</Body>}
-          {policyLine && <Disclaimer className={styles.policy}>Policy: {policyLine}</Disclaimer>}
+          {policyLine && <Body className={styles.policy}>Policy: {policyLine}</Body>}
           {canDecide && agent?.proposedAction && (
             <div className={styles.actions}>
               <Button variant="primary" disabled={!!acting} onClick={() => decide("APPROVE")}>
