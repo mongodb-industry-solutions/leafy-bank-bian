@@ -103,8 +103,9 @@
         },
         "agent": {
           "bsonType": ["object", "null"],
-          "description": "Null until the Reconciliation Agent runs. Its output lands here (Sep 17 L1319-1323): investigation result, likely root cause, supporting evidence, confidence, recommended resolution. Shape ratified via Q61. Written by backend/payment_agent/reconciliation_agent.py `record_investigation` — the ONLY write that agent performs.",
+          "description": "Null until the Reconciliation Agent runs (Sep 17 L1319-1323; shape Q61, extended by recon plan Part C). Written ONLY by backend/payment_agent/reconciliation_agent.py — its own annotation, merged field by field (`set_agent_fields`). Status changes and money movements never land here; they go through the transactions/ledger resolve routes.",
           "properties": {
+            "cause": {"bsonType": ["string", "null"], "enum": ["TIMING_LAG", "REFERENCE_MISMATCH", "AMOUNT_MISMATCH", "FEE", "ORPHANED", null], "description": "The agent's classification. Selects the permitted actions in payment_agent/policy.py `allowed_actions`."},
             "investigation": {"bsonType": ["string", "null"]},
             "rootCause": {"bsonType": ["string", "null"]},
             "evidence": {"bsonType": "array", "items": {"bsonType": "string"}},
@@ -113,7 +114,15 @@
               "enum": ["HIGH", "MEDIUM", "LOW", null],
               "description": "A free-text LABEL, not a numeric score — an LLM's numeric confidence is not calibrated, so the operator sees the label. Validated against this same set in `reconciliation_agent._CONFIDENCE_VALUES` before the write; an out-of-set value is refused, not coerced."
             },
-            "recommendedResolution": {"bsonType": ["string", "null"]},
+            "recommendedResolution": {"bsonType": ["string", "null"], "description": "The proposed action's name, mirrored from proposedAction.action for older readers."},
+            "candidates": {"bsonType": "array", "description": "Deterministically scored pairings from `find_statement_candidates` (recon_evidence.rank_candidates). LINK may only name one of these by index."},
+            "proposedAction": {"bsonType": ["object", "null"], "description": "{action, params{amount, candidateIndex, target}, rationale, at}. Cleared after verification."},
+            "approval": {"bsonType": ["object", "null"], "description": "{decision: APPROVE|REJECT, by, note, at}."},
+            "actionsTaken": {"bsonType": "array", "description": "[{action, at, result, detail}] — rechecks, executed proposals, refusals."},
+            "verification": {"bsonType": ["object", "null"], "description": "{result: RESOLVED|ESCALATED|STILL_OPEN|REFUSED, at}. RESOLVED only when the exception is no longer OPEN."},
+            "nextCheckAt": {"bsonType": ["date", "null"], "description": "When the recheck sweep next wakes the agent (timing lag). Capped by policy.MAX_RECHECK_MINUTES."},
+            "recheckCount": {"bsonType": ["int", "long", "null"]},
+            "startedAt": {"bsonType": ["string", "null"]},
             "recordedAt": {
               "bsonType": ["string", "null"],
               "description": "ISO 8601 string, not a BSON date — the agent service writes `datetime.now(timezone.utc).isoformat()` so the value survives the JSON hop to the UI unchanged."

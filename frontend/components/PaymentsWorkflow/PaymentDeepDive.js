@@ -1894,7 +1894,7 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
                   ))}
                 </ul>
               )}
-              {onAcknowledgeAgent && e.status === "OPEN" && !acknowledged.has(e.exceptionId) && (
+              {onAcknowledgeAgent && e.status === "OPEN" && e.agent.proposedAction && !acknowledged.has(e.exceptionId) && (
                 <div className={styles.resolveActions}>
                   <Button
                     size="xsmall"
@@ -1909,11 +1909,11 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
                       } finally {
                         setApproving(false);
                       }
-                      if (err) setPanelError(`Acknowledge failed — ${err}`);
+                      if (err) setPanelError(`Approve failed — ${err}`);
                       else setAcknowledged((prev) => new Set(prev).add(e.exceptionId));
                     }}
                   >
-                    Acknowledge AI recommendation
+                    Approve AI proposal: {e.agent.proposedAction.action}
                   </Button>
                 </div>
               )}
@@ -2232,16 +2232,16 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
     }
   }
 
-  // HITL approval gate (Phase 2.5): the Reconciliation Agent's graph paused at its `approval`
-  // node via `interrupt()`, surfacing its AI investigation for operator review. This
-  // resumes the graph with the operator's acknowledgement. The operator THEN resolves
-  // through the existing transactions UI above — this gate reviews, it does not execute,
-  // so there is no duplicate resolve path (spec L1323).
+  // HITL approval gate (recon plan Part C): the Reconciliation Agent's graph paused at its
+  // `approval` node with a proposed action. APPROVE resumes it; the agent then executes the
+  // action through the same transactions/ledger route an operator would, and verifies the
+  // result. The full agent card (Approve/Reject, evidence, candidates) is Part D.
   async function acknowledgeAgent(excId) {
     if (!excId) return;
     const { error: err } = await agentApi(
       `reconciliation/${excId}/approve`,
-      { method: "POST" }
+      null,
+      { method: "POST", body: { decision: "APPROVE" } }
     );
     if (err) return err;
     // Bump the dedicated agent-investigation refresh so the callout re-renders resolved,

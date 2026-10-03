@@ -4,10 +4,12 @@ A LangGraph agent over Bedrock (Haiku), in its own service so the money-path tra
 service stays thin. (The stage-3 Enrichment Agent was retired 2026-09-29 — Doina struck it
 from the agentic design; stage 3 is fully deterministic.)
 
-- **Reconciliation Agent** — asynchronous, change-stream-driven. Watches `exceptions` for OPEN
-  `RECONCILIATION_DISCREPANCY` inserts, investigates the mismatch, writes findings onto
-  `exceptions.agent{}`. `POST /reconciliation/investigate` triggers a run manually;
-  `GET /reconciliation/{exception_id}` reads the recorded investigation.
+- **Reconciliation Agent** — asynchronous. Watches `exceptions` for OPEN reconciliation
+  exceptions (DISCREPANCY, MISSING, ORPHANED_SETTLEMENT), classifies the cause, rechecks on its
+  own or proposes an action for approval. `POST /reconciliation/investigate` triggers a run
+  manually; `GET /reconciliation/{exception_id}` reads `exceptions.agent{}`;
+  `POST /reconciliation/{exception_id}/approve` resumes a paused proposal with the operator's
+  decision, executes it through the owning service's route and verifies the outcome.
 
 Uses a `MongoDBSaver` checkpointer (graph state persists in Atlas).
 
@@ -22,12 +24,15 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from typing import Literal
+
 from pydantic import BaseModel
 
 from bedrock import bedrock_model
 from database.connection import MongoDBConnection
-from reconciliation_agent import build_reconciliation_agent, investigate
+from reconciliation_agent import (build_reconciliation_agent, investigate, is_awaiting_approval,
+                                  resume)
 from reconciliation_worker import start_reconciliation_worker
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -54,7 +59,7 @@ async def lifespan(app: FastAPI):
         RECON_AGENT = build_reconciliation_agent(bedrock_model(), db, checkpointer)
         _DB = db
         logger.info("Reconciliation agent built.")
-        start_reconciliation_worker(RECON_AGENT, db, connection)
+        start_reconciliation_worker(RECON_AGENT, db)
     except Exception:  # noqa: BLE001
         logger.warning("Reconciliation agent could not be built at startup — endpoints will 503/degrade.",
                        exc_info=True)
@@ -97,31 +102,34 @@ def get_investigation(exception_id: str) -> dict:
     return {"exceptionId": exception_id, "agent": (doc or {}).get("agent")}
 
 
+class ApproveRequest(BaseModel):
+    # Required, no default: APPROVE executes the proposal (possibly a money-moving
+    # POST_ADJUSTMENT), so a bodyless call — e.g. the pre-Part-C "Acknowledge" button — must
+    # not be read as an approval.
+    decision: Literal["APPROVE", "REJECT"]
+    note: Optional[str] = None
+    by: str = "operator"
+
+
 @app.post("/reconciliation/{exception_id}/approve")
-def approve_investigation(exception_id: str) -> dict:
-    """Resume the paused Reconciliation Agent graph (HITL approval gate).
+def approve_investigation(exception_id: str, req: ApproveRequest) -> dict:
+    """Resume a proposal paused at the approval gate with the operator's decision.
 
-    The agent's `approval` node called `interrupt()` to surface its investigation for
-    operator review. This endpoint resumes the graph with the operator's acknowledgement.
-    The operator then resolves the exception through the existing transactions UI
-    (`POST /workflow/exceptions/{id}/resolve`) — this gate reviews, it does not execute,
-    so there is no duplicate resolve path.
+    APPROVE executes the proposed action through the transactions/ledger route and verifies
+    the result; REJECT records the decision and ends the run. Returns `exceptions.agent{}`
+    as it stands afterwards. 409 when no proposal is awaiting approval on this exception.
     """
-    if RECON_AGENT is None:
-        return {"exceptionId": exception_id, "approved": False, "error": "agent not ready"}
-    from langgraph.types import Command
-
+    if RECON_AGENT is None or _DB is None:
+        raise HTTPException(status_code=503, detail="Reconciliation agent not ready.")
+    if not is_awaiting_approval(RECON_AGENT, exception_id):
+        raise HTTPException(status_code=409,
+                            detail=f"No agent proposal is awaiting approval on {exception_id}.")
     try:
-        RECON_AGENT.invoke(
-            Command(resume=True),
-            config={"configurable": {"thread_id": exception_id}},
-        )
-        return {"exceptionId": exception_id, "approved": True}
-    except Exception:  # noqa: BLE001 — never 500 on a resume failure.
-        logger.warning(
-            "approve resume failed for %s — graph left paused.", exception_id, exc_info=True,
-        )
-        return {"exceptionId": exception_id, "approved": False, "error": "resume failed"}
+        agent_block = resume(RECON_AGENT, _DB, exception_id, req.decision, req.note, req.by)
+    except Exception:  # noqa: BLE001
+        logger.warning("approve resume failed for %s", exception_id, exc_info=True)
+        raise HTTPException(status_code=502, detail="Resuming the agent failed; the proposal is still paused.")
+    return {"exceptionId": exception_id, "decision": req.decision, "agent": agent_block}
 
 
 if __name__ == "__main__":

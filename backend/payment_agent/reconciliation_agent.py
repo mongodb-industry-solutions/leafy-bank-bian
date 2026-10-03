@@ -1,282 +1,529 @@
-"""The Phase-1 Reconciliation Agent — invoked async on a reconciliation mismatch.
+"""The Reconciliation Agent — investigates an OPEN reconciliation exception, classifies its
+cause, and proposes the one action the code permits for that cause.
 
-Triggered by the ledger service's deterministic reconciliation engine when it stamps a payment
-DISCREPANT and opens a `RECONCILIATION_DISCREPANCY` exception (reconciliation_service.
-_stamp_discrepant). The deterministic engine decides whether the records mathematically
-reconcile; this agent never makes that decision. Its job is the *reasoning after a mismatch
-is detected* (spec L1274): gather the full payment lifecycle, identify the likely root cause
-of the discrepancy (fee, settlement adjustment, delayed record, posting error), and record its
-findings + a recommended resolution onto the exception's reserved `exceptions.agent{}` subdoc.
+Woken by `reconciliation_worker` for the three categories the ledger raises at stage 8:
+`RECONCILIATION_DISCREPANCY`, `RECONCILIATION_MISSING` and `ORPHANED_SETTLEMENT` (parent plan
+§Part C). The deterministic engine decides whether records reconcile; the agent never does.
+Its job is the reasoning after a break: gather the trace, the correspondent's habits, past
+resolutions and candidate statement lines, then name a cause and an action.
 
-## Human-in-the-loop
+## What the agent may do
 
-The agent does NOT resolve the exception and does NOT modify ledger or journal records (spec
-L1286). It records a `recommendedResolution`; a Payments Operations user reviews that
-recommendation and approves the actual resolution through the existing transactions UI
-(`POST /workflow/exceptions/{id}/resolve`) — the spec's own HITL model (L1323): *"the
-Payments Operations user can review the recommendation and approve actions that require human
-authorization."* An in-graph `interrupt()`-based approval gate is a future enhancement (the
-plan's deferred supervisor / Payments Operations Agent), not Phase 1.
+- **On its own:** `recheck_reconciliation` (resolves only if the engine then says RECONCILED)
+  and `schedule_recheck` (defers its own next look, capped). Timing lag is its to wait out.
+- **With approval:** everything else. `propose_action` records a proposal; the graph pauses
+  at `approval` (`interrupt()`); `POST /reconciliation/{id}/approve` resumes it with the
+  operator's decision. On APPROVE, `execute` calls the owning service's route and `verify`
+  closes the case only when the exception is no longer OPEN (or, for an escalation, is
+  awaiting the correspondent). A failed fix gets one re-investigation, then an escalation.
+
+Which actions are permitted is decided in code (`policy.py`), checked at propose AND again at
+execute, with the services' own guards behind both. The prompt describes the rules; it does
+not enforce them (defect 2026-09-28 A2).
 
 ## Write surface
 
-The one write the agent performs is `$set: {"agent": {...}}` on the exception document —
-exactly the landing zone the schema reserves (Q61). It never touches the exception's `status`,
-`category`, `resolution`, or any ledger/journal record. `MongoDBSaver` persists the agent's
-investigation state in Atlas keyed by `thread_id = exceptionId`.
+The agent writes only its own annotation, `exceptions.agent{}`, directly. Every change to an
+exception's status, and every money movement, goes through the transactions/ledger routes
+(`clients.py`). Tools read the exception and payment ids from graph state, never from the
+model's arguments, so a run can act only on the exception it was woken for. `MongoDBSaver`
+persists graph state keyed by `thread_id = exceptionId`.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, TypedDict
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import InjectedState, ToolNode
 from langgraph.types import interrupt
 from typing_extensions import Annotated
 
+import clients
+import policy
+import recon_evidence
 # `payment_trace`, not `trace` — the stdlib owns that name, and this service directory leads
-# sys.path, so a module called `trace.py` here shadows it for the whole process (including
-# any dependency that imports the stdlib one).
+# sys.path, so a module called `trace.py` here shadows it for the whole process.
 import payment_trace as trace_mod
 
 logger = logging.getLogger(__name__)
 
-# Confidence is a free-text label the agent picks from {HIGH, MEDIUM, LOW} — not a numeric
-# score, because an LLM's numeric confidence is not calibrated. The operator sees the label.
+# A label, not a numeric score — an LLM's numeric confidence is not calibrated.
 _CONFIDENCE_VALUES = {"HIGH", "MEDIUM", "LOW"}
 
-RECONCILIATION_SYSTEM_PROMPT = """\
-You are the Reconciliation Agent for Leafy Bank, invoked at Stage 8 after the deterministic \
-reconciliation engine flagged a mismatch on a payment.
+APPROVE = "APPROVE"
+REJECT = "REJECT"
 
-The deterministic engine has ALREADY decided the records do not reconcile. Do not re-check \
-whether they reconcile — assume the mismatch is real. Your job is to investigate WHY they \
-disagree and recommend a resolution.
+VERIFIED_RESOLVED = "RESOLVED"
+VERIFIED_ESCALATED = "ESCALATED"
+VERIFIED_OPEN = "STILL_OPEN"
+VERIFIED_REFUSED = "REFUSED"
+
+RECONCILIATION_SYSTEM_PROMPT = """\
+You are the Reconciliation Agent for Leafy Bank. The deterministic reconciliation engine \
+opened an exception at stage 8; it has already decided the records do not (yet) reconcile. \
+Find out WHY, and resolve it with the one action the bank's policy permits.
+
+Exception categories:
+- RECONCILIATION_DISCREPANCY: a statement line was matched but an amount differs.
+- RECONCILIATION_MISSING: a wire settled but no correspondent statement line arrived in time.
+- ORPHANED_SETTLEMENT: a statement line arrived that matches no payment.
 
 Steps:
-1. Call `payment_trace_lookup` with the paymentId to gather every record across the lifecycle \
-(payment, executions, transactions, ledger events, settlement positions, reconciliation items, \
-the exception itself).
-2. Call `reconciliation_analysis` with the paymentId to get the per-leg expected-vs-actual \
-breakdown and the discrepancy amount.
-3. Reason across the trace to identify the LIKELY root cause: a fee or charge deducted by a \
-correspondent, a settlement adjustment / FX residual, a delayed record not yet posted, an \
-incorrect posting, or another known condition. Cite the specific records and amounts that \
-support your conclusion.
-4. Call `record_investigation` with your findings — root cause, the evidence (list of \
-specific record/amount citations), a confidence label (HIGH/MEDIUM/LOW), and a recommended \
-resolution action.
+1. `payment_trace_lookup` and `reconciliation_analysis` (skip both for an ORPHANED line — it \
+has no payment; the exception detail describes the line).
+2. `get_correspondent_profile` (charge policy, reference format, usual booking lag) and \
+`get_resolution_precedents` (how similar cases were resolved before).
+3. For MISSING or ORPHANED: `find_statement_candidates`.
+4. `record_investigation` with a cause: TIMING_LAG, REFERENCE_MISMATCH, AMOUNT_MISMATCH, FEE \
+or ORPHANED. Cite specific records and amounts as evidence. The reply lists the actions \
+permitted for that cause.
+5. Act:
+   - TIMING_LAG: `recheck_reconciliation`; if still open, `schedule_recheck` within the \
+correspondent's usual lag. Do not escalate a timing lag until rechecks are exhausted.
+   - Otherwise: `propose_action` with one permitted action. An operator approves it.
 
 Rules:
-- You investigate and recommend ONLY. Do NOT resolve the exception, do NOT modify ledger or \
-journal records, do NOT move money. The operator approves any resolution.
-- `record_investigation` is your only write. Use it exactly once, after your analysis.
-- If the trace is incomplete (records missing), say so in the investigation and recommend \
-manual review with confidence LOW.
-
-Respond with a short summary of your investigation once `record_investigation` has been called.
+- Only permitted actions are accepted; a refused proposal explains why — fix it or pick \
+another permitted action. Never invent a statement line: LINK uses a candidate index.
+- For FEE, the payment's chargeBearer decides the books, not you.
+- An adjustment amount must equal the discrepancy exactly.
+- End with a two-sentence summary for the operator.
 """
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _exception(db: Any, exception_id: str) -> dict:
+    return db["exceptions"].find_one({"exceptionId": exception_id}, {"_id": 0}) or {}
+
+
+def _is_statement_line(exc: dict) -> bool:
+    return (exc.get("subjectRef") or {}).get("kind") == "STATEMENT_LINE"
+
+
+def _charge_bearer(db: Any, exc: dict) -> Optional[str]:
+    if _is_statement_line(exc):
+        return None
+    payment = db["payments"].find_one({"paymentId": exc.get("paymentId")},
+                                      {"_id": 0, "chargeBearer": 1}) or {}
+    return payment.get("chargeBearer")
+
+
+def set_agent_fields(db: Any, exception_id: str, fields: dict, push: Optional[dict] = None) -> None:
+    """Merge `fields` into `exceptions.agent{}`. A dotted `$set` fails on a null parent, so
+    an exception the agent has not touched yet gets an empty `agent{}` first."""
+    coll = db["exceptions"]
+    coll.update_one({"exceptionId": exception_id, "agent": None}, {"$set": {"agent": {}}})
+    update: dict = {"$set": {f"agent.{k}": v for k, v in fields.items()}}
+    if push:
+        update["$push"] = {f"agent.{k}": v for k, v in push.items()}
+    coll.update_one({"exceptionId": exception_id}, update)
+
+
+def _action_record(action: str, result: str, detail: Any = None) -> dict:
+    return {"action": action, "at": _now().isoformat(), "result": result, "detail": detail}
+
+
+def _ids(state: dict) -> tuple[str, str]:
+    return state["exception_id"], state["payment_id"]
+
+
 def _build_tools(db: Any):
-    """Build the agent's tools, closing over the DB handle."""
+    """The agent's tools. Ids come from graph state (`InjectedState`), not from the model."""
 
     @tool
-    def payment_trace_lookup(payment_id: str) -> str:
-        """Gather every record sharing this paymentId across the lifecycle collections: \
-payment, paymentExecutions, transactions, ledgerEvents, settlementPositions, \
-reconciliationItems, and the exception. Returns the trace as JSON."""
-        return json.dumps(
-            trace_mod.gather_trace(db, payment_id), default=str
-        )
+    def payment_trace_lookup(state: Annotated[dict, InjectedState]) -> str:
+        """Every record of this payment across the lifecycle: payment, executions, \
+transactions, ledger events, settlement positions, reconciliation items, the exception."""
+        exception_id, payment_id = _ids(state)
+        return json.dumps(trace_mod.gather_trace(db, payment_id, exception_id), default=str)
 
     @tool
-    def reconciliation_analysis(payment_id: str) -> str:
-        """Return the per-leg reconciliation breakdown for a payment: each leg's expected vs \
-actual amount and the discrepancy. Draws from reconciliationItems and settlementPositions."""
-        items = trace_mod.gather_trace(db, payment_id)
-        legs = []
-        # `reconciliationItems` is one doc whose `legs[]` array carries `leftAmount`/
-        # `rightAmount`/`result`/`detail` PER LEG. Iterate the legs, not read off the item.
-        for item in items.get("reconciliationItems") or []:
-            for leg in item.get("legs") or []:
-                legs.append({
-                    "leg": leg.get("leg"),
-                    "leftAmount": leg.get("leftAmount"),
-                    "rightAmount": leg.get("rightAmount"),
-                    "result": leg.get("result"),
-                    "detail": leg.get("detail"),
-                })
-        positions = items.get("settlementPositions") or []
-        return json.dumps({
-            "reconciliationLegs": legs,
-            "settlementPositions": [
-                {"expected": p.get("expectedAmount", p.get("grossAmount")),
-                 "actual": p.get("actualAmount"),
-                 "outcome": p.get("outcome")}
-                for p in positions
-            ],
-            "discrepancyHint": _discrepancy_hint(legs, positions),
-        }, default=str)
+    def reconciliation_analysis(state: Annotated[dict, InjectedState]) -> str:
+        """Per-leg reconciliation breakdown in major units: each leg's result, left and right \
+amounts, the delta (left - right) and the reason a leg is pending."""
+        exception_id, payment_id = _ids(state)
+        trace = trace_mod.gather_trace(db, payment_id, exception_id)
+        legs = [{
+            "leg": leg.get("leg"),
+            "result": leg.get("result"),
+            "left": _major(leg.get("leftAmount")),
+            "right": _major(leg.get("rightAmount")),
+            "delta": _major(_delta(leg.get("leftAmount"), leg.get("rightAmount"))),
+            "reason": leg.get("reason"),
+            "detail": leg.get("detail"),
+        } for item in trace.get("reconciliationItems") or [] for leg in item.get("legs") or []]
+        exc = trace.get("exception") or {}
+        return json.dumps({"legs": legs, "exceptionDetail": exc.get("detail"),
+                           "chargeBearer": (trace.get("payment") or {}).get("chargeBearer")},
+                          default=str)
+
+    @tool
+    def find_statement_candidates(state: Annotated[dict, InjectedState]) -> str:
+        """For a MISSING payment: unmatched statement lines that could be it. For an ORPHANED \
+line: unreconciled payments it could belong to. Scored deterministically by reference \
+(exact / re-keyed prefix / shared token) and amount. Use the returned index with LINK."""
+        exception_id, _ = _ids(state)
+        candidates = recon_evidence.find_candidates(db, _exception(db, exception_id))
+        set_agent_fields(db, exception_id, {"candidates": candidates})
+        return json.dumps([{"index": i, **c} for i, c in enumerate(candidates)] or
+                          "No candidates found.", default=str)
+
+    @tool
+    def get_correspondent_profile(state: Annotated[dict, InjectedState]) -> str:
+        """The correspondent bank's charge policy, reference format and usual booking lag \
+(p50/p90 seconds from submission to statement booking)."""
+        exception_id, payment_id = _ids(state)
+        bic = _correspondent_bic(db, _exception(db, exception_id), payment_id)
+        if not bic:
+            return "No correspondent on this payment (a domestic or internal settlement)."
+        return json.dumps(recon_evidence.correspondent_profile(db, bic), default=str)
+
+    @tool
+    def get_resolution_precedents(state: Annotated[dict, InjectedState]) -> str:
+        """The last resolved exceptions of this category with this correspondent, and the \
+action each was closed with."""
+        exception_id, payment_id = _ids(state)
+        exc = _exception(db, exception_id)
+        bic = _correspondent_bic(db, exc, payment_id)
+        if not bic:
+            return "No correspondent to look up precedents for."
+        return json.dumps(recon_evidence.resolution_precedents(db, bic, exc.get("category")),
+                          default=str)
 
     @tool
     def record_investigation(
-        exception_id: str,
+        state: Annotated[dict, InjectedState],
+        cause: str,
         root_cause: str,
         evidence: list[str],
         confidence: str,
-        recommended_resolution: str,
         investigation: str = "",
     ) -> str:
-        """Record the investigation findings onto the exception's reserved `agent{}` subdoc. \
-This is the only write you may perform. `confidence` must be one of HIGH, MEDIUM, LOW. \
-`evidence` is a list of short strings each citing a specific record and amount."""
+        """Record your findings. `cause` is one of TIMING_LAG, REFERENCE_MISMATCH, \
+AMOUNT_MISMATCH, FEE, ORPHANED. `confidence` is HIGH, MEDIUM or LOW. `evidence` is a list of \
+short strings each citing a specific record and amount. Returns the permitted actions."""
+        exception_id, _ = _ids(state)
         confidence_up = (confidence or "").upper()
+        cause_up = (cause or "").upper()
         if confidence_up not in _CONFIDENCE_VALUES:
             return f"confidence must be one of {sorted(_CONFIDENCE_VALUES)}; got {confidence!r}. Not recorded."
-        coll = db["exceptions"]
-        try:
-            result = coll.update_one(
-                {"exceptionId": exception_id},
-                {"$set": {
-                    "agent": {
-                        "investigation": investigation,
-                        "rootCause": root_cause,
-                        "evidence": evidence or [],
-                        "confidence": confidence_up,
-                        "recommendedResolution": recommended_resolution,
-                        "recordedAt": datetime.now(timezone.utc).isoformat(),
-                    }
-                }},
-            )
-        except Exception:  # noqa: BLE001 — never propagate; the operator still has the raw exception.
-            logger.warning(
-                "record_investigation failed on %s — the exception is unchanged.",
-                exception_id, exc_info=True,
-            )
-            return f"Failed to record investigation on {exception_id}."
-        if result.matched_count == 0:
+        if cause_up not in policy.CAUSES:
+            return f"cause must be one of {list(policy.CAUSES)}; got {cause!r}. Not recorded."
+        exc = _exception(db, exception_id)
+        if not exc:
             return f"No exception found with exceptionId {exception_id}."
-        return f"Recorded investigation on {exception_id} (rootCause={root_cause}, confidence={confidence_up})."
+        allowed = sorted(policy.allowed_actions(exc.get("category"), cause_up, _charge_bearer(db, exc)))
+        set_agent_fields(db, exception_id, {
+            "cause": cause_up,
+            "investigation": investigation,
+            "rootCause": root_cause,
+            "evidence": evidence or [],
+            "confidence": confidence_up,
+            "recommendedResolution": None,
+            "recordedAt": _now().isoformat(),
+        })
+        if not allowed:
+            return (f"Recorded (cause={cause_up}). No action is permitted for a "
+                    f"{exc.get('category')} with that cause — re-check the cause.")
+        return f"Recorded (cause={cause_up}, confidence={confidence_up}). Permitted actions: {allowed}."
 
-    return [payment_trace_lookup, reconciliation_analysis, record_investigation]
+    @tool
+    def recheck_reconciliation(state: Annotated[dict, InjectedState]) -> str:
+        """Re-match statements and re-run this payment's tie-out. Resolves the exception only \
+if the engine now says RECONCILED. You may call this without approval."""
+        exception_id, _ = _ids(state)
+        refusal = _refusal(db, exception_id, policy.RECHECK, {})
+        if refusal:
+            return refusal
+        agent_doc = _exception(db, exception_id).get("agent") or {}
+        count = int(agent_doc.get("recheckCount") or 0)
+        if count >= policy.MAX_RECHECKS:
+            return (f"Rechecks exhausted ({count}). Propose ESCALATE_TO_CORRESPONDENT.")
+        try:
+            out = clients.recheck(exception_id, note="Reconciliation Agent re-check")
+        except clients.ServiceRefused as e:
+            set_agent_fields(db, exception_id, {}, push={
+                "actionsTaken": _action_record(policy.RECHECK, VERIFIED_REFUSED, e.detail)})
+            return f"Recheck refused: {e.detail}"
+        status = (out.get("exception") or {}).get("status")
+        set_agent_fields(db, exception_id, {"recheckCount": count + 1}, push={
+            "actionsTaken": _action_record(policy.RECHECK, out.get("outcome") or "UNKNOWN")})
+        if status != "OPEN":
+            set_agent_fields(db, exception_id, {"nextCheckAt": None, "verification": {
+                "result": VERIFIED_RESOLVED, "at": _now().isoformat()}})
+            return f"Recheck reconciled the payment (outcome {out.get('outcome')}). Case closed."
+        return f"Still {out.get('outcome')} after recheck {count + 1}/{policy.MAX_RECHECKS}."
+
+    @tool
+    def schedule_recheck(state: Annotated[dict, InjectedState], minutes: int) -> str:
+        """Look at this exception again in `minutes` (capped). Use after a recheck finds the \
+statement line still missing and the correspondent's lag says it may yet arrive."""
+        exception_id, _ = _ids(state)
+        refusal = _refusal(db, exception_id, policy.RECHECK, {})
+        if refusal:
+            return refusal
+        m = policy.capped_recheck_minutes(minutes)
+        at = _now() + timedelta(minutes=m)
+        set_agent_fields(db, exception_id, {"nextCheckAt": at})
+        return f"Next check scheduled in {m} minute(s), at {at.isoformat()}."
+
+    @tool
+    def propose_action(
+        state: Annotated[dict, InjectedState],
+        action: str,
+        rationale: str,
+        amount: Optional[float] = None,
+        candidate_index: Optional[int] = None,
+    ) -> str:
+        """Propose one resolution for operator approval: LINK_STATEMENT_ENTRY (needs \
+candidate_index), POST_ADJUSTMENT (needs amount = the discrepancy), ACCEPT_DISCREPANCY, \
+ESCALATE_TO_CORRESPONDENT, DISMISS or RECHECK. Refused unless permitted for the cause."""
+        exception_id, _ = _ids(state)
+        action_up = (action or "").upper()
+        params = {"amount": amount, "candidateIndex": candidate_index}
+        refusal = _refusal(db, exception_id, action_up, params)
+        if refusal:
+            return f"Refused: {refusal}"
+        if action_up == policy.LINK:
+            candidate = (_exception(db, exception_id).get("agent") or {})["candidates"][candidate_index]
+            params["target"] = {k: candidate.get(k) for k in
+                                ("paymentId", "paymentMessageId", "lineNo", "reference", "amount", "score")}
+        set_agent_fields(db, exception_id, {
+            "proposedAction": {"action": action_up, "params": params, "rationale": rationale,
+                               "at": _now().isoformat()},
+            "recommendedResolution": action_up,
+            "nextCheckAt": None,
+        })
+        return f"Proposed {action_up}; awaiting operator approval."
+
+    return [payment_trace_lookup, reconciliation_analysis, find_statement_candidates,
+            get_correspondent_profile, get_resolution_precedents, record_investigation,
+            recheck_reconciliation, schedule_recheck, propose_action]
 
 
-def _discrepancy_hint(legs: list[dict], positions: list[dict]) -> str:
-    """A plain-language summary the agent can use as a starting hypothesis."""
-    disc = next((l.get("discrepancyAmount") for l in legs if l.get("discrepancyAmount")), None)
-    if disc:
-        return f"Discrepancy of {disc} detected across reconciliation legs."
-    expected = (positions[0].get("expected") if positions else None)
-    actual = (positions[0].get("actual") if positions else None)
-    if expected is not None and actual is not None and expected != actual:
-        return f"Settlement expected {expected} vs actual {actual}."
-    return "No numeric discrepancy located in the available records."
+def _major(minor) -> Optional[float]:
+    return None if minor is None else round(minor / 100.0, 2)
 
 
-class ReconciliationState(TypedDict):
-    # `messages` is the agent loop; `exception_id`/`payment_id` are carried as context for the
-    # tools and the HITL node. Not multi-writer, so no reducer needed beyond `add_messages`.
+def _delta(left, right) -> Optional[int]:
+    return None if left is None or right is None else left - right
+
+
+def _correspondent_bic(db: Any, exc: dict, payment_id: str) -> Optional[str]:
+    if _is_statement_line(exc):
+        subject = exc.get("subjectRef") or {}
+        stmt = db["paymentMessages"].find_one({"paymentMessageId": subject.get("paymentMessageId")},
+                                              {"_id": 0, "entries": 1}) or {}
+        line = next((e for e in stmt.get("entries") or [] if e.get("lineNo") == subject.get("lineNo")), {})
+        return line.get("counterpartyBic")
+    payment = db["payments"].find_one({"paymentId": payment_id}, {"_id": 0, "correspondent": 1}) or {}
+    return (payment.get("correspondent") or {}).get("correspondentBic")
+
+
+def _refusal(db: Any, exception_id: str, action: str, params: dict) -> Optional[str]:
+    """The policy check, against the exception as it stands in the DB right now."""
+    exc = _exception(db, exception_id)
+    if exc.get("status") != "OPEN":
+        return f"Exception {exception_id} is {exc.get('status')}, not OPEN — nothing to do."
+    agent_doc = exc.get("agent") or {}
+    return policy.check_proposal(
+        category=exc.get("category"), cause=agent_doc.get("cause"),
+        charge_bearer=_charge_bearer(db, exc), action=action, params=params,
+        candidates=agent_doc.get("candidates") or [],
+        discrepancy_amount=(exc.get("detail") or {}).get("discrepancyAmount"),
+    )
+
+
+def execute_proposal(db: Any, exc: dict, proposal: dict) -> dict:
+    """Call the owning service's route for an approved proposal. Raises ServiceRefused."""
+    exception_id = exc["exceptionId"]
+    action = proposal["action"]
+    note = f"Approved agent proposal: {proposal.get('rationale') or action}"
+    if action == policy.RECHECK:
+        return clients.recheck(exception_id, note=note)
+    if action == policy.LINK:
+        target = (proposal.get("params") or {}).get("target") or {}
+        if _is_statement_line(exc):
+            return clients.link(exception_id, payment_id=target.get("paymentId"), note=note)
+        return clients.link(exception_id, payment_message_id=target.get("paymentMessageId"),
+                            line_no=target.get("lineNo"), note=note)
+    return clients.resolve(exception_id, action, note=note)
+
+
+class ReconciliationState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     exception_id: str
     payment_id: str
+    decision: Optional[dict]
+    verification: Optional[str]
+    reinvestigated: bool
 
 
 def build_reconciliation_agent(model: Any, db: Any, checkpointer: Any):
-    """Build the Reconciliation Agent as a raw StateGraph with a HITL approval gate.
+    """investigate ⇄ tools → (proposal? approval : END); approval → execute → verify.
 
-    `create_agent` is a tool-calling loop with no place for an `interrupt()`. The
-    reconciliation flow needs a custom control flow: investigate (tool loop) → approval
-    (interrupt, pause for operator review) → END. So this is a raw `StateGraph`, not a
-    `create_agent` — exactly the LangGraph skill's "use raw StateGraph when control flow is
-    NOT 'LLM picks a tool in a loop'" case.
+    A raw `StateGraph`, not `create_agent`: the flow needs an `interrupt()` gate and a
+    post-approval execute/verify path that a tool-calling loop has no place for.
     """
     tools = _build_tools(db)
     model_bound = model.bind_tools(tools)
     tool_node = ToolNode(tools)
 
     def investigate(state: ReconciliationState) -> dict:
-        response = model_bound.invoke(state["messages"])
-        return {"messages": [response]}
+        messages = [SystemMessage(RECONCILIATION_SYSTEM_PROMPT), *state["messages"]]
+        return {"messages": [model_bound.invoke(messages)]}
 
     def after_investigate(state: ReconciliationState) -> str:
-        last = state["messages"][-1]
-        if getattr(last, "tool_calls", None):
+        if getattr(state["messages"][-1], "tool_calls", None):
             return "tools"
-        # No more tool calls — investigation finished (record_investigation has written
-        # `exceptions.agent{}`). Route to the human-in-the-loop approval gate.
-        return "approval"
+        agent_doc = _exception(db, state["exception_id"]).get("agent") or {}
+        return "approval" if agent_doc.get("proposedAction") else END
 
     def approval(state: ReconciliationState) -> dict:
-        # Read back the investigation the agent recorded. Idempotent — safe to re-run on
-        # resume (the node re-runs from the top; the read repeats but changes nothing).
-        doc = db["exceptions"].find_one(
-            {"exceptionId": state["exception_id"]}, {"_id": 0, "agent": 1}
-        ) or {}
-        agent_block = doc.get("agent") or {}
-        # Pause for operator review of the AI recommendation. The resume value is the
-        # operator's acknowledgement — any truthy value means "reviewed". The operator then
-        # resolves through the EXISTING transactions UI; this gate reviews, it does not
-        # execute, so there is no duplicate resolve path (spec L1323).
-        interrupt({
+        agent_doc = _exception(db, state["exception_id"]).get("agent") or {}
+        decision = interrupt({
             "exceptionId": state["exception_id"],
-            "rootCause": agent_block.get("rootCause"),
-            "confidence": agent_block.get("confidence"),
-            "recommendedResolution": agent_block.get("recommendedResolution"),
+            "cause": agent_doc.get("cause"),
+            "confidence": agent_doc.get("confidence"),
+            "evidence": agent_doc.get("evidence"),
+            "proposedAction": agent_doc.get("proposedAction"),
         })
-        return {}  # reached only on resume → fall through to END
+        decision = decision if isinstance(decision, dict) else {"decision": APPROVE if decision else REJECT}
+        record = {"decision": (decision.get("decision") or REJECT).upper(),
+                  "by": decision.get("by") or "operator", "note": decision.get("note"),
+                  "at": _now().isoformat()}
+        set_agent_fields(db, state["exception_id"], {"approval": record})
+        return {"decision": record}
+
+    def after_approval(state: ReconciliationState) -> str:
+        return "execute" if (state.get("decision") or {}).get("decision") == APPROVE else END
+
+    def execute(state: ReconciliationState) -> dict:
+        exception_id = state["exception_id"]
+        exc = _exception(db, exception_id)
+        proposal = (exc.get("agent") or {}).get("proposedAction") or {}
+        action = proposal.get("action")
+        # Re-check at the execute boundary: the exception may have moved while paused.
+        refusal = _refusal(db, exception_id, action, proposal.get("params") or {})
+        if refusal:
+            set_agent_fields(db, exception_id, {}, push={
+                "actionsTaken": _action_record(action, VERIFIED_REFUSED, refusal)})
+            return {"verification": VERIFIED_REFUSED}
+        try:
+            out = execute_proposal(db, exc, proposal)
+        except clients.ServiceRefused as e:
+            set_agent_fields(db, exception_id, {}, push={
+                "actionsTaken": _action_record(action, VERIFIED_REFUSED, e.detail)})
+            return {"verification": VERIFIED_REFUSED}
+        set_agent_fields(db, exception_id, {}, push={
+            "actionsTaken": _action_record(action, "DONE", out.get("outcome"))})
+        return {"verification": None}
+
+    def verify(state: ReconciliationState) -> dict:
+        exception_id = state["exception_id"]
+        result = state.get("verification")
+        if result is None:
+            exc = _exception(db, exception_id)
+            if exc.get("status") == "OPEN" and not _is_statement_line(exc):
+                try:  # the deterministic engine has the last word
+                    clients.reconcile(state["payment_id"])
+                except clients.ServiceRefused:
+                    pass  # 409: no longer eligible, i.e. already reconciled
+                exc = _exception(db, exception_id)
+            if exc.get("status") != "OPEN":
+                result = VERIFIED_RESOLVED
+            elif exc.get("awaitingCounterparty"):
+                result = VERIFIED_ESCALATED
+            else:
+                result = VERIFIED_OPEN
+        set_agent_fields(db, exception_id, {
+            "verification": {"result": result, "at": _now().isoformat()},
+            "proposedAction": None})
+        return {"verification": result}
+
+    def after_verify(state: ReconciliationState) -> str:
+        if state.get("verification") in (VERIFIED_RESOLVED, VERIFIED_ESCALATED):
+            return END
+        return END if state.get("reinvestigated") else "reinvestigate"
+
+    def reinvestigate(state: ReconciliationState) -> dict:
+        return {"reinvestigated": True, "decision": None, "messages": [HumanMessage(
+            f"The approved action did not close the exception (verification: "
+            f"{state.get('verification')}). Re-investigate once. If no permitted action can "
+            "close it, propose ESCALATE_TO_CORRESPONDENT.")]}
 
     builder = StateGraph(ReconciliationState)
     builder.add_node("investigate", investigate)
     builder.add_node("tools", tool_node)
     builder.add_node("approval", approval)
+    builder.add_node("execute", execute)
+    builder.add_node("verify", verify)
+    builder.add_node("reinvestigate", reinvestigate)
     builder.add_edge(START, "investigate")
-    builder.add_conditional_edges(
-        "investigate", after_investigate, {"tools": "tools", "approval": "approval"}
-    )
+    builder.add_conditional_edges("investigate", after_investigate,
+                                  {"tools": "tools", "approval": "approval", END: END})
     builder.add_edge("tools", "investigate")
-    builder.add_edge("approval", END)
+    builder.add_conditional_edges("approval", after_approval, {"execute": "execute", END: END})
+    builder.add_edge("execute", "verify")
+    builder.add_conditional_edges("verify", after_verify,
+                                  {"reinvestigate": "reinvestigate", END: END})
+    builder.add_edge("reinvestigate", "investigate")
     return builder.compile(checkpointer=checkpointer)
 
 
-def investigate(
-    agent: Any, db: Any, exception_id: str, payment_id: str
-) -> Optional[dict]:
-    """Run the reconciliation agent for one OPEN discrepancy exception.
+def _config(exception_id: str) -> dict:
+    return {"configurable": {"thread_id": exception_id}}
 
-    Returns the `exceptions.agent{}` subdoc that was recorded (read back), or None if the
-    agent failed or recorded nothing. Never raises — a failure leaves the exception's `agent`
-    field unset and the operator investigates manually, exactly as before Phase 2.
-    """
-    user_msg = (
-        f"Reconciliation mismatch on payment {payment_id} (exception {exception_id}). "
-        "Investigate the discrepancy across the full payment lifecycle and record your "
-        "findings with `record_investigation`."
-    )
+
+def is_awaiting_approval(agent: Any, exception_id: str) -> bool:
     try:
-        agent.invoke(
-            {
-                "messages": [{"role": "user", "content": user_msg}],
-                "exception_id": exception_id,
-                "payment_id": payment_id,
-            },
-            config={"configurable": {"thread_id": exception_id}},
-        )
-    except Exception:  # noqa: BLE001 — never propagate to the worker.
-        logger.warning(
-            "reconciliation agent invoke failed for %s — leaving exception unchanged.",
-            exception_id, exc_info=True,
-        )
-        return None
-    # Read back what the agent recorded (if anything).
-    try:
-        doc = db["exceptions"].find_one({"exceptionId": exception_id}, {"_id": 0, "agent": 1})
+        return bool(agent.get_state(_config(exception_id)).next)
     except Exception:  # noqa: BLE001
+        return False
+
+
+def investigate(agent: Any, db: Any, exception_id: str, payment_id: str) -> Optional[dict]:
+    """Run (or re-run) the agent for one OPEN exception; returns the recorded `agent{}`.
+
+    Never raises. A thread paused for approval is left alone — re-investigating would
+    abandon the proposal the operator is looking at.
+    """
+    if is_awaiting_approval(agent, exception_id):
+        logger.info("reconciliation agent: %s awaits approval — not re-investigating", exception_id)
+        return _exception(db, exception_id).get("agent")
+    exc = _exception(db, exception_id)
+    if exc.get("status") != "OPEN":
+        return exc.get("agent")
+    set_agent_fields(db, exception_id, {"startedAt": _now().isoformat(), "nextCheckAt": None,
+                                        "proposedAction": None})
+    user_msg = (f"{exc.get('category')} on {payment_id} (exception {exception_id}). "
+                f"Detail: {json.dumps(exc.get('detail'), default=str)}. Investigate and act.")
+    try:
+        agent.invoke({"messages": [HumanMessage(user_msg)], "exception_id": exception_id,
+                      "payment_id": payment_id, "reinvestigated": False},
+                     config=_config(exception_id))
+    except Exception:  # noqa: BLE001 — never propagate to the worker.
+        logger.warning("reconciliation agent invoke failed for %s — exception unchanged.",
+                       exception_id, exc_info=True)
         return None
-    return (doc or {}).get("agent")
+    return _exception(db, exception_id).get("agent")
+
+
+def resume(agent: Any, db: Any, exception_id: str, decision: str, note: Optional[str] = None,
+           by: str = "operator") -> Optional[dict]:
+    """Resume a paused thread with the operator's decision; returns the recorded `agent{}`."""
+    from langgraph.types import Command
+
+    agent.invoke(Command(resume={"decision": decision, "note": note, "by": by}),
+                 config=_config(exception_id))
+    return _exception(db, exception_id).get("agent")

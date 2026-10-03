@@ -43,7 +43,7 @@ def _find(collection, query, projection):
 
 
 def _find_open_recon_exception(db, payment_id):
-    """The OPEN RECONCILIATION_DISCREPANCY exception for a payment, or None.
+    """The OPEN reconciliation exception (any watched category) for a payment, or None.
 
     `gather_trace` is called by the tools with only `payment_id`; the exception carries the
     pre-computed `detail.discrepancyAmount`/`expectedAmount`/`actualAmount` the agent needs,
@@ -54,8 +54,9 @@ def _find_open_recon_exception(db, payment_id):
         return None
     try:
         return coll.find_one(
-            {"paymentId": payment_id, "category": "RECONCILIATION_DISCREPANCY",
-             "status": "OPEN"},
+            {"paymentId": payment_id, "status": "OPEN",
+             "category": {"$in": ["RECONCILIATION_DISCREPANCY", "RECONCILIATION_MISSING",
+                                  "ORPHANED_SETTLEMENT"]}},
             {"_id": 0},
         )
     except Exception:  # noqa: BLE001
