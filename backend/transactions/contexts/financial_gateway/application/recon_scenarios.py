@@ -30,7 +30,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from contexts.financial_gateway.application.statement import NOSTRO_USD, generate_statement
+from contexts.financial_gateway.application.statement import (
+    NOSTRO_USD, PRESENTER_DRIVEN_REF_PREFIX, generate_statement,
+)
 from contexts.financial_gateway.domain import camt053
 from contexts.payment_settlement import settle
 
@@ -100,7 +102,7 @@ def _initiate(service, debtor: dict, scenario: tuple) -> dict:
         remittance_unstructured=purpose,
         charge_bearer=bearer,
         channel="BRANCH",
-        client_reference=f"RECON-DEMO-{key}",
+        client_reference=f"{PRESENTER_DRIVEN_REF_PREFIX}{key}",
         statement_outcome=lever,
     )
     return {"paymentId": doc["paymentId"], "status": doc["status"],

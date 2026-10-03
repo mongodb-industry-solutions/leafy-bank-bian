@@ -229,7 +229,8 @@ class PaymentsService:
         )
         return payment_lifecycle.run(ctx)
 
-    def generate_statement(self, *, account_code: str = "1111", include_orphan: bool = True) -> Optional[dict]:
+    def generate_statement(self, *, account_code: str = "1111", include_orphan: bool = True,
+                           skip_presenter_driven: bool = False) -> Optional[dict]:
         """The correspondent's next camt.053 for a nostro (reconciliation plan A1).
 
         One code path for the background worker and the manual route, like
@@ -237,7 +238,8 @@ class PaymentsService:
         """
         from contexts.financial_gateway.application.statement import generate_statement
         return generate_statement(self.db, account_code=account_code,
-                                  include_orphan=include_orphan)
+                                  include_orphan=include_orphan,
+                                  skip_presenter_driven=skip_presenter_driven)
 
     def simulate_inbound(self, scenario: str = "HAPPY", *, account_id: Optional[str] = None) -> dict:
         """Generate one simulated inbound pacs.008 and run it (demo trigger).

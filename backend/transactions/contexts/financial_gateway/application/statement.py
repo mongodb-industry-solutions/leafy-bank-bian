@@ -45,6 +45,11 @@ logger = logging.getLogger(__name__)
 
 NOSTRO_USD = "1111"
 
+# Scenario wires (`recon_scenarios`) carry this clientReference prefix. The presenter books
+# their statement by hand, so the background simulator must leave them alone — otherwise any
+# instance sharing the DB (e.g. a deployed one with the sim on) books them mid-walkthrough.
+PRESENTER_DRIVEN_REF_PREFIX = "RECON-DEMO-"
+
 
 def _as_datetime(value) -> Optional[datetime]:
     if value is None:
@@ -71,17 +76,22 @@ def _previous_statement(messages, account_code: str) -> Optional[dict]:
     return max(statements, key=lambda s: s["statement"]["sequence"])
 
 
-def _settled_wires(payments, account_code: str) -> list[dict]:
+def _settled_wires(payments, account_code: str, *, skip_presenter_driven: bool = False) -> list[dict]:
     """Outbound wires settled on this nostro. The window is applied by the caller."""
-    return list(payments.find(
+    wires = payments.find(
         {
             "lifecycle.settlementStatus": "SETTLED",
             "clearing.settlementAccountCode": account_code,
             "clearing.settledAt": {"$ne": None},
             "direction": {"$ne": "INBOUND"},
         },
-        {"paymentId": 1, "clearing.settledAt": 1, "simulatedStatementOutcome": 1},
-    ))
+        {"paymentId": 1, "clearing.settledAt": 1, "simulatedStatementOutcome": 1,
+         "clientReference": 1},
+    )
+    if not skip_presenter_driven:
+        return list(wires)
+    return [w for w in wires
+            if not (w.get("clientReference") or "").startswith(PRESENTER_DRIVEN_REF_PREFIX)]
 
 
 def _booked_payment_ids(messages, account_code: str) -> set[str]:
@@ -102,6 +112,7 @@ def generate_statement(
     include_orphan: bool = True,
     now: Optional[datetime] = None,
     rng: Optional[random.Random] = None,
+    skip_presenter_driven: bool = False,
 ) -> Optional[dict]:
     """Write the next statement for `account_code`. Returns it, or None when nothing is due."""
     now = now or datetime.now(timezone.utc)
@@ -109,7 +120,8 @@ def generate_statement(
     previous = _previous_statement(messages, account_code)
     booked = _booked_payment_ids(messages, account_code)
 
-    wires = [w for w in _settled_wires(db["payments"], account_code)
+    wires = [w for w in _settled_wires(db["payments"], account_code,
+                                       skip_presenter_driven=skip_presenter_driven)
              if w["paymentId"] not in booked]
     for w in wires:
         w["_settledAt"] = _as_datetime(w["clearing"]["settledAt"])

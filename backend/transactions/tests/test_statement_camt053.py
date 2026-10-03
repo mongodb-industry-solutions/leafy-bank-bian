@@ -165,3 +165,22 @@ def test_a_historical_statement_never_moves_the_live_chain(service, db):
     assert live["statement"]["sequence"] == 1
     assert live["statement"]["openingBalance"] == 0.0
     assert _line(live, pid)
+
+
+# --- presenter-driven scenario wires ------------------------------------------
+
+def test_the_simulator_leaves_scenario_wires_for_the_presenter_to_book(service, db):
+    """A walkthrough wire must survive any simulator sharing the DB (a deployed instance
+    with the sim on booked R5 mid-walkthrough, 2026-10-03); the manual trigger still books it."""
+    ambient = _settled_wire(service, db)
+    scenario = _initiate_external(service, instructed_amount=300.0,
+                                  client_reference="RECON-DEMO-R5")["paymentId"]
+    settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0)
+
+    sim = generate_statement(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False,
+                             now=_later(1), skip_presenter_driven=True)
+    assert {e["simulatedPaymentId"] for e in sim["entries"]} == {ambient}
+
+    manual = generate_statement(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False,
+                                now=_later(2))
+    assert {e["simulatedPaymentId"] for e in manual["entries"]} == {scenario}

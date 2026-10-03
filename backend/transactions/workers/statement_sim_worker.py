@@ -30,8 +30,11 @@ ACCOUNT_CODES = ("1111", "1121")
 
 
 def generate_cycle(service) -> list:
-    """One cycle: at most one statement per account. Returns those written."""
-    docs = [service.generate_statement(account_code=code) for code in ACCOUNT_CODES]
+    """One cycle: at most one statement per account. Returns those written.
+
+    Skips the walkthrough's scenario wires: the presenter books those by hand."""
+    docs = [service.generate_statement(account_code=code, skip_presenter_driven=True)
+            for code in ACCOUNT_CODES]
     return [d for d in docs if d]
 
 
