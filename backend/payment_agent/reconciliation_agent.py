@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, TypedDict
 
@@ -56,6 +57,15 @@ logger = logging.getLogger(__name__)
 
 # A label, not a numeric score — an LLM's numeric confidence is not calibrated.
 _CONFIDENCE_VALUES = {"HIGH", "MEDIUM", "LOW"}
+
+# Some model responses leak their own tool-call markup (e.g. a stray closing
+# tag like `</rationale>` or `</invoke>`) onto the end of a free-text field.
+# Strip it before persisting so `agent{}` never surfaces a malformed fragment.
+_TRAILING_TAG_LEAK = re.compile(r"(\s*</[a-zA-Z_][\w:-]*>\s*)+$")
+
+
+def _clean_text(value: str) -> str:
+    return _TRAILING_TAG_LEAK.sub("", value or "").rstrip()
 
 APPROVE = "APPROVE"
 REJECT = "REJECT"
@@ -225,8 +235,8 @@ short strings each citing a specific record and amount. Returns the permitted ac
         allowed = sorted(policy.allowed_actions(exc.get("category"), cause_up, _charge_bearer(db, exc)))
         set_agent_fields(db, exception_id, {
             "cause": cause_up,
-            "investigation": investigation,
-            "rootCause": root_cause,
+            "investigation": _clean_text(investigation),
+            "rootCause": _clean_text(root_cause),
             "evidence": evidence or [],
             "confidence": confidence_up,
             "recommendedResolution": None,
@@ -299,7 +309,8 @@ ESCALATE_TO_CORRESPONDENT, DISMISS or RECHECK. Refused unless permitted for the 
             params["target"] = {k: candidate.get(k) for k in
                                 ("paymentId", "paymentMessageId", "lineNo", "reference", "amount", "score")}
         set_agent_fields(db, exception_id, {
-            "proposedAction": {"action": action_up, "params": params, "rationale": rationale,
+            "proposedAction": {"action": action_up, "params": params,
+                               "rationale": _clean_text(rationale),
                                "at": _now().isoformat()},
             "recommendedResolution": action_up,
             "nextCheckAt": None,
