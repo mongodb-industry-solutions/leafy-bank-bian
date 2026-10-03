@@ -71,12 +71,39 @@ def allowed_actions(category: str, cause: str, charge_bearer: Optional[str]) -> 
     return frozenset(by_cause[cause])
 
 
+def fee_cause_refusal(discrepancy_amount: Optional[float],
+                      known_charges: Optional[list]) -> Optional[str]:
+    """Why a FEE cause is inadmissible, or None when it is grounded in a levied charge.
+
+    A fee explanation is only admissible when the discrepancy equals a charge the
+    correspondent actually levies — otherwise the model is rationalising an unknown
+    delta as a fee (defect 2026-10-03, R4: 54.0 explained as "fee + extra correspondent
+    charge" and proposed for acceptance). Any other delta is an AMOUNT_MISMATCH, whose
+    permitted actions never move money.
+    """
+    if not known_charges or discrepancy_amount is None:
+        return None
+    amount = round(abs(float(discrepancy_amount)), 2)
+    charges = sorted({round(abs(float(c)), 2) for c in known_charges})
+    if amount in charges:
+        return None
+    permitted = sorted(_ALLOWED[CATEGORY_DISCREPANCY][AMOUNT_MISMATCH])
+    return (f"The discrepancy {amount} matches no charge this correspondent levies "
+            f"({charges}); it is not a fee. Record AMOUNT_MISMATCH instead "
+            f"(permitted: {permitted}).")
+
+
 def check_proposal(*, category: str, cause: Optional[str], charge_bearer: Optional[str],
                    action: str, params: dict, candidates: list,
-                   discrepancy_amount: Optional[float]) -> Optional[str]:
+                   discrepancy_amount: Optional[float],
+                   known_charges: Optional[list] = None) -> Optional[str]:
     """None when the proposal is permitted, otherwise the reason it is refused."""
     if cause not in CAUSES:
         return "Record the investigation (with a cause) before proposing an action."
+    if category == CATEGORY_DISCREPANCY and cause == FEE:
+        grounded = fee_cause_refusal(discrepancy_amount, known_charges)
+        if grounded:
+            return grounded
     allowed = allowed_actions(category, cause, charge_bearer)
     if action not in allowed:
         return (f"{action} is not permitted for a {category} with cause {cause} "

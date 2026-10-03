@@ -56,11 +56,20 @@ def rank_candidates(rows: list[dict]) -> list[dict]:
     return ranked[:MAX_CANDIDATES]
 
 
-def _charge_for(db: Any, bic: Optional[str]) -> float:
+def known_charges(db: Any, bic: Optional[str]) -> list[float]:
+    """Every charge this correspondent levies; the default charge when it has none.
+
+    A FEE cause is admissible only at one of these amounts — a delta that matches
+    none is an AMOUNT_MISMATCH, whatever the model calls it (policy.fee_cause_refusal).
+    """
     profile = _correspondent(db, bic) or {}
     policy_doc = profile.get("chargePolicy") or {}
     charges = [v for k, v in policy_doc.items() if k != "currency" and isinstance(v, (int, float))]
-    return max(charges) if charges else DEFAULT_CHARGE
+    return sorted({round(float(c), 2) for c in charges}) or [DEFAULT_CHARGE]
+
+
+def _charge_for(db: Any, bic: Optional[str]) -> float:
+    return max(known_charges(db, bic))
 
 
 def _correspondent(db: Any, bic: Optional[str]) -> Optional[dict]:

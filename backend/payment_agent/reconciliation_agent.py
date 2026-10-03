@@ -102,6 +102,9 @@ correspondent's usual lag. Do not escalate a timing lag until rechecks are exhau
 Rules:
 - Only permitted actions are accepted; a refused proposal explains why — fix it or pick \
 another permitted action. Never invent a statement line: LINK uses a candidate index.
+- A FEE cause is accepted only when the discrepancy equals a charge the correspondent's \
+chargePolicy actually levies (else the bank default 25.0). Any other delta is an \
+AMOUNT_MISMATCH: escalate it, never accept it.
 - For FEE, the payment's chargeBearer decides the books, not you.
 - An adjustment amount must equal the discrepancy exactly.
 - End with a two-sentence summary for the operator.
@@ -126,6 +129,11 @@ def _charge_bearer(db: Any, exc: dict) -> Optional[str]:
     payment = db["payments"].find_one({"paymentId": exc.get("paymentId")},
                                       {"_id": 0, "chargeBearer": 1}) or {}
     return payment.get("chargeBearer")
+
+
+def _known_charges(db: Any, exc: dict) -> list:
+    """Every charge this exception's correspondent levies (recon_evidence)."""
+    return recon_evidence.known_charges(db, _correspondent_bic(db, exc, exc.get("paymentId")))
 
 
 def set_agent_fields(db: Any, exception_id: str, fields: dict, push: Optional[dict] = None) -> None:
@@ -232,6 +240,13 @@ short strings each citing a specific record and amount. Returns the permitted ac
         exc = _exception(db, exception_id)
         if not exc:
             return f"No exception found with exceptionId {exception_id}."
+        if cause_up == policy.FEE and exc.get("category") == policy.CATEGORY_DISCREPANCY:
+            # A fee the correspondent does not levy is a rationalised amount mismatch
+            # (defect 2026-10-03, R4) — refuse the label before anything keys on it.
+            refusal = policy.fee_cause_refusal(
+                (exc.get("detail") or {}).get("discrepancyAmount"), _known_charges(db, exc))
+            if refusal:
+                return f"FEE refused: {refusal}"
         allowed = sorted(policy.allowed_actions(exc.get("category"), cause_up, _charge_bearer(db, exc)))
         set_agent_fields(db, exception_id, {
             "cause": cause_up,
@@ -347,11 +362,15 @@ def _refusal(db: Any, exception_id: str, action: str, params: dict) -> Optional[
     if exc.get("status") != "OPEN":
         return f"Exception {exception_id} is {exc.get('status')}, not OPEN — nothing to do."
     agent_doc = exc.get("agent") or {}
+    known = (_known_charges(db, exc)
+             if exc.get("category") == policy.CATEGORY_DISCREPANCY
+             and agent_doc.get("cause") == policy.FEE else None)
     return policy.check_proposal(
         category=exc.get("category"), cause=agent_doc.get("cause"),
         charge_bearer=_charge_bearer(db, exc), action=action, params=params,
         candidates=agent_doc.get("candidates") or [],
         discrepancy_amount=(exc.get("detail") or {}).get("discrepancyAmount"),
+        known_charges=known,
     )
 
 

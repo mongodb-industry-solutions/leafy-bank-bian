@@ -82,6 +82,25 @@ def test_no_proposal_before_a_cause_is_recorded():
     assert "cause" in _check(cause=None)
 
 
+def test_a_fee_is_refused_unless_it_matches_a_levied_charge():
+    # R4 (defect 2026-10-03): 54.0 rationalised as "fee + extra correspondent charge".
+    refusal = policy.fee_cause_refusal(54.0, [25.0])
+    assert refusal and "AMOUNT_MISMATCH" in refusal
+    assert policy.fee_cause_refusal(25.0, [25.0]) is None          # a levied charge
+    assert policy.fee_cause_refusal(-25.0, [25.0]) is None          # sign does not matter
+    assert policy.fee_cause_refusal(25.0, [12.5, 25.0]) is None     # any levied charge
+    assert policy.fee_cause_refusal(54.0, None) is None             # nothing to ground in
+    assert policy.fee_cause_refusal(None, [25.0]) is None           # no amount recorded
+
+
+def test_an_ungrounded_fee_is_refused_at_check_proposal_too():
+    assert _check(known_charges=[25.0]) is None
+    refusal = _check(discrepancy_amount=54.0, known_charges=[25.0], params={"amount": 54.0})
+    assert refusal and "AMOUNT_MISMATCH" in refusal
+    assert "not a fee" in _check(discrepancy_amount=54.0, known_charges=[25.0],
+                                 charge_bearer="SHAR", action=policy.ACCEPT, params={})
+
+
 def test_recheck_minutes_are_capped():
     assert policy.capped_recheck_minutes(999) == policy.MAX_RECHECK_MINUTES
     assert policy.capped_recheck_minutes(0) == 1
@@ -104,6 +123,17 @@ def test_candidates_rank_by_reference_then_amount_closeness():
     ])
     assert ranked[0]["reference"] == "AA/LEAFYBK"
     assert ranked[0]["amountDelta"] == -1.0
+
+
+def test_known_charges_lists_every_levied_charge_else_the_default():
+    db = FakeDB()
+    db["correspondentBanks"] = FakeColl([
+        {"recordType": "BIC_DIRECTORY", "identification": {"value": "ROYKGB2L"},
+         "chargePolicy": {"wire": 25.0, "fx": 12.5, "currency": "USD"}},
+        {"recordType": "BIC_DIRECTORY", "identification": {"value": "NOPOXY"}}])
+    assert ev.known_charges(db, "ROYKGB2L") == [12.5, 25.0]
+    assert ev.known_charges(db, "NOPOXY") == [ev.DEFAULT_CHARGE]   # no policy -> default
+    assert ev.known_charges(db, None) == [ev.DEFAULT_CHARGE]        # no correspondent
 
 
 # --- graph harness ----------------------------------------------------------------------
@@ -239,6 +269,69 @@ def test_execute_rechecks_policy_if_the_exception_moved_while_paused(calls):
     db["exceptions"].update_one({"exceptionId": "EXC-R1"}, {"$set": {"status": "RESOLVED"}})
     ra.resume(agent, db, "EXC-R1", ra.APPROVE)
     assert not calls  # never called the route on a closed exception
+
+
+# --- R4: a FEE cause must be grounded in the correspondent's charge policy --------------
+
+# The live-gate scenario: Royal Bank of Canada levies 25.0, the statement is 54.0 short.
+_R4 = {"exceptionId": "EXC-R4", "paymentId": "PAY-R4", "category": policy.CATEGORY_DISCREPANCY,
+       "detail": {"discrepancyAmount": 54.0, "expectedAmount": 7360.0, "actualAmount": 7306.0}}
+_ROY = {"recordType": "BIC_DIRECTORY", "identification": {"value": "ROYKGB2L"},
+        "chargePolicy": {"wire": 25.0}}
+
+
+def _r4_db(discrepancy: float = 54.0) -> FakeDB:
+    db = _db({**_R4, "detail": {**_R4["detail"], "discrepancyAmount": discrepancy}},
+             {"paymentId": "PAY-R4", "chargeBearer": "SHAR",
+              "correspondent": {"correspondentBic": "ROYKGB2L"}})
+    db["correspondentBanks"] = FakeColl([_ROY])
+    return db
+
+
+def test_a_delta_no_correspondent_levies_is_escalated_as_a_mismatch(calls):
+    db = _r4_db()
+
+    def resolve(exc_id, action, note=None):
+        db["exceptions"].update_one({"exceptionId": exc_id},
+                                    {"$set": {"awaitingCounterparty": True}})
+        return {"outcome": "ESCALATED"}
+    calls.fake("resolve", resolve)
+    calls.fake("reconcile", {"outcome": "DISCREPANT"})
+
+    agent = _agent(db,
+                   _call("record_investigation", cause="FEE", root_cause="fee + extra charge",
+                         evidence=["line 7306.00 vs 7360.00"], confidence="HIGH"),
+                   _call("record_investigation", cause="AMOUNT_MISMATCH",
+                         root_cause="54.0 matches no levied charge (policy: 25.0)",
+                         evidence=["chargePolicy wire 25.0"], confidence="HIGH"),
+                   _call("propose_action", action="ESCALATE_TO_CORRESPONDENT",
+                         rationale="delta matches no fee the bank levies"),
+                   AIMessage(content="Escalated."))
+    ra.investigate(agent, db, "EXC-R4", "PAY-R4")
+
+    doc = _agent_doc(db, "EXC-R4")
+    assert doc["cause"] == "AMOUNT_MISMATCH"     # the FEE label was refused, not recorded
+    assert doc["proposedAction"]["action"] == policy.ESCALATE
+    assert ra.is_awaiting_approval(agent, "EXC-R4")
+
+    ra.resume(agent, db, "EXC-R4", ra.APPROVE)
+    assert [c[0] for c in calls] == ["resolve", "reconcile"]  # verify re-runs the engine
+    assert calls[0][1][1] == policy.ESCALATE
+    assert _agent_doc(db, "EXC-R4")["verification"]["result"] == ra.VERIFIED_ESCALATED
+
+
+def test_a_prerecorded_fee_is_refused_at_the_propose_and_execute_boundary():
+    # EXC-e00554fa on the live DB: the FEE cause was recorded before this guard existed.
+    db = _r4_db()
+    db["exceptions"].update_one({"exceptionId": "EXC-R4"}, {"$set": {"agent": {"cause": "FEE"}}})
+    refusal = ra._refusal(db, "EXC-R4", policy.ACCEPT, {})
+    assert refusal and "AMOUNT_MISMATCH" in refusal
+
+
+def test_a_levied_charge_keeps_the_fee_path_open():
+    db = _r4_db(discrepancy=25.0)
+    db["exceptions"].update_one({"exceptionId": "EXC-R4"}, {"$set": {"agent": {"cause": "FEE"}}})
+    assert ra._refusal(db, "EXC-R4", policy.ACCEPT, {}) is None   # SHAR -> ACCEPT permitted
 
 
 # --- R2: re-keyed reference → LINK to a returned candidate ------------------------------
