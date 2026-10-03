@@ -59,49 +59,68 @@ SCENARIOS = (
 )
 TOTAL = sum(s[4] for s in SCENARIOS)
 
+# Plan E — the walkthrough initiates one wire per click. R5 is a clean wire (its orphan line
+# is injected at statement time); TL is a clean wire whose statement the presenter withholds,
+# so the line is genuinely late. R3 stays batch-only: TL tells the timing story on demand.
+WALKTHROUGH_SCENARIOS = {s[0]: s for s in SCENARIOS if s[0] != "R3"} | {
+    "R5": ("R5", "GB", "SHAR", camt053.CLEAN, 5_630.00, "GB33BUKB20201555555555", "Software licences"),
+    "TL": ("TL", "CH", "SHAR", camt053.CLEAN, 2_485.00, "CH5604835012345678009", "Advisory retainer"),
+}
 
-def _debtor(service) -> dict:
-    """A funded, active customer account to send all five from. Customer types only — the
+
+def _debtor(service, amount: float = TOTAL) -> dict:
+    """A funded, active customer account to send from. Customer types only — the
     shared `accounts` collection also holds NOSTRO/GL accounts (defect 2026-06-29)."""
     account = service.accounts.find_one(
         {"type": {"$in": ["CURRENT", "SAVINGS", "CHECKING"]}, "status": "ACTIVE",
-         "currency": "USD", "balance.available": {"$gte": TOTAL}},
+         "currency": "USD", "balance.available": {"$gte": amount}},
         {"accountId": 1, "customerSnapshot.customerId": 1},
     )
     if account is None:
-        raise ValueError(f"No active USD customer account holds {TOTAL:,.2f} to fund the scenarios.")
+        raise ValueError(f"No active USD customer account holds {amount:,.2f} to fund the scenarios.")
     return account
+
+
+def _initiate(service, debtor: dict, scenario: tuple) -> dict:
+    key, country, bearer, lever, amount, account_no, purpose = scenario
+    bank = _BANKS[country]
+    doc = service.initiate_payment(
+        customer_ref=(debtor.get("customerSnapshot") or {}).get("customerId"),
+        debtor_account_ref=debtor["accountId"],
+        creditor_account_ref=None,
+        creditor_party={"name": bank["name"], "accountNo": account_no, "bic": bank["bic"],
+                        "bankName": bank["bankName"], "bankCountry": country,
+                        "address": bank["address"],
+                        "clearingSystemCode": bank["clearingSystemCode"],
+                        "clearingSystemMemberId": bank["clearingSystemMemberId"]},
+        instructed_amount=amount,
+        instructed_currency="USD",
+        payment_type="CREDIT_TRANSFER",
+        payment_rail="WIRE",
+        remittance_unstructured=purpose,
+        charge_bearer=bearer,
+        channel="BRANCH",
+        client_reference=f"RECON-DEMO-{key}",
+        statement_outcome=lever,
+    )
+    return {"paymentId": doc["paymentId"], "status": doc["status"],
+            "chargeBearer": bearer, "statementOutcome": lever, "amount": amount}
+
+
+def run_one(service, key: str) -> dict:
+    """Initiate one walkthrough scenario's wire. No settle, no statement: the presenter
+    drives those steps. Raises KeyError for an unknown key, ValueError if nothing funds it."""
+    scenario = WALKTHROUGH_SCENARIOS[key]
+    bank = _BANKS[scenario[1]]
+    payment = _initiate(service, _debtor(service, scenario[4]), scenario)
+    return {"scenario": key, **payment, "bic": bank["bic"], "bankName": bank["bankName"],
+            "includeOrphan": key == "R5"}
 
 
 def run(service, connection, db_name: str, *, now=None) -> dict:
     """Initiate R1–R4, settle them, book one statement (+ the R5 orphan). Returns the ids."""
     debtor = _debtor(service)
-    customer_id = (debtor.get("customerSnapshot") or {}).get("customerId")
-
-    payments = {}
-    for key, country, bearer, lever, amount, account_no, purpose in SCENARIOS:
-        bank = _BANKS[country]
-        doc = service.initiate_payment(
-            customer_ref=customer_id,
-            debtor_account_ref=debtor["accountId"],
-            creditor_account_ref=None,
-            creditor_party={"name": bank["name"], "accountNo": account_no, "bic": bank["bic"],
-                            "bankName": bank["bankName"], "bankCountry": country,
-                            "address": bank["address"],
-                            "clearingSystemCode": bank["clearingSystemCode"],
-                            "clearingSystemMemberId": bank["clearingSystemMemberId"]},
-            instructed_amount=amount,
-            instructed_currency="USD",
-            payment_type="CREDIT_TRANSFER",
-            payment_rail="WIRE",
-            remittance_unstructured=purpose,
-            charge_bearer=bearer,
-            channel="BRANCH",
-            client_reference=f"RECON-DEMO-{key}",
-            statement_outcome=lever,
-        )
-        payments[key] = {"paymentId": doc["paymentId"], "status": doc["status"],
-                         "chargeBearer": bearer, "statementOutcome": lever, "amount": amount}
+    payments = {s[0]: _initiate(service, debtor, s) for s in SCENARIOS}
 
     settled = settle.complete_due(connection, db_name, delay_seconds=0)
     statement = generate_statement(service.db, account_code=NOSTRO_USD, include_orphan=True, now=now)

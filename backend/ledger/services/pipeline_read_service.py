@@ -459,6 +459,8 @@ def trace_payment(
             f"{payment_id}-FEE",
             f"{payment_id}-SETTLEMENT",
             f"{payment_id}-REV",
+            # A4's approved POST_ADJUSTMENT (Dr 5214 / Cr 1111) — the showcase's R1 evidence.
+            f"{payment_id}-ADJ",
         ]}},
         {"_id": 0},
     ))

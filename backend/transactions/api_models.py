@@ -373,6 +373,13 @@ class InboundMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReconScenarioRequest(BaseModel):
+    """`POST /workflow/demo/recon-scenario` — the walkthrough scenario key. Validated against
+    `recon_scenarios.WALKTHROUGH_SCENARIOS` in the route (422), the single source of keys."""
+
+    scenario: str
+
+
 class UtaResolveRequest(BaseModel):
     """`POST /workflow/exceptions/{exceptionId}/uta` — an operator's UTA resolution.
 

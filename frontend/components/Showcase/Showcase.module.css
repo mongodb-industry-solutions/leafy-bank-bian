@@ -1,0 +1,300 @@
+.root {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 32px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0;
+}
+
+.health {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #b8c4c2;
+}
+
+.dotUp {
+  background: #00a35c;
+}
+
+.dotDown {
+  background: #db3030;
+}
+
+.banner {
+  margin: 0;
+}
+
+.lead {
+  font-size: 17px;
+}
+
+.muted {
+  color: #5c6c75;
+}
+
+.mono {
+  font-family: "Source Code Pro", Menlo, monospace;
+}
+
+.error {
+  color: #db3030;
+}
+
+/* Picker */
+.pickerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 20px;
+}
+
+.scenarioCard {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cardTitle {
+  margin: 0;
+}
+
+.cardStory {
+  font-size: 16px;
+}
+
+.cardMeta {
+  font-weight: 600;
+}
+
+.cardExpected {
+  font-size: 15px;
+}
+
+/* Walkthrough */
+.walkthrough {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.stepperBar {
+  padding: 8px 0;
+}
+
+.narration {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.narrationText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.narrationHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.narrationTitle {
+  margin: 0;
+}
+
+.narrationBody {
+  font-size: 18px;
+  line-height: 28px;
+  max-width: 820px;
+}
+
+.note {
+  color: #00684a;
+}
+
+.outcome {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.narrationActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 220px;
+}
+
+.panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.pane {
+  border: 1px solid #e8edeb;
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.paneTitle {
+  margin: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.factRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+}
+
+/* Payment tracker */
+.paymentHead {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.amount {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.stageList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.stageRow {
+  display: grid;
+  grid-template-columns: 28px 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f3f2;
+  font-size: 15px;
+}
+
+.stageNum {
+  color: #889397;
+  font-weight: 600;
+}
+
+.stageLabel {
+  font-weight: 500;
+}
+
+.stageMeta {
+  color: #5c6c75;
+  font-size: 13px;
+  text-align: right;
+}
+
+/* Agent thinking */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 16px;
+  border-left: 2px solid #e8edeb;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.tlItem {
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.tlThought {
+  white-space: pre-wrap;
+}
+
+.tlTool {
+  font-family: "Source Code Pro", Menlo, monospace;
+  color: #016bf8;
+}
+
+.tlResult {
+  color: #5c6c75;
+}
+
+.tlPre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.prose {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.evidence {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+}
+
+.proposal {
+  border-top: 1px solid #e8edeb;
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.policy {
+  color: #00684a;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}

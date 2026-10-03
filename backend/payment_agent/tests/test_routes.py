@@ -39,3 +39,24 @@ def test_approve_resumes_with_the_decision(client, monkeypatch):
     assert r.status_code == 200
     assert client.resumed[0][2:5] == ("EXC-1", "REJECT", "n")
     assert r.json()["agent"]["verification"]["result"] == "RESOLVED"
+
+
+# --- Plan E: the read-only steps timeline --------------------------------------------------
+
+def test_steps_without_a_thread_is_404(client, monkeypatch):
+    monkeypatch.setattr(main, "thread_messages", lambda *a: [])
+    assert client.get("/reconciliation/EXC-1/steps").status_code == 404
+
+
+def test_steps_returns_the_shaped_timeline(client, monkeypatch):
+    from langchain_core.messages import AIMessage, HumanMessage
+    monkeypatch.setattr(main, "thread_messages", lambda *a: [HumanMessage("go"), AIMessage("hmm")])
+    monkeypatch.setattr(main, "is_awaiting_approval", lambda *a: True)
+    body = client.get("/reconciliation/EXC-1/steps").json()
+    assert body["exceptionId"] == "EXC-1" and body["awaitingApproval"] is True
+    assert [s["kind"] for s in body["steps"]] == ["note", "thought"]
+
+
+def test_steps_before_the_agent_is_built_is_503(monkeypatch):
+    monkeypatch.setattr(main, "RECON_AGENT", None)
+    assert TestClient(main.app).get("/reconciliation/EXC-1/steps").status_code == 503

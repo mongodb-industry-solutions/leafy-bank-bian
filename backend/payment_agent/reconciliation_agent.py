@@ -515,6 +515,54 @@ def _config(exception_id: str) -> dict:
     return {"configurable": {"thread_id": exception_id}}
 
 
+# Graph-state keys a tool may receive via `InjectedState`; never part of what the model chose.
+_INJECTED_ARG_KEYS = {"state"}
+_TOOL_RESULT_MAX = 600
+_NOTE_MAX = 300
+
+
+def _text_of(content: Any) -> str:
+    """A message's text: a plain string, or the text blocks of a content list."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b if isinstance(b, str) else b.get("text", "")
+                         for b in content
+                         if isinstance(b, str) or (isinstance(b, dict) and b.get("type") == "text"))
+    return ""
+
+
+def _step(kind: str, text: Optional[str] = None, tool: Optional[str] = None,
+          args: Optional[dict] = None) -> dict:
+    return {"kind": kind, "text": text, "tool": tool, "args": args}
+
+
+def messages_to_steps(messages: list) -> list[dict]:
+    """Shape a thread's messages into the read-only thinking timeline (plan E)."""
+    steps = []
+    for msg in messages:
+        kind = getattr(msg, "type", None)
+        if kind == "ai":
+            text = _clean_text(_text_of(msg.content))
+            if text:
+                steps.append(_step("thought", text=text))
+            for call in getattr(msg, "tool_calls", None) or []:
+                args = {k: v for k, v in (call.get("args") or {}).items() if k not in _INJECTED_ARG_KEYS}
+                steps.append(_step("tool_call", tool=call.get("name"), args=args))
+        elif kind == "tool":
+            steps.append(_step("tool_result", text=_text_of(msg.content)[:_TOOL_RESULT_MAX],
+                               tool=getattr(msg, "name", None)))
+        elif kind == "human":
+            steps.append(_step("note", text=_text_of(msg.content)[:_NOTE_MAX]))
+    return steps
+
+
+def thread_messages(agent: Any, exception_id: str) -> list:
+    """The checkpointed messages of an exception's thread; empty when there is no thread."""
+    state = agent.get_state(_config(exception_id))
+    return list((state.values or {}).get("messages", []))
+
+
 def is_awaiting_approval(agent: Any, exception_id: str) -> bool:
     try:
         return bool(agent.get_state(_config(exception_id)).next)

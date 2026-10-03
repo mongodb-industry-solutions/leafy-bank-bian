@@ -72,11 +72,17 @@ async function proxy(request, { params }) {
   const { path } = await params;
   const backend = BACKEND_BY_PREFIX[path[0]] || CONSENT_BACKEND;
 
+  // The `agent` prefix exists only for proxy routing — the payment_agent service
+  // mounts its routes at root (`/reconciliation/…`), so the segment is dropped
+  // here. Scoped to this branch only: the BIAN services keep their first segment
+  // (defect 2026-07-06 — a prefix convention must never blanket-apply).
+  const segments = path[0] === "agent" ? path.slice(1) : path;
+
   // BIAN services (accounts/transactions/ledger) mount their routes at root.
   // Only the open-finance monolith fallback serves under /api/v1, so prepend
   // that prefix solely for unmapped (CONSENT_BACKEND) routes.
   const apiPrefix = BACKEND_BY_PREFIX[path[0]] ? "" : "/api/v1";
-  let backendPath = `${apiPrefix}/${path.join("/")}`;
+  let backendPath = `${apiPrefix}/${segments.join("/")}`;
 
   // Preserve trailing slash for FastAPI (avoids 307 redirects)
   if (request.nextUrl.pathname.endsWith("/")) {

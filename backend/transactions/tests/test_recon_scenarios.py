@@ -73,3 +73,66 @@ def test_an_unfunded_bank_refuses_up_front(service, db):
     import pytest
     with pytest.raises(ValueError, match="fund the scenarios"):
         _run(service, db)
+
+
+# --- Plan E: the walkthrough's one-wire-per-click route -------------------------------------
+
+def test_run_one_initiates_exactly_one_wire_with_its_lever(service, db):
+    _fund(db)
+    out = recon_scenarios.run_one(service, "R1")
+    assert db["payments"].count_documents({}) == 1
+    doc = db["payments"].find_one({"paymentId": out["paymentId"]})
+    assert doc["chargeBearer"] == "DEBT"
+    assert doc["simulatedStatementOutcome"] == camt053.FEE_DEDUCTED
+    assert doc["lifecycle"]["settlementStatus"] != "SETTLED", "no settle on initiate"
+    assert out["bic"] == "BARCGB22" and out["includeOrphan"] is False
+
+
+def test_r5_and_timing_lag_initiate_clean_wires(service, db):
+    _fund(db)
+    r5 = recon_scenarios.run_one(service, "R5")
+    tl = recon_scenarios.run_one(service, "TL")
+    assert r5["includeOrphan"] is True and tl["includeOrphan"] is False
+    assert r5["statementOutcome"] == tl["statementOutcome"] == camt053.CLEAN
+    assert tl["bic"] == "UBSWCHZH" and tl["chargeBearer"] == "SHAR"
+    for p in (r5, tl):
+        doc = db["payments"].find_one({"paymentId": p["paymentId"]})
+        assert doc["fraud"]["decision"] == "APPROVED"
+
+
+def test_run_one_funds_check_uses_only_that_scenarios_amount(service, db):
+    _fund(db, amount=5_000.0)  # below TOTAL, above R1's 4,850
+    assert recon_scenarios.run_one(service, "R1")["paymentId"]
+
+
+def _request(service, db):
+    from types import SimpleNamespace
+    state = SimpleNamespace(payments_service=service, connection=FakeConnection(db),
+                            db_name="leafy_bank_bian")
+    return SimpleNamespace(app=SimpleNamespace(state=state))
+
+
+def test_route_refuses_an_unknown_scenario_with_422(service, db):
+    import pytest
+    from fastapi import HTTPException
+    from api_models import ReconScenarioRequest
+    from routers.workflow import initiate_recon_scenario
+
+    with pytest.raises(HTTPException) as e:
+        initiate_recon_scenario(ReconScenarioRequest(scenario="R3"), _request(service, db))
+    assert e.value.status_code == 422
+
+
+def test_settle_due_route_settles_the_initiated_wire(service, db):
+    import json
+    from api_models import ReconScenarioRequest
+    from routers.workflow import initiate_recon_scenario, settle_due
+
+    _fund(db)
+    req = _request(service, db)
+    body = json.loads(initiate_recon_scenario(ReconScenarioRequest(scenario="R2"), req).body)
+    assert json.loads(settle_due(req).body) == {"settled": 1}
+    doc = db["payments"].find_one({"paymentId": body["paymentId"]})
+    assert doc["lifecycle"]["settlementStatus"] == "SETTLED"
+    assert set(body) == {"scenario", "paymentId", "status", "amount", "chargeBearer",
+                         "statementOutcome", "bic", "bankName", "includeOrphan"}

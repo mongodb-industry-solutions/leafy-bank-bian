@@ -18,7 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from api_models import ExceptionResolveRequest, UtaResolveRequest
+from api_models import ExceptionResolveRequest, ReconScenarioRequest, UtaResolveRequest
 from process.exceptions import ExceptionActionNotLegal, ExceptionConflict, ExceptionNotFound
 from routers._util import to_json_response
 from services import workflow_read_service
@@ -212,3 +212,27 @@ def advance_statement_cycle(request: Request) -> JSONResponse:
     return to_json_response({"generated": doc is not None,
                              "paymentMessageId": doc and doc["paymentMessageId"],
                              "entryCount": len(doc["entries"]) if doc else 0})
+
+
+# Plan E — the scenario walkthrough: one wire per click, then settle on demand.
+@router.post("/demo/recon-scenario")
+def initiate_recon_scenario(body: ReconScenarioRequest, request: Request) -> JSONResponse:
+    """Initiate one walkthrough scenario's wire. No settle, no statement."""
+    from contexts.financial_gateway.application import recon_scenarios
+
+    if body.scenario not in recon_scenarios.WALKTHROUGH_SCENARIOS:
+        raise HTTPException(status_code=422, detail=f"unknown scenario {body.scenario!r}")
+    try:
+        return to_json_response(recon_scenarios.run_one(request.app.state.payments_service,
+                                                        body.scenario))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/demo/settle-due")
+def settle_due(request: Request) -> JSONResponse:
+    """Settle every captured wire now (the settlement worker's job, without its 30s wait)."""
+    from contexts.payment_settlement import settle
+
+    connection, db_name = _deps(request)
+    return to_json_response({"settled": settle.complete_due(connection, db_name, delay_seconds=0)})

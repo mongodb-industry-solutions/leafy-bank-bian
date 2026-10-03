@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from bedrock import bedrock_model
 from database.connection import MongoDBConnection
 from reconciliation_agent import (build_reconciliation_agent, investigate, is_awaiting_approval,
-                                  resume)
+                                  messages_to_steps, resume, thread_messages)
 from reconciliation_worker import start_reconciliation_worker
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -100,6 +100,20 @@ def get_investigation(exception_id: str) -> dict:
         return {"exceptionId": exception_id, "agent": None}
     doc = _DB["exceptions"].find_one({"exceptionId": exception_id}, {"_id": 0, "agent": 1})
     return {"exceptionId": exception_id, "agent": (doc or {}).get("agent")}
+
+
+@app.get("/reconciliation/{exception_id}/steps")
+def get_investigation_steps(exception_id: str) -> dict:
+    """The agent's thinking timeline for one exception, read from its checkpointed thread.
+    Read-only; the walkthrough polls it while the agent investigates. 404 before any run."""
+    if RECON_AGENT is None:
+        raise HTTPException(status_code=503, detail="Reconciliation agent not ready.")
+    messages = thread_messages(RECON_AGENT, exception_id)
+    if not messages:
+        raise HTTPException(status_code=404, detail=f"No agent thread for {exception_id}.")
+    return {"exceptionId": exception_id,
+            "awaitingApproval": is_awaiting_approval(RECON_AGENT, exception_id),
+            "steps": messages_to_steps(messages)}
 
 
 class ApproveRequest(BaseModel):

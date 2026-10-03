@@ -487,3 +487,26 @@ def test_the_same_exception_is_never_run_twice_at_once():
 ])
 def test_every_demo_scenario_reaches_its_action(category, cause, bearer, needed):
     assert needed in policy.allowed_actions(category, cause, bearer)
+
+
+# --- Plan E: messages → thinking-timeline steps ---------------------------------------------
+
+def test_messages_to_steps_shapes_each_message_kind():
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from reconciliation_agent import messages_to_steps
+
+    steps = messages_to_steps([
+        HumanMessage("Investigate EXC-1 " + "x" * 400),
+        AIMessage(content=[{"type": "text", "text": "Checking the trace.</invoke>"},
+                           {"type": "tool_use", "id": "t1", "name": "payment_trace_lookup", "input": {}}],
+                  tool_calls=[{"name": "payment_trace_lookup", "args": {"state": {}, "k": 1}, "id": "t1"}]),
+        ToolMessage("y" * 900, tool_call_id="t1", name="payment_trace_lookup"),
+        AIMessage(content="", tool_calls=[{"name": "propose_action", "args": {"action": "LINK"}, "id": "t2"}]),
+    ])
+
+    assert [s["kind"] for s in steps] == ["note", "thought", "tool_call", "tool_result", "tool_call"]
+    assert len(steps[0]["text"]) == 300
+    assert steps[1]["text"] == "Checking the trace."
+    assert steps[2] == {"kind": "tool_call", "text": None, "tool": "payment_trace_lookup", "args": {"k": 1}}
+    assert steps[3]["tool"] == "payment_trace_lookup" and len(steps[3]["text"]) == 600
+    assert steps[4]["args"] == {"action": "LINK"}
