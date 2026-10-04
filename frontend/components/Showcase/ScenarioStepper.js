@@ -28,7 +28,7 @@ const generateStatement = (includeOrphan) =>
   });
 
 /** Runs one step's backend action. Returns { patch, note } or throws with the error text. */
-async function runAction(kind, scenarioKey) {
+async function runAction(kind, scenarioKey, paymentId) {
   if (kind === "initiate") {
     const { data, error } = await coreApi("workflow/demo/recon-scenario", {
       method: "POST",
@@ -64,6 +64,10 @@ async function runAction(kind, scenarioKey) {
       return { patch: {}, note: "This wire is already on a statement." };
     }
     const orphans = data.orphanCount ? ` (${data.orphanCount} unknown)` : "";
+    // The agent scheduled its recheck minutes ahead; the new statement is the reason to look now.
+    if (kind === "statementLate" && paymentId) {
+      await agentApi("reconciliation/wake", null, { method: "POST", body: { paymentId } });
+    }
     const patch = kind === "statementLate" ? {} : { statementId: data.paymentMessageId };
     return {
       patch,
@@ -222,7 +226,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     setRunning(true);
     setError(null);
     try {
-      const { patch, note: n } = step.run ? await runAction(step.run, scenarioKey) : { patch: {}, note: null };
+      const { patch, note: n } = step.run ? await runAction(step.run, scenarioKey, ctx.paymentId) : { patch: {}, note: null };
       setCtx((c) => ({ ...c, ...patch }));
       setNote(n);
       setIndex((i) => Math.min(i + 1, steps.length - 1));

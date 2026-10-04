@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from dotenv import load_dotenv
@@ -91,6 +92,24 @@ def reconciliation_investigate(req: InvestigateRequest) -> dict:
         return {"exceptionId": req.exceptionId, "agent": None}
     agent_block = investigate(RECON_AGENT, _DB, req.exceptionId, req.paymentId)
     return {"exceptionId": req.exceptionId, "agent": agent_block}
+
+
+class WakeRequest(BaseModel):
+    paymentId: str
+
+
+@app.post("/reconciliation/wake")
+def wake_scheduled_rechecks(req: WakeRequest) -> dict:
+    """New evidence arrived (e.g. a late statement): bring the agent's scheduled recheck for
+    this payment forward to now, so the next sweep (<= RECON_AGENT_SWEEP_SECONDS) runs it
+    instead of waiting out the policy delay. Touches only exceptions that already have a
+    pending nextCheckAt; the agent still decides the outcome."""
+    if _DB is None:
+        raise HTTPException(status_code=503, detail="Reconciliation agent not ready.")
+    res = _DB["exceptions"].update_many(
+        {"paymentId": req.paymentId, "status": "OPEN", "agent.nextCheckAt": {"$ne": None}},
+        {"$set": {"agent.nextCheckAt": datetime.now(timezone.utc)}})
+    return {"paymentId": req.paymentId, "woken": res.modified_count}
 
 
 @app.get("/reconciliation/{exception_id}")

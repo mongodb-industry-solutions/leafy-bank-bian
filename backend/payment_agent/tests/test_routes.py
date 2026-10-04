@@ -60,3 +60,22 @@ def test_steps_returns_the_shaped_timeline(client, monkeypatch):
 def test_steps_before_the_agent_is_built_is_503(monkeypatch):
     monkeypatch.setattr(main, "RECON_AGENT", None)
     assert TestClient(main.app).get("/reconciliation/EXC-1/steps").status_code == 503
+
+
+# --- wake: new evidence brings a scheduled recheck forward ---------------------------------
+
+def test_wake_pulls_only_pending_rechecks_forward(client, monkeypatch):
+    calls = []
+
+    class _Coll:
+        def update_many(self, query, update):
+            calls.append((query, update))
+            return type("R", (), {"modified_count": 1})()
+
+    monkeypatch.setattr(main, "_DB", {"exceptions": _Coll()})
+    r = client.post("/reconciliation/wake", json={"paymentId": "PAY-1"})
+    assert r.json() == {"paymentId": "PAY-1", "woken": 1}
+    query, update = calls[0]
+    assert query["paymentId"] == "PAY-1" and query["status"] == "OPEN"
+    assert query["agent.nextCheckAt"] == {"$ne": None}
+    assert "agent.nextCheckAt" in update["$set"]
