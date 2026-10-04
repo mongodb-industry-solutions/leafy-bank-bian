@@ -1052,23 +1052,6 @@ export default function InitiateWizard({ onInitiated }) {
                     )}
                   </div>
                 </div>
-
-                <div className={styles.infoBox}>
-                  <div className={styles.infoBoxTitle}>Phase information</div>
-                  <div>
-                    <Badge variant="green">Phase 1</Badge> Wires, Internal Transfer
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    <Badge variant="lightgray">Phase 2</Badge> ACH, Cards
-                  </div>
-                </div>
-
-                {isWire(form) && (
-                  <Banner variant="info">
-                    External wires are captured and validated, then held at SUBMITTED — rail
-                    execution arrives in stage 5.
-                  </Banner>
-                )}
               </div>
             </SectionCard>
           </div>

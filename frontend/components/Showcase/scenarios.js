@@ -57,12 +57,12 @@ export const SCENARIOS = [
         "beneficiary may legitimately receive slightly less.",
       settle: "Barclays confirms settlement.",
       glpost: "Our books say 3,275.00 left our nostro account.",
-      statement: "Barclays's statement shows 3,250.00: the same 25.00 fee as in R1.",
-      match: "A 25.00 RECONCILIATION_DISCREPANCY opens, the same as in R1.",
+      statement: "Barclays's statement shows 3,250.00: the same 25.00 fee as in the sender-pays scenario.",
+      match: "A 25.00 RECONCILIATION_DISCREPANCY opens, the same as in the sender-pays scenario.",
       investigate:
         "The agent reaches the same cause, FEE, but this time the bearer is SHAR. The " +
         "beneficiary carries the fee, so there is nothing to book. Policy allows only " +
-        "ACCEPT_DISCREPANCY. Same symptom as R1, different correct answer.",
+        "ACCEPT_DISCREPANCY. Same symptom as the sender-pays case, different correct answer.",
       approve: "Approving accepts the discrepancy. No ledger entry is written, by design.",
       verify:
         "The exception is closed and the payment is RECONCILED, with no correcting journal. " +

@@ -17,7 +17,7 @@ import { usePaymentsList } from "@/lib/api/hooks";
 import { coreApi, workflowApi } from "@/lib/api/client";
 import { fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 // Mirrors the spec's rail enum. Kept as a literal rather than fetched: it is a contract
 // the backend validates against, not data.
@@ -202,13 +202,6 @@ function beneficiaryOf(p) {
 // settlement is even initiated." Surface posting + settlement as a muted subline so a
 // settled-but-unposted payment reads "posting pending · settlement —" instead of just
 // SETTLED. Reconciliation stays in the deep-dive (terminal, not a scan axis).
-function axisLabel(v) {
-  return v ? String(v).toLowerCase() : "—";
-}
-function statusAxes(p) {
-  return `posting ${axisLabel(p.lifecycle?.postingStatus)} · settlement ${axisLabel(p.lifecycle?.settlementStatus)}`;
-}
-
 // Stage 9 — the Operations queue row shows the exception reason + the discrepancy line
 // (R15's mockup: "Payment $25,000 / Settlement $24,975 — $25 discrepancy"). The joined
 // `exception` doc (doc 24 §3 step 7) carries the category + detail; render it as a subline
@@ -219,23 +212,34 @@ function fmtDiscrepancy(amount) {
   const n = Number(amount);
   return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
 }
+const humanize = (code) => {
+  const t = String(code || "").toLowerCase().replace(/_/g, " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 function exceptionLine(exc) {
   if (!exc) return "";
   const d = exc.detail || {};
   if (exc.category === "ORPHANED_SETTLEMENT") {
-    return `ORPHANED_SETTLEMENT · statement ref ${d.reference || "—"}`;
+    return `Orphaned settlement · statement ref ${d.reference || "—"}`;
   }
   if (exc.category === "DUPLICATE_SIGNAL" && d.duplicateOf) {
-    return `DUPLICATE_SIGNAL · resembles ${d.duplicateOf}`;
+    return `Duplicate signal · resembles ${d.duplicateOf}`;
   }
   const disc = fmtDiscrepancy(d.discrepancyAmount);
   if (disc) {
-    return `${exc.category} · ${disc} discrepancy`;
+    return `${humanize(exc.category)} · ${disc} discrepancy`;
   }
   if (d.returnCode) {
-    return `${exc.category} · return ${d.returnCode}`;
+    return `${humanize(exc.category)} · return ${d.returnCode}`;
   }
-  return exc.category;
+  return humanize(exc.category);
+}
+
+function resolvedLine(exc) {
+  const action = exc.resolution?.action;
+  return `${exc.status === "DISMISSED" ? "Dismissed" : "Resolved"}${
+    action ? ` · ${ACTION_LABELS[action] || humanize(action)}` : ""
+  }`;
 }
 
 // Friendly labels for a resolved exception's action — mirrors the map in PaymentDeepDive.
@@ -247,6 +251,7 @@ const ACTION_LABELS = {
   RECHECK: "Statement line arrived",
   REPAIR: "Repair",
   RETURN: "Return",
+  POST_ADJUSTMENT: "Post adjustment",
 };
 
 /**
@@ -284,7 +289,7 @@ function InboundTrigger({ onRefresh, onJump }) {
 
   return (
     <div className={styles.inboundTrigger}>
-      <Button size="xsmall" variant="primary" disabled={busy} onClick={fire}>
+      <Button size="small" leftGlyph={<Icon glyph="Import" />} disabled={busy} onClick={fire}>
         {busy ? "Arriving…" : "Simulate incoming wire"}
       </Button>
       {error && <span className={styles.inboundError}>{error}</span>}
@@ -297,12 +302,12 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
     <div className={styles.tableWrap}>
       <table className={styles.table}>
         <colgroup>
-          <col style={{ width: "34%" }} />
-          <col style={{ width: "20%" }} />
+          <col style={{ width: "28%" }} />
+          <col style={{ width: "18%" }} />
           <col style={{ width: "16%" }} />
-          <col style={{ width: "12%" }} />
+          <col style={{ width: "14%" }} />
           <col style={{ width: "8%" }} />
-          <col style={{ width: "10%" }} />
+          <col style={{ width: "16%" }} />
         </colgroup>
         <thead>
           <tr>
@@ -326,7 +331,7 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
             return (
               <tr
                 key={p.paymentId}
-                className={`${styles.row} ${active ? styles.rowActive : ""} ${excClosed ? styles.rowResolved : ""}`}
+                className={`${styles.row} ${active ? styles.rowActive : ""}`}
                 onClick={open}
                 // Keyboard parity: the row is the control, so it must be reachable and
                 // activatable without a pointer.
@@ -368,21 +373,31 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                 </td>
                 <td><span className={styles.railTag}>{p.rail || "—"}</span></td>
                 <td>
-                  <StatusPill status={p.status} />
-                  <div className={styles.statusAxes}>{statusAxes(p)}</div>
-                  {p.exception && excOpen && (
-                    <div className={styles.exceptionReason} title={exceptionLine(p.exception)}>
-                      {exceptionLine(p.exception)}
-                    </div>
-                  )}
-                  {p.exception && excClosed && (
-                    <div className={styles.exceptionResolved}>
-                      {p.exception.status === "DISMISSED" ? "Dismissed" : "Resolved"}
-                      {p.exception.resolution?.action
-                        ? ` · ${ACTION_LABELS[p.exception.resolution.action] || p.exception.resolution.action}`
-                        : ""}
-                    </div>
-                  )}
+                  <div className={styles.statusCell}>
+                    <StatusPill status={p.status} />
+                    {/* A symbol, not a sentence: the full reason is the tooltip, and the
+                        deep-dive carries the detail. */}
+                    {p.exception && excOpen && (
+                      <span
+                        className={styles.exceptionIconOpen}
+                        title={exceptionLine(p.exception)}
+                        aria-label={exceptionLine(p.exception)}
+                        role="img"
+                      >
+                        <Icon glyph="Warning" size={16} />
+                      </span>
+                    )}
+                    {p.exception && excClosed && (
+                      <span
+                        className={styles.exceptionIconResolved}
+                        title={resolvedLine(p.exception)}
+                        aria-label={resolvedLine(p.exception)}
+                        role="img"
+                      >
+                        <Icon glyph="Checkmark" size={16} />
+                      </span>
+                    )}
+                  </div>
                 </td>
               </tr>
             );
@@ -402,6 +417,8 @@ export default function PaymentsLens({
   const [filters, setFilters] = useState({
     status: "", rail: "", customerId: "", from: "", to: "", skip: 0,
   });
+  // Detailed filters are tucked away: search covers the common case.
+  const [showFilters, setShowFilters] = useState(false);
 
   // The Activity list — every payment, newest first. Rows carry their joined exception
   // (open or latest resolved) so failed/returned payments show the reason + discrepancy
@@ -459,9 +476,14 @@ export default function PaymentsLens({
           </div>
           <div className={styles.panelHeadRight}>
             <InboundTrigger onRefresh={onRefresh} onJump={onSelect} />
-            <span className={styles.resultCount}>
-              {loading ? "Loading…" : `${total} ${total === 1 ? "payment" : "payments"}`}
-            </span>
+            <Button
+              size="small"
+              leftGlyph={<Icon glyph="Filter" />}
+              aria-expanded={showFilters}
+              onClick={() => setShowFilters((v) => !v)}
+            >
+              {activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
+            </Button>
             <Button size="small" leftGlyph={<Icon glyph="Refresh" />} onClick={onRefresh}>
               Refresh
             </Button>
@@ -475,14 +497,16 @@ export default function PaymentsLens({
               setFilters((f) => ({ ...f, customerId: v, skip: 0 }))
             }
           />
-          <div className={styles.filterBar}>
-            <Filters value={filters} onChange={setFilters} />
-            {activeFilterCount > 0 && (
-              <Button size="xsmall" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            )}
-          </div>
+          {showFilters && (
+            <div className={styles.filterBar}>
+              <Filters value={filters} onChange={setFilters} />
+              {activeFilterCount > 0 && (
+                <Button size="xsmall" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         {error && (

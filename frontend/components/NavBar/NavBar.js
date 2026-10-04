@@ -7,7 +7,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { Body } from "@leafygreen-ui/typography";
 import styles from "./NavBar.module.css";
 import { useUser } from "@/lib/context/UserContext";
-import { usePaymentsWorkflow, WORKFLOW_LENS } from "@/lib/context/PaymentsWorkflowContext";
 import Icon from "@leafygreen-ui/icon";
 import UserInfo from "./UserInfo";
 
@@ -45,13 +44,9 @@ const NavBarContent = ({ bianModelUrl }) => {
     const router = useRouter();
     const isGlMonitor = pathname?.startsWith("/gl-pipeline-monitor");
     const isPaymentsWorkflow = pathname?.startsWith("/payments-workflow");
-    // /showcase is the third tab of this surface: the same lens bar renders on
-    // both routes — Payments/Activity are lenses on /payments-workflow, and on
-    // /showcase they navigate back there (the lens state lives in this shell's
-    // provider, which stays mounted across the client-side navigation).
+    // /showcase is the second tab of this surface; the same tab bar renders on both routes.
     const isShowcase = pathname?.startsWith("/showcase");
     const isWorkflowSurface = isPaymentsWorkflow || isShowcase;
-    const { lens: workflowLens, setLens: setWorkflowLens } = usePaymentsWorkflow();
     // Before a user is chosen (welcome modal), show only the logo — no nav links or user controls.
     // The GL monitor runs as an implicit ops user, so it's always treated as signed in.
     // selectedUser is set as soon as the login flow starts (to prefetch data in the
@@ -81,30 +76,9 @@ const NavBarContent = ({ bianModelUrl }) => {
                 )}
                 {isWorkflowSurface && (
                     <>
-                        <button
-                            type="button"
-                            className={styles.navLink}
-                            onClick={() => {
-                                setWorkflowLens(WORKFLOW_LENS.PAYMENTS);
-                                // A no-op push when already on /payments-workflow; from
-                                // /showcase it returns to the lens surface.
-                                router.push("/payments-workflow");
-                            }}
-                            aria-pressed={isPaymentsWorkflow && workflowLens === WORKFLOW_LENS.PAYMENTS}
-                        >
-                            <Body weight="medium" className={isPaymentsWorkflow && workflowLens === WORKFLOW_LENS.PAYMENTS ? styles.navLinkActive : ""}>Payments</Body>
-                        </button>
-                        <button
-                            type="button"
-                            className={styles.navLink}
-                            onClick={() => {
-                                setWorkflowLens(WORKFLOW_LENS.ACTIVITY);
-                                router.push("/payments-workflow");
-                            }}
-                            aria-pressed={isPaymentsWorkflow && workflowLens === WORKFLOW_LENS.ACTIVITY}
-                        >
-                            <Body weight="medium" className={isPaymentsWorkflow && workflowLens === WORKFLOW_LENS.ACTIVITY ? styles.navLinkActive : ""}>Activity</Body>
-                        </button>
+                        <Link href="/payments-workflow" className={styles.navLink}>
+                            <Body weight="medium" className={isPaymentsWorkflow ? styles.navLinkActive : ""}>Payments</Body>
+                        </Link>
                         {/* The /showcase control room (plan D) — a full-page route on this
                             same surface, so it is a Link, not a lens toggle. The page mints
                             its own operator session. */}

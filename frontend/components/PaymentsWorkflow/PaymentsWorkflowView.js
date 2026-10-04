@@ -2,81 +2,77 @@
 
 // Client shell for the Payments Workflow route (Payments Analyst persona).
 //
-// Three lenses, switched from the NavBar top bar (not a local toggle) via
-// PaymentsWorkflowContext so the nav and this page share one source of truth:
-//   * Payments   — the initiation wizard. On submit, the wizard's "View lifecycle" action
-//     swaps in the PaymentDeepDive for the just-created payment *in this same lens*, so the
-//     analyst watches the saga without hopping to Activity. Back returns to a fresh form.
-//   * Activity   — the historical list; selecting a payment shows its lifecycle. Failed /
-//     returned payments show their exception reason + discrepancy subline inline (the
-//     resolve actions live in the deep-dive), so the former Operations queue folded in here.
+// One surface: the payment history list, with its lifecycle deep-dive on selection. A
+// persistent "New payment" button (bottom centre, like Leafy Bank's Send Money) opens the
+// initiation wizard in a modal over the list. When the wizard's "View lifecycle" action
+// fires, the modal closes and the new payment is selected in the list.
 //
-// Owns the per-lens selected payment and the single refresh key — the one-owner rule
-// GlPipelineView establishes. No page-level poll: the list is a surface an analyst reads and
-// filters, and refreshing it under a cursor is hostile. The only thing that changes while
-// you watch it is the selected payment's ledger trace, and PaymentDeepDive already owns that
-// poll (usePipelineTrace, self-terminating).
-import { useCallback, useEffect, useState } from "react";
+// Owns the selected payment and the single refresh key — the one-owner rule GlPipelineView
+// establishes. No page-level poll: the list is a surface an analyst reads and filters, and
+// refreshing it under a cursor is hostile. The only thing that changes while you watch it is
+// the selected payment's ledger trace, and PaymentDeepDive already owns that poll.
+import { useCallback, useState } from "react";
+import Button from "@leafygreen-ui/button";
+import Icon from "@leafygreen-ui/icon";
 
 import styles from "./PaymentsWorkflow.module.css";
 import InitiateWizard from "./InitiateWizard";
 import PaymentsLens from "./PaymentsLens";
-import PaymentDeepDive from "./PaymentDeepDive";
-import { usePaymentsWorkflow, WORKFLOW_LENS } from "@/lib/context/PaymentsWorkflowContext";
 
 export default function PaymentsWorkflowView() {
-  const { lens } = usePaymentsWorkflow();
   const [refreshKey, setRefreshKey] = useState(0);
-  // Activity lens: the selected historical payment; null means "show the list".
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
-  // Payments lens: the payment just created via the wizard; null means "show the wizard".
-  const [initiatePaymentId, setInitiatePaymentId] = useState(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
-  // The wizard's "View lifecycle" action: show the deep dive for the new payment in place,
-  // staying on the Payments lens — do not jump to Activity.
   const handleInitiated = useCallback(
     (paymentId) => {
-      if (paymentId) setInitiatePaymentId(paymentId);
+      setWizardOpen(false);
+      if (paymentId) setSelectedPaymentId(paymentId);
       refresh();
     },
     [refresh]
   );
 
-  // Switching lens (from the NavBar) resets that lens's selection so neither re-shows a
-  // stale lifecycle. Keyed on `lens`, not the trace, so re-polls don't clobber it.
-  useEffect(() => {
-    setSelectedPaymentId(null);
-    setInitiatePaymentId(null);
-  }, [lens]);
-
   return (
     <div className={styles.pwRoot}>
       <div id="pw-lens-panel" className={styles.lensPanel}>
-        {lens === WORKFLOW_LENS.PAYMENTS &&
-          (initiatePaymentId ? (
-            <PaymentDeepDive
-              paymentId={initiatePaymentId}
-              refreshKey={refreshKey}
-              onBack={() => setInitiatePaymentId(null)}
-            />
-          ) : (
-            <InitiateWizard onInitiated={handleInitiated} />
-          ))}
-
-        {lens === WORKFLOW_LENS.ACTIVITY && (
-          <PaymentsLens
-            // Remounting on lens change resets filters and paging, which is what entering
-            // Activity should do.
-            key={lens}
-            refreshKey={refreshKey}
-            onRefresh={refresh}
-            selectedPaymentId={selectedPaymentId}
-            onSelect={setSelectedPaymentId}
-          />
-        )}
+        <PaymentsLens
+          refreshKey={refreshKey}
+          onRefresh={refresh}
+          selectedPaymentId={selectedPaymentId}
+          onSelect={setSelectedPaymentId}
+        />
       </div>
+
+      <div className={styles.newPaymentBar}>
+        <Button variant="baseGreen" leftGlyph={<Icon glyph="Plus" />} onClick={() => setWizardOpen(true)}>
+          New payment
+        </Button>
+      </div>
+
+      {wizardOpen && (
+        <div
+          className={styles.wizardOverlay}
+          role="dialog"
+          aria-modal="true"
+          aria-label="New payment"
+          onMouseDown={(e) => e.target === e.currentTarget && setWizardOpen(false)}
+        >
+          <div className={styles.wizardDialog}>
+            <button
+              type="button"
+              className={styles.wizardClose}
+              aria-label="Close"
+              onClick={() => setWizardOpen(false)}
+            >
+              <Icon glyph="X" />
+            </button>
+            <InitiateWizard onInitiated={handleInitiated} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

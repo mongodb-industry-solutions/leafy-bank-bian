@@ -28,7 +28,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--pw-text);
   background: var(--pw-page);
-  padding: 24px;
+  padding: 24px 24px 88px; /* bottom room for the fixed New payment button */
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -50,6 +50,59 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+/* ── new-payment launcher + wizard modal ── */
+
+.newPaymentBar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999;
+}
+
+/* Rendered inside .pwRoot (not portalled) so the --pw-* tokens the wizard uses still resolve. */
+.wizardOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(28, 45, 56, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow-y: auto;
+  padding: 48px 24px;
+}
+
+.wizardDialog {
+  position: relative;
+  width: 100%;
+  max-width: 1400px;
+}
+
+.wizardClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--pw-muted);
+  line-height: 0;
+}
+
+.wizardClose:hover {
+  background: var(--pw-surface);
+}
+
+/* The wizard's header actions (Clear / Autopopulate / Review / Submit) are inside the
+   dialog, so reserve room on the right for the close button instead of overlapping it. */
+.wizardDialog :where(.createHeader) {
+  padding-right: 40px;
 }
 
 /* ── generic panel ── */
@@ -102,13 +155,6 @@
   align-items: center;
   gap: 12px;
   flex: none;
-}
-
-.resultCount {
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--pw-muted);
-  white-space: nowrap;
 }
 
 /* The manual incoming-wire trigger (PaymentsLens header). Self-contained so the header
@@ -240,9 +286,8 @@
   white-space: nowrap;
 }
 
-/* Status (last column) sits flush right alongside the right-aligned Amount. */
-.table th:last-child,
-.table td:last-child {
+/* Amount is right-aligned in header and cells alike (the th rule above forces left). */
+.table th.numeric {
   text-align: right;
 }
 
@@ -276,17 +321,24 @@
 
 /* B6: a resolved/dismissed exception dims its row so an operator scanning the Operations
  * queue can tell open work from closed history at a glance. */
-.rowResolved {
-  opacity: 0.6;
+.statusCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.exceptionResolved {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--pw-muted, #9ca3af);
-  margin-top: 2px;
+.exceptionIconOpen,
+.exceptionIconResolved {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.exceptionIconOpen {
+  color: #b86c00; /* amber dark2 — same warning tone the text line used */
+}
+
+.exceptionIconResolved {
+  color: var(--pw-faint);
 }
 
 .mono {
@@ -1519,30 +1571,8 @@
 /* Muted subline under the list's status pill — the posting + settlement axes (Doina
    Sep 17). Smaller and fainter than the pill so the primary `status` stays the lead,
    with the two lagging axes as supporting context ("posting pending · settlement —"). */
-.statusAxes {
-  font-size: 11px;
-  line-height: 14px;
-  color: var(--pw-faint);
-  margin-top: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-transform: lowercase;
-}
-
 /* Stage 9 — the Operations queue row's exception reason (R15's $25-discrepancy line).
    Warn-toned so it reads as the WHY the row is queued, distinct from the neutral axis subline. */
-.exceptionReason {
-  font-size: 11px;
-  line-height: 14px;
-  color: #b86c00; /* LeafyGreen amber dark2 — warning, palette-only */
-  margin-top: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 600;
-}
-
 /* ── Stage 9 Exceptions panel (doc 24 §3 step 8) ── */
 .exceptionsPanel {
   display: flex;

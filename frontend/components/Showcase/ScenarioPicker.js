@@ -1,7 +1,6 @@
 "use client";
 
 import Card from "@leafygreen-ui/card";
-import Badge from "@leafygreen-ui/badge";
 import { H3, Body } from "@leafygreen-ui/typography";
 import { SCENARIOS } from "./scenarios";
 import styles from "./Showcase.module.css";
@@ -19,7 +18,6 @@ export default function ScenarioPicker({ onPick }) {
           onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onPick(s.key)}
         >
           <div className={styles.cardHead}>
-            <Badge variant="blue">{s.key}</Badge>
             <H3 className={styles.cardTitle}>{s.title}</H3>
           </div>
           <Body>{s.story}</Body>

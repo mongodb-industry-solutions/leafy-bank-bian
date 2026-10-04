@@ -234,7 +234,6 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
       <Card className={styles.narration}>
         <div className={styles.narrationText}>
           <div className={styles.narrationHead}>
-            <Badge variant="blue">{scenario.key}</Badge>
             <H2 className={styles.narrationTitle}>
               {index + 1}. {step.title}
             </H2>
