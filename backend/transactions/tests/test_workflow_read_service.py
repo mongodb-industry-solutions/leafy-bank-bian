@@ -134,8 +134,25 @@ class FakeArtifacts:
                 return out
         return None
 
+    @staticmethod
+    def _resolve(doc, path):
+        """Dotted path; through an array it collects every element's value (Mongo's
+        `entries.simulatedPaymentId` matches when ANY entry matches)."""
+        vals = [doc]
+        for part in path.split("."):
+            nxt = []
+            for v in vals:
+                v = v.get(part) if isinstance(v, dict) else None
+                nxt.extend(v if isinstance(v, list) else [v])
+            vals = nxt
+        return vals
+
     def _matches(self, doc, flt):
         for k, v in flt.items():
+            if "." in k:
+                if not isinstance(v, dict) and v not in self._resolve(doc, k):
+                    return False
+                continue
             actual = doc.get(k)
             if isinstance(v, dict):
                 if "$in" in v and actual not in v["$in"]:
@@ -561,3 +578,20 @@ def test_historical_precedents_never_reach_the_operations_queue():
         out = svc.list_exceptions(conn, "db", status=status)
         assert [i["paymentId"] for i in out["items"]] == ["PAY-9"]
         assert out["total"] == 1
+
+
+def test_get_payment_attaches_the_statement_carrying_its_line_even_with_an_altered_reference():
+    """Stage 8's evidence for the showcase: the camt.053 has `paymentId: null` (it covers
+    many payments), so it must be found by the line's `simulatedPaymentId`, not by
+    `reference` — R2's correspondent rewrites the reference."""
+    statement = {"paymentMessageId": "PM-1", "purpose": "ACCOUNT_STATEMENT", "paymentId": None,
+                 "createdAt": NOW,
+                 "entries": [{"lineNo": 1, "reference": "8EBAA746/LEAFYBK",
+                              "simulatedPaymentId": "PAY-1"},
+                             {"lineNo": 2, "reference": "XYZ", "simulatedPaymentId": None}]}
+    other = {"paymentMessageId": "PM-2", "purpose": "ACCOUNT_STATEMENT", "paymentId": None,
+             "createdAt": NOW, "entries": [{"lineNo": 1, "simulatedPaymentId": "PAY-2"}]}
+    conn = FakeConnection(FakePayments([_payment("PAY-1")]), messages=[statement, other])
+    payment = svc.get_payment(conn, "db", "PAY-1")
+    assert [s["paymentMessageId"] for s in payment["statements"]] == ["PM-1"]
+    assert payment["messages"] == []  # the statement is not one of this payment's own messages

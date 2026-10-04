@@ -218,6 +218,16 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
         .find({"paymentId": payment_id}, {"_id": 0})
         .sort("updatedAt", 1)
     )
+    # Stage 8's evidence: the camt.053 statement(s) carrying this payment's line. Not in
+    # `messages` above because a statement covers many payments (`paymentId` is null).
+    # Keyed on `simulatedPaymentId`, not `reference`: an altered reference (R2) still
+    # belongs to this payment.
+    payment["statements"] = list(
+        connection.get_collection(db_name, "paymentMessages")
+        .find({"purpose": "ACCOUNT_STATEMENT", "entries.simulatedPaymentId": payment_id},
+              {"_id": 0})
+        .sort("createdAt", 1)
+    )
     return payment
 
 

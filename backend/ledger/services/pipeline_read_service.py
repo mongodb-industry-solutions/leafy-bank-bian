@@ -538,4 +538,21 @@ def trace_payment(
         # whose downstream artifacts are not all present yet (PENDING), and for any payment
         # written before stage 8. The UI panel reads this block to render the L646-653 tie-out.
         "reconciliation": _reconciliation_block(payment_id, connection, db_name),
+        # Raw stored documents for the showcase's "written to MongoDB" view. The fields above
+        # keep their shapes for the existing panels; these are the docs exactly as persisted.
+        # Every journal any of this payment's events posted to (principal, fee, settlement,
+        # adjustment), not just the principal's `journalEntry`.
+        "allJournalEntries": _journals_for(all_events, jnl_coll),
+        # Latest stored stage-8 result; `reconciliation` above is recomputed on read.
+        "reconciliationItem": connection.get_collection(db_name, "reconciliationItems").find_one(
+            {"paymentId": payment_id}, {"_id": 0}, sort=[("checkedAt", -1)],
+        ),
     }
+
+
+def _journals_for(events: list, jnl_coll) -> list:
+    ids = [(e.get("postingResult") or {}).get("journalEntryId") for e in events]
+    ids = [i for i in ids if i]
+    if not ids:
+        return []
+    return list(jnl_coll.find({"journalId": {"$in": ids}}, {"_id": 0}))

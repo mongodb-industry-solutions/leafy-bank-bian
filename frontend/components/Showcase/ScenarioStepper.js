@@ -15,6 +15,7 @@ import { usePaymentWorkflow, usePipelineTrace, useWorkflowExceptions } from "@/l
 import { CATEGORY, OVERDUE_SECONDS, scenarioByKey, stepsFor } from "./scenarios";
 import PaymentTracker from "./PaymentTracker";
 import AgentThinking from "./AgentThinking";
+import StepDocuments from "./StepDocuments";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
@@ -266,6 +267,13 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
           </Button>
         </div>
       </Card>
+
+      <StepDocuments
+        steps={steps}
+        index={index}
+        scenarioKey={scenarioKey}
+        sources={{ payment, trace, ownException, orphan, agent, followedException, scenarioKey }}
+      />
 
       <div className={styles.panes}>
         <PaymentTracker init={ctx.init} payment={payment} trace={trace} exceptions={trackedExceptions} />
