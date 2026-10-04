@@ -449,6 +449,21 @@ steps:
       secret_key:
         from_secret: ecr_secret_key
 
+  - name: publish-payment-agent-dev
+    image: plugins/kaniko-ecr
+    settings:
+      create_repository: true
+      registry: 795250896452.dkr.ecr.us-east-1.amazonaws.com
+      repo: industrysolutions/leafy-bank-bian-payment-agent
+      tags:
+        - git-${DRONE_COMMIT_SHA:0:7}-dev
+        - dev-latest
+      dockerfile: Dockerfile.payment_agent
+      access_key:
+        from_secret: ecr_access_key
+      secret_key:
+        from_secret: ecr_secret_key
+
   # ---------- deploy (one combined pod) ----------
   - name: deploy-dev-combined
     image: public.ecr.aws/kanopy/drone-helm:v3
@@ -475,6 +490,7 @@ steps:
         - "sidecarContainers[0].image=795250896452.dkr.ecr.us-east-1.amazonaws.com/industrysolutions/leafy-bank-bian-accounts:git-${DRONE_COMMIT_SHA:0:7}-dev"
         - "sidecarContainers[1].image=795250896452.dkr.ecr.us-east-1.amazonaws.com/industrysolutions/leafy-bank-bian-transactions:git-${DRONE_COMMIT_SHA:0:7}-dev"
         - "sidecarContainers[2].image=795250896452.dkr.ecr.us-east-1.amazonaws.com/industrysolutions/leafy-bank-bian-ledger:git-${DRONE_COMMIT_SHA:0:7}-dev"
+        - "sidecarContainers[3].image=795250896452.dkr.ecr.us-east-1.amazonaws.com/industrysolutions/leafy-bank-bian-payment-agent:git-${DRONE_COMMIT_SHA:0:7}-dev"
       api_server: https://api.staging.corp.mongodb.com
       kubernetes_token:
         from_secret: staging_kubernetes_token

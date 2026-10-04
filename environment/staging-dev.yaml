@@ -7,7 +7,7 @@ ownership:
 
 # Multicontainer dev preview on the staging cluster (branch: integrate-payment-flow).
 # One pod: frontend (main, port 8080) + accounts/transactions/ledger sidecars on
-# localhost 8001/8002/8003. Top-level `env`/`envSecrets` apply to the main (frontend)
+# localhost 8001/8002/8003/8004 (8004 = payment_agent). Top-level `env`/`envSecrets` apply to the main (frontend)
 # container only; each sidecar carries its own env below. The frontend is a Next.js
 # proxy with no direct Mongo access, so it needs no ksec secret — only the sidecars
 # pull MONGODB_URI / LEAFYBANK_DB_NAME / PARTY_AUTH_SECRET from the
@@ -19,6 +19,7 @@ env:
   TRANSACTIONS_BACKEND_URL: http://localhost:8002
   TRANSACTIONS_BASE_URL: http://localhost:8002
   LEDGER_BACKEND_URL: http://localhost:8003
+  AGENTS_BACKEND_URL: http://localhost:8004
   # External shared staging services (open-finance monolith + chatbots) stay as-is.
   CONSENT_BACKEND_URL: http://open-finance-next-gen-web-app:80
   CHATBOT_BACKEND_URL: http://cross-be-pdf-rag-web-app:80
@@ -127,6 +128,42 @@ sidecarContainers:
         value: "500"
       - name: EOD_TOPUP_AMOUNT
         value: "500"
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+  # ---------- payment_agent (LangGraph reconciliation agent over Bedrock) ----------
+  - name: payment-agent
+    containerPort: 8004
+    env:
+      - name: PORT
+        value: "8004"
+      - name: NODE_ENV
+        value: staging
+      - name: MONGODB_URI
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: MONGODB_URI
+      - name: LEAFYBANK_DB_NAME
+        valueFrom:
+          secretKeyRef:
+            name: leafy-bank-bian-dev
+            key: LEAFYBANK_DB_NAME
+      # The agent calls the sibling sidecars over the pod loopback.
+      - name: LEDGER_BASE_URL
+        value: http://localhost:8003
+      - name: TRANSACTIONS_BASE_URL
+        value: http://localhost:8002
+      - name: ENABLE_RECONCILIATION_AGENT
+        value: "true"
+      # Bedrock access comes from the pod's IRSA role (serviceAccount.irsa below).
+      - name: AWS_REGION
+        value: us-east-1
     resources:
       limits:
         cpu: 1000m

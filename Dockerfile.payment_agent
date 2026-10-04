@@ -1,0 +1,21 @@
+FROM python:3.10-slim-buster
+
+ENV GET_POETRY_IGNORE_DEPRECATION=1
+
+WORKDIR /
+
+# No poetry.lock is committed for this service, so the glob keeps COPY from failing and
+# `poetry install` resolves from pyproject.toml.
+COPY backend/payment_agent/pyproject.toml backend/payment_agent/poetry.lock* ./
+
+RUN pip install poetry==1.8.4
+RUN poetry config virtualenvs.in-project true
+RUN poetry install --no-interaction -v --no-cache --no-root
+
+COPY backend/payment_agent/ .
+
+EXPOSE 8080
+
+# The multicontainer dev preview sets PORT=8004 so the agent doesn't collide with the
+# frontend (8080) or the other sidecars in the shared pod network namespace.
+CMD poetry run uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
