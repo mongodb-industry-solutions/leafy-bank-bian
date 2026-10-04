@@ -2098,33 +2098,6 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
   );
 }
 
-/**
- * The three independent fact axes — posting, settlement, reconciliation — that advance
- * alongside `currentState` but not in lockstep with it (research §1.4). A journal's legs
- * can post at different times than the payment settles, so these cannot be folded into the
- * linear timeline. Surfaced as a first-class row under the header, separate from the rail.
- * Null = the axis has not started; renders a neutral "not started" pill.
- */
-function AxesRow({ payment }) {
-  const lc = payment?.lifecycle;
-  const axes = [
-    { label: "Posting", value: lc?.postingStatus },
-    { label: "Settlement", value: lc?.settlementStatus },
-    { label: "Reconciliation", value: lc?.reconciliationStatus },
-  ];
-  return (
-    <div className={styles.axesRow}>
-      <span className={styles.axesHeading}>Independent axes</span>
-      {axes.map((a) => (
-        <div className={styles.axisItem} key={a.label}>
-          <span className={styles.axisLabel}>{a.label}</span>
-          <StatusPill status={a.value} label={a.value || "not started"} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataChanged }) {
   // 2026-09-09 (Kiran): the step-up approval happens HERE, at stage 2, not at initiate. A held
   // payment is resumed from this view; `nudge` bumps into the hook's refresh key so the
@@ -2385,7 +2358,6 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
 
         {stages && (
           <>
-            <AxesRow payment={payment} />
             <MiniStepper
               stages={stages}
               states={states}
