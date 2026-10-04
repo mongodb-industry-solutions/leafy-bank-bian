@@ -56,7 +56,7 @@ export default function StepDocuments({ steps, index, scenarioKey, sources }) {
     <div className={styles.pane}>
       <H3 className={styles.paneTitle}>Written to MongoDB</H3>
       {tabs.length === 0 ? (
-        <Body className={styles.muted}>Each step's documents appear here once it runs.</Body>
+        <Body className={styles.muted}>Each step&apos;s documents appear here once it runs.</Body>
       ) : (
         <Tabs aria-label="Documents written per step" selected={selected} setSelected={setSelected}>
           {tabs.map((s) => (
