@@ -429,6 +429,62 @@ def test_investigate_never_raises():
     assert ra.investigate(_Boom(), db, "EXC-R1", "PAY-R1") is None
 
 
+def test_a_failed_run_is_recorded_and_counted():
+    class _Boom:
+        def invoke(self, *a, **k):
+            raise RuntimeError("Token has expired and refresh failed")
+
+        def get_state(self, cfg):
+            raise RuntimeError("no state")
+    db = _db(_R1)
+    ra.investigate(_Boom(), db, "EXC-R1", "PAY-R1")
+    ra.investigate(_Boom(), db, "EXC-R1", "PAY-R1")
+    error = _agent_doc(db, "EXC-R1")["error"]
+    assert "Token has expired" in error["message"] and error["attempts"] == 2
+
+
+def test_a_crashed_run_is_not_mistaken_for_one_awaiting_approval_and_can_be_retried():
+    class _Flaky(_Script):
+        failing: bool = True
+
+        def _generate(self, *a, **k):
+            if self.failing:
+                raise RuntimeError("Token has expired")
+            return super()._generate(*a, **k)
+    model = _Flaky(responses=[AIMessage(content="ok")])
+    db = _db(_R1)
+    agent = ra.build_reconciliation_agent(model, db, InMemorySaver())
+
+    ra.investigate(agent, db, "EXC-R1", "PAY-R1")
+    assert not ra.is_awaiting_approval(agent, "EXC-R1")
+    assert _agent_doc(db, "EXC-R1")["error"]["attempts"] == 1
+
+    model.failing = False
+    ra.investigate(agent, db, "EXC-R1", "PAY-R1")
+    assert _agent_doc(db, "EXC-R1")["error"] is None
+
+
+def test_a_successful_run_clears_an_earlier_error():
+    db = _db(_R1)
+    db["exceptions"].update_one({"exceptionId": "EXC-R1"}, {"$set": {"agent": {"error": {
+        "message": "x", "at": NOW, "attempts": 1}}}})
+    agent = ra.build_reconciliation_agent(_Script(responses=[AIMessage(content="ok")]), db, InMemorySaver())
+    ra.investigate(agent, db, "EXC-R1", "PAY-R1")
+    assert _agent_doc(db, "EXC-R1")["error"] is None
+
+
+def test_sweep_retries_a_failed_run_after_the_delay_until_the_attempt_cap():
+    q = rw.sweep_query(NOW)
+    base = {"category": policy.CATEGORY_MISSING, "status": "OPEN"}
+
+    def failed(age_seconds, attempts):
+        return {**base, "agent": {"error": {"at": NOW - timedelta(seconds=age_seconds),
+                                            "attempts": attempts}}}
+    assert matches(failed(120, 1), q)
+    assert not matches(failed(10, 1), q)
+    assert not matches(failed(120, ra.MAX_ERROR_ATTEMPTS), q)
+
+
 def test_the_system_prompt_reaches_the_model():
     seen = []
 

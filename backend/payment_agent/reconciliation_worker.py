@@ -30,7 +30,7 @@ from typing import Any
 from pymongo.errors import OperationFailure
 
 import policy
-from reconciliation_agent import investigate
+from reconciliation_agent import ERROR_RETRY_AFTER_SECONDS, MAX_ERROR_ATTEMPTS, investigate
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,9 @@ def sweep_query(now: datetime) -> dict:
         "$or": [
             {"agent.nextCheckAt": {"$lte": now}},
             {"agent": None, "createdAt": {"$lte": now - _UNSEEN_GRACE}},
+            # A run that failed (e.g. an expired SSO token) is retried, a few times.
+            {"agent.error.attempts": {"$lt": MAX_ERROR_ATTEMPTS},
+             "agent.error.at": {"$lte": now - timedelta(seconds=ERROR_RETRY_AFTER_SECONDS)}},
         ],
     }
 

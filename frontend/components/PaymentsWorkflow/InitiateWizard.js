@@ -36,18 +36,17 @@ import { fmtAmount } from "@/lib/paymentsWorkflow/status";
 // would promise a gate that does not run.
 const STEPS = ["Enter details", "Review", "Confirmation"];
 
-// Phase 1 is wires + internal transfers; ACH and cards are Phase 2. The unavailable rails
-// are listed rather than hidden so the demo can point at the roadmap — `disabled` keeps
-// them unselectable.
+// Wires and internal transfers are live. The unavailable rails are listed rather than
+// hidden so the demo can point at the roadmap — `disabled` keeps them unselectable.
 const PAYMENT_TYPES = [
-  { rail: "WIRE", label: "Wires", phase: 1, available: true, glyph: "Building",
+  { rail: "WIRE", label: "Wires", available: true, glyph: "Building",
     blurb: "Real-time or near-real-time transfer of funds between banks." },
-  { rail: "INTERNAL", label: "Internal Transfer", phase: 1, available: true, glyph: "Refresh",
+  { rail: "INTERNAL", label: "Internal Transfer", available: true, glyph: "Refresh",
     blurb: "Book transfer between two Leafy Bank accounts. Settles on our own ledger." },
-  { rail: "ACH", label: "ACH", phase: 2, available: false, glyph: "Menu",
-    blurb: "Batch clearing house transfers. Phase 2." },
-  { rail: "CARD", label: "Cards", phase: 2, available: false, glyph: "CreditCard",
-    blurb: "Card acquiring and issuing rails. Phase 2." },
+  { rail: "ACH", label: "ACH", available: false, glyph: "Menu",
+    blurb: "Batch clearing house transfers." },
+  { rail: "CARD", label: "Cards", available: false, glyph: "CreditCard",
+    blurb: "Card acquiring and issuing rails." },
 ];
 
 // Contract values are ISO 20022 codes; the labels spell out who actually pays.
@@ -543,7 +542,7 @@ export default function InitiateWizard({ onInitiated }) {
 
   if (step === 1) {
     const rows = [
-      ["Payment type", `${selectedType.label} (Phase ${selectedType.phase})`],
+      ["Payment type", selectedType.label],
       ["Customer", customer?.identification?.legalName || form.customerId],
       ["Debit account", debtor ? `${debtor.type} ····${String(debtor.accountNumber || "").slice(-4)}` : form.debtorAccountId],
       ["Amount", fmtAmount(form.amount, form.currency)],
@@ -761,7 +760,7 @@ export default function InitiateWizard({ onInitiated }) {
                       glyph={<Icon glyph={t.glyph} />}
                       description={t.available ? "Available" : "Coming soon"}
                     >
-                      {`${t.label} (Phase ${t.phase})`}
+                      {t.label}
                     </Option>
                   ))}
                 </Select>

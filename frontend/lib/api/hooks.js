@@ -288,7 +288,7 @@ export function useCachedExternalData() {
 /**
  * Server-computed global position: folds internal Leafy Bank balances with the
  * cached external data into { total_balance, total_debt, net_worth, by_institution }.
- * Requires an authorized consent and that fetch-and-cache has run (Phase 1).
+ * Requires an authorized consent and that fetch-and-cache has run.
  * Returns null when there is no consent — callers fall back to internal-only math.
  */
 export function useGlobalPosition() {

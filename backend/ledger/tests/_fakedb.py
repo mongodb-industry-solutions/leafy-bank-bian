@@ -40,6 +40,8 @@ def _matches(doc: dict, query: dict) -> bool:
                 return False
             if "$lt" in want and not have < want["$lt"]:
                 return False
+            if "$lte" in want and not have <= want["$lte"]:
+                return False
             if "$exists" in want:
                 return False          # not needed by any caller yet
         elif have != want:

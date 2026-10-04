@@ -1200,7 +1200,7 @@ function InitEnvelope({ payment }) {
       ["Payment info id", w.paymentInformationId],
       ["Service level", w.paymentTypeInformation?.serviceLevel?.code],
       ["Initiating party", w.initiatingParty?.name],
-      // Phase 1 has no on-behalf-of scenario, so these are null (doc 17 §6). Render an explicit
+      // There is no on-behalf-of scenario, so these are null (doc 17 §6). Render an explicit
       // "—" (N/A) rather than dropping the row, so an audience can see the fields exist.
       ["Ultimate debtor", w.ultimateDebtor?.name ?? "—"],
       ["Ultimate creditor", w.ultimateCreditor?.name ?? "—"],
@@ -1726,6 +1726,9 @@ function exceptionDetailText(exc) {
   return "—";
 }
 
+// Mirrors payment_agent MAX_ERROR_ATTEMPTS.
+const MAX_AGENT_ATTEMPTS = 5;
+
 function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedgerAction, reversalEvent, reversalLegs, refreshKey = 0, onAcknowledgeAgent }) {
   const baseOpen = exceptions.find((e) => e?.status === "OPEN");
   // The Reconciliation Agent writes `exceptions.agent{}` asynchronously, after the exception
@@ -1882,6 +1885,12 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
                 </StatusPill>
               </div>
               <Body>{e.agent.rootCause}</Body>
+              {e.agent.error && (
+                <Body className={styles.muted}>
+                  The investigation failed ({e.agent.error.message}). It retries automatically
+                  every minute, up to {MAX_AGENT_ATTEMPTS} attempts.
+                </Body>
+              )}
               {e.agent.recommendedResolution && (
                 <Body className={styles.muted}>
                   Recommend: {e.agent.recommendedResolution}

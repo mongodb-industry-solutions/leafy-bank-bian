@@ -564,16 +564,28 @@ def thread_messages(agent: Any, exception_id: str) -> list:
 
 
 def is_awaiting_approval(agent: Any, exception_id: str) -> bool:
+    """True only when the thread is paused at the approval `interrupt()`.
+
+    `state.next` alone is wrong: a run that crashed (expired SSO token) also leaves a pending
+    node, which made a failed thread look like it was waiting for the operator — so it was
+    never retried."""
     try:
-        return bool(agent.get_state(_config(exception_id)).next)
+        return any(task.interrupts for task in agent.get_state(_config(exception_id)).tasks)
     except Exception:  # noqa: BLE001
         return False
+
+
+# A failed run (expired AWS SSO token, Bedrock throttling) is retried by the worker's sweep
+# this long after the failure, up to MAX_ERROR_ATTEMPTS times; the manual trigger always works.
+ERROR_RETRY_AFTER_SECONDS = 60
+MAX_ERROR_ATTEMPTS = 5
 
 
 def investigate(agent: Any, db: Any, exception_id: str, payment_id: str) -> Optional[dict]:
     """Run (or re-run) the agent for one OPEN exception; returns the recorded `agent{}`.
 
-    Never raises. A thread paused for approval is left alone — re-investigating would
+    Never raises; a failed run is recorded in `agent.error` (message, at, attempts) so the
+    UI can show it and the sweep can retry. A thread paused for approval is left alone — re-investigating would
     abandon the proposal the operator is looking at.
     """
     if is_awaiting_approval(agent, exception_id):
@@ -590,10 +602,14 @@ def investigate(agent: Any, db: Any, exception_id: str, payment_id: str) -> Opti
         agent.invoke({"messages": [HumanMessage(user_msg)], "exception_id": exception_id,
                       "payment_id": payment_id, "reinvestigated": False},
                      config=_config(exception_id))
-    except Exception:  # noqa: BLE001 — never propagate to the worker.
+    except Exception as e:  # noqa: BLE001 — never propagate to the worker.
         logger.warning("reconciliation agent invoke failed for %s — exception unchanged.",
                        exception_id, exc_info=True)
+        attempts = ((exc.get("agent") or {}).get("error") or {}).get("attempts", 0) + 1
+        set_agent_fields(db, exception_id, {"error": {
+            "message": f"{type(e).__name__}: {e}"[:300], "at": _now(), "attempts": attempts}})
         return None
+    set_agent_fields(db, exception_id, {"error": None})
     return _exception(db, exception_id).get("agent")
 
 

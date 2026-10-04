@@ -171,7 +171,7 @@ export async function workflowApi(path, params = null) {
 }
 
 /**
- * Payment Agent API client (the phase-1 AI agent service via the proxy).
+ * Payment Agent API client (the AI agent service via the proxy).
  *
  * Mirrors pipelineApi (supports method + body). Kept separate from workflowApi/pipelineApi
  * because it hits a different service; the UI composing a payment's trace + the agent's

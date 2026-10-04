@@ -1,6 +1,6 @@
 """A small in-memory stand-in for the pymongo surface the agent uses.
 
-Supports exact-equality and dotted-path matching, `$in`, `$lte`/`$gte`, `None` matching a
+Supports exact-equality and dotted-path matching, `$in`, `$lt`/`$lte`/`$gte`, `None` matching a
 missing field (MongoDB semantics — defect 2026-09-30), `$set`/`$push` with dotted paths, and
 find().sort().limit(). Aggregations are not emulated; tests that need them patch the
 `recon_evidence` function instead.
@@ -32,6 +32,8 @@ def _match_value(val, cond):
             if op == "$ne" and v == arg:
                 return False
             if op == "$lte" and (v is None or not v <= arg):
+                return False
+            if op == "$lt" and (v is None or not v < arg):
                 return False
             if op == "$gte" and (v is None or not v >= arg):
                 return False

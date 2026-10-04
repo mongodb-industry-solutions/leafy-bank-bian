@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 
 from database.connection import MongoDBConnection
 from shared.coa_cache import ChartOfAccounts
-from workers import gl_batch, ingest_worker, projection_worker, settlement_worker
+from workers import correspondent_reply_worker, gl_batch, ingest_worker, projection_worker, settlement_worker
 
 from routers.financial_accounting import router as fa_router
 from routers.pipeline import router as pipeline_router
@@ -74,6 +74,11 @@ async def lifespan(app: FastAPI):
     batch_workers = [
         ("gl_batch",          gl_batch.run,          (connection, DB_NAME, coa, interval, batch_status)),
     ]
+    if os.getenv("ENABLE_CORRESPONDENT_REPLY_SIM", "true").lower() == "true":
+        reply_delay = int(os.getenv("CORRESPONDENT_REPLY_SECONDS", "20"))
+        batch_workers.append(
+            ("correspondent_reply_worker", correspondent_reply_worker.run,
+             (connection, DB_NAME, reply_delay)))
     if ENABLE_CHANGE_STREAMS:
         for name, fn, args in change_stream_workers:
             threading.Thread(

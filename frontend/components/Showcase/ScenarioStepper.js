@@ -173,7 +173,10 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     (followedException && followedException.status !== "OPEN" && agent?.verification?.result === "RESOLVED");
   const escalated =
     agent?.verification?.result === "ESCALATED" || (followedException?.awaitingCounterparty && followedException?.status === "OPEN");
-  const outcome = reconciled ? "RECONCILED" : escalated ? "ESCALATED" : null;
+  const awaitingReply = !!followedException?.awaitingCounterparty && followedException.status === "OPEN";
+  // The correspondent's reply closes an escalated exception that the agent last saw as ESCALATED.
+  const answered = !!followedException?.escalation?.reply && followedException.status !== "OPEN";
+  const outcome = reconciled ? "RECONCILED" : answered ? "ANSWERED" : escalated ? "ESCALATED" : null;
 
   const countdownLeft = step.countdown && ctx.settledAt
     ? Math.max(0, Math.ceil(OVERDUE_SECONDS - (now - ctx.settledAt) / 1000))
@@ -181,6 +184,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
 
   function waitingReason() {
     if (step.countdown && countdownLeft > 0) return `Statement window closes in ${countdownLeft}s`;
+    if (agent?.error && !agent?.verification) return "Agent error — retry the investigation";
     if (step.gate === "proposal") {
       if (!followedId) return "Waiting for the exception…";
       if (!agent?.proposedAction && !agent?.verification) return "Agent investigating…";
@@ -196,6 +200,22 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     return null;
   }
   const waiting = waitingReason();
+
+  async function replyNow() {
+    setRunning(true);
+    setError(null);
+    try {
+      const { error: err } = await pipelineApi(
+        `exceptions/${followedId}/correspondent-reply`, null, { method: "POST" });
+      if (err) throw new Error(err);
+      setNote("The correspondent answered the investigation request.");
+      setTick((t) => t + 1);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setRunning(false);
+    }
+  }
 
   async function next() {
     if (running || waiting || step.final) return;
@@ -249,7 +269,9 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
           {error && <Body className={styles.error}>{error}</Body>}
           {step.final && outcome && (
             <div className={styles.outcome}>
-              <Badge variant={outcome === "RECONCILED" ? "green" : "yellow"}>{outcome}</Badge>
+              <Badge variant={outcome === "ESCALATED" ? "yellow" : "green"}>
+                {outcome === "ANSWERED" ? "CORRESPONDENT REPLIED" : outcome}
+              </Badge>
               <Body>Expected: {scenario.expected}</Body>
             </div>
           )}
@@ -261,6 +283,11 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
             </Button>
           )}
           {waiting && <Body className={styles.muted}>{waiting}</Body>}
+          {awaitingReply && (
+            <Button size="small" variant="default" disabled={running} onClick={replyNow}>
+              Correspondent replies now
+            </Button>
+          )}
           <Button size="small" variant="default" onClick={onReset}>
             All scenarios
           </Button>
@@ -278,6 +305,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
         <PaymentTracker init={ctx.init} payment={payment} trace={trace} exceptions={trackedExceptions} />
         <AgentThinking
           exceptionId={followedId}
+          paymentId={followedException?.paymentId}
           agent={agent}
           lastProposal={followedId ? lastProposals[followedId] : null}
           policyLine={scenario.policyLine}

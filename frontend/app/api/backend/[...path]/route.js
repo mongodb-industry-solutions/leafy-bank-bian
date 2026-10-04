@@ -24,7 +24,7 @@ const TRANSACTIONS_BACKEND =
   process.env.TRANSACTIONS_BACKEND_URL || "http://localhost:8002";
 const LEDGER_BACKEND =
   process.env.LEDGER_BACKEND_URL || "http://localhost:8080";
-// Phase-1 AI agents (Enrichment + Reconciliation). A separate FastAPI service so the
+// AI agents (Enrichment + Reconciliation). A separate FastAPI service so the
 // LangGraph/Bedrock/voyageai stack stays off the money-path transactions service.
 const AGENTS_BACKEND =
   process.env.AGENTS_BACKEND_URL || "http://localhost:8004";
@@ -62,7 +62,7 @@ const BACKEND_BY_PREFIX = {
   // it owns `payments`. Deliberately NOT the ledger: /pipeline and /workflow are the two
   // halves of the trace, and neither service reads the other's collections.
   workflow: TRANSACTIONS_BACKEND,
-  // Phase-1 AI agents (Enrichment propose + Reconciliation investigate/read). Routed by the
+  // AI agents (Enrichment propose + Reconciliation investigate/read). Routed by the
   // `agent` first segment to the payment_agent service. Mapped prefixes mount at root (no
   // `/api/v1`), same as the other BIAN services — see the apiPrefix rule at the proxy call.
   agent: AGENTS_BACKEND,

@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from routers._util import to_json_response
 from pydantic import BaseModel, ConfigDict
 
-from services import pipeline_read_service, reconciliation_service, resolution_service, statement_matching
+from services import correspondent_reply, pipeline_read_service, reconciliation_service, resolution_service, statement_matching
 from workers import gl_batch
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
@@ -195,6 +195,13 @@ def recheck_exception(exception_id: str, request: Request,
     connection, db_name = request.app.state.connection, request.app.state.db_name
     return _resolution_call(resolution_service.recheck, connection, db_name, exception_id,
                             note=body.note if body else None)
+
+
+@router.post("/exceptions/{exception_id}/correspondent-reply")
+def correspondent_reply_exception(exception_id: str, request: Request) -> JSONResponse:
+    """Demo: the correspondent answers an escalated exception now, without the 20s wait."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    return _resolution_call(correspondent_reply.reply, connection, db_name, exception_id)
 
 
 @router.post("/exceptions/{exception_id}/link")

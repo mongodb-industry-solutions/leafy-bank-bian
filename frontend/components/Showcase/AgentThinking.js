@@ -99,6 +99,7 @@ export default function AgentThinking({
   exceptionId,
   agent,
   lastProposal,
+  paymentId,
   policyLine,
   canDecide,
   active,
@@ -122,6 +123,20 @@ export default function AgentThinking({
       return;
     }
     onDecided?.(decision);
+  }
+
+  // The agent's run failed (e.g. an expired AWS SSO token). The worker also retries every
+  // minute; this lets the presenter retry the moment they have re-logged in.
+  async function retry() {
+    if (acting || !paymentId) return;
+    setActing("RETRY");
+    setActError(null);
+    const { error } = await agentApi("reconciliation/investigate", null, {
+      method: "POST",
+      body: { exceptionId, paymentId },
+    });
+    setActing(null);
+    if (error) setActError(friendly(error));
   }
 
   if (!exceptionId) {
@@ -149,6 +164,21 @@ export default function AgentThinking({
           <StepItem key={i} step={s} />
         ))}
       </ol>
+
+      {agent?.error && !agent?.verification && (
+        <div className={styles.section}>
+          <Overline>Investigation failed</Overline>
+          <Body className={styles.error}>{agent.error.message}</Body>
+          <Body className={styles.muted}>
+            Retrying automatically (attempt {agent.error.attempts}). If this is an expired AWS SSO
+            session, run <span className={styles.mono}>aws sso login</span> first.
+          </Body>
+          <Button size="small" disabled={!!acting} onClick={retry}>
+            {acting === "RETRY" ? "Retrying…" : "Retry investigation"}
+          </Button>
+          {actError && <Body className={styles.error}>{actError}</Body>}
+        </div>
+      )}
 
       {agent?.cause && (
         <div className={styles.section}>
