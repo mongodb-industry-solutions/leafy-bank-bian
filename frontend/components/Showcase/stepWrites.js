@@ -129,6 +129,19 @@ const APPROVE_BY_SCENARIO = {
       () => null),
   ],
 };
+// The simulated correspondent's answer to the escalation, shown on the final step.
+const REPLY_WRITER = "Ledger service, correspondent reply (after 20s or on demand)";
+const REPLY_BY_SCENARIO = {
+  R4: [
+    W("settlementPositions", "update", "actualAmount set to the confirmed amount, sourceMessageRef", position, REPLY_WRITER),
+    W("exceptions", "update", "awaitingCounterparty false, escalation.reply, status RESOLVED (RECHECK)", followed, REPLY_WRITER),
+    W("payments", "update", "lifecycle.reconciliationStatus RECONCILED, set by the tie-out",
+      ({ payment }) => nonEmpty(paymentDoc(payment)), REPLY_WRITER),
+  ],
+  R5: [
+    W("exceptions", "update", "awaitingCounterparty false, escalation.reply, status DISMISSED", followed, REPLY_WRITER),
+  ],
+};
 const APPROVE_COMMON = W("exceptions", "update",
   "agent.approval, agent.actionsTaken[], agent.verification; status and resolution (or awaitingCounterparty and escalation for an escalation)",
   followed, "Agent service, then the resolve route");
@@ -152,6 +165,7 @@ const BY_STEP = {
 };
 
 export function writesFor(stepKey, scenarioKey) {
+  if (stepKey === "verify") return REPLY_BY_SCENARIO[scenarioKey] || [];
   if (stepKey === "approve") return [APPROVE_COMMON, ...(APPROVE_BY_SCENARIO[scenarioKey] || [])];
   return BY_STEP[stepKey] || [];
 }

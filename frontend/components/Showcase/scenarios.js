@@ -103,10 +103,10 @@ export const SCENARIOS = [
     key: "R4",
     title: "Transposed amount",
     story: "The correspondent books 7,306.00 instead of 7,360.00.",
-    talkingPoint: "A 54.00 gap is not a fee any correspondent charges, so the guard refuses FEE.",
+    talkingPoint: "A 54.00 gap is not a fee any correspondent charges, so the guard refuses FEE and the correspondent's answer settles it.",
     bank: "Royal Bank of Canada",
     amount: "7,360.00",
-    expected: "Escalated to the correspondent",
+    expected: "Reconciled once the correspondent confirms the amount",
     policyLine: "Discrepancy · FEE refused (54.00 is not a levied charge) → ESCALATE_TO_CORRESPONDENT",
     beats: {
       initiate: "We send USD 7,360.00 to Adventure Works at Royal Bank of Canada.",
@@ -122,11 +122,14 @@ export const SCENARIOS = [
         "a charge the correspondent actually levies. RBC charges 25.00, so FEE is refused. " +
         "The agent classifies it as an AMOUNT_MISMATCH and proposes escalating to RBC.",
       approve:
-        "Approving sends a camt.026 query to RBC. We don't write off or adjust money we " +
-        "can't explain.",
+        "Approving sends a camt.026 investigation request to RBC. We don't write off or " +
+        "adjust money we can't explain.",
       verify:
-        "The exception stays open, marked as awaiting the correspondent. The case is now " +
-        "RBC's to answer, and the books are untouched.",
+        "First the exception stays open, marked as awaiting the correspondent, with the " +
+        "books untouched. About 20 seconds later the simulated RBC answers and confirms the " +
+        "full 7,360.00 (or use \"Correspondent replies now\"). The settlement position takes " +
+        "the confirmed amount, the recheck agrees, the exception closes and the payment is " +
+        "RECONCILED. No adjustment was ever booked.",
     },
   },
   {
@@ -136,7 +139,7 @@ export const SCENARIOS = [
     talkingPoint: "Not every line on the statement belongs to us.",
     bank: "Barclays",
     amount: "5,630.00",
-    expected: "Escalated to the correspondent",
+    expected: "Orphan dismissed once the correspondent confirms a misposting",
     policyLine: "Orphaned · no candidate → ESCALATE_TO_CORRESPONDENT or DISMISS",
     beats: {
       initiate: "We send a routine USD 5,630.00 wire to Barclays. This payment is clean.",
@@ -152,9 +155,13 @@ export const SCENARIOS = [
         "The agent searches our payments for anything that could explain the line, and finds " +
         "no candidate. With nothing to link, policy allows only escalation or dismissal.",
       approve:
-        "Approving sends a camt.026 query to Barclays to explain the line. We don't book " +
-        "money we can't attribute.",
-      verify: "The orphan is with Barclays, awaiting their answer, and our own wire is RECONCILED.",
+        "Approving sends a camt.026 investigation request to Barclays to explain the line. " +
+        "We don't book money we can't attribute.",
+      verify:
+        "Our own wire is already RECONCILED. The orphan stays open, awaiting Barclays. About " +
+        "20 seconds later the simulated Barclays answers that the line was a misposting " +
+        "(or use \"Correspondent replies now\") and the exception is dismissed. No money " +
+        "was booked.",
     },
   },
   {
