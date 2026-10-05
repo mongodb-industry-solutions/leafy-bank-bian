@@ -30,43 +30,43 @@ const COPY = {
     [OUT]: {
       business: "The caller is verified and the payment is checked against the customer's entitlements and limits.",
       technical: "authentication{} and entitlement{} are embedded on the payments document; a step-up holds the payment at INITIATED.",
-      why: "The assessments are embedded where they are judged, so the decision and its evidence travel together.",
+      why: "The payment keeps the authentication and entitlement results it was judged on, plus a reference to the session, so the decision and its evidence travel together without copying the identity system.",
     },
     [IN]: {
       business: "The beneficiary named in the message is matched to a real account at this bank.",
       technical: "An accounts lookup resolves the beneficiary; the result is persisted as beneficiaryResolution on the payment.",
-      why: "The match is a query on the same cluster as the payment, so there is no cross-system call.",
+      why: "Beneficiary resolution is an indexed lookup on accounts in the same cluster as the payment, and its verdict is stored beside the claim it resolved, so both can be compared later.",
     },
   },
   validation: {
     [OUT]: {
       business: "The payment is checked for completeness and viability, and missing details such as FX and fees are filled in.",
       technical: "$jsonSchema validation, then enrichment{} and validation{} written back to the payments document.",
-      why: "Schema validation lives in the database, and the enriched values are stored next to the originals.",
+      why: "Required fields are enforced by the database's own $jsonSchema validator, the enrichment record keeps each field's before and after, and the fx object carries rate provenance a single scalar could not.",
     },
     [IN]: {
       business: "The incoming payment is validated, screened and enriched before it can be accepted.",
       technical: "Structural checks, sanctions result and FX are written to validation{} and enrichment{} on the payment.",
-      why: "Every check result is kept on the document, so the audit trail needs no separate store.",
+      why: "Sanctions, FX and the corridor classification are written to the same payment document as the checks, so the audit trail needs no separate store.",
     },
   },
   authorization: {
     [OUT]: {
       business: "Fraud scoring clears the payment and the bank chooses the network and correspondent to send it through.",
       technical: "An immutable routingSnapshots document records the decision; fraud{} is embedded on the payment.",
-      why: "The routing decision is stored once and never edited, so you can always show why this route was chosen.",
+      why: "routingSnapshots is insert-only, so a later change to a BIC or correspondent cannot rewrite why this route was chosen.",
     },
     [IN]: {
       business: "The bank decides whether to accept the incoming payment, after compliance checks.",
       technical: "The accept or reject decision, with its checks, is recorded on the payment and in lifecycle.events.",
-      why: "The decision is stored with the checks behind it in a single document.",
+      why: "Accept or reject is one acceptanceDecision object, rolled up from results already stored on the same document.",
     },
   },
   execution: {
     [OUT]: {
       business: "The payment is converted to the network's message format and sent.",
       technical: "A paymentExecutions document per attempt and a pacs.008 in paymentMessages, built from the canonical payment.",
-      why: "The canonical payment and the ISO 20022 message are separate documents linked by id, so a new rail adds a mapping, not a schema.",
+      why: "The canonical payment and the ISO 20022 message are separate documents linked by id, and each attempt gets its own paymentExecutions document, so a new rail adds a mapping and a retry never overwrites history.",
     },
     [IN]: {
       business: "A confirmation goes back to the sending bank saying the payment was accepted or rejected.",

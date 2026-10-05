@@ -24,7 +24,11 @@ import StatusPill from "./StatusPill";
 import LensToggle, { useLens } from "./LensToggle";
 import MongoRail from "./MongoRail";
 import KeyFacts from "./KeyFacts";
-import { PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock, PartyFlow, EnvelopeChips, StatePath, IntakeOrder, BianStrip } from "./StageVisuals";
+import {
+  PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock, PartyFlow, EnvelopeChips,
+  StatePath, IntakeOrder, BianStrip, Card, StageStates, GateCards, LimitGauge, ResolutionOutcome,
+  RouteMap, FraudMeter, AcceptanceRollup, RailFlow, SettlementOutcomes, PostingDirection,
+} from "./StageVisuals";
 import { stageBian, stageCopy, stageFacts, stageWrites, settlementDelta } from "./stageContent";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
@@ -303,9 +307,17 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
             </>
           )}
           {stage.key === "authorization" && <CutoffClock snapshot={stage.data?.routingSnapshot} />}
-          {stage.key === "g:Accounting & posting" && <PostingChain payment={payment} trace={trace} />}
+          {stage.key === "g:Accounting & posting" && (
+            <>
+              <PostingChain payment={payment} trace={trace} />
+              <PostingDirection payment={payment} />
+            </>
+          )}
           {stage.key === "g:Clearing & settlement" && (
-            <FundsFlow payment={payment} position={settlementPosition} />
+            <>
+              <FundsFlow payment={payment} position={settlementPosition} />
+              <SettlementOutcomes position={settlementPosition} direction={payment?.direction} />
+            </>
           )}
           {grouped ? (
             <>
@@ -365,6 +377,29 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
         </div>
       )}
     </section>
+  );
+}
+
+const filled = (rows) => rows.filter(([, v]) => v != null && v !== "" && v !== "—");
+
+/** A card of key/values with empty fields left out; nothing at all when no field has a value. */
+function SummaryCard({ label, rows, tag }) {
+  const kept = filled(rows);
+  if (!kept.length) return null;
+  return (
+    <Card label={label} tag={tag}>
+      <KeyValues rows={kept} />
+    </Card>
+  );
+}
+
+/** The stage's state chips, then the recorded transitions with their reason, actor and time. */
+function TransitionsCard({ events, stageKey, payment }) {
+  return (
+    <Card label="State transition">
+      <StageStates stageKey={stageKey} payment={payment} />
+      {events?.length > 0 && <StateEvents events={events} />}
+    </Card>
   );
 }
 
@@ -438,28 +473,23 @@ function EnrichmentDiff({ enrichment }) {
  * collapses to a summary banner by default, so it is given the full width on top (no dead
  * column under a collapsed trail); Summary and State transitions sit side by side beneath
  * it; the Progressive-enrichment diff spans the full width last, so its As-captured /
- * After-enrichment pair has room. Same controlled-grid intent as stage 2's `stageTwoGrid`.
+ * After-enrichment pair has room. 
  */
 function EnrichmentBody({ stage, payment, checkList }) {
   const events = stage.data?.events || [];
   return (
-    <div className={styles.stageThreeGrid}>
-      <div className={styles.detailBlockWide}>
-        <div className={styles.detailBlockTitle}>Checks</div>
+    <div className={styles.stageStack}>
+      <Card label="Checks" tag="sync and async marked">
         <Checks checks={checkList} />
-      </div>
-      <div className={styles.detailBlock}>
-        <div className={styles.detailBlockTitle}>Summary</div>
-        <KeyValues rows={summaryRows(stage, payment)} />
-      </div>
-      <div className={styles.detailBlock}>
-        <div className={styles.detailBlockTitle}>State transitions</div>
-        <StateEvents events={events} />
-      </div>
-      <div className={styles.detailBlockWide}>
-        <div className={styles.detailBlockTitle}>Progressive enrichment</div>
+      </Card>
+      <SummaryCard label="What was determined" rows={summaryRows(stage, payment)} />
+      <Card
+        label="Progressive enrichment"
+        note="Stage 3 is a hard gate: the rail message is only built from a payment that passed here."
+      >
         <EnrichmentDiff enrichment={stage.data?.enrichment} />
-      </div>
+      </Card>
+      <TransitionsCard events={events} stageKey="validation" payment={payment} />
     </div>
   );
 }
@@ -1059,10 +1089,6 @@ function summaryRows(stage, payment) {
     case "enrichment": {
       // What the stage concluded, above the field-level diff. `checks` spans all three of
       // stage 3's halves (`3 validate`, `3 enrich`, `3 final-validate`).
-      const e = d?.enrichment;
-      const checks = d?.checks || [];
-      const warned = checks.filter((c) => c.result === "WARN").length;
-      const failed = checks.filter((c) => c.result === "FAIL").length;
       // FR-3.12 — the regulatory reports stage 3 attached (cross-border declaration and/or
       // threshold report). An empty array is "assessed, none required" (the spec's "Empty
       // array if none"); absent is "not assessed" and renders "—".
@@ -1081,56 +1107,24 @@ function summaryRows(stage, payment) {
       // so an inbound payment with no fraud{} still shows the screening it actually ran.
       const originatorScreen = d?.originatorSanctionsCheck;
       return [
-        ["Checks recorded", checks.length || null],
-        ["Warnings", warned || null],
-        ["Refusals", failed || null],
-        ["Fields enriched", e?.resolved?.length ?? null],
         ["Corridor", corridorLabel(payment)],
-        ["Purpose", payment?.categoryPurpose],
         ["Originator sanctions screening", originatorScreen
           ? `${originatorScreen.status}${originatorScreen.provider ? ` · ${originatorScreen.provider}` : ""}`
           : null],
-        ["Charges", payment?.fees?.length
-          ? payment.fees.map((f) => `${fmtAmount(f.amount, f.currency)} ${f.type} (${f.chargedTo})`).join(", ")
-          : null],
-        ["FX rate", payment?.fxRate ?? null],
         ["Regulatory reports", reportsLabel],
         ["Initiating party", initiatingParty
           ? (initiatingParty.name || initiatingParty.identification)
           : null],
-        ["Enriched at", fmtWhen(e?.resolvedAt)],
       ];
     }
-    case "acceptanceDecision": {
-      // Inbound stage 4 (FR-4.IN1) — the accept/reject rollup, not a routing decision.
-      const ad = payment?.acceptanceDecision;
-      return [
-        ["Decision", ad?.decision],
-        ["Reason code", ad?.reasonCode],
-        ["Beneficiary match", ad?.beneficiaryMatch],
-        ["Sanctions status", ad?.sanctionsStatus],
-        ["Decided at", fmtWhen(ad?.decidedAt)],
-      ];
-    }
+    case "acceptanceDecision":
+      // Inbound stage 4 (FR-4.IN1): the roll-up itself is drawn by AcceptanceRollup.
+      return [["Decided", fmtWhen(payment?.acceptanceDecision?.decidedAt)]];
     case "authorization": {
-      // Doina's L508-515 display, as a summary: the routing decision above, the risk
-      // decision below. `checks` carries her four display lines verbatim (the backend names
-      // them to match), so this block deliberately does NOT restate them — it gives the
-      // numbers and identifiers the checks refer to.
+      // The score, rules, sanctions and network are drawn by FraudMeter and RouteMap; this is
+      // what is left: the identifiers the checks refer to and the originator confirmation.
       const f = d?.fraud;
-      const s = d?.sanctions;
-      const checks = d?.checks || [];
-      const warned = checks.filter((c) => c.result === "WARN").length;
-      const failed = checks.filter((c) => c.result === "FAIL").length;
       return [
-        ["Checks recorded", checks.length || null],
-        ["Warnings", warned || null],
-        ["Refusals", failed || null],
-        ["Clearing network", d?.network],
-        ["Fraud score", f?.score != null ? `${f.score}/100` : null],
-        ["Decision", f?.decision],
-        ["Rules fired", f?.rulesFired?.length ? f.rulesFired.join(", ") : (f ? "none" : null)],
-        ["Sanctions", s?.status ? `${s.status} · ${s.provider || "—"}` : null],
         ["Alert ID", f?.alertId],
         ["Routing snapshot", d?.refs?.routingSnapshotId],
         ["Payment order", d?.refs?.paymentOrderId],
@@ -1146,23 +1140,16 @@ function summaryRows(stage, payment) {
       // Her L548-553 three lines live in the BUSINESS VIEW tab; this block gives what an
       // operator needs *about the execution* — which attempt, which network, what the rail
       // said back, and the two artifact ids.
+      // The rest (message, network, status, attempt, ref, simulated) is in the key facts.
       const e = d?.execution;
-      const checks = d?.checks || [];
       return [
-        ["Checks recorded", checks.length || null],
-        ["Attempt", e ? `${e.attempt} of ${d?.attempts?.length || 1}` : null],
-        ["Rail / network", [payment?.rail, e?.clearingNetwork].filter(Boolean).join(" · ") || payment?.rail],
-        ["Message", e ? `${e.messageStandard} ${e.messageFormat}` : "none — book transfer"],
-        ["Execution status", e?.status],
         ["Rail status", d?.railStatus?.code ? `${d.railStatus.code} — ${d.railStatus.reason || ""}` : null],
-        ["Network ref", d?.clearing?.networkRef],
         ["Network code", d?.clearing?.networkCode],
         ["Settlement date", d?.clearing?.settlementDate],
         ["Payment execution", e?.paymentExecutionId],
         ["Payment message", e?.paymentMessageId],
         ["Submitted", fmtWhen(d?.clearing?.submittedAt)],
         ["Acknowledged", fmtWhen(e?.acknowledgedAt)],
-        ["Simulated rail", e ? (e.simulated ? "Yes — no external network is contacted" : "No") : null],
       ];
     }
     case "transaction":
@@ -1185,19 +1172,15 @@ function summaryRows(stage, payment) {
         ["Event ID", d?.eventId],
         ["Event type", d?.eventType],
         ["Posting mode", d?.postingMode?.type],
-        ["Journal entry", d?.postingResult?.journalEntryId],
         ["Occurred", fmtWhen(d?.occurredAt)],
         ["Posted", d?.postingResult?.postedAt ? fmtWhen(d.postingResult.postedAt) : null],
       ];
     case "subLedger": {
       const first = d?.[0];
       return [
-        ["Entries", d?.length],
         // The accounting-leg identity carried from the ledger event (DR-7.3 / Doina Sep 18) —
         // SETTLEMENT (external settlement posting) vs PAYMENT_PRINCIPAL (initial posting).
-        ["Leg type", first?.eventType || "—"],
-        ["Journal entry", first?.journalEntryId || "—"],
-        ["Period", first?.periodCode],
+        ["Leg type", first?.eventType],
         ["Posting date", fmtWhen(first?.postingDate)],
       ];
     }
@@ -1224,14 +1207,10 @@ function summaryRows(stage, payment) {
       // item, the settlement position, the journal that proved leg 3, and when it ran.
       const check = d?.check;
       const pos = d?.position;
-      const overall = check?.overallResult;
       return [
-        ["Overall", overall ? overall : "not yet checked"],
         ["Reconciliation item", check?.legs ? payment?.refs?.reconciliationItemId : null],
         ["Settlement position", pos?.settlementPositionId || payment?.refs?.settlementPositionId],
-        ["Settlement model", pos?.modelLabel],
         ["Journal (leg 3)", check?.journalEntryId],
-        ["Checked", check?.checkedAt ? fmtWhen(check.checkedAt) : null],
       ];
     }
     case "legs": {
@@ -1242,13 +1221,10 @@ function summaryRows(stage, payment) {
       const clr = d?.clearing;
       const outcome = pos?.outcome;
       const rows = [
-        ["Outcome", outcome || "—"],
-        ["Settlement status", pos?.settlementStatus || payment?.lifecycle?.settlementStatus],
         ["Settlement model", pos?.modelLabel],
         // FR-7.1 (Doina Sep 18) — the event is named to read as the external-settlement posting
         // (eventType: SETTLEMENT, distinct from the stage-6 PAYMENT_PRINCIPAL event).
-        ["Settlement event", d?.event?.eventType || "—"],
-        ["Settled at", clr?.settledAt ? fmtWhen(clr.settledAt) : null],
+        ["Settlement event", d?.event?.eventType],
         ["Value date", clr?.settlementDate],
         ["Batch", pos?.batchRef],
       ];
@@ -1259,8 +1235,6 @@ function summaryRows(stage, payment) {
         // bare delta. Expected = the clearing amount sent; Received = the rail's claimed
         // partial settlement; Discrepancy = the unmatched portion (the correspondent fee).
         rows.push(
-          ["Expected", pos?.expectedAmount != null ? fmtAmount(pos.expectedAmount, ccy) : null],
-          ["Received", pos?.actualAmount != null ? fmtAmount(pos.actualAmount, ccy) : null],
           ["Discrepancy", clr?.discrepancyAmount != null ? fmtAmount(clr.discrepancyAmount, ccy) : null],
           ["Discrepancy reason", clr?.discrepancyReason],
         );
@@ -1317,19 +1291,6 @@ function InitEnvelope({ payment }) {
   );
 }
 
-/** A titled card of key/values — reused for the stage-2 authentication/entitlement gates. */
-function DetailCard({ label, tag, rows }) {
-  return (
-    <div className={styles.partyCard}>
-      <div className={styles.partyLabel}>
-        {label}
-        {tag && <span className={styles.partyExternal}>{tag}</span>}
-      </div>
-      <KeyValues rows={rows.length ? rows : [["—", "—"]]} />
-    </div>
-  );
-}
-
 /**
  * FR-4.1 — the stage-4 execution-strategy decision, rendered from the immutable
  * `routingSnapshots` record. The payment doc carries only `wireDetails.network` + the
@@ -1340,48 +1301,25 @@ function DetailCard({ label, tag, rows }) {
 function RoutingDecision({ snapshot }) {
   if (!snapshot) {
     return (
-      <div className={styles.detailBlock}>
-        <div className={styles.detailBlockTitle}>Routing decision</div>
+      <Card label="Routing decision">
         <Body className={styles.muted}>
           No routing decision yet — this payment has not reached orchestration (stage 4).
         </Body>
-      </div>
+      </Card>
     );
   }
   const corr = snapshot.correspondent || {};
-  const cutoff =
-    snapshot.cutoffHourET == null
-      ? "no cut-off"
-      : `${String(snapshot.cutoffHourET).padStart(2, "0")}:00 ET`;
-  const withinCutoff =
-    snapshot.cutoffHourET == null
-      ? null
-      : snapshot.withinCutoff
-        ? "within cut-off"
-        : "past cut-off — value date rolled";
+  // Network, value date and cut-off are drawn by RouteMap and CutoffClock, so only the parts
+  // those do not show are listed here.
   const rows = [
-    ["Execution strategy", snapshot.executionStrategy],
-    ["Clearing network", snapshot.clearingNetwork],
     ["Cost rank", snapshot.costRank],
-    ["Value date", snapshot.valueDate],
-    ["Cut-off", cutoff],
-    ["Cut-off status", withinCutoff],
-    ["Rail", snapshot.rail],
-    ["Wire type", snapshot.wireType],
     ["Correspondent", corr.required
       ? [corr.bic, corr.bankName, corr.country].filter(Boolean).join(" · ")
-          + (corr.simulated ? " (SIMULATED)" : "")
       : "none — domestic/intrabank"],
-    ["Correspondent resolved", corr.required
-      ? (corr.resolved ? "Yes" : "No — recorded as unresolved")
-      : null],
     ["Rationale", snapshot.rationale],
-  ].filter(([, v]) => v != null);
+  ];
   return (
-    <div className={styles.detailBlockWide}>
-      <div className={styles.detailBlockTitle}>Routing decision</div>
-      <KeyValues rows={rows} />
-    </div>
+    <SummaryCard label="Routing decision" tag="immutable snapshot" rows={rows} />
   );
 }
 
@@ -1439,47 +1377,27 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
     );
   }
 
-  const showLegs = !!stage.legs;
-  const showInitiation = stage.kind === "initiation";
-  const showEnrichment = stage.kind === "enrichment";
-  const showAuthorization = stage.kind === "authorization";
-  const showRailExecution = stage.kind === "railExecution";
-  const showReconciliation = stage.kind === "reconciliation";
-  // Stages 3 and 4 render checks too, but their `data` is an object rather than the bare
-  // array stage 2 passes, so the shapes are resolved separately.
-  const showChecks =
-    stage.kind === "checks" || showEnrichment || showAuthorization || showRailExecution;
-  const showStates = stage.kind === "states";
-  const checkList =
-    showEnrichment || showAuthorization || showRailExecution
-      ? stage.data?.checks
-      : stage.data;
+  const { kind, key } = stage;
+  const events = stage.data?.events;
+  // Stages 3, 4 and 5 keep their checks in an object; stage 2 passes the bare array.
+  const checkList = ["enrichment", "authorization", "acceptanceDecision", "railExecution"].includes(kind)
+    ? stage.data?.checks
+    : stage.data;
   // Stage 1's only lifecycle event is INITIATED — the moment the instruction was captured.
   const initEvents = (payment?.lifecycle?.events || []).filter(
     (e) => (e.state || "").toUpperCase() === "INITIATED"
   );
-  // Stage 2 is the only `checks`-kind stage: it renders the two gate assessments instead
-  // of the generic Summary, and surfaces the dual-approval rule (Doina's $25k → $10k demo).
-  const showStageTwo = stage.kind === "checks";
-  const a = payment?.authentication;
-  const e = payment?.entitlement;
-  const authRows = [
-    ["Method", a?.method],
-    ["Factor count", a?.factorCount],
-    ["Caller type", a?.callerType],
-    ["Session", a?.sessionRef],
-    ["Step-up", a?.stepUp ? "Yes" : null],
-    ["Sufficient", a?.sufficient ? "Yes" : "No"],
-    ["Assessed at", fmtWhen(a?.assessedAt)],
-  ];
-  const entRows = [
-    ["Segment", e?.segment],
-    ["Signing rule", e?.signingRule],
-    ["Per-payment limit", e?.perPaymentLimit != null ? fmtAmount(e.perPaymentLimit, payment?.currency) : null],
-    ["Dual-approval threshold", e?.dualApprovalThreshold != null ? fmtAmount(e.dualApprovalThreshold, payment?.currency) : null],
-    ["Dual approval required", e?.dualApprovalRequired ? `Yes · ${e.dualApprovalBy || "—"}` : "No"],
-    ["Assessed at", fmtWhen(e?.assessedAt)],
-  ];
+  const hasChecks = !!checkList?.length;
+  const dedicated = [
+    "initiation", "checks", "beneficiaryResolution", "enrichment", "authorization",
+    "acceptanceDecision", "railExecution", "reconciliation", "states",
+  ].includes(kind);
+  const inbound = payment?.direction === "INBOUND";
+  const reconTitle = payment?.rail === "INTERNAL"
+    ? "Payment to general ledger"
+    : inbound
+      ? "Received message and pacs.002 to ledger, rail to settlement account, settlement account to GL"
+      : "Three-way match: payment to rail, rail to settlement account, settlement account to GL";
 
   return (
     <>
@@ -1490,106 +1408,92 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
         </div>
       )}
       <div className={styles.detailColumns}>
-        {showStageTwo && (
-          <>
-            <div className={styles.stageTwoGrid}>
-            <div className={styles.detailBlock}>
-              <div className={styles.detailBlockTitle}>The two gates</div>
-              <div className={styles.partyGrid}>
-                <DetailCard label="Party authentication" rows={authRows} />
-                <DetailCard label="Payment entitlement" rows={entRows} />
-              </div>
-              {payment?.amount != null &&
-                e?.dualApprovalThreshold != null &&
-                Number(payment.amount) > Number(e.dualApprovalThreshold) && (
-                <div className={styles.dualApprovalCallout}>
-                  <strong>Dual approval applies:</strong>{" "}
-                  {fmtAmount(payment?.amount, payment?.currency)} is above the{" "}
-                  {e?.segment || "segment"} dual-approval threshold of{" "}
-                  {fmtAmount(e?.dualApprovalThreshold, payment?.currency)} — a second approver
-                  ({e?.dualApprovalBy || "—"}) is required. Simulated: no human approved this
-                  payment; the interactive approval queue is deferred.
-                </div>
-              )}
-            </div>
-            <div className={styles.detailBlock}>
-              <div className={styles.detailBlockTitle}>Checks — gate results</div>
-              <Checks checks={checkList} />
-            </div>
-            </div>
-          </>
-        )}
-
-        {/* Stage 2 renders its own checks inside the two-column grid; every other checks
-            stage (3/4/5) uses this generic block. */}
-        {showChecks && !showStageTwo && !showEnrichment && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>Checks</div>
-            <Checks checks={checkList} />
-          </div>
-        )}
-
-        {showStates && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>State transitions</div>
-            <StateEvents events={stage.data} />
-          </div>
-        )}
-
-        {!showStates && !showStageTwo && !showEnrichment && !showInitiation && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>Summary</div>
-            <KeyValues rows={summaryRows(stage, payment)} />
-          </div>
-        )}
-
-        {/* FR-4.1 — the execution-strategy decision from the immutable routing snapshot.
-            Rendered for stage 4 so the determination (strategy, network, correspondent,
-            cut-off, value date, rationale) is visible in the UI, not just the snapshot id. */}
-        {showAuthorization && (
-          <RoutingDecision snapshot={stage.data?.routingSnapshot} />
-        )}
-
-        {showInitiation && (
+        {kind === "initiation" && (
           <div className={styles.detailBlockWide}>
             <InitiationBody payment={stage.data} initEvents={initEvents} />
           </div>
         )}
 
-        {showReconciliation && (
-          <div className={styles.detailBlockWide}>
-            <div className={styles.detailBlockTitle}>
-              Three-way match: payment to rail, rail to settlement account, settlement account to GL
-            </div>
-            <ReconciliationTieOut data={stage.data} payment={payment} />
+        {kind === "checks" && (
+          <div className={styles.stageStack}>
+            <GateCards payment={payment} checks={checkList} />
+            <LimitGauge payment={payment} />
+            <TransitionsCard stageKey={key} payment={payment} />
           </div>
         )}
 
-        {showReconciliation && !!stage.data?.events?.length && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>State transitions</div>
-            <StateEvents events={stage.data.events} />
+        {kind === "beneficiaryResolution" && (
+          <div className={styles.stageStack}>
+            <ResolutionOutcome payment={payment} />
+            <TransitionsCard stageKey={key} payment={payment} />
           </div>
         )}
 
-        {showEnrichment && (
+        {kind === "states" && (
+          <Card label="State transitions">
+            <StateEvents events={stage.data} />
+          </Card>
+        )}
+
+        {kind === "enrichment" && (
           <EnrichmentBody stage={stage} payment={payment} checkList={checkList} />
         )}
 
-        {showRailExecution && (
-          <div className={styles.detailBlockWide}>
-            <div className={styles.detailBlockTitle}>
-              Canonical payment &rarr; ISO 20022
+        {kind === "authorization" && (
+          <div className={styles.stageStack}>
+            <RouteMap snapshot={stage.data?.routingSnapshot} payment={payment} />
+            <div className={styles.cardGrid}>
+              <RoutingDecision snapshot={stage.data?.routingSnapshot} />
+              <FraudMeter fraud={stage.data?.fraud} sanctions={stage.data?.sanctions} />
             </div>
-            <RailViews data={stage.data} />
+            <SummaryCard label="References" rows={summaryRows(stage, payment)} />
+            {hasChecks && (
+              <Card label="Checks"><Checks checks={checkList} /></Card>
+            )}
+            <TransitionsCard events={events} stageKey={key} payment={payment} />
           </div>
         )}
 
-        {(showAuthorization || showRailExecution) && !!stage.data?.events?.length && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>State transitions</div>
-            <StateEvents events={stage.data.events} />
+        {kind === "acceptanceDecision" && (
+          <div className={styles.stageStack}>
+            <AcceptanceRollup payment={payment} />
+            {hasChecks && (
+              <Card label="Checks"><Checks checks={checkList} /></Card>
+            )}
+            <SummaryCard label="Decision record" rows={summaryRows(stage, payment)} />
+            <TransitionsCard events={events} stageKey={key} payment={payment} />
           </div>
+        )}
+
+        {kind === "railExecution" && (
+          <div className={styles.stageStack}>
+            <RailFlow payment={payment} data={stage.data} />
+            <SummaryCard label="Rail response" rows={summaryRows(stage, payment)} />
+            <Card
+              label={inbound ? "Business view and pacs.002" : "Canonical payment to ISO 20022"}
+              note={inbound ? undefined : "The ISO message is built only at the rail boundary, never earlier in the lifecycle."}
+            >
+              <RailViews data={stage.data} />
+            </Card>
+            {hasChecks && (
+              <Card label="Checks"><Checks checks={checkList} /></Card>
+            )}
+            <TransitionsCard events={events} stageKey={key} payment={payment} />
+          </div>
+        )}
+
+        {kind === "reconciliation" && (
+          <div className={styles.stageStack}>
+            <Card label={reconTitle}>
+              <ReconciliationTieOut data={stage.data} payment={payment} />
+            </Card>
+            <SummaryCard label="References" rows={summaryRows(stage, payment)} />
+            <TransitionsCard events={events} stageKey={key} payment={payment} />
+          </div>
+        )}
+
+        {!dedicated && (
+          <SummaryCard label="Summary" rows={summaryRows(stage, payment)} />
         )}
 
         {(stage.exceptions || []).length > 0 && (
@@ -1606,11 +1510,10 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
           />
         )}
 
-        {showLegs && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>Double-entry</div>
+        {!!stage.legs && (
+          <Card label="Double-entry">
             <Legs legs={stage.legs} />
-          </div>
+          </Card>
         )}
       </div>
     </>
