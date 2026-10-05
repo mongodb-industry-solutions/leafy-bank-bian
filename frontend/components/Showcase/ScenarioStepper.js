@@ -199,10 +199,13 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     }
     if (step.gate === "decided" && !ctx.decision) return "Approve or reject the proposal";
     if (step.final && !outcome) {
+      if (revisedProposalPending) return "The agent revised its proposal. Approve or reject it";
       return scenarioKey === "TL" ? "Waiting for the agent's next sweep…" : "Waiting for the outcome…";
     }
     return null;
   }
+  // A failed first action sends the agent back to re-investigate; its new proposal needs its own approval.
+  const revisedProposalPending = ctx.decision === "APPROVE" && !!agent?.proposedAction;
   const waiting = waitingReason();
 
   async function replyNow() {
@@ -313,7 +316,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
           agent={agent}
           lastProposal={followedId ? lastProposals[followedId] : null}
           policyLine={scenario.policyLine}
-          canDecide={step.gate === "decided" && !ctx.decision}
+          canDecide={(step.gate === "decided" && !ctx.decision) || revisedProposalPending}
           active={!outcome}
           onDecided={onDecided}
         />
