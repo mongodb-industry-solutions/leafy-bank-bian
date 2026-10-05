@@ -174,7 +174,9 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
 
   const reconciled =
     payment?.lifecycle?.reconciliationStatus === "RECONCILED" ||
-    (followedException && followedException.status !== "OPEN" && agent?.verification?.result === "RESOLVED");
+    // R2 has a payment whose own reconciliation must close; resolving only the orphan twin
+    // (e.g. a dismissal) does not reconcile it.
+    (scenarioKey !== "R2" && followedException && followedException.status !== "OPEN" && agent?.verification?.result === "RESOLVED");
   const escalated =
     agent?.verification?.result === "ESCALATED" || (followedException?.awaitingCounterparty && followedException?.status === "OPEN");
   const awaitingReply = !!followedException?.awaitingCounterparty && followedException.status === "OPEN";
@@ -251,7 +253,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   return (
     <div className={styles.walkthrough}>
       <div>
-        <Stepper currentStep={index} maxDisplayedSteps={steps.length}>
+        <Stepper currentStep={step.final && outcome ? steps.length : index} maxDisplayedSteps={steps.length}>
           {steps.map((s) => (
             <Step key={s.key}>{s.label}</Step>
           ))}

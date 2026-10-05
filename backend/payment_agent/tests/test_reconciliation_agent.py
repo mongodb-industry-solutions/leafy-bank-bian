@@ -101,6 +101,14 @@ def test_an_ungrounded_fee_is_refused_at_check_proposal_too():
                                  charge_bearer="SHAR", action=policy.ACCEPT, params={})
 
 
+def test_an_orphan_line_with_a_candidate_payment_cannot_be_dismissed():
+    base = dict(category=policy.CATEGORY_ORPHANED, cause=policy.ORPHANED,
+                charge_bearer=None, action=policy.DISMISS, params={})
+    assert _check(**base, candidates=[]) is None
+    refusal = _check(**base, candidates=[{"paymentId": "PAY-1"}])
+    assert refusal and "LINK" in refusal
+
+
 def test_recheck_minutes_are_capped():
     assert policy.capped_recheck_minutes(999) == policy.MAX_RECHECK_MINUTES
     assert policy.capped_recheck_minutes(0) == 1

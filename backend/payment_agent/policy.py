@@ -108,6 +108,11 @@ def check_proposal(*, category: str, cause: Optional[str], charge_bearer: Option
     if action not in allowed:
         return (f"{action} is not permitted for a {category} with cause {cause} "
                 f"(chargeBearer {charge_bearer}); permitted: {sorted(allowed) or 'none'}.")
+    if category == CATEGORY_ORPHANED and action == DISMISS and candidates:
+        # Defect 2026-10-05 (R2): a re-keyed line was dismissed as a misposting while its
+        # payment sat MISSING. A line with a possible owner is linked or escalated, never dropped.
+        return ("DISMISS is refused: this line has candidate payments "
+                f"({len(candidates)}). Record REFERENCE_MISMATCH and propose LINK, or ESCALATE.")
     if action == POST_ADJUSTMENT:
         proposed = params.get("amount")
         if discrepancy_amount is None or proposed is None or \

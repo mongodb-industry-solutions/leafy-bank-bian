@@ -365,10 +365,14 @@ def _refusal(db: Any, exception_id: str, action: str, params: dict) -> Optional[
     known = (_known_charges(db, exc)
              if exc.get("category") == policy.CATEGORY_DISCREPANCY
              and agent_doc.get("cause") == policy.FEE else None)
+    candidates = agent_doc.get("candidates") or []
+    if exc.get("category") == policy.CATEGORY_ORPHANED and action == policy.DISMISS:
+        # Read live: the model may never have called find_statement_candidates.
+        candidates = recon_evidence.find_candidates(db, exc)
     return policy.check_proposal(
         category=exc.get("category"), cause=agent_doc.get("cause"),
         charge_bearer=_charge_bearer(db, exc), action=action, params=params,
-        candidates=agent_doc.get("candidates") or [],
+        candidates=candidates,
         discrepancy_amount=(exc.get("detail") or {}).get("discrepancyAmount"),
         known_charges=known,
     )
