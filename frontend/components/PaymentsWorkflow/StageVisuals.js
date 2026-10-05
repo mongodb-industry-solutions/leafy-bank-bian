@@ -304,20 +304,31 @@ export function EnvelopeChips({ rail }) {
   );
 }
 
-/** States as chips, lit when the payment has been in them; optional ones are marked. */
+/**
+ * A progress track: one dot per state, joined by a line. Filled = the payment has been in the
+ * state, ringed = the next one it moves to, hollow = further ahead. The note says what happens
+ * next, under the track.
+ */
 export function StatesStrip({ seen, states, note }) {
+  const nextIndex = states.findIndex(({ state }) => !seen.has(state));
   return (
-    <div className={styles.statePath} aria-label="Lifecycle states">
-      {states.map(({ state, optional }, i) => (
-        <span key={state} className={styles.statePathItem}>
-          {i > 0 && <span className={styles.statePathArrow} aria-hidden="true">→</span>}
-          <span className={`${styles.stateChip} ${seen.has(state) ? styles.stateChipOn : ""}`}>
-            {state}
-            {optional ? " (if held)" : ""}
-          </span>
-        </span>
-      ))}
-      {note && <span className={styles.statePathNote}>{note}</span>}
+    <div className={styles.track} aria-label="Lifecycle states">
+      <ol className={styles.trackSteps}>
+        {states.map(({ state, optional }, i) => {
+          const done = seen.has(state);
+          const kind = done ? styles.trackDone : i === nextIndex ? styles.trackNext : "";
+          return (
+            <li key={state} className={`${styles.trackStep} ${kind}`}>
+              <span className={styles.trackDot} aria-hidden="true">{done ? "✓" : ""}</span>
+              <span className={styles.trackLabel}>
+                {state}
+                {optional && <span className={styles.trackOptional}>only if held</span>}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      {note && <div className={styles.trackNote}>{note}</div>}
     </div>
   );
 }
@@ -344,12 +355,12 @@ const STAGE_STATES = {
     INBOUND: { states: [S("RECEIVED")], note: "unchanged here; NO_MATCH goes to stage 9" },
   },
   validation: {
-    both: { states: [S("VALIDATED"), S("ENRICHED"), S("FINAL_VALIDATED")], note: "next: stage 4" },
+    both: { states: [S("VALIDATED"), S("ENRICHED"), S("FINAL_VALIDATED")], note: "Stage 4 routes it next." },
   },
   authorization: {
     OUTBOUND: {
       states: [S("ROUTED"), S("MANUAL_FRAUD_REVIEW", true), S("AUTHORISED"), S("APPROVED")],
-      note: "next: stage 5 submits",
+      note: "Stage 5 submits it next.",
     },
     INBOUND: {
       states: [S("FINAL_VALIDATED"), S("ACCEPTED")],
@@ -357,7 +368,7 @@ const STAGE_STATES = {
     },
   },
   execution: {
-    OUTBOUND: { states: [S("SUBMITTED"), S("IN_PROGRESS")], note: "next: stage 6 posts" },
+    OUTBOUND: { states: [S("SUBMITTED"), S("IN_PROGRESS")], note: "Stage 6 posts it next." },
     INBOUND: { states: [S("ACCEPTED")], note: "set on transmission, before internal posting" },
   },
   "g:Accounting & Posting": { both: { states: [S("POSTED")], note: "lifecycle.postingStatus" } },
@@ -375,11 +386,11 @@ export function StageStates({ stageKey, payment }) {
   return <StatesStrip seen={seenStates(payment)} states={def.states} note={def.note} />;
 }
 
-/** Stage 1's path: DRAFT, INITIATED, VALIDATED, or RECEIVED, VALIDATED for an inbound wire. */
+/** Stage 1 sets DRAFT then INITIATED, or RECEIVED for an inbound wire. VALIDATED is stage 3's. */
 export function StatePath({ events, inbound }) {
-  const states = (inbound ? ["RECEIVED", "VALIDATED"] : ["DRAFT", "INITIATED", "VALIDATED"]).map((s) => S(s));
+  const states = (inbound ? ["RECEIVED"] : ["DRAFT", "INITIATED"]).map((s) => S(s));
   const seen = new Set((events || []).map((e) => String(e.state || "").toUpperCase()));
-  return <StatesStrip seen={seen} states={states} note="next: stage 3 validates" />;
+  return <StatesStrip seen={seen} states={states} note="Stage 2 checks it without changing the state. Stage 3 moves it to VALIDATED." />;
 }
 
 /** Inbound intake order: the raw message is persisted before the payment is created. */

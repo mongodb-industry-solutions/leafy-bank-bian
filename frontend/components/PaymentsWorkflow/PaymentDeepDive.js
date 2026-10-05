@@ -718,7 +718,7 @@ function StateEvents({ events }) {
       {events.map((e, i) => (
         <div className={styles.event} key={`${e.state}-${e.at}-${i}`}>
           <div>
-            <StatusPill status={e.state} />{" "}
+            <span className={styles.eventState}>{e.state}</span>
             <span className={styles.eventReason}>
               {e.reason || "—"}
               {e.actor ? ` · ${e.actor}` : ""}
@@ -1391,11 +1391,10 @@ function InitiationBody({ payment, initEvents }) {
         </div>
       </div>
       {initEvents.length > 0 && (
-        <div>
-          <div className={styles.detailBlockTitle}>State transition</div>
+        <Card label="State transition">
           <StatePath events={d?.lifecycle?.events} inbound={inbound} />
           <StateEvents events={initEvents} />
-        </div>
+        </Card>
       )}
     </div>
   );

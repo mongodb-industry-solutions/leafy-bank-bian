@@ -20,6 +20,9 @@
   --pw-faint: #889397;          /* gray.base — meta / timestamps */
   --pw-accent: #00684a;         /* green.dark2 — brand / primary actions */
   --pw-accent-light: #c0fae6;   /* green.light2 — active tint (was light3, too pale to read) */
+  --pw-tray: #f1f4f3;           /* page tray the white cards sit on */
+  --pw-card-border: #c9d1cf;    /* visible card edge, darker than the hairline */
+  --pw-card-shadow: 0 1px 2px rgba(6, 22, 33, 0.08);
   --pw-surface: #f9fbfa;        /* gray.light3 — subtle in-card fill */
   --pw-radius: 12px;            /* borderRadius.300 — cards */
   --pw-shadow: 0 1px 2px rgba(16,36,43,.06), 0 4px 16px rgba(16,36,43,.06);  /* panel elevation */
@@ -599,6 +602,9 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding: 16px;
+  border-radius: var(--pw-radius);
+  background: var(--pw-tray);
   animation: pwExpand 200ms ease;
 }
 
@@ -712,10 +718,11 @@
 
 /* ── stage intro callout (what a stage does) ── */
 .stageIntro {
-  border: 1px solid var(--pw-border);
+  border: 1px solid var(--pw-card-border);
   border-left: 3px solid var(--pw-accent);
   border-radius: var(--pw-radius);
-  background: var(--pw-surface);
+  background: var(--pw-bg);
+  box-shadow: var(--pw-card-shadow);
   padding: 12px 16px;
   margin-bottom: 20px;
 }
@@ -754,11 +761,12 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .partyCard {
-  border: 1px solid var(--pw-border);
+  border: 1px solid var(--pw-card-border);
+  box-shadow: var(--pw-card-shadow);
   border-radius: var(--pw-radius);
   background: var(--pw-bg);
   padding: 12px 16px;
@@ -1087,6 +1095,16 @@
 
 .event:last-child {
   border-bottom: none;
+}
+
+.eventState {
+  display: inline-block;
+  min-width: 96px;
+  margin-right: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pw-text);
 }
 
 .eventReason {

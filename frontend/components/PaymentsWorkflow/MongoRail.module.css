@@ -4,10 +4,11 @@
   gap: 10px;
   min-width: 0;
   padding: 12px 14px;
-  border: 1px solid var(--pw-border);
+  border: 1px solid var(--pw-card-border);
   border-top: 3px solid #00684a;   /* green.dark2 */
+  box-shadow: var(--pw-card-shadow);
   border-radius: var(--pw-radius);
-  background: var(--pw-surface);
+  background: var(--pw-bg);
 }
 
 .title {
