@@ -37,7 +37,7 @@
 
 .chain {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   padding: 12px 14px;
@@ -51,7 +51,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 96px;
+  flex: 1 1 0;
+  min-width: 0;
   padding: 6px 10px;
   border-radius: 6px;
   border: 1px solid var(--pw-border);
@@ -80,6 +81,7 @@
 
 .hop {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   align-items: center;
   min-width: 56px;
@@ -95,6 +97,8 @@
 }
 
 .hopLabel {
+  max-width: 72px;
+  overflow-wrap: anywhere;
   font-size: 10px;
   line-height: 14px;
   color: var(--pw-faint);
@@ -689,4 +693,40 @@
   border-radius: 10px;
   background: var(--pw-surface);
   font-size: 12px;
+}
+
+/* Narrow column (or browser zoom): stack the chain top to bottom instead of squeezing the nodes. */
+@container pane (max-width: 700px) {
+  .chain {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .node {
+    flex: 0 0 auto;
+  }
+
+  .hop {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding-left: 20px;
+  }
+
+  .hopLine {
+    width: 0;
+    height: 20px;
+    border-top: 0;
+    border-left: 2px solid var(--pw-border);
+  }
+
+  .hopAsync {
+    border-left-style: dashed;
+  }
+
+  .hopLabel {
+    max-width: none;
+  }
 }

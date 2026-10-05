@@ -646,6 +646,7 @@
 
 .paneMain,
 .paneRail {
+  container: pane / inline-size;   /* lets flow diagrams react to the column, not the window */
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1664,4 +1665,63 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
   align-items: start;
+}
+
+/* ── stage 3 enrichment table: field, optional before, after, source ── */
+.enrichTable {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.enrichWithBefore { --enrich-cols: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr); }
+.enrichNoBefore { --enrich-cols: minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr); }
+
+.enrichHead,
+.enrichRow {
+  display: grid;
+  grid-template-columns: var(--enrich-cols);
+  gap: 16px;
+  align-items: start;
+  padding: 8px 0;
+}
+
+.enrichHead {
+  padding-top: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--pw-border);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--pw-muted);
+}
+
+.enrichRow + .enrichRow {
+  border-top: 1px solid var(--pw-border-light);
+}
+
+.enrichRow > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.enrichField {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--pw-muted);
+}
+
+.enrichValue {
+  font-weight: 600;
+}
+
+.enrichSource {
+  justify-self: start;
+}
+
+@media (max-width: 700px) {
+  .enrichHead { display: none; }
+  .enrichRow { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }

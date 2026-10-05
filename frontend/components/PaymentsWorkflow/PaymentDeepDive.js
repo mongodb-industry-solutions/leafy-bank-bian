@@ -448,21 +448,26 @@ function EnrichmentDiff({ enrichment }) {
     );
   }
 
+  // When nothing was captured for any field, an empty "As captured" column says nothing.
+  const hasCaptured = resolved.some((r) => fmtEnriched(r.from) !== "—");
+  const cols = hasCaptured ? styles.enrichWithBefore : styles.enrichNoBefore;
   return (
-    <div className={styles.legs}>
-      <div className={styles.legsHead}>As captured</div>
-      <div className={styles.legsHead}>After enrichment</div>
+    <div className={`${styles.enrichTable} ${cols}`} role="table">
+      <div className={styles.enrichHead} role="row">
+        <span>Field</span>
+        {hasCaptured && <span>As captured</span>}
+        <span>After enrichment</span>
+        <span>Source</span>
+      </div>
       {resolved.map((r) => (
-        <Fragment key={r.field}>
-          <div className={styles.legRow}>
-            <span>{r.field}</span>
-            <span className={styles.legAmount}>{fmtEnriched(r.from)}</span>
-          </div>
-          <div className={styles.legRow}>
-            <span className={styles.legAmount}>{fmtEnriched(r.to)}</span>
+        <div className={styles.enrichRow} role="row" key={r.field}>
+          <span className={styles.enrichField}>{r.field}</span>
+          {hasCaptured && <span>{fmtEnriched(r.from) === "—" ? "" : fmtEnriched(r.from)}</span>}
+          <span className={styles.enrichValue}>{fmtEnriched(r.to)}</span>
+          <span className={styles.enrichSource}>
             <StatusPill family="gray" label={r.source} />
-          </div>
-        </Fragment>
+          </span>
+        </div>
       ))}
     </div>
   );
