@@ -819,8 +819,9 @@ def test_b1_accept_discrepancy_on_reconciliation_discrepancy_flips_the_axis_to_r
 
     payment_after = db["payments"].find_one({"paymentId": pid})
     assert payment_after["lifecycle"]["reconciliationStatus"] == "RECONCILED"
-    # the state axis is untouched — SETTLED stays SETTLED (an axis flip, not a transition)
-    assert payment_after["lifecycle"]["currentState"] == lifecycle.SETTLED
+    # state advances too, so the payments list (reads `status`) agrees with the lifecycle view
+    assert payment_after["lifecycle"]["currentState"] == "RECONCILED"
+    assert payment_after["status"] == "RECONCILED"
 
 
 def test_b2_return_funds_is_idempotent_a_second_resolve_does_not_double_compensate(

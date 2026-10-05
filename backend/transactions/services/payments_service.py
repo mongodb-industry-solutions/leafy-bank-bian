@@ -1029,15 +1029,33 @@ class PaymentsService:
             # loop where the only legal action (accept) never sticks. Flipping
             # reconciliationStatus to RECONCILED makes the operator's accept the final word on
             # this axis; the discrepancy itself is preserved in the exception's detail + the
-            # resolution note (the cause, e.g. "correspondent fee"). The state axis (SETTLED)
-            # is untouched — this is an axis flip, not a state transition.
+            # resolution note (the cause, e.g. "correspondent fee"). The state advances to
+            # RECONCILED too, exactly as the sweep's _stamp_reconciled does: flipping only the
+            # axis left `currentState`/`status` at SETTLED, so the payments list (which reads
+            # `status`) showed SETTLED while the lifecycle view showed RECONCILED.
             if category == CATEGORY_RECONCILIATION_DISCREPANCY:
-                update = {
-                    "lifecycle.reconciliationStatus": "RECONCILED",
-                    "updatedAt": now,
-                }
                 # ACCEPT never books anything (A4): a DEBT wire is refused above.
-                self.payments.update_one({"paymentId": exc["paymentId"]}, {"$set": update})
+                self.payments.update_one(
+                    {"paymentId": exc["paymentId"],
+                     "lifecycle.currentState": {"$in": ["SETTLED", "POSTED"]}},
+                    {"$set": {
+                        "lifecycle.currentState": "RECONCILED",
+                        "lifecycle.stateEnteredAt": now,
+                        "lifecycle.reconciliationStatus": "RECONCILED",
+                        "status": "RECONCILED",
+                        "updatedAt": now,
+                    }, "$push": {"lifecycle.events": {
+                        "state": "RECONCILED", "at": now, "actor": "payments-operations",
+                        "actorType": "USER",
+                        "reason": f"Discrepancy accepted — {exc.get('exceptionId')}",
+                    }}},
+                )
+                # Already past SETTLED/POSTED (e.g. the sweep got there first): axis only.
+                self.payments.update_one(
+                    {"paymentId": exc["paymentId"],
+                     "lifecycle.reconciliationStatus": {"$ne": "RECONCILED"}},
+                    {"$set": {"lifecycle.reconciliationStatus": "RECONCILED", "updatedAt": now}},
+                )
         elif action == ACTION_POST_ADJUSTMENT:
             self._post_adjustment(payment, exc, note, now)
         elif action == ACTION_ESCALATE_TO_CORRESPONDENT:

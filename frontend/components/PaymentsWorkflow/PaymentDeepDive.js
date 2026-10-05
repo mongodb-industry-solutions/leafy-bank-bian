@@ -1,21 +1,14 @@
 "use client";
 
-// The payment lifecycle deep dive — a thin horizontal mini-stepper (zone 1) over a vertical
-// stepper-timeline (zone 2), per the Payment Analyst UI research (§3.3/§3.4).
-//
-// Why vertical primary, not the horizontal rail this used to be: a single payment is a
-// single-threaded state machine, and each stage carries too much (timestamps, actor,
-// checks, ISO views, double-entry legs) to fit under a node. A vertical spine gives each
-// stage's detail the full width it needs, and the mini-stepper above preserves the
-// left-to-right saga shape and stays the clickable summary. Clicking either scrolls the
-// matching row into view and expands it. A terminal failure auto-expands the failing stage
-// and dims the downstream ones.
+// The payment lifecycle deep dive — a horizontal stage stepper (the only navigation) over one
+// detail pane (StagePane) that shows the selected stage. A terminal failure or an open
+// exception auto-selects the stage that owns it; the stepper marks stages needing attention.
 //
 // Two data sources, composed client-side and never server-side:
 //   * /workflow/payments/{id}  (transactions) — stages 1-4
 //   * /pipeline/trace/{id}     (ledger)       — stages 5-8
 // Neither service reads the other's collections (decisions.md 2026-06-18).
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Banner from "@leafygreen-ui/banner";
 import Code from "@leafygreen-ui/code";
 import { Tab, Tabs } from "@leafygreen-ui/tabs";
@@ -54,7 +47,7 @@ const nodeGlyph = (state) =>
   state === "failed" ? "×" : state === "completed" ? "✓" : "";
 
 /**
- * Per-stage node state for the mini-stepper and the vertical timeline.
+ * Per-stage node state for the stage stepper.
  *
  * Two different progress models live on this one rail, and they must not be conflated:
  *
@@ -99,164 +92,241 @@ function nodeStates(stages, paymentStatus) {
   });
 }
 
-/** Zone 1 — thin horizontal clickable summary that preserves the saga's left-to-right shape. */
+/** The things in a stage that need someone's attention, across a grouped stage's panels. */
+function stageAttention(stage) {
+  const panels = stage.children?.length > 1 ? stage.children : [stage];
+  const openExceptions = panels
+    .flatMap((p) => p.exceptions || [])
+    .filter((e) => e?.status === "OPEN").length;
+  return {
+    openExceptions,
+    stepUp: panels.some((p) => p.actionRequired),
+    review: panels.some((p) => p.data?.reviewActionRequired),
+  };
+}
+
+function attentionLabel({ openExceptions, stepUp, review }) {
+  if (openExceptions) return `${openExceptions} open exception${openExceptions > 1 ? "s" : ""}`;
+  if (stepUp) return "Waiting for step-up authentication";
+  if (review) return "Waiting for manual review";
+  return null;
+}
+
+/**
+ * The horizontal stage selector — the only navigation in the lifecycle panel. Each node shows
+ * its state, label and one line of meta; an orange dot marks a stage that needs attention so
+ * the presenter sees where to click without opening anything. Linear-saga stages downstream
+ * of a terminal failure are dimmed (they never ran); the independent axes (stage >= 6) are
+ * parallel, not downstream, so they are not.
+ */
 function MiniStepper({ stages, states, selectedKey, onSelect }) {
+  const failedIdx = states.indexOf("failed");
+
+  // Left/right arrows move between stages (roving focus over the buttons).
+  function onKeyDown(e) {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!step) return;
+    const next = stages[stages.findIndex((s) => s.key === selectedKey) + step];
+    if (!next) return;
+    e.preventDefault();
+    onSelect(next.key);
+    e.currentTarget.querySelector(`[data-stage-key="${next.key}"]`)?.focus();
+  }
+
   return (
     <div className={styles.miniStepperScroll}>
-      <div className={styles.miniStepperTrack}>
-        {stages.map((s, i) => (
-          <Fragment key={s.key}>
-            {i > 0 && (
-              <span
-                className={`${styles.miniConnector} ${
-                  states[i - 1] === "completed" ? styles.miniConnectorDone : ""
-                }`}
-              />
-            )}
-            <button
-              type="button"
-              className={`${styles.miniNode} ${
-                selectedKey === s.key ? styles.miniNodeActive : ""
-              }`}
-              onClick={() => onSelect(s.key)}
-              aria-pressed={selectedKey === s.key}
-              title={s.label}
-            >
-              <span className={`${styles.miniCircle} ${styles[`mini${cap(states[i])}`]}`}>
-                {nodeGlyph(states[i])}
-              </span>
-              <span className={styles.miniLabel}>{s.label}</span>
-            </button>
-          </Fragment>
-        ))}
+      <div className={styles.miniStepperTrack} onKeyDown={onKeyDown}>
+        {stages.map((s, i) => {
+          const issue = attentionLabel(stageAttention(s));
+          const dimmed = failedIdx >= 0 && i > failedIdx && s.stage < 6;
+          return (
+            <Fragment key={s.key}>
+              {i > 0 && (
+                <span
+                  className={`${styles.miniConnector} ${
+                    states[i - 1] === "completed" ? styles.miniConnectorDone : ""
+                  }`}
+                />
+              )}
+              <button
+                type="button"
+                data-stage-key={s.key}
+                className={`${styles.miniNode} ${
+                  selectedKey === s.key ? styles.miniNodeActive : ""
+                } ${dimmed ? styles.miniNodeDimmed : ""}`}
+                onClick={() => onSelect(s.key)}
+                aria-current={selectedKey === s.key ? "step" : undefined}
+                title={issue ? `${s.label} — ${issue}` : s.label}
+              >
+                <span className={`${styles.miniCircle} ${styles[`mini${cap(states[i])}`]}`}>
+                  {nodeGlyph(states[i])}
+                  {issue && <span className={styles.miniIssueDot} aria-label={issue} />}
+                </span>
+                <span className={styles.miniLabel}>{s.label}</span>
+                {s.meta && <span className={styles.miniMeta}>{s.meta}</span>}
+              </button>
+            </Fragment>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-/** Zone 2 — vertical spine of expandable rows; the selected row expands to its full detail. */
-function VerticalTimeline({ stages, states, selectedKey, onSelect, payment, setRowRef, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
-  const failedIdx = states.indexOf("failed");
+/**
+ * What the operator must do next, lifted out of the stage body so it sits right under the
+ * stage header. The handlers are the ones the bodies used before; only the placement moved.
+ * Open exceptions keep their resolve buttons in the exceptions block, so they get a pointer,
+ * not a second set of buttons.
+ */
+function NextAction({ attention, onApprove, onResolve }) {
+  const { openExceptions, stepUp, review } = attention;
   return (
-    <div className={styles.timeline}>
-      {stages.map((s, i) => {
-        const expanded = selectedKey === s.key;
-        // A terminal failure dims the downstream LINEAR-SAGA stages (1-5) — the payment did
-        // not advance past the failure, so later linear steps never ran. Independent axes
-        // (stages 6-8: posting / settlement / reconciliation) are parallel, not downstream —
-        // they carry their own reached/pending/failed state and render without the extra dim
-        // layer. Greying reconciliation on a FAILED settlement read as "broken" when it is
-        // really "not applicable" — the plain pending node conveys that without the dim.
-        const dimmed = failedIdx >= 0 && i > failedIdx && s.stage < 6;
-        const nodeState = states[i];
-        return (
-          <div
-            key={s.key}
-            className={`${styles.timelineRow} ${dimmed ? styles.timelineRowDimmed : ""}`}
-            ref={setRowRef(s.key)}
-          >
-            <div className={styles.spine}>
-              <span className={`${styles.timelineNode} ${styles[`node${cap(nodeState)}`]}`}>
-                {nodeGlyph(nodeState)}
-              </span>
-              {i < stages.length - 1 && (
-                <span
-                  className={`${styles.timelineConnector} ${
-                    nodeState === "completed" ? styles.timelineConnectorDone : ""
-                  } ${i === failedIdx ? styles.timelineConnectorDashed : ""}`}
-                />
-              )}
-            </div>
-            <div className={styles.timelineContent}>
-              <button
-                type="button"
-                className={styles.timelineRowHeader}
-                onClick={() => onSelect(s.key)}
-                aria-expanded={expanded}
-              >
-                <span className={styles.timelineStageLabel}>{s.label}</span>
-                <span className={styles.timelineStageMeta}>{s.meta || "—"}</span>
-                {s.status && <StatusPill status={s.status} />}
-              </button>
-              {nodeState === "failed" && expanded && (
-                <div className={styles.failedBanner}>
-                  Payment stopped at {s.label} — status {payment?.status || "unknown"}.
-                </div>
-              )}
-              {expanded && (
-                <div className={styles.timelineRowBody}>
-                  {s.children?.length > 1 ? (
-                    <GroupStageBody
-                      group={s}
-                      payment={payment}
-                      onApprove={onApprove}
-                      onResolve={onResolve}
-                      onResolveException={onResolveException}
-                      onResolveUta={onResolveUta}
-                      onLedgerAction={onLedgerAction}
-                      onAcknowledgeAgent={onAcknowledgeAgent}
-                      refreshKey={refreshKey}
-                    />
-                  ) : (
-                    <StageDetailBody
-                      stage={s}
-                      payment={payment}
-                      onApprove={onApprove}
-                      onResolve={onResolve}
-                      onResolveException={onResolveException}
-                      onResolveUta={onResolveUta}
-                      onLedgerAction={onLedgerAction}
-                      onAcknowledgeAgent={onAcknowledgeAgent}
-                      refreshKey={refreshKey}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
+    <>
+      {stepUp && (
+        <div className={styles.stepUpCallout}>
+          <div className={styles.stepUpCalloutTitle}>
+            <Icon glyph="Lock" />
+            <span>Verification required here</span>
           </div>
-        );
-      })}
-    </div>
+          <Body>
+            This payment is above the account&apos;s step-up threshold and is waiting for an
+            additional authentication factor before it can proceed. Approve it here to
+            continue it through the lifecycle.
+          </Body>
+          <Button variant="primary" onClick={onApprove}>
+            Authenticate &amp; continue
+          </Button>
+        </div>
+      )}
+      {review && onResolve && (
+        <div className={styles.stepUpCallout}>
+          <div className={styles.stepUpCalloutTitle}>
+            <Icon glyph="Diagram3" />
+            <span>Manual review required here</span>
+          </div>
+          <Body>
+            Fraud scoring held this payment for manual review. Approve to commit the
+            execution path and continue it through the lifecycle, or decline to reject it.
+            No money has moved yet.
+          </Body>
+          <div className={styles.resolveActions}>
+            <Button variant="primary" onClick={() => onResolve("APPROVED")}>
+              Approve &amp; continue
+            </Button>
+            <Button variant="danger" onClick={() => onResolve("REJECTED")}>
+              Decline
+            </Button>
+          </div>
+        </div>
+      )}
+      {openExceptions > 0 && (
+        <div className={styles.nextActionChip}>
+          <Icon glyph="Warning" />
+          <span>
+            {openExceptions} open exception{openExceptions > 1 ? "s" : ""} on this stage —
+            resolve {openExceptions > 1 ? "them" : "it"} in the Exceptions section below.
+          </span>
+        </div>
+      )}
+    </>
   );
 }
 
 /**
- * The grouped stage body — stage 6 (Accounting & posting) renders as ONE rail node whose
- * expanded body stacks the four panels (ledger event, fee ledger event, sub-ledger, general
- * ledger). The group's composite intro is shown once, then each panel as its own titled
- * sub-block: label + its own status pill + its own intro + its full detail. Keeping the
- * per-panel heads lets the reader name each accounting fact before its legs, instead of six
- * anonymous columns that read as separate top-level stages.
+ * The single detail pane under the stepper: header (label, status, meta), failure banner,
+ * next action, then the stage body. A grouped stage (6, 7) shows its panels as sub-tabs; the
+ * group's exceptions render ONCE above the tabs, because the lifecycle model attaches them to
+ * the first panel and a per-tab copy would put two live resolve buttons on one exception.
  */
-function GroupStageBody({ group, payment, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
+function StagePane({ stage, state, payment, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
+  const [panelIdx, setPanelIdx] = useState(0);
+  // A different stage (or a payment with fewer panels) must not keep a stale tab index.
+  useEffect(() => setPanelIdx(0), [stage?.key]);
+
+  if (!stage) return null;
+
+  const grouped = stage.children?.length > 1;
+  const attention = stageAttention(stage);
+  const actions = { onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent };
+  const claimer = grouped ? stage.children.find((c) => (c.exceptions || []).length) : null;
+
   return (
-    <div className={styles.groupBody}>
-      {group.intro && (
-        <div className={styles.stageIntro}>
-          <div className={styles.stageIntroLabel}>What this stage does</div>
-          <div className={styles.stageIntroText}>{group.intro}</div>
+    <section className={styles.stagePane} aria-live="polite">
+      <div className={styles.stagePaneHead}>
+        <span className={styles.stagePaneLabel}>{stage.label}</span>
+        {stage.status && <StatusPill status={stage.status} />}
+        {stage.meta && <span className={styles.stagePaneMeta}>{stage.meta}</span>}
+      </div>
+
+      {state === "failed" && (
+        <div className={styles.failedBanner}>
+          Payment stopped at {stage.label} — status {payment?.status || "unknown"}.
         </div>
       )}
-      {group.children.map((c) => (
-        <section className={styles.groupPanel} key={c.key}>
-          <div className={styles.groupPanelHead}>
-            <span className={styles.timelineStageLabel}>{c.label}</span>
-            {c.status && <StatusPill status={c.status} />}
-            {c.meta && <span className={styles.groupPanelMeta}>{c.meta}</span>}
-          </div>
-          <StageDetailBody
-            stage={c}
-            payment={payment}
-            onApprove={onApprove}
-            onResolve={onResolve}
-            onResolveException={onResolveException}
-            onResolveUta={onResolveUta}
-            onLedgerAction={onLedgerAction}
-            onAcknowledgeAgent={onAcknowledgeAgent}
-          />
-        </section>
-      ))}
-    </div>
+
+      {!stage.reached ? (
+        <>
+          {stage.intro && (
+            <div className={styles.stageIntro}>
+              <div className={styles.stageIntroLabel}>What this stage does</div>
+              <div className={styles.stageIntroText}>{stage.intro}</div>
+            </div>
+          )}
+          <Body className={styles.muted}>{stage.label} — not reached yet.</Body>
+        </>
+      ) : (
+        <>
+          <NextAction attention={attention} onApprove={onApprove} onResolve={onResolve} />
+          {grouped ? (
+            <>
+              {stage.intro && (
+                <div className={styles.stageIntro}>
+                  <div className={styles.stageIntroLabel}>What this stage does</div>
+                  <div className={styles.stageIntroText}>{stage.intro}</div>
+                </div>
+              )}
+              {claimer && (
+                <ExceptionsPanel
+                  exceptions={claimer.exceptions}
+                  payment={payment}
+                  onResolve={onResolveException}
+                  onLedgerAction={onLedgerAction}
+                  onResolveUta={onResolveUta}
+                  onAcknowledgeAgent={onAcknowledgeAgent}
+                  reversalEvent={claimer.reversalEvent}
+                  reversalLegs={claimer.reversalLegs}
+                  refreshKey={refreshKey}
+                />
+              )}
+              <Tabs
+                aria-label={`${stage.label} panels`}
+                selected={panelIdx}
+                setSelected={setPanelIdx}
+              >
+                {stage.children.map((c) => (
+                  <Tab key={c.key} name={c.label}>
+                    <div className={styles.tabBody}>
+                      <div className={styles.groupPanelHead}>
+                        {c.status && <StatusPill status={c.status} />}
+                        {c.meta && <span className={styles.groupPanelMeta}>{c.meta}</span>}
+                      </div>
+                      <StageDetailBody
+                        stage={{ ...c, exceptions: [] }}
+                        payment={payment}
+                        {...actions}
+                      />
+                    </div>
+                  </Tab>
+                ))}
+              </Tabs>
+            </>
+          ) : (
+            <StageDetailBody stage={stage} payment={payment} {...actions} refreshKey={refreshKey} />
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1300,7 +1370,7 @@ function RoutingDecision({ snapshot }) {
   );
 }
 
-function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
+function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
   // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
   // must sit above the early returns (rules of hooks).
   const [showRaw, setShowRaw] = useState(false);
@@ -1373,22 +1443,6 @@ function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveExcept
       <div className={styles.detailColumns}>
         {showStageTwo && (
           <>
-            {stage.actionRequired && (
-              <div className={styles.stepUpCallout}>
-                <div className={styles.stepUpCalloutTitle}>
-                  <Icon glyph="Lock" />
-                  <span>Verification required here</span>
-                </div>
-                <Body>
-                  This payment is above the account&apos;s step-up threshold and is waiting for an
-                  additional authentication factor before it can proceed. Approve it here to
-                  continue it through the lifecycle.
-                </Body>
-                <Button variant="primary" onClick={onApprove}>
-                  Authenticate &amp; continue
-                </Button>
-              </div>
-            )}
             <div className={styles.stageTwoGrid}>
             <div className={styles.detailBlock}>
               <div className={styles.detailBlockTitle}>The two gates</div>
@@ -1454,37 +1508,6 @@ function StageDetailBody({ stage, payment, onApprove, onResolve, onResolveExcept
             cut-off, value date, rationale) is visible in the UI, not just the snapshot id. */}
         {showAuthorization && (
           <RoutingDecision snapshot={stage.data?.routingSnapshot} />
-        )}
-
-        {/* FR-4.13 — the operator manual-review resolve. A payment held at PENDING_REVIEW
-            is approved (commits the authorisation, continues to execution) or declined
-            (terminates to REJECTED) here. Mirrors the stage-2 step-up callout above. */}
-        {showAuthorization && stage.data?.reviewActionRequired && onResolve && (
-          <div className={styles.stepUpCallout}>
-            <div className={styles.stepUpCalloutTitle}>
-              <Icon glyph="Diagram3" />
-              <span>Manual review required here</span>
-            </div>
-            <Body>
-              Fraud scoring held this payment for manual review. Approve to commit the
-              execution path and continue it through the lifecycle, or decline to reject it.
-              No money has moved yet.
-            </Body>
-            <div className={styles.resolveActions}>
-              <Button
-                variant="primary"
-                onClick={() => onResolve("APPROVED")}
-              >
-                Approve &amp; continue
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => onResolve("REJECTED")}
-              >
-                Decline
-              </Button>
-            </div>
-          </div>
         )}
 
         {showInitiation && (
@@ -2250,13 +2273,6 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
     setNudge((n) => n + 1);
     if (onDataChanged) onDataChanged();
   }
-  const rowRefs = useRef({});
-  const setRowRef = useCallback(
-    (key) => (el) => {
-      rowRefs.current[key] = el;
-    },
-    []
-  );
   // Per-payment guard so the failed-stage auto-expand fires once, not on every trace re-poll.
   const autoExpandedFor = useRef(null);
 
@@ -2267,7 +2283,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
     autoExpandedFor.current = null;
   }, [paymentId]);
 
-  // Group first so the rail/timeline reads as Doina's 8 stages — stage 6 as one
+  // Group first so the stepper reads as Doina's 8 stages — stage 6 as one
   // "Accounting & posting" node with the four panels nested — rather than ~12 nodes.
   const stages = useMemo(
     () => (payment ? groupLifecycleStages(buildLifecycleStages(payment, trace)) : null),
@@ -2298,14 +2314,6 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
       autoExpandedFor.current = paymentId;
     }
   }, [stages, states, paymentId]);
-
-  // Clicking the mini-stepper or a row header scrolls the matching row into view.
-  useEffect(() => {
-    rowRefs.current[selectedKey]?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-    });
-  }, [selectedKey]);
 
   if (!paymentId) {
     return (
@@ -2383,13 +2391,10 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
               selectedKey={selectedKey}
               onSelect={setSelectedKey}
             />
-            <VerticalTimeline
-              stages={stages}
-              states={states}
-              selectedKey={selectedKey}
-              onSelect={setSelectedKey}
+            <StagePane
+              stage={stages.find((s) => s.key === selectedKey) ?? stages[0]}
+              state={states[Math.max(0, stages.findIndex((s) => s.key === selectedKey))]}
               payment={payment}
-              setRowRef={setRowRef}
               onApprove={() => setStepUpOpen(true)}
               onResolve={resolveReview}
               onResolveException={resolveException}

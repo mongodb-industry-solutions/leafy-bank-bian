@@ -450,11 +450,8 @@
   gap: 8px;
 }
 
-/* ── lifecycle: mini-stepper (zone 1) + vertical timeline (zone 2) ──
-   Research §3.3/§3.4. A single payment is a single-threaded state machine; each stage
-   carries too much to sit under a node, so the vertical spine is primary and the thin
-   horizontal stepper above is the clickable summary that preserves the saga's shape.
-   Clicking either scrolls the matching row into view and expands it. */
+/* ── lifecycle: stage stepper + stage pane ──
+   The horizontal stepper is the only navigation; the pane under it shows the selected stage. */
 
 .miniStepperScroll {
   overflow-x: auto;
@@ -494,11 +491,16 @@
   outline-offset: 1px;
 }
 
+.miniNodeDimmed {
+  opacity: .45;
+}
+
 .miniNodeActive {
   background: var(--pw-accent-light);
 }
 
 .miniCircle {
+  position: relative;
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -545,6 +547,28 @@
   color: var(--pw-muted);
 }
 
+/* Orange dot on a node whose stage has an open exception or a held action. */
+.miniIssueDot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ed6c02;
+  border: 2px solid var(--pw-bg);
+}
+
+.miniMeta {
+  font-size: 10px;
+  line-height: 12px;
+  max-width: 92px;
+  color: var(--pw-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Sits level with the 24px circle's centre (6px node padding + 12px). */
 .miniConnector {
   flex: 1 1 12px;
@@ -556,133 +580,6 @@
 
 .miniConnectorDone {
   background: #00684a;   /* green.dark2 */
-}
-
-/* ── vertical timeline ── */
-
-.timeline {
-  display: flex;
-  flex-direction: column;
-}
-
-.timelineRow {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  gap: 16px;
-  align-items: stretch;
-}
-
-/* Downstream of a failure: dim the stages that never ran. */
-.timelineRowDimmed {
-  opacity: .45;
-}
-
-.spine {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 14px;
-}
-
-.timelineNode {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  border: 1px solid transparent;
-  z-index: 1;
-}
-
-.nodeCompleted {
-  background: #00684a;   /* green.dark2 */
-  color: #ffffff;
-  border-color: #00684a;
-}
-
-.nodeCurrent {
-  background: #c3e7fe;   /* blue.light2 */
-  color: #083c90;        /* blue.dark2 */
-  border-color: #083c90;
-  animation: pwPulse 1.8s ease-in-out infinite;
-}
-
-.nodeFailed {
-  background: #970606;   /* red.dark2 */
-  color: #ffffff;
-  border-color: #970606;
-}
-
-.nodePending {
-  background: var(--pw-bg);
-  color: var(--pw-faint);
-  border: 1px dashed var(--pw-border);
-}
-
-/* Vertical connector down to the next row's node. */
-.timelineConnector {
-  width: 2px;
-  flex: 1 1 auto;
-  min-height: 16px;
-  margin-top: 4px;
-  background: var(--pw-border);
-}
-
-.timelineConnectorDone {
-  background: #00684a;   /* green.dark2 */
-}
-
-/* After a failed stage the connector becomes a short dashed gray stub. */
-.timelineConnectorDashed {
-  background: transparent;
-  border-left: 2px dashed var(--pw-border);
-}
-
-.timelineContent {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding-bottom: 20px;
-}
-
-.timelineRowHeader {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  border-radius: 6px;
-}
-
-.timelineRowHeader:hover {
-  background: var(--pw-surface);
-}
-
-.timelineRowHeader:focus-visible {
-  outline: 2px solid var(--pw-accent);
-  outline-offset: 1px;
-}
-
-.timelineStageLabel {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.timelineStageMeta {
-  font-size: 12px;
-  color: var(--pw-faint);
-  margin-right: auto;
 }
 
 .failedBanner {
@@ -697,35 +594,45 @@
   line-height: 20px;
 }
 
-.timelineRowBody {
-  border-top: 1px solid var(--pw-border-light);
-  padding-top: 16px;
+/* ── stage pane ── */
+.stagePane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   animation: pwExpand 200ms ease;
 }
 
-/* ── grouped stage body (stage 6 Accounting & posting) ──
-   One rail node whose expanded body stacks the four accounting panels. Each panel is a
-   titled sub-block, not its own top-level stage, so the reader sees the group's single
-   story ("one stage, four panels") rather than four independent rows. Lighter than a full
-   card: a hairline rule above each panel, the panel head (label + status + meta) carrying
-   the identity once, the detail below. */
-.groupBody {
+.stagePaneHead {
   display: flex;
-  flex-direction: column;
-  gap: 20px;
+  align-items: center;
+  gap: 10px;
 }
 
-.groupPanel {
-  padding-top: 12px;
-  border-top: 1px solid var(--pw-border-light);
+.stagePaneLabel {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
 }
 
-.groupPanel:first-of-type {
-  /* The group intro already opens with a rule; don't double it under the first panel. */
-  padding-top: 0;
-  border-top: none;
+.stagePaneMeta {
+  font-size: 12px;
+  color: var(--pw-faint);
+  margin-left: auto;
 }
 
+.nextActionChip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #c25a00;   /* orange.dark2-ish */
+  border-radius: var(--pw-radius);
+  background: #fff4e5;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* Sub-panel head inside a grouped stage's tab (status + meta; the tab carries the label). */
 .groupPanelHead {
   display: flex;
   align-items: center;
