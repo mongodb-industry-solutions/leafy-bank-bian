@@ -1,4 +1,4 @@
-// Small stage-specific visuals: the corridor decision and FX provenance (stage 3), the cut-off
+// Small stage-specific visuals: who pays whom (stage 1), the corridor decision and FX provenance (stage 3), the cut-off
 // clock (stage 4), how a payment becomes ledger entries (stage 6) and how the expected
 // settlement compares with what was booked (stage 7). Each reads only fields the backend
 // already stores, and renders nothing when they are absent.
@@ -162,6 +162,76 @@ export function CutoffClock({ snapshot }) {
             ? "within cut-off"
             : `past cut-off${snapshot.valueDate ? ` — value date ${snapshot.valueDate}` : ""}`}
         </span>
+      </div>
+    </div>
+  );
+}
+
+const initials = (name) =>
+  String(name || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+
+function PartyBox({ role, party, external }) {
+  const account = party?.accountNo ? `····${String(party.accountNo).slice(-4)}` : null;
+  const bank = [party?.bankName, party?.bic, party?.bankCountry].filter(Boolean);
+  return (
+    <div className={styles.party}>
+      <div className={styles.partyTop}>
+        <span className={styles.avatar} aria-hidden="true">{initials(party?.name)}</span>
+        <div className={styles.partyId}>
+          <span className={styles.partyRole}>
+            {role}
+            {external && <span className={styles.partyTag}>external</span>}
+          </span>
+          <span className={styles.partyName}>{party?.name || "—"}</span>
+        </div>
+      </div>
+      <dl className={styles.partyLines}>
+        {bank.length > 0 && (
+          <div>
+            <dt>Bank</dt>
+            <dd>{bank.join(" · ")}</dd>
+          </div>
+        )}
+        {account && (
+          <div>
+            <dt>Account</dt>
+            <dd className={styles.mono}>
+              {account}
+              {party?.accountType ? ` · ${party.accountType}` : ""}
+            </dd>
+          </div>
+        )}
+        {party?.accountId && (
+          <div>
+            <dt>Account ID</dt>
+            <dd className={styles.mono}>{party.accountId}</dd>
+          </div>
+        )}
+      </dl>
+    </div>
+  );
+}
+
+/** Debtor, the amount and rail travelling between them, creditor. Stacks when narrow. */
+export function PartyFlow({ payment }) {
+  const wireType = payment?.wireDetails?.wireType;
+  return (
+    <div className={styles.flowFrame}>
+      <div className={styles.flow}>
+        <PartyBox role="Payer" party={payment?.debtor} />
+        <div className={styles.flowLink}>
+          <span className={styles.flowAmount}>{fmtAmount(payment?.amount, payment?.currency)}</span>
+          <span className={styles.flowArrow} aria-hidden="true" />
+          <span className={styles.flowRail}>
+            {[payment?.rail, wireType].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+        <PartyBox role="Beneficiary" party={payment?.creditor} external />
       </div>
     </div>
   );

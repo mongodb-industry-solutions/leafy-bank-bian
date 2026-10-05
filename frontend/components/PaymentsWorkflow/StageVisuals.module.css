@@ -203,3 +203,170 @@
   font-size: 12px;
   color: var(--pw-muted);
 }
+
+/* ── stage 1: who pays whom ── */
+.flowFrame {
+  container-type: inline-size;
+}
+
+.flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, auto) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.party {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--pw-border);
+  border-radius: var(--pw-radius);
+  background: var(--pw-bg);
+}
+
+.partyTop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--pw-accent-light);
+  color: var(--pw-accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.partyId {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.partyRole {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.partyTag {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--pw-surface);
+  border: 1px solid var(--pw-border);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.partyName {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.partyLines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--pw-border-light);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.partyLines > div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.partyLines dt {
+  color: var(--pw-muted);
+}
+
+.partyLines dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.flowLink {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.flowAmount {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 700;
+}
+
+.flowArrow {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  background: var(--pw-accent);
+}
+
+.flowArrow::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -4px;
+  border-left: 8px solid var(--pw-accent);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+
+.flowRail {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--pw-muted);
+}
+
+@container (max-width: 640px) {
+  .flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .flowArrow {
+    width: 2px;
+    height: 24px;
+  }
+
+  .flowArrow::after {
+    right: -4px;
+    top: auto;
+    bottom: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 8px solid var(--pw-accent);
+    border-bottom: none;
+  }
+}

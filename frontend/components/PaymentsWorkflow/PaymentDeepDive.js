@@ -24,7 +24,7 @@ import StatusPill from "./StatusPill";
 import LensToggle, { useLens } from "./LensToggle";
 import MongoRail from "./MongoRail";
 import KeyFacts from "./KeyFacts";
-import { PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock } from "./StageVisuals";
+import { PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock, PartyFlow } from "./StageVisuals";
 import { stageCopy, stageFacts, stageWrites, settlementDelta } from "./stageContent";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
@@ -1271,30 +1271,6 @@ function summaryRows(stage, payment) {
   }
 }
 
-/** One immutable party snapshot (debtor or creditor) as a card of key/values. */
-function PartyCard({ label, party, external }) {
-  const rows = [
-    ["Name", party?.name],
-    ["Account ID", party?.accountId],
-    ["Account no", party?.accountNo ? `····${String(party.accountNo).slice(-4)}` : null],
-    ["Account type", party?.accountType],
-    ["Bank", party?.bankName],
-    ["BIC", party?.bic],
-    ["Country", party?.bankCountry],
-  ].filter(([, v]) => v != null);
-  return (
-    <div className={styles.partyCard}>
-      <div className={styles.partyLabel}>
-        {label}
-        {external && !party?.accountId && (
-          <span className={styles.partyExternal}>external</span>
-        )}
-      </div>
-      <KeyValues rows={rows.length ? rows : [["—", "—"]]} />
-    </div>
-  );
-}
-
 /**
  * The rail-specific initiation envelope — Doina's "type-specific initiation envelope". One is
  * populated per rail; the other two stay all-null. Shows the fields stage 1 genuinely knows,
@@ -1413,6 +1389,45 @@ function RoutingDecision({ snapshot }) {
   );
 }
 
+/**
+ * Stage 1 as one composed block: who pays whom first, then the instruction and the rail
+ * envelope side by side, then the single state transition as a footer. The amount, rail,
+ * charge bearer, execution date and channel are in the key facts above, so they are not
+ * repeated here, and fields with no value are left out rather than printed as dashes.
+ */
+function InitiationBody({ payment, initEvents }) {
+  const d = payment;
+  const instruction = [
+    ["Type", d?.type],
+    ["Priority", d?.priority],
+    ["Customer", d?.customerId],
+    ["Purpose", d?.remittance?.unstructured],
+    ["End-to-end reference", d?.remittance?.reference],
+    ["Client reference", d?.remittance?.invoiceNo],
+  ].filter(([, v]) => v != null && v !== "");
+  return (
+    <div className={styles.initBody}>
+      <PartyFlow payment={d} />
+      <div className={styles.initDetails}>
+        <div className={styles.partyCard}>
+          <div className={styles.partyLabel}>Instruction</div>
+          <KeyValues rows={instruction} />
+        </div>
+        <div className={styles.partyCard}>
+          <div className={styles.partyLabel}>Rail envelope</div>
+          <InitEnvelope payment={d} />
+        </div>
+      </div>
+      {initEvents.length > 0 && (
+        <div>
+          <div className={styles.detailBlockTitle}>State transition</div>
+          <StateEvents events={initEvents} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
   if (!stage) return null;
 
@@ -1521,16 +1536,7 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
           </div>
         )}
 
-        {/* Stage 2 shows both: the six check results, and the assessment blocks
-            (`authentication{}` / `entitlement{}`) that say what they were judged against. */}
-        {showInitiation && initEvents.length > 0 && (
-          <div className={styles.detailBlock}>
-            <div className={styles.detailBlockTitle}>State transition</div>
-            <StateEvents events={initEvents} />
-          </div>
-        )}
-
-        {!showStates && !showStageTwo && !showEnrichment && (
+        {!showStates && !showStageTwo && !showEnrichment && !showInitiation && (
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Summary</div>
             <KeyValues rows={summaryRows(stage, payment)} />
@@ -1546,22 +1552,7 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
 
         {showInitiation && (
           <div className={styles.detailBlockWide}>
-            <div className={styles.detailBlockTitle}>Immutable parties</div>
-            <div className={styles.partyGrid}>
-              <PartyCard label="Debtor — the payer" party={stage.data?.debtor} />
-              <PartyCard
-                label="Creditor — the beneficiary"
-                party={stage.data?.creditor}
-                external
-              />
-            </div>
-          </div>
-        )}
-
-        {showInitiation && (
-          <div className={styles.detailBlockWide}>
-            <div className={styles.detailBlockTitle}>Initiation envelope</div>
-            <InitEnvelope payment={stage.data} />
+            <InitiationBody payment={stage.data} initEvents={initEvents} />
           </div>
         )}
 

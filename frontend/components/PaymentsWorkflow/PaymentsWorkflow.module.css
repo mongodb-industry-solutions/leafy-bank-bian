@@ -744,6 +744,19 @@
   align-items: start;
 }
 
+.initBody {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.initDetails {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
 .partyCard {
   border: 1px solid var(--pw-border);
   border-radius: var(--pw-radius);
