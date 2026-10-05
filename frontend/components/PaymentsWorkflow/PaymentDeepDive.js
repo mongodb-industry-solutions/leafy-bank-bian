@@ -1652,6 +1652,24 @@ function linkCandidateLabel(exc) {
   return `${exc.paymentId} · expected ${d.expectedAmount ?? "?"}`;
 }
 
+// A MISSING payment's own unmatched statement lines, shaped like the orphan twins the picker
+// lists. Without them a wrongly dismissed orphan leaves the payment with nothing to link.
+function withUnclaimedStatementLines(twins, open, payment) {
+  if (open?.category !== "RECONCILIATION_MISSING") return twins;
+  const seen = new Set(twins.map((t) => `${t.subjectRef?.paymentMessageId}#${t.subjectRef?.lineNo}`));
+  const lines = (payment?.statements || []).flatMap((stmt) =>
+    (stmt.entries || [])
+      .filter((e) => e.simulatedPaymentId === payment.paymentId && e.recon?.status === "UNMATCHED")
+      .map((e) => ({
+        exceptionId: `${stmt.paymentMessageId}#${e.lineNo}`,
+        category: "ORPHANED_SETTLEMENT",
+        subjectRef: { paymentMessageId: stmt.paymentMessageId, lineNo: e.lineNo },
+        detail: { reference: e.reference, actualAmount: e.amount, currency: e.currency },
+      }))
+  );
+  return [...twins, ...lines.filter((l) => !seen.has(l.exceptionId))];
+}
+
 // The UTA actions post to `/workflow/exceptions/{id}/uta`, not `/resolve`. Named here so
 // the panel routes by data rather than by a hardcoded category check at the call site.
 const UTA_ACTIONS = new Set(["REPAIR", "RETURN"]);
@@ -1756,7 +1774,8 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
   const [repairAccount, setRepairAccount] = useState("");
   const [returnReason, setReturnReason] = useState("AC01");
   const [linkTarget, setLinkTarget] = useState("");
-  const linkCandidates = useLinkCandidates(baseOpen?.category, refreshKey);
+  const twinCandidates = useLinkCandidates(baseOpen?.category, refreshKey);
+  const linkCandidates = withUnclaimedStatementLines(twinCandidates, baseOpen, payment);
 
   if (!exceptions.length) {
     return <Body className={styles.muted}>No exceptions recorded for this payment.</Body>;

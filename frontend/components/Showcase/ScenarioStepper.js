@@ -19,6 +19,12 @@ import StepDocuments from "./StepDocuments";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
+// Endings each scenario is designed to reach. ESCALATED is a legitimate waypoint for R4/R5
+// (the correspondent has not answered yet); anywhere else it means the run went off script.
+const EXPECTED_OUTCOMES = {
+  R1: ["RECONCILED"], R1b: ["RECONCILED"], R2: ["RECONCILED"], TL: ["RECONCILED"],
+  R4: ["RECONCILED", "ESCALATED"], R5: ["ANSWERED", "ESCALATED"],
+};
 const OWN_CATEGORIES = new Set([CATEGORY.DISCREPANCY, CATEGORY.MISSING]);
 
 const generateStatement = (includeOrphan) =>
@@ -174,9 +180,9 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
 
   const reconciled =
     payment?.lifecycle?.reconciliationStatus === "RECONCILED" ||
-    // R2 has a payment whose own reconciliation must close; resolving only the orphan twin
-    // (e.g. a dismissal) does not reconcile it.
-    (scenarioKey !== "R2" && followedException && followedException.status !== "OPEN" && agent?.verification?.result === "RESOLVED");
+    // Only R5 has no payment. Elsewhere the payment's own reconciliation must close:
+    // resolving one exception (e.g. dismissing an orphan twin) does not reconcile it.
+    (scenarioKey === "R5" && followedException && followedException.status !== "OPEN" && agent?.verification?.result === "RESOLVED");
   const escalated =
     agent?.verification?.result === "ESCALATED" || (followedException?.awaitingCounterparty && followedException?.status === "OPEN");
   const awaitingReply = !!followedException?.awaitingCounterparty && followedException.status === "OPEN";
@@ -282,6 +288,12 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
                 {outcome === "ANSWERED" ? "CORRESPONDENT REPLIED" : outcome}
               </Badge>
               <Body>Expected: {scenario.expected}</Body>
+              {!(EXPECTED_OUTCOMES[scenarioKey] || []).includes(outcome) && (
+                <Body className={styles.error}>
+                  This run ended differently than the scenario expects. Check the exception
+                  and the payment before continuing.
+                </Body>
+              )}
             </div>
           )}
         </div>

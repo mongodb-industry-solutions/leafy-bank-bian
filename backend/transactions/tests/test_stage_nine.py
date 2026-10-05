@@ -676,6 +676,31 @@ def test_an_orphan_line_escalates_and_dismisses_without_a_payment(service, db):
     assert dismissed["status"] == STATUS_DISMISSED
 
 
+def test_an_orphan_line_a_settled_wire_is_waiting_for_cannot_be_dismissed(service, db):
+    """R2 (2026-10-05): dismissing a re-keyed line stranded its wire as MISSING."""
+    now = datetime.now(timezone.utc)
+    db["paymentMessages"].insert_one({
+        "paymentMessageId": "PM-STMT", "purpose": "ACCOUNT_STATEMENT",
+        "statement": {"accountCode": "1111"},
+        "entries": [{"lineNo": 1, "reference": "1BCF3CC0/LEAFYBK", "amount": 6120.0}]})
+    db["settlementPositions"].insert_one({
+        "paymentId": "PAY-WAIT", "settlementAccountCode": "1111",
+        "expectedAmount": 6120.0, "actualAmount": None})
+    db["payments"].insert_one({"paymentId": "PAY-WAIT", "lifecycle": {
+        "currentState": "SETTLED", "reconciliationStatus": "PENDING"}})
+    db["exceptions"].insert_one({
+        "_id": "oid-orph2", "exceptionId": "EXC-ORPH2", "paymentId": "PM-STMT#1",
+        "category": "ORPHANED_SETTLEMENT", "status": STATUS_OPEN, "severity": "ACTION_REQUIRED",
+        "source": {"stage": SOURCE_STAGE_RECONCILE, "service": SERVICE_LEDGER},
+        "detail": {}, "subjectRef": {"kind": "STATEMENT_LINE", "paymentMessageId": "PM-STMT", "lineNo": 1},
+        "resolution": None, "agent": None, "createdAt": now, "updatedAt": now,
+        "sourceSystem": SERVICE_LEDGER})
+
+    with pytest.raises(ExceptionConflict, match="PAY-WAIT"):
+        service.resolve_exception("EXC-ORPH2", action=ACTION_DISMISS)
+    assert db["exceptions"].find_one({"exceptionId": "EXC-ORPH2"})["status"] == STATUS_OPEN
+
+
 @pytest.mark.parametrize("bearer", ["CRED", "SHAR", "SLEV"])
 def test_accept_when_the_beneficiary_bears_charges_posts_nothing(service, db, bearer):
     """CRED/SHAR/SLEV — the short credit is the beneficiary's; the accept is the record."""

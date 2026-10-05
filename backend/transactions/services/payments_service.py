@@ -928,6 +928,8 @@ class PaymentsService:
 
         # An orphan statement line has no payment (A3 D1a keys it `<msgId>#<lineNo>`).
         is_line = (exc.get("subjectRef") or {}).get("kind") == "STATEMENT_LINE"
+        if action == ACTION_DISMISS and category == CATEGORY_ORPHANED_SETTLEMENT:
+            self._refuse_dismissing_a_claimable_line(exc)
         payment = None if is_line else self.payments.find_one({"paymentId": exc["paymentId"]})
         if payment is None and not is_line:
             raise ExceptionNotFound(
@@ -1107,6 +1109,32 @@ class PaymentsService:
 
         with self.db.client.start_session() as session:
             session.with_transaction(callback)
+
+    def _refuse_dismissing_a_claimable_line(self, exc: dict) -> None:
+        """A statement line some settled wire is still waiting for is linked or escalated,
+        never dismissed — dismissing it strands the wire as MISSING (defect 2026-10-05, R2)."""
+        subject = exc.get("subjectRef") or {}
+        stmt = self.db["paymentMessages"].find_one(
+            {"paymentMessageId": subject.get("paymentMessageId"), "purpose": "ACCOUNT_STATEMENT"},
+            {"_id": 0, "statement.accountCode": 1, "entries": 1})
+        line = next((e for e in (stmt or {}).get("entries") or []
+                     if e.get("lineNo") == subject.get("lineNo")), None)
+        if line is None:
+            return
+        amount = float(line.get("amount") or 0)
+        waiting = list(self.db["settlementPositions"].find(
+            {"settlementAccountCode": ((stmt or {}).get("statement") or {}).get("accountCode"),
+             "actualAmount": None,
+             "expectedAmount": {"$gte": amount - 0.005, "$lte": amount + 0.005}},
+            {"_id": 0, "paymentId": 1}))
+        for pos in waiting:
+            lifecycle = (self.payments.find_one(
+                {"paymentId": pos["paymentId"]}, {"lifecycle": 1}) or {}).get("lifecycle") or {}
+            if (lifecycle.get("currentState") in ("SETTLED", "POSTED")
+                    and lifecycle.get("reconciliationStatus") != "RECONCILED"):
+                raise ExceptionConflict(
+                    f"Line {subject.get('lineNo')} of {subject.get('paymentMessageId')} can be "
+                    f"claimed by {pos['paymentId']}; link it or escalate, do not dismiss.")
 
     def _escalate(self, exc: dict, note: Optional[str], now: datetime) -> None:
         """Send the correspondent a camt.026 case and keep the exception OPEN (A4 D4).
