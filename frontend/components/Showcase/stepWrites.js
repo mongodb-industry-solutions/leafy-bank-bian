@@ -10,23 +10,23 @@
 // get_payment joins these onto the payments doc; strip them to show the doc as stored.
 const JOINED = ["executions", "messages", "settlementPositions", "routingSnapshot", "exceptions", "statements"];
 
-function paymentDoc(payment) {
+export function paymentDoc(payment) {
   if (!payment) return null;
   const doc = { ...payment };
   JOINED.forEach((k) => delete doc[k]);
   return doc;
 }
 
-const nonEmpty = (docs) => {
+export const nonEmpty = (docs) => {
   const list = (Array.isArray(docs) ? docs : [docs]).filter(Boolean);
   return list.length ? list : null;
 };
 
-const pacsMessages = ({ payment }) =>
+export const pacsMessages = ({ payment }) =>
   nonEmpty((payment?.messages || []).filter((m) => !m.purpose));
-const position = ({ payment }) => nonEmpty((payment?.settlementPositions || []).slice(-1));
-const statements = ({ payment }) => nonEmpty(payment?.statements);
-const ledgerEvents = (suffixes) => ({ payment, trace }) => {
+export const position = ({ payment }) => nonEmpty((payment?.settlementPositions || []).slice(-1));
+export const statements = ({ payment }) => nonEmpty(payment?.statements);
+export const ledgerEvents = (suffixes) => ({ payment, trace }) => {
   const pid = payment?.paymentId;
   const keys = suffixes.map((s) => (s ? `${pid}-${s}` : pid));
   return nonEmpty((trace?.allLedgerEvents || []).filter((e) => keys.includes(e.idempotencyKey)));

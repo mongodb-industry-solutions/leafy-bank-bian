@@ -1,0 +1,205 @@
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 20px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--pw-border);
+  border-radius: var(--pw-radius);
+  background: var(--pw-bg);
+}
+
+.fact {
+  min-width: 0;
+}
+
+.factLabel {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--pw-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.factValue {
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.factWarn {
+  color: #970606;   /* red.dark2 */
+}
+
+.chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--pw-border-light);
+  border-radius: var(--pw-radius);
+  background: var(--pw-surface);
+}
+
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 96px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--pw-border);
+  background: var(--pw-bg);
+}
+
+.nodeDone {
+  border-color: #00684a;   /* green.dark2 */
+}
+
+.nodePending {
+  border-style: dashed;
+  color: var(--pw-faint);
+}
+
+.nodeLabel {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nodeDetail {
+  font-size: 12px;
+  color: var(--pw-muted);
+  overflow-wrap: anywhere;
+}
+
+.hop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 56px;
+}
+
+.hopLine {
+  width: 100%;
+  border-top: 2px solid var(--pw-border);
+}
+
+.hopAsync {
+  border-top-style: dashed;
+}
+
+.hopLabel {
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--pw-faint);
+  text-align: center;
+}
+
+.deltaChip {
+  margin-left: 8px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.deltaShort {
+  background: #ffcdc7;   /* red.light2 */
+  color: #970606;        /* red.dark2 */
+}
+
+.deltaMatch {
+  background: #e3fcf7;   /* green.light3 */
+  color: #00684a;
+}
+
+.table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--pw-border);
+  border-radius: var(--pw-radius);
+  background: var(--pw-bg);
+}
+
+.tableRow {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 190px) minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--pw-faint);
+}
+
+.tableRow + .tableRow {
+  border-top: 1px solid var(--pw-border-light);
+}
+
+.tableRowOn {
+  background: var(--pw-accent-light);
+  color: var(--pw-text);
+  font-weight: 600;
+}
+
+.tableRule {
+  font-weight: 400;
+}
+
+.clock {
+  padding: 12px 14px;
+  border: 1px solid var(--pw-border-light);
+  border-radius: var(--pw-radius);
+  background: var(--pw-surface);
+}
+
+.clockBar {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--pw-border);
+}
+
+.clockOpen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 5px 0 0 5px;
+  background: #00684a;   /* green.dark2: the window before the cut-off */
+  opacity: .35;
+}
+
+.clockCutoff {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 18px;
+  background: var(--pw-text);
+}
+
+.clockDecided {
+  position: absolute;
+  top: -3px;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  border-radius: 50%;
+  background: #083c90;   /* blue.dark2 */
+  border: 2px solid var(--pw-bg);
+}
+
+.clockLate {
+  background: #970606;   /* red.dark2 */
+}
+
+.clockLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--pw-muted);
+}

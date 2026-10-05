@@ -620,6 +620,37 @@
   margin-left: auto;
 }
 
+.outcomeLine {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--pw-text);
+}
+
+/* Main column and MongoDB rail. The lens sets the split; the rail drops below on narrow
+   screens. In the business lens the rail is a one-line strip, so it spans the full width. */
+.paneLayout {
+  display: grid;
+  gap: 20px;
+  align-items: start;
+}
+
+.lens_both { grid-template-columns: minmax(0, 58fr) minmax(0, 42fr); }
+.lens_technical { grid-template-columns: minmax(0, 40fr) minmax(0, 60fr); }
+.lens_business { grid-template-columns: minmax(0, 1fr); }
+
+.paneMain,
+.paneRail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .lens_both,
+  .lens_technical { grid-template-columns: minmax(0, 1fr); }
+}
+
 .nextActionChip {
   display: flex;
   align-items: center;
@@ -827,47 +858,7 @@
   }
 }
 
-/* ── expandable raw-document toggle (bottom of a stage body) ── */
-.rawToggleBar {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.rawToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--pw-border);
-  border-radius: 6px;
-  background: var(--pw-surface);
-  color: var(--pw-muted);
-  font: inherit;
-  font-size: 12px;
-  line-height: 20px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.rawToggleIco {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1;
-  letter-spacing: -0.04em;
-}
-
-.rawToggle:hover {
-  border-color: var(--pw-accent);
-  color: var(--pw-accent);
-}
-
-.rawToggle:focus-visible {
-  outline: 2px solid var(--pw-accent);
-  outline-offset: 1px;
-}
-
-/* A raw document / ISO JSON / XML block can be arbitrarily long — cap it and scroll inside,
-   so one stage's payload cannot push the timeline row off the screen. */
+/* ── scrollable code block (RailViews JSON/XML tabs) ── */
 .codeScroll {
   max-height: 360px;
   overflow: auto;

@@ -21,6 +21,11 @@ import { Body } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
+import LensToggle, { useLens } from "./LensToggle";
+import MongoRail from "./MongoRail";
+import KeyFacts from "./KeyFacts";
+import { PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock } from "./StageVisuals";
+import { stageCopy, stageFacts, stageWrites, settlementDelta } from "./stageContent";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
 import { usePaymentWorkflow, usePipelineTrace, useBatchTick, useReconciliationAgent, useLinkCandidates } from "@/lib/api/hooks";
@@ -239,7 +244,7 @@ function NextAction({ attention, onApprove, onResolve }) {
  * group's exceptions render ONCE above the tabs, because the lifecycle model attaches them to
  * the first panel and a per-tab copy would put two live resolve buttons on one exception.
  */
-function StagePane({ stage, state, payment, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
+function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
   const [panelIdx, setPanelIdx] = useState(0);
   // A different stage (or a payment with fewer panels) must not keep a stale tab index.
   useEffect(() => setPanelIdx(0), [stage?.key]);
@@ -250,6 +255,12 @@ function StagePane({ stage, state, payment, onApprove, onResolve, onResolveExcep
   const attention = stageAttention(stage);
   const actions = { onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent };
   const claimer = grouped ? stage.children.find((c) => (c.exceptions || []).length) : null;
+  const copy = stageCopy(stage, payment?.direction);
+  const outcome = lens === "technical" ? copy?.technical : copy?.business;
+  const writes = stageWrites(stage);
+  const sources = { payment, trace };
+  const facts = stageFacts(stage, payment);
+  const settlementPosition = stage.children?.find((c) => c.key === "settlementConfirm")?.data?.position;
 
   return (
     <section className={styles.stagePane} aria-live="polite">
@@ -265,6 +276,8 @@ function StagePane({ stage, state, payment, onApprove, onResolve, onResolveExcep
         </div>
       )}
 
+      {outcome && <div className={styles.outcomeLine}>{outcome}</div>}
+
       {!stage.reached ? (
         <>
           {stage.intro && (
@@ -276,8 +289,21 @@ function StagePane({ stage, state, payment, onApprove, onResolve, onResolveExcep
           <Body className={styles.muted}>{stage.label} — not reached yet.</Body>
         </>
       ) : (
-        <>
+        <div className={`${styles.paneLayout} ${styles[`lens_${lens}`]}`}>
+          <div className={styles.paneMain}>
           <NextAction attention={attention} onApprove={onApprove} onResolve={onResolve} />
+          <KeyFacts facts={facts} />
+          {stage.key === "validation" && (
+            <>
+              <CategoryTable payment={payment} />
+              <FxProvenance payment={payment} />
+            </>
+          )}
+          {stage.key === "authorization" && <CutoffClock snapshot={stage.data?.routingSnapshot} />}
+          {stage.key === "g:Accounting & posting" && <PostingChain payment={payment} trace={trace} />}
+          {stage.key === "g:Clearing & settlement" && (
+            <FundsFlow payment={payment} position={settlementPosition} />
+          )}
           {grouped ? (
             <>
               {stage.intro && (
@@ -324,7 +350,16 @@ function StagePane({ stage, state, payment, onApprove, onResolve, onResolveExcep
           ) : (
             <StageDetailBody stage={stage} payment={payment} {...actions} refreshKey={refreshKey} />
           )}
-        </>
+          </div>
+          <div className={styles.paneRail}>
+            <MongoRail
+              writes={writes}
+              why={copy?.why}
+              sources={sources}
+              collapsed={lens === "business"}
+            />
+          </div>
+        </div>
       )}
     </section>
   );
@@ -581,8 +616,16 @@ function ReconciliationTieOut({ data, payment }) {
 
   const overall = check.overallResult;
 
+  const gap = settlementDelta(position);
   return (
     <div className={styles.reconTieOut}>
+      {overall === "DISCREPANT" && gap?.delta > 0 && (
+        <div className={styles.failedBanner}>
+          Settlement account is short by {fmtAmount(gap.delta, currency)}: expected{" "}
+          {fmtAmount(gap.expected, currency)}, the correspondent booked{" "}
+          {fmtAmount(gap.actual, currency)}.
+        </div>
+      )}
       <div className={styles.reconRows}>
         {rows.map((r) => {
           const result = r.leg?.result;
@@ -1371,10 +1414,6 @@ function RoutingDecision({ snapshot }) {
 }
 
 function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
-  // Raw JSON is behind a toggle so it never buries the informative blocks below. The hook
-  // must sit above the early returns (rules of hooks).
-  const [showRaw, setShowRaw] = useState(false);
-
   if (!stage) return null;
 
   if (!stage.reached) {
@@ -1404,11 +1443,6 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
   const initEvents = (payment?.lifecycle?.events || []).filter(
     (e) => (e.state || "").toUpperCase() === "INITIATED"
   );
-  // The raw document is always present as an expandable artifact below the structured
-  // blocks. Most stages dump their `data`; stage 2 is a checks stage (so `data` is the
-  // checks array) and instead carries an explicit `raw` object of the assessments.
-  const showRawToggle =
-    (!!stage.data && !showChecks && !showStates && !showEnrichment) || !!stage.raw;
   // Stage 2 is the only `checks`-kind stage: it renders the two gate assessments instead
   // of the generic Summary, and surfaces the dual-approval rule (Doina's $25k → $10k demo).
   const showStageTwo = stage.kind === "checks";
@@ -1585,29 +1619,6 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
           <div className={styles.detailBlock}>
             <div className={styles.detailBlockTitle}>Double-entry</div>
             <Legs legs={stage.legs} />
-          </div>
-        )}
-
-        {showRawToggle && (
-          <div className={styles.detailBlockWide}>
-            <div className={styles.rawToggleBar}>
-              <button
-                type="button"
-                className={styles.rawToggle}
-                onClick={() => setShowRaw((v) => !v)}
-                aria-expanded={showRaw}
-              >
-                <span className={styles.rawToggleIco}>{"{ }"}</span>
-                {showRaw ? "Hide raw document" : "Show raw document"}
-              </button>
-            </div>
-            {showRaw && (
-              <div className={styles.codeScroll} style={{ marginTop: 8 }}>
-                <Code language="json" copyButtonAppearance="hover">
-                  {JSON.stringify(stage.raw || stage.data, null, 2)}
-                </Code>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -2166,6 +2177,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
   // reversal event (idempotencyKey {paymentId}-REV) is picked up once the batch journals it.
   const { trace } = usePipelineTrace(paymentId, !!paymentId, 2000, (refreshKey || 0) + nudge);
   const [selectedKey, setSelectedKey] = useState("initiation");
+  const [lens, setLens] = useLens();
 
   async function resumePayment() {
     if (!paymentId) return;
@@ -2359,6 +2371,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
           {payment?.status && (
             <StatusPill status={payment.status} />
           )}
+          <LensToggle lens={lens} onChange={setLens} />
         </div>
       </div>
 
@@ -2395,6 +2408,8 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
               stage={stages.find((s) => s.key === selectedKey) ?? stages[0]}
               state={states[Math.max(0, stages.findIndex((s) => s.key === selectedKey))]}
               payment={payment}
+              trace={trace}
+              lens={lens}
               onApprove={() => setStepUpOpen(true)}
               onResolve={resolveReview}
               onResolveException={resolveException}
