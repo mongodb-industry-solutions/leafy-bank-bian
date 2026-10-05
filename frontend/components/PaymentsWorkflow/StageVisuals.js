@@ -3,6 +3,8 @@
 // settlement compares with what was booked (stage 7). Each reads only fields the backend
 // already stores, and renders nothing when they are absent.
 
+import Icon from "@leafygreen-ui/icon";
+import Tooltip from "@leafygreen-ui/tooltip";
 import { fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
 import { settlementDelta } from "./stageContent";
 import styles from "./StageVisuals.module.css";
@@ -175,7 +177,7 @@ const initials = (name) =>
     .map((w) => w[0].toUpperCase())
     .join("");
 
-function PartyBox({ role, party, external }) {
+function PartyBox({ role, party, tag }) {
   const account = party?.accountNo ? `····${String(party.accountNo).slice(-4)}` : null;
   const bank = [party?.bankName, party?.bic, party?.bankCountry].filter(Boolean);
   return (
@@ -185,7 +187,7 @@ function PartyBox({ role, party, external }) {
         <div className={styles.partyId}>
           <span className={styles.partyRole}>
             {role}
-            {external && <span className={styles.partyTag}>external</span>}
+            {tag && <span className={styles.partyTag}>{tag}</span>}
           </span>
           <span className={styles.partyName}>{party?.name || "—"}</span>
         </div>
@@ -217,13 +219,28 @@ function PartyBox({ role, party, external }) {
   );
 }
 
-/** Debtor, the amount and rail travelling between them, creditor. Stacks when narrow. */
+const TRAVEL_RULE =
+  "Debtor and creditor are stored as point-in-time snapshots, not live references to a customer " +
+  "or bank directory. The beneficiary may not be a Leafy Bank customer, and the Travel Rule " +
+  "(FATF Recommendation 16) requires originator information to travel unchanged with the " +
+  "payment, whatever happens to the customer record afterwards.";
+
+function creditorTag(payment) {
+  if (payment?.direction !== "INBOUND") return "external";
+  const outcome = payment?.beneficiaryResolution?.matchOutcome;
+  if (outcome === "MATCHED") return "confirmed";
+  if (outcome === "PARTIAL") return "partial match";
+  return "claimed, not yet confirmed";
+}
+
+/** Debtor, the amount and rail travelling between them, creditor, and the snapshot note. */
 export function PartyFlow({ payment }) {
+  const inbound = payment?.direction === "INBOUND";
   const wireType = payment?.wireDetails?.wireType;
   return (
     <div className={styles.flowFrame}>
       <div className={styles.flow}>
-        <PartyBox role="Payer" party={payment?.debtor} />
+        <PartyBox role={inbound ? "Originator" : "Payer"} party={payment?.debtor} />
         <div className={styles.flowLink}>
           <span className={styles.flowAmount}>{fmtAmount(payment?.amount, payment?.currency)}</span>
           <span className={styles.flowArrow} aria-hidden="true" />
@@ -231,8 +248,96 @@ export function PartyFlow({ payment }) {
             {[payment?.rail, wireType].filter(Boolean).join(" · ")}
           </span>
         </div>
-        <PartyBox role="Beneficiary" party={payment?.creditor} external />
+        <PartyBox
+          role={inbound ? "Claimed beneficiary" : "Beneficiary"}
+          party={payment?.creditor}
+          tag={creditorTag(payment)}
+        />
       </div>
+      <div className={styles.snapshotNote}>
+        <Icon glyph="Lock" size={14} />
+        <span>
+          {inbound ? "Taken from the message" : "Frozen"}
+          {payment?.initiatedAt ? ` at ${fmtWhen(payment.initiatedAt)}` : ""}. Not a live record.
+        </span>
+        <Tooltip
+          trigger={
+            <button type="button" className={styles.noteButton} aria-label="Why the parties are frozen">
+              <Icon glyph="InfoWithCircle" size={14} />
+            </button>
+          }
+        >
+          {TRAVEL_RULE}
+        </Tooltip>
+      </div>
+    </div>
+  );
+}
+
+const ENVELOPES = [
+  ["WIRE", "Wire"],
+  ["INTERNAL", "Internal"],
+  ["ACH", "ACH"],
+  ["CARD", "Card"],
+];
+
+/** Which rail envelope is populated; the others stay empty by design. */
+export function EnvelopeChips({ rail }) {
+  return (
+    <div className={styles.envelopeChips} aria-label="Rail envelopes">
+      {ENVELOPES.map(([key, label]) => (
+        <span
+          key={key}
+          className={`${styles.envelopeChip} ${key === rail ? styles.envelopeChipOn : ""}`}
+        >
+          {key === rail ? "●" : "○"} {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Where the payment is on the lifecycle: states it has been in, then the next one. */
+export function StatePath({ events, inbound }) {
+  const seen = new Set((events || []).map((e) => String(e.state || "").toUpperCase()));
+  const path = inbound ? ["RECEIVED", "VALIDATED"] : ["DRAFT", "INITIATED", "VALIDATED"];
+  return (
+    <div className={styles.statePath} aria-label="Lifecycle states">
+      {path.map((state, i) => (
+        <span key={state} className={styles.statePathItem}>
+          {i > 0 && <span className={styles.statePathArrow} aria-hidden="true">→</span>}
+          <span className={`${styles.stateChip} ${seen.has(state) ? styles.stateChipOn : ""}`}>
+            {state}
+          </span>
+        </span>
+      ))}
+      <span className={styles.statePathNote}>next: stage 3 validates</span>
+    </div>
+  );
+}
+
+/** Inbound intake order: the raw message is persisted before the payment is created. */
+export function IntakeOrder() {
+  return (
+    <div className={styles.statePath} aria-label="Inbound intake order">
+      <span className={styles.stateChip}>1 · raw pacs.008 stored (canonicalJsonStorage)</span>
+      <span className={styles.statePathArrow} aria-hidden="true">→</span>
+      <span className={styles.stateChip}>2 · payment created (payments)</span>
+      <span className={styles.statePathNote}>the original message survives a parse failure</span>
+    </div>
+  );
+}
+
+/** BIAN service domains for the stage; the operation is shown to technical readers only. */
+export function BianStrip({ bian, showOperation }) {
+  if (!bian) return null;
+  return (
+    <div className={styles.bianStrip}>
+      <span className={styles.bianLabel}>BIAN service domain</span>
+      <span className={styles.bianDomains}>{bian.domains.join(" · ")}</span>
+      {showOperation && bian.operation && (
+        <code className={styles.bianOperation}>{bian.operation}</code>
+      )}
     </div>
   );
 }

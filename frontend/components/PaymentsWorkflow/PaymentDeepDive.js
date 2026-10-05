@@ -24,8 +24,8 @@ import StatusPill from "./StatusPill";
 import LensToggle, { useLens } from "./LensToggle";
 import MongoRail from "./MongoRail";
 import KeyFacts from "./KeyFacts";
-import { PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock, PartyFlow } from "./StageVisuals";
-import { stageCopy, stageFacts, stageWrites, settlementDelta } from "./stageContent";
+import { PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock, PartyFlow, EnvelopeChips, StatePath, IntakeOrder, BianStrip } from "./StageVisuals";
+import { stageBian, stageCopy, stageFacts, stageWrites, settlementDelta } from "./stageContent";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
 import { usePaymentWorkflow, usePipelineTrace, useBatchTick, useReconciliationAgent, useLinkCandidates } from "@/lib/api/hooks";
@@ -259,6 +259,7 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
   const outcome = lens === "technical" ? copy?.technical : copy?.business;
   const writes = stageWrites(stage);
   const sources = { payment, trace };
+  const bian = stageBian(stage, payment?.direction);
   const facts = stageFacts(stage, payment);
   const settlementPosition = stage.children?.find((c) => c.key === "settlementConfirm")?.data?.position;
 
@@ -275,6 +276,8 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
           Payment stopped at {stage.label} — status {payment?.status || "unknown"}.
         </div>
       )}
+
+      <BianStrip bian={bian} showOperation={lens !== "business"} />
 
       {outcome && <div className={styles.outcomeLine}>{outcome}</div>}
 
@@ -1295,28 +1298,21 @@ function InitEnvelope({ payment }) {
       ["Ultimate creditor", w.ultimateCreditor?.name ?? "—"],
     ];
     note =
-      "Wire type is derived from the two bank countries. Routing fields (network, local " +
-      "instrument code) stay null here — they are resolved in stage 4 orchestration.";
+      "Wire type is derived from the two bank countries. Network and local instrument " +
+      "code stay empty until stage 4 orchestration.";
   } else if (rail === "INTERNAL") {
     const i = payment?.internalDetails || {};
     rows = [
       ["Transfer type", i.transferType],
       ["Posting reference", i.postingReference],
     ];
-    note =
-      "postingReference points at the ledger event the ledger service writes asynchronously — " +
-      "null at initiation.";
+    note = "postingReference is filled once the ledger service posts the event.";
   }
   return (
     <div>
+      <EnvelopeChips rail={rail} />
       <KeyValues rows={rows ? rows.filter(([, v]) => v != null) : [["Rail", rail || "—"]]} />
       {note && <div className={styles.stageNote}>{note}</div>}
-      {rail && (
-        <div className={styles.stageNote}>
-          Exactly one envelope is populated per rail — the {rail} one carries the fields above;
-          the other two stay all-null.
-        </div>
-      )}
     </div>
   );
 }
@@ -1405,8 +1401,11 @@ function InitiationBody({ payment, initEvents }) {
     ["End-to-end reference", d?.remittance?.reference],
     ["Client reference", d?.remittance?.invoiceNo],
   ].filter(([, v]) => v != null && v !== "");
+  const inbound = d?.direction === "INBOUND";
+  const envelopeLabel = d?.rail === "WIRE" ? "pain.001 envelope" : d?.rail === "INTERNAL" ? "Internal envelope" : "Rail envelope";
   return (
     <div className={styles.initBody}>
+      {inbound && <IntakeOrder />}
       <PartyFlow payment={d} />
       <div className={styles.initDetails}>
         <div className={styles.partyCard}>
@@ -1414,13 +1413,14 @@ function InitiationBody({ payment, initEvents }) {
           <KeyValues rows={instruction} />
         </div>
         <div className={styles.partyCard}>
-          <div className={styles.partyLabel}>Rail envelope</div>
+          <div className={styles.partyLabel}>{envelopeLabel}</div>
           <InitEnvelope payment={d} />
         </div>
       </div>
       {initEvents.length > 0 && (
         <div>
           <div className={styles.detailBlockTitle}>State transition</div>
+          <StatePath events={d?.lifecycle?.events} inbound={inbound} />
           <StateEvents events={initEvents} />
         </div>
       )}

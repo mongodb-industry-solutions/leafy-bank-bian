@@ -18,7 +18,7 @@ const COPY = {
     [OUT]: {
       business: "The customer's instruction is captured and the debtor and creditor are frozen as they were at that moment.",
       technical: "One insert into payments, with the parties embedded as an immutable snapshot and the idempotency key enforced by a unique index.",
-      why: "The payment, its parties and its checks live in one document, so a single read returns the whole instruction.",
+      why: "One payments document serves every rail: a wire adds a wireDetails envelope and an internal transfer adds internalDetails. No per-rail collection and no schema change.",
     },
     [IN]: {
       business: "A payment message arrives from another bank and is recorded exactly as received.",
@@ -339,4 +339,48 @@ function factsFor(stage, payment) {
 /** Four to six label/value facts a business reader needs, empty ones dropped. */
 export function stageFacts(stage, payment) {
   return factsFor(stage, payment).filter(([, value]) => present(value));
+}
+
+// BIAN service domains per stage, as Doina's document names them. `operation` is only set where
+// it was checked against the BIAN v14 index (stage 1: Initiate), never guessed.
+const BIAN = {
+  initiation: {
+    [OUT]: { domains: ["Payment Order Initiation"], operation: "POST /PaymentOrderInitiation/Initiate" },
+    [IN]: {
+      domains: ["Payment Order Initiation", "Financial Gateway"],
+      operation: "POST /FinancialGateway/{id}/Inbound/Initiate",
+    },
+  },
+  authentication: {
+    [OUT]: { domains: ["Payment Order Initiation", "Party Authentication", "Current Account"] },
+    [IN]: { domains: ["Financial Gateway", "Current Account", "Party Reference Data Directory"] },
+  },
+  validation: {
+    [OUT]: { domains: ["Payment Order Initiation"] },
+    [IN]: { domains: ["Payment Order Initiation", "Current Account"] },
+  },
+  authorization: {
+    [OUT]: { domains: ["Payment Orchestration", "Payment Confirmation", "Fraud Evaluation"] },
+    [IN]: { domains: ["Payment Confirmation", "Financial Crime Evaluation"] },
+  },
+  execution: { both: { domains: ["Financial Gateway", "Payment Rail"] } },
+  "g:Accounting & posting": {
+    both: { domains: ["Financial Accounting", "Position Keeping", "Current Account"] },
+  },
+  "g:Clearing & settlement": {
+    [OUT]: {
+      domains: ["Internal Bank Account", "Payment Settlement", "Correspondent Bank Directory"],
+    },
+    [IN]: {
+      domains: ["Internal Bank Account", "Payment Settlement", "Correspondent Bank Directory"],
+    },
+  },
+  reconciliation: { both: { domains: ["Account Reconciliation", "Payment Rail"] } },
+};
+
+/** `{ domains, operation? }` for a stage, or null when the document names none. */
+export function stageBian(stage, direction) {
+  const entry = BIAN[stage.key];
+  if (!entry) return null;
+  return entry[direction === IN ? IN : OUT] || entry.both || null;
 }

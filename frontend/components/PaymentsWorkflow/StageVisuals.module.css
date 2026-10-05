@@ -370,3 +370,112 @@
     border-bottom: none;
   }
 }
+
+.snapshotNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pw-muted);
+}
+
+.noteButton {
+  display: inline-flex;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--pw-muted);
+  cursor: pointer;
+}
+
+.noteButton:focus-visible {
+  outline: 2px solid var(--pw-accent);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.envelopeChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.envelopeChip {
+  padding: 2px 10px;
+  border: 1px dashed var(--pw-border);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--pw-faint);
+}
+
+.envelopeChipOn {
+  border: 1px solid #00684a;   /* green.dark2 */
+  color: var(--pw-text);
+  font-weight: 600;
+}
+
+.statePath {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.statePathItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statePathArrow {
+  color: var(--pw-faint);
+}
+
+.stateChip {
+  padding: 2px 10px;
+  border: 1px dashed var(--pw-border);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--pw-faint);
+}
+
+.stateChipOn {
+  border: 1px solid #00684a;   /* green.dark2 */
+  color: var(--pw-text);
+  font-weight: 600;
+}
+
+.statePathNote {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--pw-muted);
+}
+
+.bianStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--pw-muted);
+}
+
+.bianLabel {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.bianDomains {
+  color: var(--pw-text);
+}
+
+.bianOperation {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
