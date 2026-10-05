@@ -55,6 +55,15 @@ NAMESPACE = "urn:iso:std:iso:20022:tech:xsd:pacs.002.001.08"
 ACCEPTED = "ACCP"
 REJECTED = "RJCT"
 
+# Plain-English `AddtlInf` for the status-reason codes inbound can raise. ISO leaves the text
+# to the sender of the report; a reader of the pacs.002 should not need the code list open.
+REASON_TEXT = {
+    "AC01": "Beneficiary account number is incorrect or unknown",
+    "AC04": "Beneficiary account is closed",
+    "AM05": "Duplicate payment",
+    "RR04": "Sanctions screening hit on originator",
+}
+
 
 def build(
     *,
@@ -62,6 +71,7 @@ def build(
     accepted: bool,
     reason_code: Optional[str] = None,
     original_message_ref: Optional[str] = None,
+    additional_info: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> dict:
     """The pacs.002 for one inbound payment. Pure — pass a payment dict, get a message.
@@ -75,7 +85,7 @@ def build(
 
     group_header = {
         # OUR message id, not the sender's — this is a new message, and it is ours.
-        "MsgId": f"STS-{payment.get('paymentId')}",
+        "MsgId": _message_id(payment.get("paymentId"), now),
         "CreDtTm": now,
         # The instructing agent on a status report is the bank SENDING the report: us.
         "InstgAgt": _agent(bank_identity.OUR_BIC, bank_identity.OUR_BANK_NAME),
@@ -97,7 +107,9 @@ def build(
         # The UETR travels unchanged across every hop — the point of it.
         "OrgnlUETR": payment.get("uetr"),
         "TxSts": status,
-        "StsRsnInf": _status_reason(reason_code),
+        "StsRsnInf": _status_reason(reason_code, additional_info),
+        # When the payment was accepted. Only on ACCP: a refusal was never accepted.
+        "AccptncDtTm": now if accepted else None,
         "AcctSvcrRef": payment.get("paymentId"),
         "OrgnlTxRef": {"MsgRef": original_message_ref} if original_message_ref else None,
     }
@@ -133,11 +145,25 @@ def _agent(bic: Optional[str], name: Optional[str] = None) -> Optional[dict]:
     return {"FinInstnId": fin}
 
 
-def _status_reason(reason_code: Optional[str]) -> Optional[dict]:
-    """`StsRsnInf` — present only on a refusal. An accepted payment needs no reason."""
+def _message_id(payment_id: Optional[str], now: Optional[datetime]) -> str:
+    """`STSRPT-{date}-{payment suffix}` — ours, unique per payment, readable at a glance."""
+    day = now.strftime("%Y%m%d") if now else "00000000"
+    suffix = str(payment_id or "").removeprefix("PAY-").upper() or "UNKNOWN"
+    return f"STSRPT-{day}-{suffix}"
+
+
+def _status_reason(reason_code: Optional[str], additional_info: Optional[str]) -> Optional[dict]:
+    """`StsRsnInf` — present only on a refusal. An accepted payment needs no reason.
+
+    `AddtlInf` sits inside `StsRsnInf` in ISO 20022, next to the coded reason it explains.
+    """
     if not reason_code:
         return None
-    return {"Rsn": {"Cd": reason_code}}
+    info = {"Rsn": {"Cd": reason_code}}
+    text = additional_info or REASON_TEXT.get(reason_code)
+    if text:
+        info["AddtlInf"] = text
+    return info
 
 
 def body(message: dict) -> dict:

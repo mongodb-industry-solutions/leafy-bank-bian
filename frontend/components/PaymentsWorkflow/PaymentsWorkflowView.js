@@ -46,11 +46,14 @@ export default function PaymentsWorkflowView() {
         />
       </div>
 
-      <div className={styles.newPaymentBar}>
-        <Button variant="baseGreen" leftGlyph={<Icon glyph="Plus" />} onClick={() => setWizardOpen(true)}>
-          New payment
-        </Button>
-      </div>
+      {/* Hidden while a payment's lifecycle is open; the list view is where you start one. */}
+      {!selectedPaymentId && (
+        <div className={styles.newPaymentBar}>
+          <Button variant="baseGreen" leftGlyph={<Icon glyph="Plus" />} onClick={() => setWizardOpen(true)}>
+            New payment
+          </Button>
+        </div>
+      )}
 
       {wizardOpen && (
         <div

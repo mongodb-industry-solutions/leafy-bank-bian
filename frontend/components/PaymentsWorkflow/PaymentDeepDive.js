@@ -28,6 +28,7 @@ import {
   PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock, PartyFlow, EnvelopeChips,
   StatePath, IntakeOrder, BianStrip, Card, StageStates, GateCards, LimitGauge, ResolutionOutcome,
   RouteMap, FraudMeter, AcceptanceRollup, RailFlow, SettlementOutcomes, PostingDirection,
+  InboundResolutionChecks, InboundValidationChecks,
 } from "./StageVisuals";
 import { stageBian, stageCopy, stageFacts, stageWrites, settlementDelta } from "./stageContent";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
@@ -307,7 +308,7 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
             </>
           )}
           {stage.key === "authorization" && <CutoffClock snapshot={stage.data?.routingSnapshot} />}
-          {stage.key === "g:Accounting & posting" && (
+          {stage.key === "g:Accounting & Posting" && (
             <>
               <PostingChain payment={payment} trace={trace} />
               <PostingDirection payment={payment} />
@@ -479,9 +480,13 @@ function EnrichmentBody({ stage, payment, checkList }) {
   const events = stage.data?.events || [];
   return (
     <div className={styles.stageStack}>
-      <Card label="Checks" tag="sync and async marked">
-        <Checks checks={checkList} />
-      </Card>
+      {payment?.direction === "INBOUND" ? (
+        <InboundValidationChecks payment={payment} checks={checkList} />
+      ) : (
+        <Card label="Checks" tag="sync and async marked">
+          <Checks checks={checkList} />
+        </Card>
+      )}
       <SummaryCard label="What was determined" rows={summaryRows(stage, payment)} />
       <Card
         label="Progressive enrichment"
@@ -977,7 +982,7 @@ function RailViews({ data }) {
       <Tab name="ISO VIEW">
         <div className={styles.tabBody}>
           <Body className={styles.muted}>
-            Mapping to ISO 20022 &rarr; {data?.execution?.messageFormat}
+            Mapping to ISO 20022 &rarr; {data?.execution?.messageFormat ?? data?.messageFormat}
             {data?.mappingVersion ? ` (mapping ${data.mappingVersion})` : ""}
             {data?.simulated ? " \u00b7 SIMULATED rail" : ""}
           </Body>
@@ -1031,6 +1036,8 @@ function RailViews({ data }) {
 // cross-border determination; `wireType` (DOMESTIC/INTERNATIONAL) is the coarser stage-1 field,
 // used as the fallback when the corridor hasn't been determined (e.g. a pre-stage-3 payment).
 const CORRIDOR_LABELS = {
+  DOMESTIC: "Domestic",
+  CROSS_BORDER: "Cross-border",
   "domestic-same-bank": "Domestic — same bank",
   "domestic-different-bank": "Domestic — different bank",
   "cross-border": "Cross-border",
@@ -1137,6 +1144,18 @@ function summaryRows(stage, payment) {
       ];
     }
     case "railExecution": {
+      if (payment?.direction === "INBOUND") {
+        // Inbound has no execution doc, so most outbound rows are empty. What exists is the
+        // pacs.002 sent back to the sending bank and the timestamps on the payment.
+        const m = d?.statusResponse;
+        return [
+          ["Status response", m?.paymentMessageId ?? payment?.refs?.statusResponseMessageId],
+          ["Status", m?.statusCode ?? d?.clearing?.statusCode],
+          ["Reason code", m?.reason],
+          ["Answers message", m?.originalMessageRef],
+          ["Sent to sending bank", fmtWhen(d?.clearing?.submittedAt)],
+        ];
+      }
       // Her L548-553 three lines live in the BUSINESS VIEW tab; this block gives what an
       // operator needs *about the execution* — which attempt, which network, what the rail
       // said back, and the two artifact ids.
@@ -1172,8 +1191,13 @@ function summaryRows(stage, payment) {
         ["Event ID", d?.eventId],
         ["Event type", d?.eventType],
         ["Posting mode", d?.postingMode?.type],
+        ["Posting status", d?.postingStatus],
+        ["Group", d?.groupId],
+        ["Period", d?.periodName],
+        ["Value date", d?.valueDate],
         ["Occurred", fmtWhen(d?.occurredAt)],
         ["Posted", d?.postingResult?.postedAt ? fmtWhen(d.postingResult.postedAt) : null],
+        ["Journal entry", d?.postingResult?.journalEntryId],
       ];
     case "subLedger": {
       const first = d?.[0];
@@ -1182,6 +1206,9 @@ function summaryRows(stage, payment) {
         // SETTLEMENT (external settlement posting) vs PAYMENT_PRINCIPAL (initial posting).
         ["Leg type", first?.eventType],
         ["Posting date", fmtWhen(first?.postingDate)],
+        ["Period", first?.periodCode],
+        ["Journal entry", first?.journalEntryId],
+        ["Sub-ledger IDs", (d ?? []).map((e) => e.subLedgerId).filter(Boolean).join(", ") || null],
       ];
     }
     case "journal": {
@@ -1255,12 +1282,15 @@ function summaryRows(stage, payment) {
  */
 function InitEnvelope({ payment }) {
   const rail = payment?.rail;
+  const inbound = payment?.direction === "INBOUND";
   let rows = null;
   let note = null;
   if (rail === "WIRE") {
     const w = payment?.wireDetails || {};
     rows = [
-      ["Message definition", w.messageDefinitionIdentifier],
+      // Inbound arrives as a pacs.008 and is stored in the canonical format; the pain.001
+      // identifier the backend stamps there describes an outbound customer instruction.
+      ["Message definition", inbound ? "canonical payment format" : w.messageDefinitionIdentifier],
       ["Payment method", w.paymentMethod],
       ["Wire type", w.wireType],
       ["Payment info id", w.paymentInformationId],
@@ -1271,9 +1301,13 @@ function InitEnvelope({ payment }) {
       ["Ultimate debtor", w.ultimateDebtor?.name ?? "—"],
       ["Ultimate creditor", w.ultimateCreditor?.name ?? "—"],
     ];
-    note =
-      "Wire type is derived from the two bank countries. Network and local instrument " +
-      "code stay empty until stage 4 orchestration.";
+    note = inbound
+      ? "Receive and parse the inbound pacs.008; the payment rail is fixed as WIRE. Routing " +
+        "fields (network, local instrument code) stay null, since inbound has no " +
+        "orchestration stage to resolve them. The canonical payment is created with only " +
+        "the wireDetails envelope populated, and the claimed creditor identity is captured."
+      : "Wire type is derived from the two bank countries. Network and local instrument " +
+        "code stay empty until stage 4 orchestration.";
   } else if (rail === "INTERNAL") {
     const i = payment?.internalDetails || {};
     rows = [
@@ -1331,16 +1365,17 @@ function RoutingDecision({ snapshot }) {
  */
 function InitiationBody({ payment, initEvents }) {
   const d = payment;
+  const inbound = d?.direction === "INBOUND";
   const instruction = [
     ["Type", d?.type],
     ["Priority", d?.priority],
     ["Customer", d?.customerId],
     ["Purpose", d?.remittance?.unstructured],
     ["End-to-end reference", d?.remittance?.reference],
-    ["Client reference", d?.remittance?.invoiceNo],
+    // An inbound wire carries no client reference; the RECEIVED event below replaces it.
+    ...(inbound ? [] : [["Client reference", d?.remittance?.invoiceNo]]),
   ].filter(([, v]) => v != null && v !== "");
-  const inbound = d?.direction === "INBOUND";
-  const envelopeLabel = d?.rail === "WIRE" ? "pain.001 envelope" : d?.rail === "INTERNAL" ? "Internal envelope" : "Rail envelope";
+  const envelopeLabel = d?.rail === "WIRE" ? (inbound ? "Wire RECEIVED" : "pain.001 envelope") : d?.rail === "INTERNAL" ? "Internal envelope" : "Rail envelope";
   return (
     <div className={styles.initBody}>
       {inbound && <IntakeOrder />}
@@ -1383,9 +1418,11 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
   const checkList = ["enrichment", "authorization", "acceptanceDecision", "railExecution"].includes(kind)
     ? stage.data?.checks
     : stage.data;
-  // Stage 1's only lifecycle event is INITIATED — the moment the instruction was captured.
+  // Stage 1's only lifecycle event is INITIATED (outbound) or RECEIVED (inbound) — the
+  // moment the instruction was captured or the message arrived.
+  const stageOneState = payment?.direction === "INBOUND" ? "RECEIVED" : "INITIATED";
   const initEvents = (payment?.lifecycle?.events || []).filter(
-    (e) => (e.state || "").toUpperCase() === "INITIATED"
+    (e) => (e.state || "").toUpperCase() === stageOneState
   );
   const hasChecks = !!checkList?.length;
   const dedicated = [
@@ -1424,6 +1461,10 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
 
         {kind === "beneficiaryResolution" && (
           <div className={styles.stageStack}>
+            <InboundResolutionChecks
+              payment={payment}
+              checks={(payment?.checks || []).filter((c) => String(c?.stage || "").startsWith("2 "))}
+            />
             <ResolutionOutcome payment={payment} />
             <TransitionsCard stageKey={key} payment={payment} />
           </div>
@@ -1471,7 +1512,9 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
             <SummaryCard label="Rail response" rows={summaryRows(stage, payment)} />
             <Card
               label={inbound ? "Business view and pacs.002" : "Canonical payment to ISO 20022"}
-              note={inbound ? undefined : "The ISO message is built only at the rail boundary, never earlier in the lifecycle."}
+              note={inbound
+                ? "The payment has not settled on Leafy Bank's books yet, and will only do so if it is ACCEPTED. A simulated pacs.002 is created in the canonicalJsonStorage collection, confirming or rejecting the payment."
+                : "The ISO message is built only at the rail boundary, never earlier in the lifecycle."}
             >
               <RailViews data={stage.data} />
             </Card>
@@ -1511,9 +1554,11 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
         )}
 
         {!!stage.legs && (
-          <Card label="Double-entry">
-            <Legs legs={stage.legs} />
-          </Card>
+          <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>
+            <Card label="Double-entry">
+              <Legs legs={stage.legs} />
+            </Card>
+          </div>
         )}
       </div>
     </>
@@ -2190,7 +2235,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
   }, [paymentId]);
 
   // Group first so the stepper reads as Doina's 8 stages — stage 6 as one
-  // "Accounting & posting" node with the four panels nested — rather than ~12 nodes.
+  // "Accounting & Posting" node with the four panels nested — rather than ~12 nodes.
   const stages = useMemo(
     () => (payment ? groupLifecycleStages(buildLifecycleStages(payment, trace)) : null),
     [payment, trace]

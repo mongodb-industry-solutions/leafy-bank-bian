@@ -982,9 +982,13 @@
   flex: none;
 }
 
+/* Account code and name wrap rather than truncate: Doina needs the full account on screen. */
 .legsLedger .legRow > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.legsLedger .legsFoot .legRow > span:first-child {
   white-space: nowrap;
 }
 

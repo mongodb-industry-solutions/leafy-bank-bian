@@ -369,6 +369,12 @@ def test_an_exact_name_match_proceeds(service, db):
     resolution = _payment_doc(db)["beneficiaryResolution"]
     assert resolution["matchOutcome"] == name_match.MATCHED
     assert resolution["matchedAccountId"] == CREDITOR
+    # The claim and the record are both kept (creditor.name is overwritten on MATCHED).
+    assert resolution["nameOfRecord"] == _HOLDER_NAME
+    assert resolution["accountStatus"] == "ACTIVE"
+    names = {c["name"]: c["result"] for c in _payment_doc(db)["checks"]}
+    assert names["beneficiary_account_open"] == "PASS"
+    assert names["beneficiary_name_matched"] == "PASS"
 
 
 def test_a_plausible_variant_proceeds_with_a_flag(service, db):
@@ -387,7 +393,7 @@ def test_a_plausible_variant_proceeds_with_a_flag(service, db):
     # The CLAIMED name is preserved, not overwritten — erasing it would erase the very
     # discrepancy the flag exists to report.
     assert payment["creditor"]["name"] == variant
-    flagged = [c for c in payment["checks"] if c["name"] == "beneficiary_resolved"]
+    flagged = [c for c in payment["checks"] if c["name"] == "beneficiary_name_matched"]
     assert flagged and flagged[0]["result"] == "WARN"
 
 
@@ -410,6 +416,11 @@ def test_an_unrelated_name_becomes_an_unable_to_apply(service, db):
     assert exception["status"] == exc_module.STATUS_OPEN
     # The operator sees what was claimed without opening the message (her L1341).
     assert exception["detail"]["claimedName"] == "Completely Different Person"
+    assert payment["beneficiaryResolution"]["claimedName"] == "Completely Different Person"
+    assert payment["beneficiaryResolution"]["nameOfRecord"] == _HOLDER_NAME
+    results = {c["name"]: c["result"] for c in payment["checks"]}
+    assert results["beneficiary_account_open"] == "PASS"
+    assert results["beneficiary_name_matched"] == "FAIL"
 
 
 def test_an_unknown_account_becomes_an_unable_to_apply(service, db):
@@ -684,6 +695,14 @@ def test_a_refusal_carries_a_reason_and_an_acceptance_does_not():
     )
     assert refused["TxInfAndSts"][0]["TxSts"] == pacs002.REJECTED
     assert refused["TxInfAndSts"][0]["StsRsnInf"]["Rsn"]["Cd"] == "RR04"
+    # The coded reason carries its plain-English explanation, and a refusal was never accepted.
+    assert refused["TxInfAndSts"][0]["StsRsnInf"]["AddtlInf"] == "Sanctions screening hit on originator"
+    assert refused["TxInfAndSts"][0]["AccptncDtTm"] is None
+    # An acceptance carries the acceptance time and the STSRPT message id, and no reason.
+    assert accepted["TxInfAndSts"][0]["AccptncDtTm"] == NOW
+    assert accepted["TxInfAndSts"][0]["StsRsnInf"] is None
+    named = pacs002.body(pacs002.build(payment={"paymentId": "PAY-1bcf3cc0"}, accepted=True, now=NOW))
+    assert named["GrpHdr"]["MsgId"] == f"STSRPT-{NOW:%Y%m%d}-1BCF3CC0"
 
 
 def test_the_return_swaps_the_parties():

@@ -49,6 +49,7 @@ REJECT = "REJECT"
 #   AC04 ClosedAccountNumber / AC01 IncorrectAccountNumber — the beneficiary could not be
 #   resolved; AM05 Duplication; RR04 (regulatory reason) — the screening refusal.
 REASON_BENEFICIARY_UNRESOLVED = "AC01"
+REASON_ACCOUNT_CLOSED = "AC04"
 REASON_SANCTIONS = "RR04"
 REASON_ACCEPTED = None
 
@@ -274,7 +275,15 @@ def _decide(ctx, screening, now) -> None:
     elif not screening_ok:
         decision, reason_code = REJECT, REASON_SANCTIONS
     else:
-        decision, reason_code = REJECT, REASON_BENEFICIARY_UNRESOLVED
+        # A resolved-but-not-ACTIVE account is a closed/blocked account (AC04), distinct from
+        # an account the sender named that does not exist (AC01).
+        stored = ctx.collections.payments.find_one(
+            {"_id": ctx.payment_oid}, {"beneficiaryResolution.accountStatus": 1}
+        ) or {}
+        account_status = (stored.get("beneficiaryResolution") or {}).get("accountStatus")
+        closed = account_status not in (None, "ACTIVE")
+        decision = REJECT
+        reason_code = REASON_ACCOUNT_CLOSED if closed else REASON_BENEFICIARY_UNRESOLVED
 
     ctx.collections.payments.update_one(
         {"_id": ctx.payment_oid},

@@ -33,6 +33,17 @@ const minor = (v) => (v == null ? null : Number(v) / 100);
 const leg = (code, name, amount) => ({ code, name, amount: minor(amount) });
 
 /**
+ * A ledger-event leg posts to a leaf GL account and rolls up to a coarser control account
+ * (`controlAccountCode`). Show both so the posting and its roll-up read together.
+ */
+const eventLeg = (l, names) => {
+  const control = l.controlAccountCode && l.controlAccountCode !== l.glAccountCode
+    ? ` (control ${l.controlAccountCode}${names[l.controlAccountCode] ? ` ${names[l.controlAccountCode]}` : ""})`
+    : "";
+  return leg(l.glAccountCode, `${names[l.glAccountCode] || ""}${control}`.trim(), l.amount);
+};
+
+/**
  * Stage 6's one-line summary. The posting axis advances independently of `currentState`
  * (spec: *"POSTED is an accounting fact, not a pipeline position"*), so this reads
  * `lifecycle.postingStatus` — written by the LEDGER service (doc 20 B1) — rather than
@@ -184,14 +195,18 @@ export function buildLifecycleStages(payment, trace) {
   // append-only, so its order is the history.
   const executions = payment?.executions ?? [];
   const execution = executions.length ? executions[executions.length - 1] : null;
-  const message = (payment?.messages ?? []).find(
-    (m) => m.paymentMessageId === execution?.paymentMessageId
-  ) ?? (payment?.messages ?? [])[0] ?? null;
+  // Inbound has no execution doc, and `messages[0]` is the inbound pacs.008 (no `payload`).
+  // The stage-5 artifact is the outbound STATUS_RESPONSE (pacs.002) written by `apply`.
+  const message = inbound
+    ? (payment?.messages ?? []).find((m) => m.purpose === "STATUS_RESPONSE") ?? null
+    : (payment?.messages ?? []).find(
+        (m) => m.paymentMessageId === execution?.paymentMessageId
+      ) ?? (payment?.messages ?? [])[0] ?? null;
 
   return [
     {
       key: "initiation",
-      label: inbound ? "Payment Order Initiation (Inbound)" : "Initiation",
+      label: inbound ? "Payment Received" : "Initiation",
       icon: "Edit",
       stage: 1,
       reached: !!payment,
@@ -238,13 +253,13 @@ export function buildLifecycleStages(payment, trace) {
       // authenticate — no step-up, no entitlement policy — so this stage instead resolves the
       // CLAIMED creditor from stage 1 against Leafy Bank's own account records.
       intro: inbound
-        ? "A different question from outbound's stage 2 — there is no customer to " +
+        ? "A different question from outbound's stage 2: there is no customer to " +
           "authenticate here, only a sending bank. First the message itself is authenticated " +
-          "at the network level, then the claimed beneficiary from stage 1 is checked " +
+          "at the network level; then the claimed beneficiary from stage 1 is checked " +
           "against Leafy Bank's own account records: does the account exist and is it open, " +
           "and does the name on the wire match the name on file? A full match proceeds; a " +
           "close-but-not-exact name proceeds with a flag; no match at all sends the payment " +
-          "straight to Exceptions rather than continuing forward."
+          "straight to Exceptions instead of continuing forward."
         : "Answers one question — is this caller allowed to initiate this amount? Two gates: " +
           "party authentication — is this the real customer, corporate user, or API? — and " +
           "payment entitlement — is this caller allowed to initiate this amount from this " +
@@ -455,9 +470,12 @@ export function buildLifecycleStages(payment, trace) {
         xml: inbound ? null : execution?.messageXml ?? null,
         transformationAudit: message?.transformationAudit ?? [],
         mappingVersion: message?.mappingVersion ?? null,
+        // Inbound has no execution doc to carry the format, so it rides on the pacs.002.
+        messageFormat: message?.messageFormat ?? null,
+        statusResponse: inbound ? message : null,
         clearing: payment?.clearing ?? null,
         railStatus: execution?.railStatus ?? null,
-        simulated: execution?.simulated ?? false,
+        simulated: inbound ? message?.simulated ?? false : execution?.simulated ?? false,
         transaction: tx,
         checks: checks.filter((c) => String(c?.stage || "").startsWith("5 ")),
       },
@@ -467,7 +485,7 @@ export function buildLifecycleStages(payment, trace) {
       label: "Ledger event",
       icon: "Copy",
       stage: 6,
-      group: "Accounting & posting",
+      group: "Accounting & Posting",
       reached: !!le,
       // "COMPLETED" (not le.postingStatus) so the panel goes green once the balanced event is
       // CAPTURED — seconds after execution via CDC. le.postingStatus flips to POSTED only at
@@ -479,20 +497,20 @@ export function buildLifecycleStages(payment, trace) {
       // "BATCH" — a constant, so it told the reader nothing).
       meta: accountingMeta(payment, jn, le),
       intro:
-        "Posts the balanced debit and credit legs at minor-unit precision — the payment's own " +
-        "accounting fact, written by the ledger service — and captures the financial history as " +
+        "Posts the balanced debit and credit legs at minor-unit precision \u2014 the payment's own " +
+        "accounting fact, written by the ledger service \u2014 and captures the financial history as " +
         "sub-ledger entries that roll up into a journal entry, whose id is written back to the " +
-        "preceding records.",
+        "originating transactions record.",
       kind: "ledgerEvent",
       data: le,
       legs: le
         ? {
             currency: le.debitLeg?.currency || le.creditLeg?.currency || "USD",
             debits: le.debitLeg
-              ? [leg(le.debitLeg.glAccountCode, names[le.debitLeg.glAccountCode] || "", le.debitLeg.amount)]
+              ? [eventLeg(le.debitLeg, names)]
               : [],
             credits: le.creditLeg
-              ? [leg(le.creditLeg.glAccountCode, names[le.creditLeg.glAccountCode] || "", le.creditLeg.amount)]
+              ? [eventLeg(le.creditLeg, names)]
               : [],
           }
         : null,
@@ -507,7 +525,7 @@ export function buildLifecycleStages(payment, trace) {
       label: "Fee ledger event",
       icon: "Copy",
       stage: 6,
-      group: "Accounting & posting",
+      group: "Accounting & Posting",
       reached: !!feeEvent,
       // Same rationale as the principal ledger event: green when captured, not when the GL
       // batch journals it.
@@ -525,10 +543,10 @@ export function buildLifecycleStages(payment, trace) {
         ? {
             currency: feeEvent.debitLeg?.currency || feeEvent.creditLeg?.currency || "USD",
             debits: feeEvent.debitLeg
-              ? [leg(feeEvent.debitLeg.glAccountCode, names[feeEvent.debitLeg.glAccountCode] || "", feeEvent.debitLeg.amount)]
+              ? [eventLeg(feeEvent.debitLeg, names)]
               : [],
             credits: feeEvent.creditLeg
-              ? [leg(feeEvent.creditLeg.glAccountCode, names[feeEvent.creditLeg.glAccountCode] || "", feeEvent.creditLeg.amount)]
+              ? [eventLeg(feeEvent.creditLeg, names)]
               : [],
           }
         : null,
@@ -538,7 +556,7 @@ export function buildLifecycleStages(payment, trace) {
       label: "Sub-ledger",
       icon: "List",
       stage: 6,
-      group: "Accounting & posting",
+      group: "Accounting & Posting",
       reached: sls.length > 0,
       // "COMPLETED" when the paired entries exist (seconds, via the projection worker) — not
       // gated on journalEntryId, which is stamped only at the GL batch. The batch wait is the
@@ -555,9 +573,9 @@ export function buildLifecycleStages(payment, trace) {
         ? {
             currency: sls[0]?.currency || "USD",
             debits: sls.filter((e) => e.side === "DEBIT")
-              .map((e) => leg(e.controlAccountCode, names[e.controlAccountCode] || e.subLedgerType || "", e.amount)),
+              .map((e) => leg(e.controlAccountCode, `${names[e.controlAccountCode] || e.subLedgerType || ""}${e.glAccountCode && e.glAccountCode !== e.controlAccountCode ? ` (leaf ${e.glAccountCode})` : ""}`.trim(), e.amount)),
             credits: sls.filter((e) => e.side === "CREDIT")
-              .map((e) => leg(e.controlAccountCode, names[e.controlAccountCode] || e.subLedgerType || "", e.amount)),
+              .map((e) => leg(e.controlAccountCode, `${names[e.controlAccountCode] || e.subLedgerType || ""}${e.glAccountCode && e.glAccountCode !== e.controlAccountCode ? ` (leaf ${e.glAccountCode})` : ""}`.trim(), e.amount)),
           }
         : null,
     },
@@ -566,14 +584,13 @@ export function buildLifecycleStages(payment, trace) {
       label: "General ledger",
       icon: "Building",
       stage: 6,
-      group: "Accounting & posting",
+      group: "Accounting & Posting",
       reached: !!jn,
       status: jn?.status,
       meta: jn?.periodCode,
       intro:
-        "The aggregation of the sub-ledger entries by (period, control account, side) into a " +
-        "posted journal entry — the moment the accounting facts become a balanced, immutable " +
-        "journal.",
+        "The aggregation of sub-ledger entries by (period, control account, side) into a " +
+        "posted journal entry — balanced by construction, and immutable once posted.",
       kind: "journal",
       data: jn,
       legs: jn
@@ -727,7 +744,7 @@ export function buildLifecycleStages(payment, trace) {
  * with stage 6 fragmented across "Ledger event" / "Sub-ledger" / "General ledger".
  *
  * Stages 1-5, 7, 8 own a single panel (no `group`), so each passes through as its own node.
- * Stage 6's four accounting panels share `group: "Accounting & posting"` and merge into one
+ * Stage 6's four accounting panels share `group: "Accounting & Posting"` and merge into one
  * node whose expanded body stacks the four. `reached` / `status` / `meta` are lifted off the
  * most-informative child so the node's state (nodeStates, stage >= 6 = independent axis) still
  * reflects the axis's OWN terminal fact: the accounting group completes when the general-ledger
@@ -765,7 +782,7 @@ export function groupLifecycleStages(stages) {
     const reachedCount = children.filter((c) => c.reached).length;
     // The group's terminal fact is its LAST NON-JOURNAL child's status: the sub-ledger for
     // stage 6 (the journal is a trailing batch step that must NOT gate the group's green mark),
-    // the settlement posting for stage 7. Stage 6's "Accounting & posting" is complete once the
+    // the settlement posting for stage 7. Stage 6's "Accounting & Posting" is complete once the
     // balanced event and sub-ledger entries are captured (seconds, via CDC) — the general-ledger
     // journal aggregation is a downstream batch artifact shown in its own sub-panel, not the
     // gate on the stage's ✓. nodeStates keys off this, exactly as the other independent axes do.
@@ -780,11 +797,14 @@ export function groupLifecycleStages(stages) {
       status: terminal?.status ?? undefined,
       meta: reachedCount ? `${reachedCount} of ${children.length} reached` : undefined,
       intro:
-        "One stage, Accounting & Posting, shown as four panels — the balanced " +
-        "debit/credit event, a second event for any wire fee, the paired sub-ledger entries, " +
-        "and the aggregated journal. The panels advance together: posting can finish before " +
-        "settlement and vice-versa without the panels disagreeing on what or how much was " +
-        "posted, since each carries the same accounting fact at a different grain.",
+        "Accounting & Posting uses the same pipeline for incoming as for outgoing: payment " +
+        "\u2192 transaction \u2192 ledger event \u2192 sub-ledger entries \u2192 journal entry. " +
+        "It is shown as four panels: the balanced debit/credit event, a second event for any " +
+        "wire fee, the paired sub-ledger entries, and the aggregated journal. Posting (stage 6) " +
+        "happens before settlement (stage 7). Only the direction of the debit/credit legs " +
+        "differs. Outgoing: Dr Customer Deposit Liability / Cr Wire Clearing Account. " +
+        "Incoming: Dr Wire Clearing Account / Cr Customer Deposit Liability, the reverse of " +
+        "outgoing's posting.",
       children,
     };
   });

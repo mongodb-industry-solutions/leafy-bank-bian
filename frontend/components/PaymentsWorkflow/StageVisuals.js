@@ -84,12 +84,19 @@ const CORRIDORS = [
 ];
 
 /** The three corridor categories, with the one stage 3 determined highlighted. */
+const INBOUND_CORRIDORS = [
+  ["DOMESTIC", "Domestic", "The sending bank is in this bank's country."],
+  ["CROSS_BORDER", "Cross-border", "The sending bank is in another country."],
+];
+
 export function CategoryTable({ payment }) {
   const determined = payment?.validation?.determinedCategory;
   if (!determined) return null;
+  // Inbound compares the ORIGINATOR's bank country, so it has two outcomes, not three.
+  const corridors = payment?.direction === "INBOUND" ? INBOUND_CORRIDORS : CORRIDORS;
   return (
     <div className={styles.table} role="table" aria-label="Corridor category">
-      {CORRIDORS.map(([key, label, rule]) => (
+      {corridors.map(([key, label, rule]) => (
         <div
           key={key}
           role="row"
@@ -353,7 +360,7 @@ const STAGE_STATES = {
     OUTBOUND: { states: [S("SUBMITTED"), S("IN_PROGRESS")], note: "next: stage 6 posts" },
     INBOUND: { states: [S("ACCEPTED")], note: "set on transmission, before internal posting" },
   },
-  "g:Accounting & posting": { both: { states: [S("POSTED")], note: "lifecycle.postingStatus" } },
+  "g:Accounting & Posting": { both: { states: [S("POSTED")], note: "lifecycle.postingStatus" } },
   "g:Clearing & settlement": {
     both: { states: [S("PENDING"), S("SETTLED")], note: "lifecycle.settlementStatus" },
   },
@@ -525,6 +532,88 @@ export function LimitGauge({ payment }) {
   );
 }
 
+/** One check row: result mark, label, mode chip, with the backend's detail as a tooltip. */
+function CheckLine({ result, label, mode, detail, value }) {
+  const [glyph, cls] = MARK[result] || ["–", "markIdle"];
+  return (
+    <div className={styles.gateRow} title={detail || undefined}>
+      <span className={`${styles.gateMark} ${styles[cls]}`} aria-label={result || "not applicable"}>{glyph}</span>
+      <span>{label}{value ? `: ${value}` : ""}</span>
+      {mode && <span className={styles.gateMode}>{mode}</span>}
+    </div>
+  );
+}
+
+const byName = (checks, ...names) =>
+  (checks || []).find((c) => names.includes(c.name));
+const resultOf = (c) => (c ? String(c.result || c.outcome || "").toUpperCase() : undefined);
+
+const OUTCOME_ROUTE = {
+  MATCHED: ["PASS", "Proceeds to stage 3"],
+  PARTIAL: ["WARN", "Proceeds to stage 3, flagged"],
+  NO_MATCH: ["FAIL", "Routes to stage 9, unable to apply"],
+};
+
+/** Inbound stage 2: the four checks Doina lists, in her order, from `checks[]` and the resolution. */
+export function InboundResolutionChecks({ payment, checks }) {
+  const r = payment?.beneficiaryResolution;
+  const auth = byName(checks, "inbound_message_authenticated");
+  const open = byName(checks, "beneficiary_account_open");
+  // `beneficiary_resolved` is the name written before the account and name checks were split.
+  const name = byName(checks, "beneficiary_name_matched", "beneficiary_resolved");
+  const [routeResult, routeText] = OUTCOME_ROUTE[r?.matchOutcome] || [undefined, "Not decided yet"];
+  return (
+    <Card label="Checks performed" tag="sync">
+      <CheckLine
+        result={resultOf(auth)} mode={auth?.mode} detail={auth?.detail}
+        label="Sending institution authenticated at the network level"
+      />
+      <CheckLine
+        result={resultOf(open)} mode={open?.mode} detail={open?.detail}
+        label="Claimed beneficiary account exists and is open"
+        value={r?.accountStatus && r.accountStatus !== "ACTIVE" ? r.accountStatus : undefined}
+      />
+      <CheckLine
+        result={resultOf(name)} mode={name?.mode} detail={name?.detail}
+        label="Beneficiary name matches the account holder of record"
+        value={r?.matchOutcome}
+      />
+      <CheckLine result={routeResult} label="Routed by outcome" value={routeText} />
+    </Card>
+  );
+}
+
+/** Inbound stage 3: sanctions of the originator, FX if required, domestic or cross-border. */
+export function InboundValidationChecks({ payment, checks }) {
+  const sanctions = byName(checks, "originator_screened");
+  const fxDone = byName(checks, "inbound_fx_applied");
+  const fxMissing = byName(checks, "inbound_fx_unavailable");
+  const fx = fxDone || fxMissing;
+  const corridor = byName(checks, "corridor_classified");
+  const category = payment?.validation?.determinedCategory;
+  const f = payment?.fx;
+  return (
+    <Card label="Checks performed" tag="sync">
+      <CheckLine
+        result={resultOf(sanctions)} mode={sanctions?.mode} detail={sanctions?.detail}
+        label="Originator screened for sanctions and AML"
+      />
+      <CheckLine
+        result={fx ? resultOf(fx) : "PASS"} mode={fx?.mode} detail={fx?.detail}
+        label="Incoming FX conversion"
+        value={fxDone && f?.fxRate
+          ? `${f.sourceCurrency} to ${f.targetCurrency} at ${f.fxRate}`
+          : fx ? undefined : "not required"}
+      />
+      <CheckLine
+        result={resultOf(corridor)} mode={corridor?.mode} detail={corridor?.detail}
+        label="Payment classified"
+        value={category === "CROSS_BORDER" ? "Cross-border" : category === "DOMESTIC" ? "Domestic" : undefined}
+      />
+    </Card>
+  );
+}
+
 const RESOLUTIONS = [
   ["MATCHED", "Account open, name matches", "Proceeds to stage 3", ""],
   ["PARTIAL", "Account open, name is a plausible variant", "Proceeds to stage 3, flagged", "tileOnWarn"],
@@ -535,7 +624,9 @@ const RESOLUTIONS = [
 export function ResolutionOutcome({ payment }) {
   const r = payment?.beneficiaryResolution;
   if (!r) return null;
-  const claimedName = payment?.creditor?.name;
+  // `creditor.name` is overwritten with the name of record on an exact match, so prefer the
+  // claim persisted on the resolution; fall back for payments resolved before it existed.
+  const claimedName = r.claimedName ?? payment?.creditor?.name;
   const claimedAccount = payment?.creditor?.accountNo ? `····${String(payment.creditor.accountNo).slice(-4)}` : null;
   return (
     <>
@@ -554,7 +645,8 @@ export function ResolutionOutcome({ payment }) {
           {claimedAccount && <div className={styles.gateFacts}>Account {claimedAccount}</div>}
         </Card>
         <Card label="Found at Leafy Bank" tag={r.matchMethod ? `match: ${r.matchMethod}` : undefined}>
-          <div className={styles.gateRow}><span>{r.matchedAccountId || "no account matched"}</span></div>
+          <div className={styles.gateRow}><span>{r.nameOfRecord || r.matchedAccountId || "no account matched"}</span></div>
+          {r.nameOfRecord && r.matchedAccountId && <div className={styles.gateFacts}>Account {r.matchedAccountId}</div>}
           {r.checkedAt && <div className={styles.gateFacts}>Checked {fmtWhen(r.checkedAt)}</div>}
         </Card>
       </div>

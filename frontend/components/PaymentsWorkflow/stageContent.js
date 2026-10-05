@@ -7,7 +7,7 @@
 import { fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
 import { legTotals } from "./lifecycleStages";
 import {
-  paymentDoc, nonEmpty, pacsMessages, position, statements, ledgerEvents,
+  paymentDoc, nonEmpty, position, statements, ledgerEvents,
 } from "../Showcase/stepWrites";
 
 const OUT = "OUTBOUND";
@@ -74,7 +74,7 @@ const COPY = {
       why: "Inbound and outbound messages share one collection, told apart by direction.",
     },
   },
-  "g:Accounting & posting": {
+  "g:Accounting & Posting": {
     both: {
       business: "The bank's books record the money movement as balanced debits and credits.",
       technical: "A ledger event is written, a change stream posts its sub-ledger entries and one journal in an ACID transaction, keyed by idempotencyKey.",
@@ -110,6 +110,11 @@ export function stageCopy(stage, direction) {
 }
 
 const W = (collection, op, fields, pick, via) => ({ collection, op, fields, pick, via });
+// Outbound's rail messages carry no `purpose`; inbound's stage-5 artifact is the outbound
+// STATUS_RESPONSE (pacs.002), which does.
+const executionMessages = ({ payment }) =>
+  nonEmpty((payment?.messages || []).filter((m) => !m.purpose || m.purpose === "STATUS_RESPONSE"));
+
 const whole = ({ payment }) => nonEmpty(paymentDoc(payment));
 
 // Writes per lifecycle stage key. A panel inside a grouped stage uses its own key; a grouped
@@ -131,7 +136,7 @@ const WRITES = {
   ],
   execution: [
     W("paymentExecutions", "insert", "The rail submission attempt", ({ payment }) => nonEmpty(payment?.executions)),
-    W("paymentMessages", "insert", "The ISO 20022 message sent and the status received", pacsMessages),
+    W("paymentMessages", "insert", "The ISO 20022 message sent and the status received", executionMessages),
   ],
   ledgerEvent: [
     W("ledgerEvents", "insert", "Principal event, idempotencyKey {paymentId}", ledgerEvents([""]),
@@ -292,7 +297,7 @@ function factsFor(stage, payment) {
         ["Simulated rail", e ? yesNo(e.simulated) : null],
       ];
     }
-    case "g:Accounting & posting": {
+    case "g:Accounting & Posting": {
       const ev = child(stage, "ledgerEvent");
       const sub = child(stage, "subLedger")?.data;
       const totals = ev?.legs ? legTotals(ev.legs) : null;
@@ -364,7 +369,7 @@ const BIAN = {
     [IN]: { domains: ["Payment Confirmation", "Financial Crime Evaluation"] },
   },
   execution: { both: { domains: ["Financial Gateway", "Payment Rail"] } },
-  "g:Accounting & posting": {
+  "g:Accounting & Posting": {
     both: { domains: ["Financial Accounting", "Position Keeping", "Current Account"] },
   },
   "g:Clearing & settlement": {

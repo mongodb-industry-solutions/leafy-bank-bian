@@ -71,6 +71,11 @@ def run(ctx: PaymentContext) -> None:
     # --- FR-2.IN2: does the claimed account exist, and is it open? -----------
     account = _find_claimed_account(c, claimed)
     if account is None:
+        recorded.append(_account_open_check(
+            checks.FAIL, now,
+            f"No account matches the claimed beneficiary "
+            f"{claimed.get('accountNo') or claimed.get('iban') or '(none supplied)'}.",
+        ))
         _record(ctx, recorded)
         _fail(
             ctx, name_match.NO_MATCH, name_match.METHOD_NONE, None, now,
@@ -78,19 +83,28 @@ def run(ctx: PaymentContext) -> None:
                 f"No account matches the claimed beneficiary "
                 f"{claimed.get('accountNo') or claimed.get('iban') or '(none supplied)'}."
             ),
+            claimed_name=claimed.get("name"),
         )
         return
 
     if account.get("status") != _OPEN_STATUS:
+        reason = (
+            f"Beneficiary account {account.get('accountId')} is "
+            f"{account.get('status')}, not {_OPEN_STATUS} — cannot be credited."
+        )
+        recorded.append(_account_open_check(checks.FAIL, now, reason))
         _record(ctx, recorded)
         _fail(
             ctx, name_match.NO_MATCH, name_match.METHOD_NONE, account.get("accountId"), now,
-            reason=(
-                f"Beneficiary account {account.get('accountId')} is "
-                f"{account.get('status')}, not {_OPEN_STATUS} — cannot be credited."
-            ),
+            reason=reason, claimed_name=claimed.get("name"),
+            account_status=account.get("status"),
         )
         return
+
+    recorded.append(_account_open_check(
+        checks.PASS, now,
+        f"Beneficiary account {account.get('accountId')} exists and is {_OPEN_STATUS}.",
+    ))
 
     # --- FR-2.IN3: does the name on record match the one claimed? ------------
     customer_id = (account.get("customerSnapshot") or {}).get("customerId")
@@ -100,45 +114,59 @@ def run(ctx: PaymentContext) -> None:
     outcome, method = name_match.compare(claimed.get("name"), name_of_record)
 
     if outcome == name_match.NO_MATCH:
+        reason = (
+            f"Beneficiary name {claimed.get('name')!r} does not match the account "
+            f"holder of record {name_of_record!r}."
+        )
+        recorded.append(_name_check(checks.FAIL, now, reason))
         _record(ctx, recorded)
         _fail(
             ctx, outcome, method, account.get("accountId"), now,
-            reason=(
-                f"Beneficiary name {claimed.get('name')!r} does not match the account "
-                f"holder of record {name_of_record!r}."
-            ),
+            reason=reason, claimed_name=claimed.get("name"),
+            name_of_record=name_of_record, account_status=account.get("status"),
         )
         return
 
     # --- MATCHED or PARTIAL: the payment proceeds ----------------------------
     _attach_confirmed_beneficiary(ctx, account, customer, customer_id)
 
-    recorded.append(
-        checks.check(
-            STAGE, "beneficiary_resolved",
-            checks.PASS if outcome == name_match.MATCHED else checks.WARN,
-            mode=checks.SYNC,
-            detail=(
-                f"Claimed beneficiary {claimed.get('name')!r} resolved to account "
-                f"{account.get('accountId')} ({name_of_record!r}) — {outcome} via {method}."
-                + (
-                    " Proceeding with a flag: the name is a plausible variant, not an "
-                    "exact match." if outcome == name_match.PARTIAL else ""
-                )
-            ),
-            actor="financial-gateway", at=now,
-        )
-    )
+    recorded.append(_name_check(
+        checks.PASS if outcome == name_match.MATCHED else checks.WARN, now,
+        f"Claimed beneficiary {claimed.get('name')!r} resolved to account "
+        f"{account.get('accountId')} ({name_of_record!r}) — {outcome} via {method}."
+        + (
+            " Proceeding with a flag: the name is a plausible variant, not an "
+            "exact match." if outcome == name_match.PARTIAL else ""
+        ),
+    ))
     _record(ctx, recorded)
 
     ctx.beneficiary_match = outcome
-    _write_resolution(ctx, outcome, method, account.get("accountId"), now)
+    _write_resolution(
+        ctx, outcome, method, account.get("accountId"), now,
+        claimed_name=claimed.get("name"), name_of_record=name_of_record,
+        account_status=account.get("status"),
+    )
 
     lifecycle.advance_ctx(
         ctx, lifecycle.VALIDATED,
         actor="financial-gateway",
         reason=f"Beneficiary resolved ({outcome}); message authenticated",
         extra={"customerId": customer_id},
+    )
+
+
+def _account_open_check(result, now, detail):
+    return checks.check(
+        STAGE, "beneficiary_account_open", result, mode=checks.SYNC,
+        detail=detail, actor="financial-gateway", at=now,
+    )
+
+
+def _name_check(result, now, detail):
+    return checks.check(
+        STAGE, "beneficiary_name_matched", result, mode=checks.SYNC,
+        detail=detail, actor="financial-gateway", at=now,
     )
 
 
@@ -173,7 +201,10 @@ def _attach_confirmed_beneficiary(ctx, account, customer, customer_id) -> None:
     ctx.creditor_customer_id = customer_id
 
 
-def _write_resolution(ctx, outcome, method, matched_account_id, now) -> None:
+def _write_resolution(
+    ctx, outcome, method, matched_account_id, now, *,
+    claimed_name=None, name_of_record=None, account_status=None,
+) -> None:
     """DR-2.IN1 — the `beneficiaryResolution` object, and the confirmed creditor fields.
 
     Written as one `$set` so the outcome and the account it resolved to can never disagree.
@@ -184,6 +215,11 @@ def _write_resolution(ctx, outcome, method, matched_account_id, now) -> None:
             "matchOutcome": outcome,
             "matchedAccountId": matched_account_id,
             "matchMethod": method,
+            # What the sender claimed vs what the bank holds. `creditor.name` is overwritten
+            # with the name of record on a MATCHED, so without these the claim is lost.
+            "claimedName": claimed_name,
+            "nameOfRecord": name_of_record,
+            "accountStatus": account_status,
             "checkedAt": now,
         },
         "updatedAt": now,
@@ -209,7 +245,10 @@ def _record(ctx, recorded) -> None:
         checks.append_checks(ctx.collections.payments, ctx.payment_oid, recorded)
 
 
-def _fail(ctx, outcome, method, matched_account_id, now, *, reason: str) -> None:
+def _fail(
+    ctx, outcome, method, matched_account_id, now, *, reason: str,
+    claimed_name=None, name_of_record=None, account_status=None,
+) -> None:
     """FR-2.IN4 — a NO_MATCH does not reject the payment; it routes to Unable to Apply.
 
     ⚠️ **Not a `ValueError`.** The saga's rejection path would mark the payment REJECTED and
@@ -224,7 +263,11 @@ def _fail(ctx, outcome, method, matched_account_id, now, *, reason: str) -> None
     from contexts.financial_gateway.application import uta
 
     ctx.beneficiary_match = outcome
-    _write_resolution(ctx, outcome, method, matched_account_id, now)
+    _write_resolution(
+        ctx, outcome, method, matched_account_id, now,
+        claimed_name=claimed_name, name_of_record=name_of_record,
+        account_status=account_status,
+    )
 
     uta.record(ctx, reason=reason, stage=STAGE)
 
