@@ -121,10 +121,17 @@ def run_reconciliation_worker(agent: Any, db: Any) -> None:
     resume_token = None
     while True:
         try:
-            stream = coll.watch(_MATCH, resume_after=resume_token)
-            for event in stream:
-                resume_token = event.get("_id")
-                _run_one(event.get("fullDocument") or {}, agent, db)
+            with coll.watch(_MATCH, resume_after=resume_token) as stream:
+                while stream.alive:
+                    event = stream.try_next()
+                    if event is None:
+                        # Idle: advance past filtered-out oplog entries so an in-process
+                        # reopen resumes from ~now, not from the last OPEN exception
+                        # (a stale token forces an oplog scan of hours on reopen).
+                        resume_token = stream.resume_token or resume_token
+                        continue
+                    resume_token = event.get("_id")
+                    _run_one(event.get("fullDocument") or {}, agent, db)
         except OperationFailure as exc:
             # Token aged out of the oplog: reopen from now. The sweep catches the gap.
             logger.warning("reconciliation change stream error (%s) — clearing token and reopening",

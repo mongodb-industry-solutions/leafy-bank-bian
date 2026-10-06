@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from database.connection import MongoDBConnection
+from shared.change_stream import iter_with_idle_checkpoint
 from shared.coa_cache import ChartOfAccounts
 from shared.posting_rules import (
     MAPPING_VERSION,
@@ -336,7 +337,8 @@ def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> No
         kwargs: dict = {"resume_after": resume_token} if resume_token else {}
         try:
             with transactions.watch(pipeline, **kwargs) as stream:
-                for change in stream:
+                checkpoint = lambda token: _save_resume_token(connection, db_name, token)  # noqa: E731
+                for change in iter_with_idle_checkpoint(stream, checkpoint):
                     txn = change.get("fullDocument", {})
                     try:
                         process_transaction(txn, connection, db_name, coa)

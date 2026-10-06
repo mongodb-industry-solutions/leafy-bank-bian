@@ -23,6 +23,7 @@ from pymongo.errors import BulkWriteError, OperationFailure
 
 from database.connection import MongoDBConnection
 from services.subledger_service import build_subledger_entries, write_subledger_entries
+from shared.change_stream import iter_with_idle_checkpoint
 from shared.coa_cache import ChartOfAccounts
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,8 @@ def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> No
         kwargs: dict = {"resume_after": resume_token} if resume_token else {}
         try:
             with ledger_events.watch(pipeline, **kwargs) as stream:
-                for change in stream:
+                checkpoint = lambda token: _save_resume_token(connection, db_name, token)  # noqa: E731
+                for change in iter_with_idle_checkpoint(stream, checkpoint):
                     event = change.get("fullDocument", {})
                     try:
                         process_ledger_event(event, connection, db_name, coa)
