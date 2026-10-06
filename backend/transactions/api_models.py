@@ -423,6 +423,32 @@ class ReconScenarioRequest(BaseModel):
     scenario: str
 
 
+class CutoffScenarioRequest(BaseModel):
+    """`POST /workflow/demo/cutoff-scenario` — start one cutoff scenario on a fresh clock run."""
+
+    scenario: Literal["C1", "C2", "C3", "C4", "C5"]
+    model_config = ConfigDict(extra="forbid")
+
+
+class DemoClockRequest(BaseModel):
+    """`POST /workflow/demo/clock` — move one demo clock run. Exactly one action:
+    `anchor` (HH:MM ET, forward only), `advanceMinutes` (forward), or `reset` (back to the
+    run's start minute)."""
+
+    runId: str = Field(min_length=1)
+    anchor: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    advanceMinutes: Optional[int] = Field(default=None, ge=1, le=240)
+    reset: Optional[bool] = None
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _exactly_one_action(self):
+        actions = (self.anchor is not None, self.advanceMinutes is not None, bool(self.reset))
+        if sum(actions) != 1:
+            raise ValueError("Give exactly one of anchor, advanceMinutes or reset.")
+        return self
+
+
 class UtaResolveRequest(BaseModel):
     """`POST /workflow/exceptions/{exceptionId}/uta` — an operator's UTA resolution.
 

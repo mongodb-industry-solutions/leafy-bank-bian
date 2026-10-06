@@ -18,7 +18,13 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from api_models import ExceptionResolveRequest, ReconScenarioRequest, UtaResolveRequest
+from api_models import (
+    CutoffScenarioRequest,
+    DemoClockRequest,
+    ExceptionResolveRequest,
+    ReconScenarioRequest,
+    UtaResolveRequest,
+)
 from process.exceptions import ExceptionActionNotLegal, ExceptionConflict, ExceptionNotFound
 from routers._util import to_json_response
 from services import workflow_read_service
@@ -225,6 +231,35 @@ def initiate_recon_scenario(body: ReconScenarioRequest, request: Request) -> JSO
     try:
         return to_json_response(recon_scenarios.run_one(request.app.state.payments_service,
                                                         body.scenario))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# Cutoff plan Part B — one hold per click, on a fresh demo clock run.
+@router.post("/demo/cutoff-scenario")
+def initiate_cutoff_scenario(body: CutoffScenarioRequest, request: Request) -> JSONResponse:
+    """Start one cutoff scenario (C1–C5) through the real saga; it stops at its hold."""
+    from contexts.payment_orchestration.application import cutoff_scenarios
+
+    try:
+        return to_json_response(cutoff_scenarios.run_one(request.app.state.payments_service,
+                                                         body.scenario))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/demo/clock")
+def move_demo_clock(body: DemoClockRequest, request: Request) -> JSONResponse:
+    """Move one demo clock run: anchor / advance forward, or reset to its start minute."""
+    from contexts.payment_orchestration.application import cutoff_scenarios
+
+    try:
+        return to_json_response(cutoff_scenarios.move_clock(
+            request.app.state.payments_service.db, body.runId, anchor=body.anchor,
+            advance_minutes=body.advanceMinutes, reset=bool(body.reset),
+        ))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

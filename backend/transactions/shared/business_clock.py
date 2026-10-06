@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -53,27 +53,49 @@ def minutes_since_midnight_et(at: datetime) -> int:
     return et.hour * 60 + et.minute
 
 
-def anchor_offset(target_et_minutes: int, *, real_now: datetime) -> int:
-    """The offset (seconds) that makes `real_now` read as `target_et_minutes` on today's ET date.
+def anchor_offset(target_et_minutes: int, *, real_now: datetime,
+                  on_date: Optional[date] = None) -> int:
+    """The offset (seconds) that makes `real_now` read as `target_et_minutes` on `on_date`
+    (default: today's ET date).
 
     Anchored to the start of the target minute, so a payment initiated a few seconds later
     still lands inside it. Rounded up so sub-second drift never lands in the minute before.
     """
     et = to_et(real_now)
-    target = et.replace(hour=target_et_minutes // 60, minute=target_et_minutes % 60,
-                        second=0, microsecond=0)
+    day = on_date or et.date()
+    target = datetime(day.year, day.month, day.day, target_et_minutes // 60,
+                      target_et_minutes % 60, tzinfo=ET)
     return math.ceil((target - et).total_seconds())
 
 
-def create_run(clocks, *, offset_seconds: int, real_now: Optional[datetime] = None) -> str:
-    """Persist a clock run and return its id. `createdAt` feeds the 24h TTL index."""
+def create_run(clocks, *, offset_seconds: int, real_now: Optional[datetime] = None,
+               scenario: Optional[str] = None, anchor_et_minutes: Optional[int] = None,
+               business_date: Optional[date] = None) -> str:
+    """Persist a clock run and return its id. `createdAt` feeds the 24h TTL index.
+
+    The optional fields record what the run was anchored to, so a clock `reset` can return
+    to the start minute (cutoff plan Q7) and a re-run can find its predecessors.
+    """
     run_id = f"CLK-{ObjectId()}"
-    clocks.insert_one({
+    doc = {
         "_id": run_id,
         "offsetSeconds": int(offset_seconds),
         "createdAt": real_now or datetime.now(timezone.utc),
-    })
+    }
+    if scenario is not None:
+        doc["scenario"] = scenario
+    if anchor_et_minutes is not None:
+        doc["anchorEtMinutes"] = int(anchor_et_minutes)
+    if business_date is not None:
+        doc["businessDate"] = business_date.isoformat()
+    clocks.insert_one(doc)
     return run_id
+
+
+def forget(clock_run_id: str) -> None:
+    """Drop one run's cached offset after its offset moves. Per process: other processes
+    (the payment agent) see the move within the cache TTL."""
+    _cache.pop(clock_run_id, None)
 
 
 def clocks_for(ctx):
