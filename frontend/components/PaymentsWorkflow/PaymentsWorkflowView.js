@@ -11,7 +11,7 @@
 // establishes. No page-level poll: the list is a surface an analyst reads and filters, and
 // refreshing it under a cursor is hostile. The only thing that changes while you watch it is
 // the selected payment's ledger trace, and PaymentDeepDive already owns that poll.
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 
@@ -23,6 +23,12 @@ export default function PaymentsWorkflowView() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+
+  // Deep link (?payment=PAY-…), used by the Agent scenarios result to open a lifecycle.
+  useEffect(() => {
+    const linked = new URLSearchParams(window.location.search).get("payment");
+    if (linked) setSelectedPaymentId(linked);
+  }, []);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 

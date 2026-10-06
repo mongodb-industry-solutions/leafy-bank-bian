@@ -276,6 +276,9 @@ const STEP = {
       "Each stage is recorded on the payment document, and the customer's account is " +
       "debited in the same ACID transaction.",
     run: "initiate",
+    // One click runs this step and the next `chain` ones: setup is not the agent story.
+    chain: 2,
+    button: "Send the wire",
   },
   settle: {
     key: "settle",
@@ -307,6 +310,8 @@ const STEP = {
       "record: a camt.053 statement of every movement on our nostro account. This is the " +
       "external evidence reconciliation checks our books against.",
     run: "statement",
+    chain: 1,
+    button: "Receive the statement",
   },
   match: {
     key: "match",
@@ -329,6 +334,7 @@ const STEP = {
       "the payment.",
     run: "batch",
     countdown: true,
+    button: "Check for the missing line",
   },
   window: {
     key: "window",
@@ -340,6 +346,7 @@ const STEP = {
       "the payment.",
     run: "batch",
     countdown: true,
+    button: "Close the statement window",
   },
   investigate: {
     key: "investigate",
@@ -352,6 +359,7 @@ const STEP = {
       "Code checks the proposal against policy, which says which actions are allowed for " +
       "each cause, before a human ever sees it.",
     gate: "proposal",
+    button: "Review the proposal",
   },
   investigateTL: {
     key: "investigate",
@@ -362,6 +370,7 @@ const STEP = {
       "records a cause. Most actions need a human's approval. One doesn't: RECHECK moves no " +
       "money and changes no books, so policy lets the agent run it on its own.",
     gate: "recheck",
+    button: "Continue",
   },
   approve: {
     key: "approve",
@@ -382,6 +391,7 @@ const STEP = {
       "The correspondent's statement turns up, late. Nobody touches the exception. The " +
       "agent's scheduled recheck sweep picks it up on its own.",
     run: "statementLate",
+    button: "Deliver the late statement",
   },
   verify: {
     key: "verify",
@@ -405,3 +415,24 @@ export function stepsFor(key) {
   const middle = key === "R2" ? [STEP.statement, STEP.match, STEP.overdue] : [STEP.statement, STEP.match];
   return [...head, ...middle, STEP.investigate, STEP.approve, STEP.verify];
 }
+
+// The five acts the audience sees. Several steps fold into one act; the step machine in
+// ScenarioStepper is unchanged and only reads this mapping for display.
+export const ACTS = [
+  { id: 1, label: "Normal wire", caption: "A routine wire leaves the bank and settles." },
+  { id: 2, label: "The problem", caption: "The correspondent's statement disagrees with our books." },
+  { id: 3, label: "Investigate", caption: "The agent gathers evidence and proposes one action." },
+  { id: 4, label: "You decide", caption: "Approve or reject. Code has already checked the proposal against policy." },
+  { id: 5, label: "Result", caption: "The agent re-reads the system before reporting success." },
+];
+
+const ACT_OF_STEP = {
+  initiate: 1, settle: 1, glpost: 1,
+  statement: 2, match: 2, overdue: 2, window: 2,
+  investigate: 3, approve: 4, late: 5, verify: 5,
+};
+
+export const actOf = (stepKey) => ACT_OF_STEP[stepKey] || 1;
+
+/** The acts a scenario passes through. TL acts on its own, so it has no decision act. */
+export const actsFor = (key) => (key === "TL" ? ACTS.filter((a) => a.id !== 4) : ACTS);

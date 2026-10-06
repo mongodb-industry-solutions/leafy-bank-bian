@@ -1,12 +1,10 @@
 "use client";
 
-// Owns its own poll (one-owner rule): GET agent/reconciliation/{id}/steps every 2s while
-// `active`. The agent{} record itself is polled by ScenarioStepper and passed in.
+// The raw agent trace behind the "Show agent trace" toggle, plus the steps poll hook
+// (GET agent/reconciliation/{id}/steps every 2s while `active`). ScenarioStepper owns the hook.
 
 import { useEffect, useState } from "react";
-import Button from "@leafygreen-ui/button";
-import Badge from "@leafygreen-ui/badge";
-import { H3, Body, Overline } from "@leafygreen-ui/typography";
+import { Body } from "@leafygreen-ui/typography";
 import { agentApi } from "@/lib/api/client";
 import styles from "./Showcase.module.css";
 
@@ -26,15 +24,7 @@ function shortArgs(args) {
   return text.length > 80 ? `${text.slice(0, 77)}…` : text;
 }
 
-function friendly(err) {
-  const s = String(err);
-  if (s.startsWith("409")) return "Nothing awaiting approval.";
-  if (s.startsWith("503")) return "Agent not running.";
-  if (s.startsWith("502")) return `Resume failed — ${s}`;
-  return s;
-}
-
-function useAgentSteps(exceptionId, active) {
+export function useAgentSteps(exceptionId, active) {
   const [steps, setSteps] = useState([]);
   const [started, setStarted] = useState(false);
 
@@ -95,136 +85,14 @@ function StepItem({ step }) {
   return <Item className={styles.tlThought}>{step.text}</Item>;
 }
 
-export default function AgentThinking({
-  exceptionId,
-  agent,
-  lastProposal,
-  paymentId,
-  policyLine,
-  canDecide,
-  active,
-  onDecided,
-}) {
-  const { steps, started } = useAgentSteps(exceptionId, active);
-  const [acting, setActing] = useState(null);
-  const [actError, setActError] = useState(null);
-
-  async function decide(decision) {
-    if (acting) return;
-    setActing(decision);
-    setActError(null);
-    const { error } = await agentApi(`reconciliation/${encodeURIComponent(exceptionId)}/approve`, null, {
-      method: "POST",
-      body: { decision, by: "presenter" },
-    });
-    setActing(null);
-    if (error) {
-      setActError(friendly(error));
-      return;
-    }
-    onDecided?.(decision);
-  }
-
-  // The agent's run failed (e.g. an expired AWS SSO token). The worker also retries every
-  // minute; this lets the presenter retry the moment they have re-logged in.
-  async function retry() {
-    if (acting || !paymentId) return;
-    setActing("RETRY");
-    setActError(null);
-    const { error } = await agentApi("reconciliation/investigate", null, {
-      method: "POST",
-      body: { exceptionId, paymentId },
-    });
-    setActing(null);
-    if (error) setActError(friendly(error));
-  }
-
-  if (!exceptionId) {
-    return (
-      <div className={styles.pane}>
-        <H3 className={styles.paneTitle}>Reconciliation agent</H3>
-        <Body className={styles.muted}>Idle until reconciliation opens an exception.</Body>
-      </div>
-    );
-  }
-
-  const proposal = agent?.proposedAction || lastProposal || null;
-  const verified = agent?.verification?.result || null;
-
+/** The unprocessed timeline: thoughts, tool calls with arguments, tool results. */
+export default function AgentTrace({ steps, started }) {
   return (
-    <div className={styles.pane}>
-      <H3 className={styles.paneTitle}>Reconciliation agent</H3>
-      <Body className={styles.muted}>
-        Following <span className={styles.mono}>{exceptionId}</span>
-      </Body>
-
-      <ol className={styles.timeline}>
-        {!started && <Item className={styles.muted}>Waiting for the agent to start…</Item>}
-        {steps.map((s, i) => (
-          <StepItem key={i} step={s} />
-        ))}
-      </ol>
-
-      {agent?.error && !agent?.verification && (
-        <div className={styles.section}>
-          <Overline>Investigation failed</Overline>
-          <Body className={styles.error}>{agent.error.message}</Body>
-          <Body className={styles.muted}>
-            Retrying automatically (attempt {agent.error.attempts}). If this is an expired AWS SSO
-            session, run <span className={styles.mono}>aws sso login</span> first.
-          </Body>
-          <Button size="small" disabled={!!acting} onClick={retry}>
-            {acting === "RETRY" ? "Retrying…" : "Retry investigation"}
-          </Button>
-          {actError && <Body className={styles.error}>{actError}</Body>}
-        </div>
-      )}
-
-      {agent?.cause && (
-        <div className={styles.section}>
-          <Overline>Finding</Overline>
-          <div className={styles.factRow}>
-            <Badge variant="red">{agent.cause}</Badge>{" "}
-            {agent.confidence && <Badge variant="lightgray">Confidence {agent.confidence}</Badge>}{" "}
-            {agent.nextCheckAt && !verified && (
-              <Badge variant="blue">Recheck {agent.recheckCount ?? 0} of 3 scheduled</Badge>
-            )}
-            {verified && <Badge variant="green">{verified}</Badge>}
-          </div>
-          {agent.rootCause && <Body>{agent.rootCause}</Body>}
-          {(agent.evidence || []).length > 0 && (
-            <Body as="ul" className={styles.evidence}>
-              {agent.evidence.map((ev, i) => (
-                <li key={i}>{typeof ev === "string" ? ev : JSON.stringify(ev)}</li>
-              ))}
-            </Body>
-          )}
-        </div>
-      )}
-
-      {proposal && (
-        <div className={styles.proposal}>
-          <Overline>Proposed action</Overline>
-          <Body>
-            <strong>{proposal.action}</strong>
-            {proposal.params?.amount != null ? ` · ${proposal.params.amount}` : ""}
-            {proposal.params?.candidateIndex != null ? ` · candidate #${proposal.params.candidateIndex}` : ""}
-          </Body>
-          {proposal.rationale && <Body className={styles.muted}>{proposal.rationale}</Body>}
-          {policyLine && <Body className={styles.policy}>Policy: {policyLine}</Body>}
-          {canDecide && agent?.proposedAction && (
-            <div className={styles.actions}>
-              <Button variant="primary" disabled={!!acting} onClick={() => decide("APPROVE")}>
-                {acting === "APPROVE" ? "Executing…" : "Approve"}
-              </Button>
-              <Button disabled={!!acting} onClick={() => decide("REJECT")}>
-                {acting === "REJECT" ? "Rejecting…" : "Reject"}
-              </Button>
-            </div>
-          )}
-          {actError && <Body className={styles.error}>{actError}</Body>}
-        </div>
-      )}
-    </div>
+    <ol className={styles.timeline}>
+      {!started && <Item className={styles.muted}>Waiting for the agent to start…</Item>}
+      {steps.map((s, i) => (
+        <StepItem key={i} step={s} />
+      ))}
+    </ol>
   );
 }

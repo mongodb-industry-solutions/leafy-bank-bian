@@ -349,27 +349,6 @@
   gap: 24px;
 }
 
-.narration {
-  display: flex;
-  gap: 32px;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.narrationText {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 820px;
-}
-
-.narrationHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .narrationTitle {
   margin: 0;
 }
@@ -388,12 +367,6 @@
   color: #00684a;
 }
 
-.outcome {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .narrationActions {
   display: flex;
   flex-direction: column;
@@ -402,33 +375,10 @@
   min-width: 220px;
 }
 
-.panes {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  align-items: start;
-}
-
 @media (max-width: 1100px) {
-  .panes {
-    grid-template-columns: 1fr;
-  }
-  .narration {
-    flex-direction: column;
-  }
   .narrationActions {
     align-items: flex-start;
   }
-}
-
-.pane {
-  border: 1px solid #e8edeb;
-  border-radius: 16px;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
 }
 
 .paneTitle {
@@ -439,45 +389,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.factRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Payment tracker */
-.paymentHead {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.stageList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.stageRow {
-  display: grid;
-  grid-template-columns: 24px 1fr auto auto;
-  align-items: center;
-  gap: 8px 16px;
-  padding: 8px 0;
-  border-bottom: 1px solid #f0f3f2;
-}
-
-.stageNum {
-  color: #889397;
-}
-
-.stageMeta {
-  text-align: right;
 }
 
 /* Agent thinking */
@@ -570,4 +481,310 @@
   margin-top: 8px;
   max-height: 420px;
   overflow: auto;
+}
+
+/* Walkthrough v2: story bar,
+scene + rail. One tone drives every accent. */
+.walkthrough {
+  --tone: #889397;
+  --tone-bg: #f9fbfa;
+}
+
+.tone_alert {
+  --tone: #db3030;
+  --tone-bg: #fef2f2;
+}
+
+.tone_waiting {
+  --tone: #ffc010;
+  --tone-bg: #fffbea;
+}
+
+.tone_resolved {
+  --tone: #00a35c;
+  --tone-bg: #f0fbf5;
+}
+
+.storyBar {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.storyNode {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid #e8edeb;
+  border-radius: 12px;
+  background: #fff;
+  color: #5c6c75;
+}
+
+.storyDot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #c1c7c6;
+  font-size: 12px;
+  flex: none;
+}
+
+.story_done {
+  color: #1c2d38;
+}
+
+.story_done .storyDot {
+  background: #00a35c;
+  border-color: #00a35c;
+  color: #fff;
+}
+
+.story_current {
+  color: #1c2d38;
+  font-weight: 600;
+  border-color: #1c2d38;
+}
+
+.story_current .storyDot {
+  border-color: #1c2d38;
+}
+
+.storyNode.tone_alert,
+.storyNode.tone_waiting,
+.storyNode.tone_resolved {
+  border-color: var(--tone);
+  background: var(--tone-bg);
+}
+
+.storyNode.tone_alert .storyDot,
+.storyNode.tone_waiting .storyDot,
+.storyNode.tone_resolved .storyDot {
+  border-color: var(--tone);
+}
+
+.storyNode.story_done.tone_alert .storyDot,
+.storyNode.story_done.tone_waiting .storyDot,
+.storyNode.story_done.tone_resolved .storyDot {
+  background: var(--tone);
+}
+
+.stage {
+  display: grid;
+  grid-template-columns: minmax(0, 65fr) minmax(0, 35fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.scene {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e8edeb;
+  border-radius: 16px;
+}
+
+.toneStripe {
+  border-top: 4px solid var(--tone);
+}
+
+.sceneHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notesSummary,
+.railDocsSummary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #3d4f58;
+}
+
+.rail {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.railCard,
+.railDocs {
+  background: #fff;
+  border: 1px solid #e8edeb;
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toneBorder {
+  border-color: var(--tone);
+  background: var(--tone-bg);
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 1100px) {
+  .stage {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    position: static;
+  }
+
+  .storyBar {
+    flex-wrap: wrap;
+  }
+}
+
+/* Scenes */
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #889397;
+}
+
+.checkDone {
+  color: #1c2d38;
+}
+
+.checkDone svg {
+  color: #00a35c;
+}
+
+.gapRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.gapSide {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid #e8edeb;
+  border-radius: 12px;
+}
+
+.gapFigure {
+  font-size: 32px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.gapBad {
+  border-color: #db3030;
+  background: #fef2f2;
+  color: #b31b1b;
+}
+
+.gapOk {
+  border-color: #00a35c;
+  background: #f0fbf5;
+  color: #00684a;
+}
+
+.exceptionCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #e8edeb;
+  border-radius: 12px;
+}
+
+.findingCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid #e8edeb;
+  border-radius: 12px;
+  background: #f9fbfa;
+}
+
+.proposalAction {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+/* Scene variants */
+.diffMark {
+  background: #ffe2e2;
+  color: #b31b1b;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.ringWrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 24px;
+  border: 2px dashed #c1c7c6;
+  border-radius: 12px;
+}
+
+.linesTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.linesTable th,
+.linesTable td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e8edeb;
+}
+
+.lineOrphan {
+  background: #fef2f2;
+  color: #b31b1b;
+  font-weight: 600;
+}
+
+.checkDone svg.refusedIcon,
+.refusedIcon {
+  color: #db3030;
 }

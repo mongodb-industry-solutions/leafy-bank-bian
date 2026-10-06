@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import Badge from "@leafygreen-ui/badge";
 import Code from "@leafygreen-ui/code";
 import { Tab, Tabs } from "@leafygreen-ui/tabs";
-import { H3, Body } from "@leafygreen-ui/typography";
+import { Body } from "@leafygreen-ui/typography";
 import { writesFor } from "./stepWrites";
 import styles from "./Showcase.module.css";
 
@@ -53,8 +53,7 @@ export default function StepDocuments({ steps, index, scenarioKey, sources }) {
   useEffect(() => setSelected(tabs.length - 1), [tabs.length]);
 
   return (
-    <div className={styles.pane}>
-      <H3 className={styles.paneTitle}>Written to MongoDB</H3>
+    <div>
       {tabs.length === 0 ? (
         <Body className={styles.muted}>Each step&apos;s documents appear here once it runs.</Body>
       ) : (

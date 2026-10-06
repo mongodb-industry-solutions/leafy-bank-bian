@@ -6,15 +6,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Button from "@leafygreen-ui/button";
-import Badge from "@leafygreen-ui/badge";
-import Card from "@leafygreen-ui/card";
-import Stepper, { Step } from "@leafygreen-ui/stepper";
 import { H2, Body, Overline } from "@leafygreen-ui/typography";
 import { agentApi, coreApi, pipelineApi } from "@/lib/api/client";
 import { usePaymentWorkflow, usePipelineTrace, useWorkflowExceptions } from "@/lib/api/hooks";
-import { CATEGORY, OVERDUE_SECONDS, scenarioByKey, stepsFor } from "./scenarios";
-import PaymentTracker from "./PaymentTracker";
-import AgentThinking from "./AgentThinking";
+import { ACTS, CATEGORY, OVERDUE_SECONDS, actOf, actsFor, scenarioByKey, stepsFor } from "./scenarios";
+import StoryBar from "./StoryBar";
+import StatusRail from "./StatusRail";
+import { useAgentSteps } from "./AgentThinking";
+import SetupScene from "./scenes/SetupScene";
+import ProblemScene from "./scenes/ProblemScene";
+import InvestigateScene from "./scenes/InvestigateScene";
+import DecisionScene from "./scenes/DecisionScene";
+import ResultScene from "./scenes/ResultScene";
+import { gapOf, railLegOf } from "./scenes/format";
 import StepDocuments from "./StepDocuments";
 import styles from "./Showcase.module.css";
 
@@ -190,6 +194,16 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   const answered = !!followedException?.escalation?.reply && followedException.status !== "OPEN";
   const outcome = reconciled ? "RECONCILED" : answered ? "ANSWERED" : escalated ? "ESCALATED" : null;
 
+  const { steps: agentSteps, started: agentStarted } = useAgentSteps(followedId, !outcome);
+
+  // The first non-zero gap seen is the "before" of the result scene; reconciling zeroes the live one.
+  const railLeg = railLegOf(trace);
+  const liveGap = gapOf(railLeg);
+  const [gapBefore, setGapBefore] = useState(null);
+  useEffect(() => {
+    if (liveGap) setGapBefore((prev) => prev ?? liveGap);
+  }, [liveGap]);
+
   const countdownLeft = step.countdown && ctx.settledAt
     ? Math.max(0, Math.ceil(OVERDUE_SECONDS - (now - ctx.settledAt) / 1000))
     : 0;
@@ -236,11 +250,20 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     if (running || waiting || step.final) return;
     setRunning(true);
     setError(null);
+    // A step may chain the ones after it into a single click. Each success advances the
+    // index, so a failure part-way leaves the failed step current and Next retries from there.
+    const last = Math.min(index + (step.chain || 0), steps.length - 1);
+    let local = ctx;
+    let at = index;
     try {
-      const { patch, note: n } = step.run ? await runAction(step.run, scenarioKey, ctx.paymentId) : { patch: {}, note: null };
-      setCtx((c) => ({ ...c, ...patch }));
-      setNote(n);
-      setIndex((i) => Math.min(i + 1, steps.length - 1));
+      for (; at <= last; at += 1) {
+        const run = steps[at].run;
+        const { patch, note: n } = run ? await runAction(run, scenarioKey, local.paymentId) : { patch: {}, note: null };
+        local = { ...local, ...patch };
+        setCtx(local);
+        setNote(n);
+        setIndex(Math.min(at + 1, steps.length - 1));
+      }
       setTick((t) => t + 1);
     } catch (e) {
       setError(e.message || String(e));
@@ -256,83 +279,115 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     setTick((t) => t + 1);
   }
 
+  const acts = actsFor(scenarioKey);
+  const currentAct = step.final && outcome ? ACTS.length + 1 : actOf(step.key);
+  const act = ACTS.find((a) => a.id === actOf(step.key)) || ACTS[0];
+  const anyOpen = trackedExceptions.some((e) => e.status === "OPEN");
+  // One tone for the whole page, so the story bar, scene stripe and status card agree.
+  const tone =
+    outcome === "RECONCILED" || outcome === "ANSWERED" ? "resolved"
+    : awaitingReply || outcome === "ESCALATED" ? "waiting"
+    : anyOpen ? "alert"
+    : "neutral";
+  const stepLabel = step.button || "Next";
+  const showButton = !step.final && step.key !== "approve";
   return (
-    <div className={styles.walkthrough}>
-      <div>
-        <Stepper currentStep={step.final && outcome ? steps.length : index} maxDisplayedSteps={steps.length}>
-          {steps.map((s) => (
-            <Step key={s.key}>{s.label}</Step>
-          ))}
-        </Stepper>
-      </div>
+    <div className={`${styles.walkthrough} ${styles[`tone_${tone}`]}`}>
+      <StoryBar acts={acts} currentAct={currentAct} tone={tone} />
 
-      <Card className={styles.narration}>
-        <div className={styles.narrationText}>
-          <div className={styles.narrationHead}>
-            <H2 className={styles.narrationTitle}>
-              {index + 1}. {step.title}
-            </H2>
-          </div>
-          <Body>{step.narration}</Body>
-          {scenario.beats?.[step.key] && (
-            <div className={styles.beat}>
-              <Overline>This scenario</Overline>
-              <Body>{scenario.beats[step.key]}</Body>
+      <div className={styles.stage}>
+        <section className={`${styles.scene} ${styles.toneStripe}`}>
+          <div className={styles.sceneHead}>
+            <div>
+              <H2 className={styles.narrationTitle}>{act.label}</H2>
+              <Body className={styles.muted}>{act.caption}</Body>
             </div>
-          )}
+            <div className={styles.narrationActions}>
+              {showButton && (
+                <Button variant="primary" size="large" disabled={running || !!waiting} onClick={next}>
+                  {running ? "Running…" : stepLabel}
+                </Button>
+              )}
+              {waiting && <Body className={styles.muted}>{waiting}</Body>}
+              {awaitingReply && (
+                <Button size="small" variant="default" disabled={running} onClick={replyNow}>
+                  Correspondent replies now
+                </Button>
+              )}
+              <Button size="small" variant="default" onClick={onReset}>
+                All scenarios
+              </Button>
+            </div>
+          </div>
+
           {note && <Body className={styles.note}>{note}</Body>}
           {error && <Body className={styles.error}>{error}</Body>}
-          {step.final && outcome && (
-            <div className={styles.outcome}>
-              <Badge variant={outcome === "ESCALATED" ? "yellow" : "green"}>
-                {outcome === "ANSWERED" ? "CORRESPONDENT REPLIED" : outcome}
-              </Badge>
-              <Body>Expected: {scenario.expected}</Body>
-              {!(EXPECTED_OUTCOMES[scenarioKey] || []).includes(outcome) && (
-                <Body className={styles.error}>
-                  This run ended differently than the scenario expects. Check the exception
-                  and the payment before continuing.
-                </Body>
-              )}
-            </div>
-          )}
-        </div>
-        <div className={styles.narrationActions}>
-          {!step.final && (
-            <Button variant="primary" size="large" disabled={running || !!waiting} onClick={next}>
-              {running ? "Running…" : "Next"}
-            </Button>
-          )}
-          {waiting && <Body className={styles.muted}>{waiting}</Body>}
-          {awaitingReply && (
-            <Button size="small" variant="default" disabled={running} onClick={replyNow}>
-              Correspondent replies now
-            </Button>
-          )}
-          <Button size="small" variant="default" onClick={onReset}>
-            All scenarios
-          </Button>
-        </div>
-      </Card>
 
-      <StepDocuments
-        steps={steps}
-        index={index}
-        scenarioKey={scenarioKey}
-        sources={{ payment, trace, ownException, orphan, agent, followedException, scenarioKey }}
-      />
+          {currentAct === 1 && <SetupScene init={ctx.init} payment={payment} />}
+          {currentAct === 2 && (
+            <ProblemScene
+              scenarioKey={scenarioKey}
+              paymentId={paymentId}
+              payment={payment}
+              trace={trace}
+              exceptions={trackedExceptions}
+              bank={scenario.bank}
+              countdown={!!step.countdown}
+              countdownLeft={countdownLeft}
+            />
+          )}
+          {currentAct === 3 && (
+            <InvestigateScene
+              scenario={scenario}
+              exceptionId={followedId}
+              paymentId={followedException?.paymentId}
+              agent={agent}
+              steps={agentSteps}
+              started={agentStarted}
+              gapMajor={liveGap == null ? null : liveGap / 100}
+            />
+          )}
+          {(currentAct === 4 || (currentAct === 5 && revisedProposalPending)) && (
+            <DecisionScene
+              scenario={scenario}
+              exceptionId={followedId}
+              proposal={agent?.proposedAction || (followedId ? lastProposals[followedId] : null)}
+              canDecide={(step.gate === "decided" && !ctx.decision) || revisedProposalPending}
+              onDecided={onDecided}
+            />
+          )}
+          {currentAct >= 5 && !revisedProposalPending && (
+            <ResultScene
+              paymentId={ctx.paymentId}
+              proposal={agent?.proposedAction || (followedId ? lastProposals[followedId] : null)}
+              scenario={scenario}
+              trace={trace}
+              payment={payment}
+              outcome={step.final ? outcome : null}
+              gapBefore={gapBefore}
+              expectedOutcomes={EXPECTED_OUTCOMES[scenarioKey] || []}
+              waiting={waiting || (step.key === "late" ? "The statement has not arrived yet." : null)}
+            />
+          )}
 
-      <div className={styles.panes}>
-        <PaymentTracker init={ctx.init} payment={payment} trace={trace} exceptions={trackedExceptions} />
-        <AgentThinking
-          exceptionId={followedId}
-          paymentId={followedException?.paymentId}
-          agent={agent}
-          lastProposal={followedId ? lastProposals[followedId] : null}
-          policyLine={scenario.policyLine}
-          canDecide={(step.gate === "decided" && !ctx.decision) || revisedProposalPending}
-          active={!outcome}
-          onDecided={onDecided}
+          <details className={styles.notes}>
+            <summary className={styles.notesSummary}>Presenter notes</summary>
+            <Body>{step.narration}</Body>
+            {scenario.beats?.[step.key] && (
+              <div className={styles.beat}>
+                <Overline>This scenario</Overline>
+                <Body>{scenario.beats[step.key]}</Body>
+              </div>
+            )}
+          </details>
+        </section>
+
+        <StatusRail
+          scenario={scenario}
+          init={ctx.init}
+          payment={payment}
+          exceptions={trackedExceptions}
+          docs={{ steps, index, scenarioKey, sources: { payment, trace, ownException, orphan, agent, followedException, scenarioKey } }}
         />
       </div>
     </div>
