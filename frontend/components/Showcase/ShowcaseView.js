@@ -4,11 +4,13 @@
 // (payment tracker, agent thinking). The step machine and its polls live in ScenarioStepper.
 
 import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Banner from "@leafygreen-ui/banner";
 import Icon from "@leafygreen-ui/icon";
 import LeafyGreenProvider from "@leafygreen-ui/leafygreen-provider";
 import { H2, Body } from "@leafygreen-ui/typography";
 import { agentApi } from "@/lib/api/client";
+import { scenarioByKey } from "./scenarios";
 import ScenarioPicker from "./ScenarioPicker";
 import ScenarioStepper from "./ScenarioStepper";
 import styles from "./Showcase.module.css";
@@ -28,7 +30,12 @@ function useAgentHealth() {
 }
 
 export default function ShowcaseView() {
-  const [scenarioKey, setScenarioKey] = useState(null);
+  // The chosen scenario lives in the URL so browser Back and the Showcase nav tab both
+  // return to the picker.
+  const router = useRouter();
+  const param = useSearchParams().get("scenario");
+  const scenarioKey = scenarioByKey(param) ? param : null;
+  const setScenarioKey = (key) => router.push(key ? `/showcase?scenario=${encodeURIComponent(key)}` : "/showcase");
   const agentReady = useAgentHealth();
 
   // 16px base: the page is presented on a shared screen, and one base size keeps every

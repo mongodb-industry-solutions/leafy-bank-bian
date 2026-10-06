@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import ShowcaseView from "@/components/Showcase/ShowcaseView";
 
 export const metadata = {
@@ -5,5 +6,9 @@ export const metadata = {
 };
 
 export default function ShowcasePage() {
-  return <ShowcaseView />;
+  return (
+    <Suspense fallback={null}>
+      <ShowcaseView />
+    </Suspense>
+  );
 }
