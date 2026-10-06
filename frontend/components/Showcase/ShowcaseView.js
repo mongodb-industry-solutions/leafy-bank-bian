@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 import Banner from "@leafygreen-ui/banner";
+import Icon from "@leafygreen-ui/icon";
 import LeafyGreenProvider from "@leafygreen-ui/leafygreen-provider";
 import { H2, Body } from "@leafygreen-ui/typography";
 import { agentApi } from "@/lib/api/client";
@@ -34,21 +35,27 @@ export default function ShowcaseView() {
   // Body, Badge and Button on the same scale instead of per-class font sizes.
   return (
     <LeafyGreenProvider baseFontSize={16}>
-      <div className={styles.root}>
-        <div className={styles.header}>
-          <div>
-            <H2 className={styles.title}>Agent scenarios</H2>
-            <Body className={styles.muted}>
-              {scenarioKey
-                ? "Click Next to run each step."
-                : "Pick a scenario to watch an AI agent handle a payment problem, step by step."}
-            </Body>
+      <div className={styles.page}>
+        <div className={styles.root}>
+          <div className={scenarioKey ? styles.header : styles.hero}>
+            <div className={styles.heroText}>
+              {!scenarioKey && (
+                <span className={styles.eyebrow}>
+                  <Icon glyph="Sparkle" size={14} /> Reconciliation agent
+                </span>
+              )}
+              <H2 className={styles.title}>Agent scenarios</H2>
+              <Body className={styles.muted}>
+                {scenarioKey
+                  ? "Click Next to run each step."
+                  : "Watch an AI agent investigate a payment problem, propose a fix, and wait for a human to approve. Cards marked Suggested make a good short demo."}
+              </Body>
+            </div>
+            <span className={styles.health}>
+              <span className={`${styles.dot} ${agentReady ? styles.dotUp : styles.dotDown}`} />
+              <Body as="span">Agent {agentReady == null ? "checking…" : agentReady ? "ready" : "offline"}</Body>
+            </span>
           </div>
-          <span className={styles.health}>
-            <span className={`${styles.dot} ${agentReady ? styles.dotUp : styles.dotDown}`} />
-            <Body as="span">Agent {agentReady == null ? "checking…" : agentReady ? "ready" : "offline"}</Body>
-          </span>
-        </div>
 
         {agentReady === false && (
           <Banner variant="warning">
@@ -62,6 +69,7 @@ export default function ShowcaseView() {
         ) : (
           <ScenarioPicker onPick={setScenarioKey} />
         )}
+        </div>
       </div>
     </LeafyGreenProvider>
   );

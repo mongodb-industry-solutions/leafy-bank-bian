@@ -26,6 +26,10 @@
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+  padding: 4px 12px;
+  border: 1px solid #c9d1cf;
+  border-radius: 999px;
+  background: #ffffff;
 }
 
 .dot {
@@ -55,38 +59,287 @@
   color: #db3030;
 }
 
-/* Picker */
-.pickerGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 24px;
+/* Page canvas + hero */
+.page {
+  min-height: 100%;
+  background:
+    radial-gradient(900px 360px at 12% -80px, rgba(0, 237, 100, 0.12), transparent 70%),
+    radial-gradient(700px 320px at 92% -60px, rgba(1, 107, 248, 0.08), transparent 70%),
+    #f6f8f7;
 }
 
-.scenarioCard {
-  cursor: pointer;
+.hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 8px 0 8px;
+}
+
+.heroText {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-width: 720px;
 }
 
-.cardHead {
+.eyebrow {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #e3fcf7;
+  color: #00684a;
+  font-weight: 600;
+}
+
+/* Picker */
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.groupHead {
   display: flex;
   align-items: center;
+  gap: 12px;
+}
+
+.groupIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-bg, #e8edeb);
+  color: var(--accent, #3d4f58);
+  flex: none;
+}
+
+.groupTitle {
+  margin: 0;
+}
+
+.pickerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 20px;
+}
+
+/* Mode themes feed both the group header and its cards. */
+.mode_approval {
+  --accent: #016bf8;
+  --accent-bg: #e1f0ff;
+}
+
+.mode_refuses {
+  --accent: #b45f06;
+  --accent-bg: #fff1d6;
+}
+
+.mode_autonomous {
+  --accent: #00684a;
+  --accent-bg: #d8f7e9;
+}
+
+.scenarioCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  color: #1c2d38;
+  background: #ffffff;
+  border: 1px solid #dbe2e0;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(6, 22, 33, 0.04), 0 8px 24px rgba(6, 22, 33, 0.06);
+  cursor: pointer;
+  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.scenarioCard::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: var(--accent, #889397);
+}
+
+.scenarioCard:hover {
+  border-color: var(--accent, #889397);
+  box-shadow: 0 2px 4px rgba(6, 22, 33, 0.06), 0 16px 36px rgba(6, 22, 33, 0.12);
+  transform: translateY(-3px);
+}
+
+.scenarioCard:focus-visible {
+  outline: 3px solid #0498ec;
+  outline-offset: 2px;
+}
+
+.cardDisabled {
+  cursor: default;
+  background: rgba(255, 255, 255, 0.55);
+  border-style: dashed;
+  box-shadow: none;
+  color: #5c6c75;
+}
+
+.cardDisabled::before {
+  display: none;
+}
+
+.cardDisabled:hover {
+  border-color: #dbe2e0;
+  box-shadow: none;
+  transform: none;
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modeIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-bg, #e8edeb);
+  color: var(--accent, #3d4f58);
+  flex: none;
+}
+
+.modeLabel {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--accent, #3d4f58);
+}
+
+.cardBadges {
+  margin-left: auto;
+  display: inline-flex;
   gap: 8px;
-  margin-bottom: 4px;
+}
+
+.suggested,
+.ranMark {
+  padding: 2px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.suggested {
+  background: #fff6d6;
+  color: #6f4c00;
+}
+
+.suggested::before {
+  content: "\2605\00a0";
+}
+
+.ranMark {
+  background: #e8edeb;
+  color: #3d4f58;
+}
+
+.ranMark::before {
+  content: "\2713\00a0";
 }
 
 .cardTitle {
   margin: 0;
 }
 
-.cardFacts {
+.cardStory {
+  color: #3d4f58;
+}
+
+/* Cause -> Rule -> Action as a vertical flow: wide enough that labels never wrap to one word per line. */
+.decision {
+  list-style: none;
+  margin: 0;
+  padding: 12px 14px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+  flex-direction: column;
+  gap: 8px;
+  background: #f6f8f7;
+  border-radius: 10px;
+}
+
+.decisionRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  align-items: baseline;
+  gap: 8px;
+  cursor: help;
+}
+
+.decisionRow + .decisionRow::before {
+  content: "";
+  position: absolute;
+  left: 28px;
+  top: -8px;
+  height: 8px;
+  border-left: 1px dashed #b8c4c2;
+}
+
+.decisionName {
+  color: #889397;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.decisionLabel {
+  font-weight: 600;
+}
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: auto;
-  padding-top: 8px;
-  border-top: 1px solid #e8edeb;
+  padding-top: 4px;
+}
+
+.cardMeta {
+  color: #5c6c75;
+}
+
+.startCue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--accent, #00684a);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.scenarioCard:hover .startCue,
+.scenarioCard:focus-visible .startCue {
+  opacity: 1;
+  transform: none;
 }
 
 /* Walkthrough */

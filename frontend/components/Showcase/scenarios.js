@@ -11,6 +11,13 @@ export const CATEGORY = {
 export const SCENARIOS = [
   {
     key: "R1",
+    mode: "approval",
+    recommended: true,
+    decision: {
+      cause: { label: "Fee deducted", code: "FEE" },
+      constraint: { label: "Sender pays all charges", code: "DEBT" },
+      action: { label: "Post a $25 adjustment", code: "POST_ADJUSTMENT" },
+    },
     title: "Fee deducted, sender pays",
     story: "The correspondent deducts a $25 fee from a wire where the sender agreed to bear all charges.",
     talkingPoint: "The agent proposes a $25 adjustment; code checks it matches the discrepancy exactly.",
@@ -44,6 +51,13 @@ export const SCENARIOS = [
   },
   {
     key: "R1b",
+    mode: "approval",
+    recommended: false,
+    decision: {
+      cause: { label: "Fee deducted", code: "FEE" },
+      constraint: { label: "Charges are shared", code: "SHAR" },
+      action: { label: "Accept the gap", code: "ACCEPT_DISCREPANCY" },
+    },
     title: "Fee deducted, shared charges",
     story: "The same $25 deduction, but the charges are shared with the beneficiary.",
     talkingPoint: "Same $25, different books: the charge terms decide the action.",
@@ -71,6 +85,13 @@ export const SCENARIOS = [
   },
   {
     key: "R2",
+    mode: "approval",
+    recommended: false,
+    decision: {
+      cause: { label: "Reference rewritten", code: "REFERENCE_MISMATCH" },
+      constraint: { label: "A matching line exists", code: "candidate found" },
+      action: { label: "Link the statement line", code: "LINK_STATEMENT_ENTRY" },
+    },
     title: "Altered reference",
     story: "The correspondent rewrites the payment reference, so the statement line matches nothing.",
     talkingPoint: "Fuzzy matching is the agent's job, never automatic. One link closes both exceptions.",
@@ -101,6 +122,13 @@ export const SCENARIOS = [
   },
   {
     key: "R4",
+    mode: "refuses",
+    recommended: true,
+    decision: {
+      cause: { label: "Amount mismatch", code: "AMOUNT_MISMATCH" },
+      constraint: { label: "54.00 is not a fee RBC charges", code: "FEE refused" },
+      action: { label: "Ask the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
+    },
     title: "Transposed amount",
     story: "The correspondent books 7,306.00 instead of 7,360.00.",
     talkingPoint: "A 54.00 gap is not a fee any correspondent charges, so the guard refuses FEE and the correspondent's answer settles it.",
@@ -134,6 +162,13 @@ export const SCENARIOS = [
   },
   {
     key: "R5",
+    mode: "refuses",
+    recommended: false,
+    decision: {
+      cause: { label: "Unknown line", code: "ORPHANED" },
+      constraint: { label: "No payment explains it", code: "no candidate" },
+      action: { label: "Ask the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
+    },
     title: "Unknown statement line",
     story: "A clean wire, plus a line on the statement that belongs to no payment of ours.",
     talkingPoint: "Not every line on the statement belongs to us.",
@@ -166,6 +201,13 @@ export const SCENARIOS = [
   },
   {
     key: "TL",
+    mode: "autonomous",
+    recommended: true,
+    decision: {
+      cause: { label: "Statement is late", code: "TIMING" },
+      constraint: { label: "Moves no money", code: "no approval needed" },
+      action: { label: "Recheck on its own", code: "RECHECK" },
+    },
     title: "Late statement",
     story: "The wire is fine; the correspondent's statement just hasn't arrived yet.",
     talkingPoint: "RECHECK is the only action the agent may take on its own.",
@@ -191,6 +233,25 @@ export const SCENARIOS = [
         "The exception closes and the payment is RECONCILED. The agent handled a false " +
         "alarm on its own and never asked a human for anything.",
     },
+  },
+];
+
+// How the picker groups scenarios: by what the agent does, because that is the point of each.
+export const GROUPS = [
+  {
+    mode: "approval",
+    title: "Acts after a human approves",
+    blurb: "The same $25 gap can need two different answers, depending on who pays the charges.",
+  },
+  {
+    mode: "refuses",
+    title: "Knows when not to act",
+    blurb: "The agent declines to guess and asks the correspondent instead.",
+  },
+  {
+    mode: "autonomous",
+    title: "Acts on its own",
+    blurb: "The one action that moves no money needs no approval.",
   },
 ];
 
