@@ -203,7 +203,6 @@ def run(ctx: PaymentContext) -> None:
     _flush(ctx, recorded)
 
     if cutoff_block is not None and cutoff_block["phaseAtCheck"] != cutoff_policy.BEFORE_INTERNAL:
-        # A3: raise the cutoff-exception queue item here.
         updates.update({"cutoff.trippedAt": now, "cutoff.resumeFrom": "4a"})
         lifecycle.advance_ctx(
             ctx, lifecycle.CUTOFF_EXCEPTION,

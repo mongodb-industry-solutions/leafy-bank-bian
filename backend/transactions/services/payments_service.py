@@ -61,7 +61,7 @@ from contexts.payment_rail.adapters.simulated_wire_rail import SimulatedWireRail
 from contexts.payment_order_initiation.domain import checks, lifecycle
 from process.payment_context import PaymentCollections, PaymentContext
 from contexts.payment_orchestration.domain import cutoff_policy
-from shared import business_clock
+from shared import business_clock, hold_queues, stage_events
 
 logger = logging.getLogger(__name__)
 
@@ -748,6 +748,11 @@ class PaymentsService:
             )
         return payment
 
+    @property
+    def _stage_events(self):
+        # Every hold route refuses untagged payments, so these advances are always tagged.
+        return self.db[stage_events.STAGE_EVENTS]
+
     def _held_context(self, payment: dict) -> PaymentContext:
         return self._context_from_doc(
             payment, customer_ref=payment.get("customerId", ""), authentication=None,
@@ -781,6 +786,8 @@ class PaymentsService:
                 self.payments, payment["_id"],
                 reason=f"Rejected by second signatory {approver_id}.", actor=approver_id,
             )
+            hold_queues.close_approval_request(self.db, payment_id=payment_id,
+                                               status=hold_queues.REJECTED, by=approver_id, at=now)
             return updated or self.payments.find_one({"paymentId": payment_id})
         if decision != "APPROVED":
             raise ValueError(f"Unknown approval decision {decision!r}.")
@@ -793,6 +800,9 @@ class PaymentsService:
             "entitlement.dualApproval.approvedAt": now,
         }
         self.payments.update_one({"_id": payment["_id"]}, {"$set": approval})
+        # Closed before the re-run, so a later re-hold opens a fresh request without colliding.
+        hold_queues.close_approval_request(self.db, payment_id=payment_id,
+                                           status=hold_queues.APPROVED, by=approver_id, at=now)
         checks.append_checks(self.payments, payment["_id"], [checks.check(
             "2 authenticate", "dual_approval", checks.PASS,
             detail=f"Approved by second signatory {approver_id}.",
@@ -844,16 +854,21 @@ class PaymentsService:
                 self.payments, payment["_id"],
                 reason=f"Sanctions HIT confirmed by analyst {analyst_id}.", actor=analyst_id,
             )
+            hold_queues.close_screening_item(self.db, payment_id=payment_id,
+                                             status=hold_queues.HIT, by=analyst_id, at=now)
             return updated or self.payments.find_one({"paymentId": payment_id})
         if outcome != sanctions.CLEAR:
             raise ValueError(f"Unknown screening outcome {outcome!r}.")
 
+        # One close covers all three CLEAR branches below.
+        hold_queues.close_screening_item(self.db, payment_id=payment_id,
+                                         status=hold_queues.CLEARED, by=analyst_id, at=now)
         if ctx.cutoff_decision == "HOLD_NEXT_VALUE_DATE":
             return lifecycle.advance(
                 self.payments, payment["_id"], lifecycle.ROUTED,
                 actor=analyst_id, from_state=lifecycle.PENDING_SCREENING, at=now,
                 reason="Screening cleared; warehoused for the next value date already chosen.",
-                extra=resolution,
+                extra=resolution, stage_events=self._stage_events,
             )
 
         window = self._cutoff_window(payment)
@@ -875,6 +890,7 @@ class PaymentsService:
                     "cutoff.trippedAt": now,
                     "cutoff.resumeFrom": "4b",
                 },
+                stage_events=self._stage_events,
             )
 
         self.payments.update_one({"_id": payment["_id"]}, {"$set": resolution})
@@ -921,7 +937,7 @@ class PaymentsService:
         updated = lifecycle.advance(
             self.payments, payment["_id"], lifecycle.ROUTED,
             actor=decided_by, reason=reason, from_state=lifecycle.CUTOFF_EXCEPTION,
-            at=now, extra=extra,
+            at=now, extra=extra, stage_events=self._stage_events,
         )
         if decision == "NEXT_VALUE_DATE":
             return updated

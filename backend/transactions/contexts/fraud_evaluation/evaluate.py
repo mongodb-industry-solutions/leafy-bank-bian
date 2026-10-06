@@ -69,6 +69,7 @@ from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_order_initiation.domain import checks, lifecycle
 from contexts.payment_orchestration.domain import documents
 from process.payment_context import PaymentContext
+from shared import hold_queues
 from shared.refs import derive_ref
 
 STAGE = "4 authorize"
@@ -184,7 +185,6 @@ def run(ctx: PaymentContext) -> None:
         refuse("sanctions_screening", screening.detail)
     if screening.status == sanctions.PENDING and ctx.clock_run_id:
         # D4 (cutoff plan A2): a tagged payment waits for an analyst instead of continuing.
-        # A3: enqueue a `screeningQueue` record here.
         record("sanctions_screening", checks.WARN, screening.detail)
         _flush(ctx, recorded)
         lifecycle.advance_ctx(
@@ -202,6 +202,10 @@ def run(ctx: PaymentContext) -> None:
                     "outcome": None,
                 },
             },
+        )
+        hold_queues.enqueue_screening(
+            ctx.collections.db, payment=ctx.payment_doc, reason=screening.detail,
+            matched=screening.matched, at=ctx.payment_doc["lifecycle"]["stateEnteredAt"],
         )
         ctx.stop(ctx.payment_doc)
         return
@@ -557,6 +561,7 @@ def _velocity_count(ctx, now: datetime) -> int:
             debtor_account_id=ctx.debtor_account_ref,
             now=now,
             exclude_payment_id=ctx.payment_id,
+            clock_run_id=ctx.clock_run_id,
         ),
     )
 

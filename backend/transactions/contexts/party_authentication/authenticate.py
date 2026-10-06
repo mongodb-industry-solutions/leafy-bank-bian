@@ -55,6 +55,7 @@ from contexts.party_authentication.domain import entitlement_policy as policy
 from contexts.payment_order_initiation.domain import checks, lifecycle
 from contexts.payment_order_initiation.domain.lifecycle import StepUpRequired
 from process.payment_context import PaymentContext
+from shared import hold_queues
 
 STAGE = "2 authenticate"
 
@@ -194,7 +195,6 @@ def run(ctx: PaymentContext) -> None:
     # D1: a tagged payment waits for a real second signatory instead of a simulated one.
     held_for_approval = approval_required and bool(ctx.clock_run_id)
     if held_for_approval:
-        # A3: enqueue an `approvalRequests` record here.
         record(
             "dual_approval", checks.WARN,
             f"{amount:,.2f} is above the {segment or 'default'} dual-approval threshold of "
@@ -286,6 +286,11 @@ def run(ctx: PaymentContext) -> None:
             actor="transactions-service",
             reason=f"Dual approval required above {limits['dualApprovalThreshold']:,.2f}; "
                    "awaiting a second signatory.",
+        )
+        # After the transition, so a failed advance leaves no orphan request.
+        hold_queues.open_approval_request(
+            ctx.collections.db, payment=ctx.payment_doc,
+            at=ctx.payment_doc["lifecycle"]["stateEnteredAt"],
         )
         ctx.stop(ctx.payment_doc)
 

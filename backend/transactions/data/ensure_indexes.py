@@ -227,6 +227,58 @@ DEMO_CLOCKS_INDEXES = [
 ]
 
 
+# Cutoff plan A3: the hold queues the cutoff agent reads. One OPEN record per payment — the
+# unique partial index is what makes `hold_queues` insert-then-catch idempotent. PARTIAL on
+# `status == OPEN`, so closed records never block a later re-hold.
+APPROVAL_REQUESTS_INDEXES = [
+    {"name": "idx_approval_open_unique", "keys": [("paymentId", ASCENDING)], "unique": True,
+     "partialFilterExpression": {"status": {"$eq": "OPEN"}}},
+    {"name": "idx_approval_assignee_status",
+     "keys": [("assignedTo", ASCENDING), ("status", ASCENDING)]},
+]
+
+SCREENING_QUEUE_INDEXES = [
+    {"name": "idx_screening_open_unique", "keys": [("paymentId", ASCENDING)], "unique": True,
+     "partialFilterExpression": {"status": {"$eq": "OPEN"}}},
+    # Serves `hold_queues.screening_position`: run-scoped OPEN items by priority then age.
+    {"name": "idx_screening_run_order",
+     "keys": [("demo.clockRunId", ASCENDING), ("status", ASCENDING),
+              ("priority", DESCENDING), ("queuedAt", ASCENDING)]},
+    {"name": "idx_screening_synthetic_ttl", "keys": [("createdAt", ASCENDING)],
+     "expireAfterSeconds": 86400, "partialFilterExpression": {"synthetic": True}},
+]
+
+STAFF_DIRECTORY_INDEXES = [
+    {"name": "idx_staff_id_unique", "keys": [("staffId", ASCENDING)], "unique": True},
+]
+
+STAGE_EVENTS_COLLECTION = "paymentStageEvents"
+STAGE_EVENTS_TIMESERIES = {"timeField": "at", "metaField": "meta", "granularity": "minutes"}
+STAGE_EVENTS_EXPIRE_SECONDS = 30 * 86400
+STAGE_EVENTS_INDEXES = [
+    {"name": "idx_stage_events_payment", "keys": [("paymentId", ASCENDING)]},
+]
+
+
+def _ensure_time_series(db, name: str, *, timeseries: dict, expire_after_seconds: int) -> None:
+    """Create a time-series collection if absent; refuse one that exists as a regular collection.
+
+    A first `insert_one` auto-creates a REGULAR collection, so this must run before any live
+    tagged traffic. A regular one cannot be converted in place, so fail loudly rather than
+    index it as if it were fine.
+    """
+    existing = list(db.list_collections(filter={"name": name}))
+    if not existing:
+        db.create_collection(name, timeseries=timeseries,
+                             expireAfterSeconds=expire_after_seconds)
+        return
+    if existing[0].get("type") != "timeseries":
+        raise RuntimeError(
+            f"{name} exists as a regular collection; drop it so it can be re-created as a "
+            "time series."
+        )
+
+
 def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs: list[dict]) -> list[str]:
     coll = connection.get_collection(db_name, collection)
     ensured = []
@@ -235,6 +287,13 @@ def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs:
         coll.create_index(spec["keys"], name=spec["name"], **opts)
         ensured.append(spec["name"])
     return ensured
+
+
+def _ensure_stage_events(connection: MongoDBConnection, db_name: str) -> list[str]:
+    _ensure_time_series(connection.get_database(db_name), STAGE_EVENTS_COLLECTION,
+                        timeseries=STAGE_EVENTS_TIMESERIES,
+                        expire_after_seconds=STAGE_EVENTS_EXPIRE_SECONDS)
+    return _ensure(connection, db_name, STAGE_EVENTS_COLLECTION, STAGE_EVENTS_INDEXES)
 
 
 def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> dict[str, list[str]]:
@@ -253,6 +312,12 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
         ),
         "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
         "demoClocks": _ensure(connection, db_name, "demoClocks", DEMO_CLOCKS_INDEXES),
+        "approvalRequests": _ensure(
+            connection, db_name, "approvalRequests", APPROVAL_REQUESTS_INDEXES
+        ),
+        "screeningQueue": _ensure(connection, db_name, "screeningQueue", SCREENING_QUEUE_INDEXES),
+        "staffDirectory": _ensure(connection, db_name, "staffDirectory", STAFF_DIRECTORY_INDEXES),
+        STAGE_EVENTS_COLLECTION: _ensure_stage_events(connection, db_name),
     }
 
 

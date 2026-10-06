@@ -77,6 +77,7 @@ def recent_duplicate_filter(
     instructed_currency: str,
     now: datetime,
     exclude_payment_id: str,
+    clock_run_id: Optional[str] = None,
 ) -> dict:
     """The Mongo filter for a content-duplicate of this payment.
 
@@ -87,6 +88,10 @@ def recent_duplicate_filter(
     Leads on `debtor.accountId`, which `idx_payments_debtorAccount_status` indexes. No new
     index is added — at this collection's size a scan is sub-millisecond, and adding one
     without measuring is defect 2026-07-08.
+
+    Run-scoped (cutoff plan Q2): a re-run scenario re-anchors to the same business minute, so
+    a tagged payment matches only its own clock run; untagged (`None`, i.e. no `demo`) matches
+    only untagged.
     """
     return {
         "debtor.accountId": debtor_account_id,
@@ -96,6 +101,7 @@ def recent_duplicate_filter(
         "paymentId": {"$ne": exclude_payment_id},
         "status": {"$nin": list(TERMINAL_FAILURE_STATES)},
         "createdAt": {"$gte": now - timedelta(seconds=window_seconds())},
+        "demo.clockRunId": clock_run_id,
     }
 
 

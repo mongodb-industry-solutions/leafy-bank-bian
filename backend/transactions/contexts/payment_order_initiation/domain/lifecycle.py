@@ -44,7 +44,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from shared import business_clock
+from shared import business_clock, stage_events as stage_event_log
 
 
 class StepUpRequired(ValueError):
@@ -249,6 +249,7 @@ def advance(
     session=None,
     extra: Optional[dict] = None,
     at: Optional[datetime] = None,
+    stage_events=None,
 ) -> dict:
     """Move a persisted payment to `to_state`. Returns the updated document.
 
@@ -261,6 +262,9 @@ def advance(
 
     `at` is the transition time; None means real UTC. `advance_ctx` passes business time, so
     a demo-clock payment's events read on the same clock as its checks.
+
+    `stage_events` is the `paymentStageEvents` handle; when given, a best-effort duration
+    point is appended after the transition lands. Callers pass it for tagged payments only.
     """
     if to_state not in TRANSITIONS:
         raise IllegalTransition(f"unknown state {to_state!r}")
@@ -292,6 +296,8 @@ def advance(
             f"could not advance {payment_oid} to {to_state}"
             + (f" from {from_state}" if from_state else "")
         )
+    if stage_events is not None:
+        stage_event_log.append(stage_events, updated, at=now)
     return updated
 
 
@@ -336,7 +342,13 @@ def advance_ctx(ctx, to_state: str, *, actor: str, reason: str, session=None, ex
     Threads `from_state` from the context and keeps it in sync, so a stage does not repeat
     that bookkeeping. Duck-typed on purpose — this module imports nothing from `process/`,
     keeping the dependency pointing inward.
+
+    Stage events: tagged payments only, and never inside a session — time-series writes do
+    not belong in a money-moving transaction.
     """
+    db = getattr(ctx.collections, "db", None)
+    events = (db[stage_event_log.STAGE_EVENTS]
+              if getattr(ctx, "clock_run_id", None) and session is None and db is not None else None)
     updated = advance(
         ctx.collections.payments,
         ctx.payment_oid,
@@ -347,6 +359,7 @@ def advance_ctx(ctx, to_state: str, *, actor: str, reason: str, session=None, ex
         session=session,
         extra=extra,
         at=business_clock.ctx_now(ctx),
+        stage_events=events,
     )
     ctx.current_state = to_state
     ctx.payment_doc = updated

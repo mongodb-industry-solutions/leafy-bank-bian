@@ -259,13 +259,16 @@ def velocity_window_seconds() -> int:
         return VELOCITY_WINDOW_SECONDS_DEFAULT
 
 
-def velocity_filter(*, debtor_account_id: str, now, exclude_payment_id: str) -> dict:
+def velocity_filter(*, debtor_account_id: str, now, exclude_payment_id: str,
+                    clock_run_id=None) -> dict:
     """How many payments has this debtor account sent inside the window?
 
     Excludes the payment being scored — stage 1 persists at DRAFT before stage 4 runs, so
     without this every payment counts itself and the threshold is effectively one lower.
     Leads on `debtor.accountId`, which `idx_payments_debtorAccount_status` covers; no new
     index (measuring first — defect 2026-07-08).
+
+    Run-scoped like the duplicate filter (cutoff plan Q2): `None` matches untagged only.
     """
     from datetime import timedelta
 
@@ -273,6 +276,7 @@ def velocity_filter(*, debtor_account_id: str, now, exclude_payment_id: str) -> 
         "debtor.accountId": debtor_account_id,
         "paymentId": {"$ne": exclude_payment_id},
         "createdAt": {"$gte": now - timedelta(seconds=velocity_window_seconds())},
+        "demo.clockRunId": clock_run_id,
     }
 
 

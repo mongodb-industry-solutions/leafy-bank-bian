@@ -277,6 +277,7 @@ def _record_duplicate(record, ctx, now) -> None:
             instructed_currency=ctx.instructed_currency,
             now=now,
             exclude_payment_id=ctx.payment_id,
+            clock_run_id=ctx.clock_run_id,
         )
     )
     if match:

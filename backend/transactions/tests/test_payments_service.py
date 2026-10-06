@@ -101,6 +101,10 @@ class FakeCollection:
                     return False
                 if "$lte" in v and not (actual is not None and actual <= v["$lte"]):
                     return False
+                if "$gt" in v and not (actual is not None and actual > v["$gt"]):
+                    return False
+                if "$lt" in v and not (actual is not None and actual < v["$lt"]):
+                    return False
                 if "$ne" in v and actual == v["$ne"]:
                     return False
                 if "$nin" in v and actual in v["$nin"]:
