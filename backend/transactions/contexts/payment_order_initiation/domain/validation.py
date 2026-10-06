@@ -214,6 +214,24 @@ def run(ctx: PaymentContext) -> None:
     # Pre-flight floor. Re-checked inside the ACID transaction in stage 5, which is the
     # check that actually holds — this one gives a clean 400 instead of a rollback.
     available = (debtor.get("balance", {}) or {}).get("available", 0)
+    if available < ctx.instructed_amount and _holds_for_funds(ctx):
+        # D2 (cutoff plan A2): a tagged wire waits for funds instead of being refused.
+        record(
+            "funds_available", checks.WARN,
+            f"Insufficient available balance: {available:,.2f} {debtor_currency} "
+            f"available, {ctx.instructed_amount:,.2f} required — held at PENDING_FUNDS.",
+            field="debtor.accountId", code="INSUFFICIENT_FUNDS_HELD",
+        )
+        checks.stamp_validation_summary(ctx.collections.payments, ctx.payment_oid, recorded)
+        _flush(ctx, recorded)
+        lifecycle.advance_ctx(
+            ctx, lifecycle.PENDING_FUNDS,
+            actor="transactions-service",
+            reason=f"Short by {ctx.instructed_amount - available:,.2f} {debtor_currency}; "
+                   "awaiting funds.",
+        )
+        ctx.stop(ctx.payment_doc)
+        return
     if available < ctx.instructed_amount:
         refuse(
             "funds_available",
@@ -235,6 +253,11 @@ def run(ctx: PaymentContext) -> None:
         actor="transactions-service",
         reason="Structural and account validation passed",
     )
+
+
+def _holds_for_funds(ctx) -> bool:
+    """Only a tagged wire holds. An internal transfer and every untagged payment refuse."""
+    return bool(ctx.clock_run_id) and ctx.payment_rail == "WIRE"
 
 
 def _record_duplicate(record, ctx, now) -> None:

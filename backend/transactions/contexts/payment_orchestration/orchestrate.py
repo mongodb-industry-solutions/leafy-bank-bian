@@ -40,22 +40,19 @@ same-day `requestedExecutionDate`, or it will look like a regression.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from contexts.payment_order_initiation.domain import checks, lifecycle
-from contexts.payment_orchestration.domain import documents, routing
+from contexts.payment_orchestration.domain import cutoff_policy, documents, routing
 from process.payment_context import PaymentContext
+from shared import business_clock
 
 STAGE = "4 orchestrate"
 
-# US Eastern, as a fixed offset. Deliberately not `zoneinfo`: the cut-off table is a demo
-# constant (routing.py), so a DST-correct clock would be false precision on top of an
-# approximation. It also keeps this module free of a tzdata dependency.
-_ET_OFFSET_HOURS = -4
-
 
 def run(ctx: PaymentContext) -> None:
-    now = datetime.now(timezone.utc)
+    now = business_clock.ctx_now(ctx)
+    now_et = business_clock.to_et(now)
     recorded: list = []
     payment = ctx.payment_doc or {}
 
@@ -89,8 +86,8 @@ def run(ctx: PaymentContext) -> None:
         creditor_country=creditor.get("bankCountry"),
         creditor_bic=creditor.get("bic"),
         requested_execution_date=ctx.requested_execution_date,
-        now=now.date(),
-        now_hour_et=(now + timedelta(hours=_ET_OFFSET_HOURS)).hour,
+        now=now_et.date(),
+        now_hour_et=now_et.hour,
     )
     ctx.execution_strategy = strategy
 
@@ -185,7 +182,38 @@ def run(ctx: PaymentContext) -> None:
             "Same-day execution — no warehousing.",
         )
 
+    # --- 7. cutoff_window (tagged payments only, cutoff plan A2 D3) ------------
+    # Untagged payments get no new check: `within_cutoff` above stays their whole story.
+    cutoff_block = None
+    if ctx.clock_run_id and not ctx.warehoused:
+        cutoff_block = _cutoff_block(ctx, payment, now)
+    if cutoff_block is not None:
+        if cutoff_block["phaseAtCheck"] == cutoff_policy.BEFORE_INTERNAL:
+            record("cutoff_window", checks.PASS,
+                   f"Before the {cutoff_block['wireType']} internal cut-off "
+                   f"({_et_hhmm(cutoff_block['internalCutoffAt'])} ET).")
+        else:
+            record("cutoff_window", checks.WARN,
+                   f"Past the {cutoff_block['wireType']} internal cut-off "
+                   f"({_et_hhmm(cutoff_block['internalCutoffAt'])} ET); external cut-off "
+                   f"{_et_hhmm(cutoff_block['externalCutoffAt'])} ET — held at "
+                   "CUTOFF_EXCEPTION for an expedite or next-value-date decision.")
+        updates.update({f"cutoff.{k}": v for k, v in cutoff_block.items()})
+
     _flush(ctx, recorded)
+
+    if cutoff_block is not None and cutoff_block["phaseAtCheck"] != cutoff_policy.BEFORE_INTERNAL:
+        # A3: raise the cutoff-exception queue item here.
+        updates.update({"cutoff.trippedAt": now, "cutoff.resumeFrom": "4a"})
+        lifecycle.advance_ctx(
+            ctx, lifecycle.CUTOFF_EXCEPTION,
+            actor="orchestration-service",
+            reason=f"Past the {cutoff_block['wireType']} internal cut-off; awaiting a "
+                   "cut-off decision.",
+            extra=updates,
+        )
+        ctx.stop(ctx.payment_doc)
+        return
 
     payment_doc = lifecycle.advance_ctx(
         ctx, lifecycle.ROUTED,
@@ -277,6 +305,28 @@ def _collection(ctx, attr: str, name: str):
 def _is_future_dated(ctx, now: datetime) -> bool:
     requested = ctx.requested_execution_date
     return bool(requested and requested > now.date())
+
+
+def _cutoff_block(ctx, payment: dict, now: datetime):
+    """The `payments.cutoff{}` facts for a tagged wire with a window, or None."""
+    window = cutoff_policy.window_for(
+        rail=ctx.payment_rail,
+        wire_type=(payment.get("wireDetails") or {}).get("wireType"),
+        currency=payment.get("currency") or ctx.instructed_currency,
+    )
+    if window is None:
+        return None
+    today = business_clock.to_et(now).date()
+    return {
+        "wireType": window.wire_type,
+        "internalCutoffAt": cutoff_policy.cutoff_at(window, business_date=today, which="internal"),
+        "externalCutoffAt": cutoff_policy.cutoff_at(window, business_date=today, which="external"),
+        "phaseAtCheck": cutoff_policy.phase(window, at=now),
+    }
+
+
+def _et_hhmm(at: datetime) -> str:
+    return business_clock.to_et(at).strftime("%H:%M")
 
 
 def _flush(ctx: PaymentContext, recorded: list) -> None:

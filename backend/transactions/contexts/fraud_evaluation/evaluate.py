@@ -153,11 +153,21 @@ def run(ctx: PaymentContext) -> None:
     # beneficiary BANK's country is a real (if broader) control; screening on a substring of
     # a formatted address would be worse than not screening. Noted in doc 18 §6 as the
     # reason a beneficiary-country field is worth asking Doina for.
-    screening = sanctions.screen(
-        creditor_name=creditor.get("name"),
-        creditor_country=creditor.get("bankCountry"),
-        purpose_code=purpose_code,
-    )
+    analyst = None
+    if ctx.screening_override == sanctions.CLEAR:
+        # An analyst cleared a PENDING_SCREENING hold (cutoff plan A2). Do not re-screen — the
+        # same name would hold again — but DO score: clearing a name says nothing about risk.
+        analyst = (payment.get("screening") or {}).get("resolvedBy") or "screening-analyst"
+        screening = sanctions.ScreeningOutcome(
+            sanctions.CLEAR,
+            f"Potential match cleared by analyst {analyst} ({sanctions.PROVIDER}, SIMULATED).",
+        )
+    else:
+        screening = sanctions.screen(
+            creditor_name=creditor.get("name"),
+            creditor_country=creditor.get("bankCountry"),
+            purpose_code=purpose_code,
+        )
     sanctions_block = {
         "status": screening.status,
         "checkedAt": now,
@@ -172,11 +182,39 @@ def run(ctx: PaymentContext) -> None:
                       "updatedAt": now}},
         )
         refuse("sanctions_screening", screening.detail)
-    record(
-        "sanctions_screening",
-        checks.PASS if screening.status == sanctions.CLEAR else checks.WARN,
-        screening.detail,
-    )
+    if screening.status == sanctions.PENDING and ctx.clock_run_id:
+        # D4 (cutoff plan A2): a tagged payment waits for an analyst instead of continuing.
+        # A3: enqueue a `screeningQueue` record here.
+        record("sanctions_screening", checks.WARN, screening.detail)
+        _flush(ctx, recorded)
+        lifecycle.advance_ctx(
+            ctx, lifecycle.PENDING_SCREENING,
+            actor="fraud-service",
+            reason="Potential sanctions match — awaiting analyst review.",
+            extra={
+                "correspondent.sanctionsCheck": sanctions_block,
+                "screening": {
+                    "status": sanctions.PENDING,
+                    "reason": screening.detail,
+                    "matched": screening.matched,
+                    "resolvedBy": None,
+                    "resolvedAt": None,
+                    "outcome": None,
+                },
+            },
+        )
+        ctx.stop(ctx.payment_doc)
+        return
+    if analyst is not None:
+        recorded.append(checks.check(STAGE, "sanctions_screening", checks.PASS,
+                                     mode=checks.SYNC, detail=screening.detail,
+                                     actor=analyst, at=now))
+    else:
+        record(
+            "sanctions_screening",
+            checks.PASS if screening.status == sanctions.CLEAR else checks.WARN,
+            screening.detail,
+        )
 
     # --- 2. risk_assessment (R10) -------------------------------------------
     assessment = fraud_rules.assess(

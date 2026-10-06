@@ -167,6 +167,11 @@ _KNOWN_EXTRAS = {
     "acceptanceDecision",
 }
 
+# Written only on a demo-clock (tagged) payment — cutoff plan A1/A2. Asserted on tagged
+# documents only; an untagged document must still equal `_KNOWN_EXTRAS` exactly. `demo` lands
+# in A1; `cutoff` and `screening` arrive with A2's holds.
+_KNOWN_DEMO_EXTRAS = {"demo", "cutoff", "screening"}
+
 # Written by `build_inbound` only. An outbound payment has no counterparty references to
 # preserve, so this is NOT in `_KNOWN_EXTRAS` above (which pins what EVERY payment carries)
 # — it is asserted separately by `test_an_inbound_payment_adds_only_the_sender_references`.
@@ -196,10 +201,14 @@ _KNOWN_INBOUND_EXTRAS = {"senderReferences"}
 # let the guard revert to the spec alone. Do not silence that test — it is the deadline.
 _INBOUND_STATES = {"RECEIVED", "ACCEPTED"}
 
+# Cutoff plan A2: the four demo-clock holds. Not in the canonical spec, so admitted the same
+# way and with the same deadline — `test_the_cutoff_states_are_still_absent_from_the_canonical_enums`.
+_CUTOFF_STATES = {"PENDING_APPROVAL", "PENDING_FUNDS", "CUTOFF_EXCEPTION", "PENDING_SCREENING"}
+
 _ENUM_EXTENSIONS = {
-    "status": set(_INBOUND_STATES),
-    "lifecycle.currentState": set(_INBOUND_STATES),
-    "lifecycle.events[].state": set(_INBOUND_STATES),
+    "status": _INBOUND_STATES | _CUTOFF_STATES,
+    "lifecycle.currentState": _INBOUND_STATES | _CUTOFF_STATES,
+    "lifecycle.events[].state": _INBOUND_STATES | _CUTOFF_STATES,
 }
 
 
@@ -207,6 +216,13 @@ def test_no_field_is_written_that_the_spec_does_not_declare(schema):
     doc = payment_document.build(_ctx())
     extras = set(doc) - set(schema["properties"])
     assert extras == _KNOWN_EXTRAS
+
+
+def test_a_tagged_document_adds_only_the_demo_extras(schema):
+    doc = payment_document.build(_ctx(clock_run_id="CLK-test"))
+    extras = set(doc) - set(schema["properties"]) - _KNOWN_EXTRAS
+    assert extras and extras <= _KNOWN_DEMO_EXTRAS
+    assert doc["demo"] == {"clockRunId": "CLK-test"}
 
 
 def test_stage_two_slots_are_empty_at_creation():
@@ -344,6 +360,16 @@ def test_the_inbound_states_are_still_absent_from_the_canonical_enums(schema):
         assert still_absent == _INBOUND_STATES, (
             f"{path}: {_INBOUND_STATES - still_absent} is now in the canonical spec enum. "
             f"Delete it from `_ENUM_EXTENSIONS` — the admission has served its purpose."
+        )
+
+
+def test_the_cutoff_states_are_still_absent_from_the_canonical_enums(schema):
+    """The deadline on the `_CUTOFF_STATES` admission. ⚠️ When this fails, delete it."""
+    for path in ("status", "lifecycle.currentState", "lifecycle.events[].state"):
+        allowed = dict(_enum_fields(schema))[path]
+        assert _CUTOFF_STATES.isdisjoint(allowed), (
+            f"{path}: {_CUTOFF_STATES & set(allowed)} is now in the canonical spec enum. "
+            "Delete it from `_ENUM_EXTENSIONS` — the admission has served its purpose."
         )
 
 

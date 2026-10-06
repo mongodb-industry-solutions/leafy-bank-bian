@@ -35,6 +35,7 @@ from pymongo.errors import DuplicateKeyError
 
 from contexts.payment_order_initiation.domain import checks, lifecycle, payment_document
 from process.payment_context import PaymentContext
+from shared import business_clock
 from shared.refs import derive_ref
 
 logger = logging.getLogger(__name__)
@@ -111,7 +112,8 @@ def run(ctx: PaymentContext) -> None:
     ctx.txn_code = "PMNT-ICDT-BOOK" if ctx.payment_rail == "INTERNAL" else "PMNT-ICDT-ESCT"
 
     # One timestamp for the instruction. Later stages stamp their own transition times.
-    ctx.now = datetime.now(timezone.utc)
+    # Business time: real UTC, or the demo clock run's offset for a tagged payment.
+    ctx.now = business_clock.ctx_now(ctx)
 
     # No requested execution date, no forward-dating answer: default to the initiation
     # date so the canonical `payments` doc always carries a non-null ReqdExctnDt (pain.001

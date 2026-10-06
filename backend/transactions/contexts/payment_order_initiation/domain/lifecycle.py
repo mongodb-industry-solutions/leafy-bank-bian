@@ -44,6 +44,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from shared import business_clock
+
 
 class StepUpRequired(ValueError):
     """A payment hit the step-up gate with an insufficient factor.
@@ -93,6 +95,15 @@ IN_PROGRESS = "IN_PROGRESS"
 POSTED = "POSTED"
 SETTLED = "SETTLED"
 RECONCILED = "RECONCILED"
+
+# Cutoff plan A2: four holds, reachable only by a tagged (demo-clock) payment. Side states off
+# HAPPY_PATH for the same reason as MANUAL_FRAUD_REVIEW. Each waits for a human decision
+# (`PaymentsService.approve_payment` / `recheck_funds` / `resolve_screening` /
+# `decide_cutoff`); none has moved money, so all four rank before SUBMITTED.
+PENDING_APPROVAL = "PENDING_APPROVAL"      # stage 2: a second signatory must approve
+PENDING_FUNDS = "PENDING_FUNDS"            # stage 3: a short wire waits for funds
+CUTOFF_EXCEPTION = "CUTOFF_EXCEPTION"      # stage 4a: past the internal cut-off
+PENDING_SCREENING = "PENDING_SCREENING"    # stage 4b: a potential sanctions match
 
 # Terminals. A payment in one of these never advances again.
 REJECTED = "REJECTED"
@@ -149,6 +160,20 @@ _FORWARD[ACCEPTED] = {IN_PROGRESS}
 # the posting axis is independent (D1). Allow IN_PROGRESS -> SETTLED to skip it.
 _FORWARD[IN_PROGRESS] = {POSTED, SETTLED}
 
+# --- the cutoff holds (tagged payments only) ---------------------------------
+# A held payment resumes onto the path it left. PENDING_APPROVAL can still fall short on
+# funds when validation re-runs; PENDING_SCREENING can still divert to manual fraud review,
+# or to CUTOFF_EXCEPTION when the analyst clears it after the internal cut-off. The
+# PENDING_SCREENING -> ROUTED edge is the warehouse of a screening hold whose next value date
+# was already chosen (HoldNextValueDate): ROUTED is where every warehoused payment waits.
+_FORWARD[INITIATED] = {VALIDATED, PENDING_APPROVAL, PENDING_FUNDS}
+_FORWARD[PENDING_APPROVAL] = {VALIDATED, PENDING_FUNDS}
+_FORWARD[PENDING_FUNDS] = {VALIDATED}
+_FORWARD[FINAL_VALIDATED] = {ROUTED, ACCEPTED, CUTOFF_EXCEPTION}
+_FORWARD[ROUTED] = {AUTHORISED, MANUAL_FRAUD_REVIEW, PENDING_SCREENING}
+_FORWARD[PENDING_SCREENING] = {AUTHORISED, MANUAL_FRAUD_REVIEW, CUTOFF_EXCEPTION, ROUTED}
+_FORWARD[CUTOFF_EXCEPTION] = {ROUTED}
+
 
 # Where each side state sits relative to the in-flight boundary, expressed as the happy-path
 # state it stands in for. A side state is not IN HAPPY_PATH (adding it would shift every
@@ -164,6 +189,10 @@ _SIDE_STATE_RANK = {
     MANUAL_FRAUD_REVIEW: ROUTED,     # before SUBMITTED — no money has moved
     RECEIVED: INITIATED,             # inbound entry, peer of INITIATED
     ACCEPTED: SUBMITTED,             # inbound peer of SUBMITTED — in flight
+    PENDING_APPROVAL: INITIATED,     # the cutoff holds: none has moved money
+    PENDING_FUNDS: INITIATED,
+    CUTOFF_EXCEPTION: FINAL_VALIDATED,
+    PENDING_SCREENING: ROUTED,
 }
 
 
@@ -219,6 +248,7 @@ def advance(
     from_state: Optional[str] = None,
     session=None,
     extra: Optional[dict] = None,
+    at: Optional[datetime] = None,
 ) -> dict:
     """Move a persisted payment to `to_state`. Returns the updated document.
 
@@ -228,11 +258,14 @@ def advance(
     `extra` is merged into the `$set` — for stage-owned fields written at the same moment as
     the transition (`clearing.settledAt`, a fraud block), so the state change and the data it
     attests to land in one write.
+
+    `at` is the transition time; None means real UTC. `advance_ctx` passes business time, so
+    a demo-clock payment's events read on the same clock as its checks.
     """
     if to_state not in TRANSITIONS:
         raise IllegalTransition(f"unknown state {to_state!r}")
 
-    now = datetime.now(timezone.utc)
+    now = at or datetime.now(timezone.utc)
     query = {"_id": payment_oid}
     if from_state is not None:
         if to_state not in TRANSITIONS[from_state]:
@@ -313,6 +346,7 @@ def advance_ctx(ctx, to_state: str, *, actor: str, reason: str, session=None, ex
         from_state=ctx.current_state,
         session=session,
         extra=extra,
+        at=business_clock.ctx_now(ctx),
     )
     ctx.current_state = to_state
     ctx.payment_doc = updated

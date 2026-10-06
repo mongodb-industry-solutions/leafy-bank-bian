@@ -19,6 +19,7 @@ Where the stages are:
     9  exceptions    process/compensation.py                                    [stub]
 """
 
+import dataclasses
 import logging
 import random
 from datetime import date, datetime, timezone
@@ -59,6 +60,8 @@ from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_rail.adapters.simulated_wire_rail import SimulatedWireRail
 from contexts.payment_order_initiation.domain import checks, lifecycle
 from process.payment_context import PaymentCollections, PaymentContext
+from contexts.payment_orchestration.domain import cutoff_policy
+from shared import business_clock
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +89,10 @@ def _settlement_adjustment_for(payment: dict, exc: dict) -> Optional[dict]:
         "chargeBearer": "DEBT",
         "exceptionId": exc.get("exceptionId"),
     }
+
+
+class PaymentNotFound(LookupError):
+    """No payment with that id. The cutoff-hold routes map this to 404."""
 
 
 class PaymentsService:
@@ -185,12 +192,16 @@ class PaymentsService:
         internal_details: Optional[dict] = None,
         settlement_outcome: Optional[str] = None,
         statement_outcome: Optional[str] = None,
+        clock_run_id: Optional[str] = None,
     ) -> dict:
         """Initiate a payment order. Returns the persisted payment document.
 
         `creditor_account_ref` is None for an external beneficiary; `creditor_party` then
         carries the snapshot off the request. Everything after the `*` is keyword-only and
         defaulted, so the stage-1 fields are additive for existing callers.
+
+        `clock_run_id` tags the payment to a demo clock run (`shared.business_clock`). It is
+        deliberately NOT on the API request model: only in-process scenario code may tag.
 
         Raises ValueError on validation failures; caller maps to HTTP 400.
         """
@@ -226,6 +237,7 @@ class PaymentsService:
             # correspondent statement line — the statement is the only source of the $25.
             statement_outcome=("FEE_DEDUCTED" if settlement_outcome == "UNMATCHED"
                                else statement_outcome),
+            clock_run_id=clock_run_id,
         )
         return payment_lifecycle.run(ctx)
 
@@ -523,6 +535,10 @@ class PaymentsService:
         ctx = self._context_from_doc(
             payment, customer_ref=customer_ref, authentication=authentication
         )
+        # The hold is over once the saga re-enters; a later stage-2 hold sets them again.
+        self.payments.update_one(
+            {"_id": payment["_id"]}, {"$unset": {"stepUpRequired": "", "stepUpReason": ""}}
+        )
         return payment_lifecycle.run(ctx, start_index=1)
 
     def _context_from_doc(
@@ -609,8 +625,51 @@ class PaymentsService:
         ctx.creditor_customer_id = creditor_customer_id
         ctx.payment_doc = payment
         ctx.current_state = payment["status"]
-        ctx.now = datetime.now(timezone.utc)
+        # Restore the demo clock tag before reading the clock, so a resumed payment stays on
+        # its run's business time.
+        ctx.clock_run_id = (payment.get("demo") or {}).get("clockRunId")
+        ctx.now = business_clock.ctx_now(ctx)
+        # Cutoff plan A2 (B4 rule): a decision taken on a hold must survive the next resume.
+        screening = payment.get("screening") or {}
+        cutoff = payment.get("cutoff") or {}
+        ctx.screening_override = screening.get("outcome")
+        ctx.cutoff_decision = cutoff.get("decision")
+        if cutoff.get("decision") == "EXPEDITE":
+            ctx.value_date_override = cutoff.get("valueDate")
         return ctx
+
+    def _reattach_routing(self, ctx: PaymentContext, payment: dict) -> None:
+        """Re-attach stage 4a's outputs from the persisted routing snapshot.
+
+        A resume rebuilds capture-time fields, not the strategy orchestrate decided, so the
+        order commit in stage 4b has nothing to read otherwise. The snapshot itself stays
+        immutable: an expedited value date is applied to the in-memory strategy only.
+        """
+        from contexts.payment_orchestration.domain.routing import ExecutionStrategy
+        routing_id = (payment.get("refs") or {}).get("routingSnapshotId")
+        snap = (
+            self.routing_snapshots.find_one({"routingSnapshotId": routing_id})
+            if routing_id else None
+        )
+        if snap:
+            corr = snap.get("correspondent") or {}
+            strategy = ExecutionStrategy(
+                strategy=snap.get("executionStrategy"),
+                network=snap.get("clearingNetwork"),
+                cost_rank=snap.get("costRank"),
+                requires_correspondent=bool(corr.get("required")),
+                correspondent_bic=corr.get("bic"),
+                cutoff_hour_et=snap.get("cutoffHourET"),
+                within_cutoff=bool(snap.get("withinCutoff", True)),
+                value_date=snap.get("valueDate"),
+                rationale=snap.get("rationale"),
+            )
+            if ctx.value_date_override:
+                strategy = dataclasses.replace(
+                    strategy, value_date=ctx.value_date_override, within_cutoff=True,
+                )
+            ctx.execution_strategy = strategy
+        ctx.routing_snapshot_id = routing_id
 
     def resolve_review(
         self, payment_id: str, *, decision: str, actor: str = "operator-review"
@@ -662,28 +721,245 @@ class PaymentsService:
         ctx = self._context_from_doc(
             payment, customer_ref=payment.get("customerId", ""), authentication=None,
         )
-        from contexts.payment_orchestration.domain.routing import ExecutionStrategy
-        routing_id = (payment.get("refs") or {}).get("routingSnapshotId")
-        snap = (
-            self.routing_snapshots.find_one({"routingSnapshotId": routing_id})
-            if routing_id else None
-        )
-        if snap:
-            corr = snap.get("correspondent") or {}
-            ctx.execution_strategy = ExecutionStrategy(
-                strategy=snap.get("executionStrategy"),
-                network=snap.get("clearingNetwork"),
-                cost_rank=snap.get("costRank"),
-                requires_correspondent=bool(corr.get("required")),
-                correspondent_bic=corr.get("bic"),
-                cutoff_hour_et=snap.get("cutoffHourET"),
-                within_cutoff=bool(snap.get("withinCutoff", True)),
-                value_date=snap.get("valueDate"),
-                rationale=snap.get("rationale"),
-            )
-        ctx.routing_snapshot_id = routing_id
+        self._reattach_routing(ctx, payment)
         ctx.review_override = "APPROVED"
         return payment_lifecycle.run(ctx, start_index=5)
+
+    # --- cutoff plan A2: the four holds' decisions ----------------------------
+    #
+    # Every method here refuses an untagged payment (ValueError → 400) and raises
+    # PaymentNotFound (→ 404) for a missing one. The holds are reachable only by a tagged
+    # payment, so an untagged one is never in a held state; the explicit refusal keeps these
+    # routes from ever acting on real traffic.
+
+    def _held_payment(self, payment_id: str, allowed: tuple) -> dict:
+        payment = self.payments.find_one({"paymentId": payment_id})
+        if payment is None:
+            raise PaymentNotFound(f"Payment {payment_id} not found.")
+        if not (payment.get("demo") or {}).get("clockRunId"):
+            raise ValueError(
+                f"Payment {payment_id} is not a demo-clock payment; holds apply only to "
+                "tagged payments."
+            )
+        if payment.get("status") not in allowed:
+            raise ValueError(
+                f"Payment {payment_id} is at {payment.get('status')}, not "
+                f"{' or '.join(allowed)}."
+            )
+        return payment
+
+    def _held_context(self, payment: dict) -> PaymentContext:
+        return self._context_from_doc(
+            payment, customer_ref=payment.get("customerId", ""), authentication=None,
+        )
+
+    def approve_payment(self, payment_id: str, *, approver_id: str, decision: str) -> dict:
+        """A second signatory's decision on a PENDING_APPROVAL hold (D1).
+
+        APPROVED records the approver and re-enters the saga at stage 3 (validate), so funds
+        and the cut-off are checked at release time, not at initiation. REJECTED terminates.
+        """
+        payment = self._held_payment(payment_id, (lifecycle.PENDING_APPROVAL,))
+        if approver_id == payment.get("customerId"):
+            raise ValueError("The initiator cannot approve their own payment.")
+        account = self.accounts.find_one({"accountId": payment["debtor"]["accountId"]}) or {}
+        signatories = {s.get("customerId") for s in account.get("signatories") or []}
+        if approver_id not in signatories:
+            raise ValueError(
+                f"{approver_id} is not a signatory on account {account.get('accountId')}."
+            )
+
+        ctx = self._held_context(payment)
+        now = business_clock.ctx_now(ctx)
+        if decision == "REJECTED":
+            checks.append_checks(self.payments, payment["_id"], [checks.check(
+                "2 authenticate", "dual_approval", checks.FAIL,
+                detail=f"Second signatory {approver_id} rejected the payment.",
+                actor=approver_id, at=now,
+            )])
+            updated = lifecycle.reject(
+                self.payments, payment["_id"],
+                reason=f"Rejected by second signatory {approver_id}.", actor=approver_id,
+            )
+            return updated or self.payments.find_one({"paymentId": payment_id})
+        if decision != "APPROVED":
+            raise ValueError(f"Unknown approval decision {decision!r}.")
+
+        approval = {
+            "entitlement.dualApprovalBy": approver_id,
+            "entitlement.dualApproval.status": checks.PASS,
+            "entitlement.dualApproval.approvers": [approver_id],
+            "entitlement.dualApproval.approvedBy": approver_id,
+            "entitlement.dualApproval.approvedAt": now,
+        }
+        self.payments.update_one({"_id": payment["_id"]}, {"$set": approval})
+        checks.append_checks(self.payments, payment["_id"], [checks.check(
+            "2 authenticate", "dual_approval", checks.PASS,
+            detail=f"Approved by second signatory {approver_id}.",
+            actor=approver_id, at=now,
+        )])
+        ctx.payment_doc = self.payments.find_one({"_id": payment["_id"]})
+        return payment_lifecycle.run(ctx, start_index=2)
+
+    def recheck_funds(self, payment_id: str) -> tuple:
+        """Re-test a PENDING_FUNDS hold (D2). Returns `(payment, still_short_by)`.
+
+        Still short: no transition, `still_short_by` > 0. Covered: re-enter at stage 3, which
+        re-runs the whole validation (including the funds check) against the fresh balance.
+        """
+        payment = self._held_payment(payment_id, (lifecycle.PENDING_FUNDS,))
+        ctx = self._held_context(payment)
+        available = ((ctx.debtor_account or {}).get("balance") or {}).get("available", 0)
+        short_by = ctx.instructed_amount - available
+        if short_by > 0:
+            return payment, short_by
+        return payment_lifecycle.run(ctx, start_index=2), None
+
+    def resolve_screening(self, payment_id: str, *, analyst_id: str, outcome: str) -> dict:
+        """An analyst's decision on a PENDING_SCREENING hold (D4).
+
+        HIT rejects. CLEAR is persisted, then: a recorded next-value-date hold warehouses at
+        ROUTED; past the internal cut-off diverts to CUTOFF_EXCEPTION (`resumeFrom: "4b"`);
+        otherwise the saga re-enters at stage 4b, which skips the screen and still scores.
+        """
+        payment = self._held_payment(payment_id, (lifecycle.PENDING_SCREENING,))
+        ctx = self._held_context(payment)
+        now = business_clock.ctx_now(ctx)
+        resolution = {
+            "screening.status": outcome,
+            "screening.outcome": outcome,
+            "screening.resolvedBy": analyst_id,
+            "screening.resolvedAt": now,
+            "correspondent.sanctionsCheck.status": outcome,
+            "correspondent.sanctionsCheck.checkedAt": now,
+        }
+        if outcome == sanctions.HIT:
+            self.payments.update_one({"_id": payment["_id"]}, {"$set": resolution})
+            checks.append_checks(self.payments, payment["_id"], [checks.check(
+                "4 authorize", "sanctions_screening", checks.FAIL,
+                detail=f"Analyst {analyst_id} confirmed the potential match as a HIT.",
+                actor=analyst_id, at=now,
+            )])
+            updated = lifecycle.reject(
+                self.payments, payment["_id"],
+                reason=f"Sanctions HIT confirmed by analyst {analyst_id}.", actor=analyst_id,
+            )
+            return updated or self.payments.find_one({"paymentId": payment_id})
+        if outcome != sanctions.CLEAR:
+            raise ValueError(f"Unknown screening outcome {outcome!r}.")
+
+        if ctx.cutoff_decision == "HOLD_NEXT_VALUE_DATE":
+            return lifecycle.advance(
+                self.payments, payment["_id"], lifecycle.ROUTED,
+                actor=analyst_id, from_state=lifecycle.PENDING_SCREENING, at=now,
+                reason="Screening cleared; warehoused for the next value date already chosen.",
+                extra=resolution,
+            )
+
+        window = self._cutoff_window(payment)
+        if window is not None and cutoff_policy.phase(window, at=now) != cutoff_policy.BEFORE_INTERNAL:
+            today = business_clock.to_et(now).date()
+            return lifecycle.advance(
+                self.payments, payment["_id"], lifecycle.CUTOFF_EXCEPTION,
+                actor=analyst_id, from_state=lifecycle.PENDING_SCREENING, at=now,
+                reason="Screening cleared after the internal cut-off; awaiting a cut-off "
+                       "decision.",
+                extra={
+                    **resolution,
+                    "cutoff.wireType": window.wire_type,
+                    "cutoff.internalCutoffAt": cutoff_policy.cutoff_at(
+                        window, business_date=today, which="internal"),
+                    "cutoff.externalCutoffAt": cutoff_policy.cutoff_at(
+                        window, business_date=today, which="external"),
+                    "cutoff.phaseAtCheck": cutoff_policy.phase(window, at=now),
+                    "cutoff.trippedAt": now,
+                    "cutoff.resumeFrom": "4b",
+                },
+            )
+
+        self.payments.update_one({"_id": payment["_id"]}, {"$set": resolution})
+        ctx.payment_doc = self.payments.find_one({"_id": payment["_id"]})
+        ctx.screening_override = sanctions.CLEAR
+        self._reattach_routing(ctx, payment)
+        return payment_lifecycle.run(ctx, start_index=5)
+
+    def decide_cutoff(self, payment_id: str, *, decision: str, decided_by: str) -> dict:
+        """A decision on a CUTOFF_EXCEPTION hold (D3).
+
+        EXPEDITE: today's value date, back to ROUTED, re-enter at stage 4b (index 5 — the
+        routing snapshot already exists and is insert-only). Refused past the external
+        cut-off, or while the payment has an OPEN exception. NEXT_VALUE_DATE: the next
+        business day, back to ROUTED, warehoused there (no release worker).
+        """
+        payment = self._held_payment(payment_id, (lifecycle.CUTOFF_EXCEPTION,))
+        ctx = self._held_context(payment)
+        now = business_clock.ctx_now(ctx)
+        today = business_clock.to_et(now).date()
+        window = self._cutoff_window(payment)
+
+        if decision == "EXPEDITE":
+            if window is not None and cutoff_policy.phase(window, at=now) == cutoff_policy.AFTER_EXTERNAL:
+                raise ValueError("Past the external cut-off — the payment cannot be expedited.")
+            if self.db["exceptions"].find_one({"paymentId": payment_id, "status": STATUS_OPEN}):
+                raise ValueError(f"Payment {payment_id} has an OPEN exception.")
+            value_date = today.isoformat()
+            reason = f"Expedited by {decided_by}; value date {value_date}."
+        elif decision == "NEXT_VALUE_DATE":
+            value_date = cutoff_policy.next_business_day(today).isoformat()
+            reason = f"Next value date {value_date} chosen by {decided_by}; warehoused."
+        else:
+            raise ValueError(f"Unknown cut-off decision {decision!r}.")
+
+        extra = {
+            "cutoff.decision": decision,
+            "cutoff.decidedBy": decided_by,
+            "cutoff.decidedAt": now,
+            "cutoff.valueDate": value_date,
+        }
+        if decision == "NEXT_VALUE_DATE":
+            extra["requestedExecutionDate"] = value_date
+        updated = lifecycle.advance(
+            self.payments, payment["_id"], lifecycle.ROUTED,
+            actor=decided_by, reason=reason, from_state=lifecycle.CUTOFF_EXCEPTION,
+            at=now, extra=extra,
+        )
+        if decision == "NEXT_VALUE_DATE":
+            return updated
+
+        ctx = self._held_context(updated)
+        self._reattach_routing(ctx, updated)
+        return payment_lifecycle.run(ctx, start_index=5)
+
+    def hold_next_value_date(self, payment_id: str, *, decided_by: str, reason: str) -> dict:
+        """Record a next-value-date decision on a pending hold. No transition.
+
+        The payment stays in its hold; when released it is warehoused at ROUTED for the
+        next business day (`requestedExecutionDate` makes orchestrate warehouse it, and a
+        screening release checks `cutoff.decision`).
+        """
+        payment = self._held_payment(payment_id, (
+            lifecycle.PENDING_APPROVAL, lifecycle.PENDING_FUNDS, lifecycle.PENDING_SCREENING,
+        ))
+        now = business_clock.ctx_now(self._held_context(payment))
+        value_date = cutoff_policy.next_business_day(business_clock.to_et(now).date()).isoformat()
+        self.payments.update_one({"_id": payment["_id"]}, {"$set": {
+            "cutoff.decision": "HOLD_NEXT_VALUE_DATE",
+            "cutoff.decidedBy": decided_by,
+            "cutoff.decidedAt": now,
+            "cutoff.valueDate": value_date,
+            "cutoff.reason": reason,
+            "requestedExecutionDate": value_date,
+            "updatedAt": now,
+        }})
+        return self.payments.find_one({"_id": payment["_id"]})
+
+    @staticmethod
+    def _cutoff_window(payment: dict):
+        return cutoff_policy.window_for(
+            rail=payment.get("rail"),
+            wire_type=(payment.get("wireDetails") or {}).get("wireType"),
+            currency=payment.get("currency") or payment.get("instructedCurrency"),
+        )
 
     def retrieve_payment(self, payment_ref: str) -> Optional[dict]:
         """Retrieve a payment plus its single transaction doc (v4_21)."""

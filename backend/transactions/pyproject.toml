@@ -16,6 +16,9 @@ uvicorn = "^0.32.0"
 # never hand-roll crypto, and a shared library across the two services cannot drift the
 # way a mirrored module can.
 pyjwt = "^2.9.0"
+# `zoneinfo` (shared/business_clock.py) needs an IANA database. The slim Docker base may ship
+# without /usr/share/zoneinfo; the `tzdata` wheel is the fallback zoneinfo reads automatically.
+tzdata = ">=2024.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

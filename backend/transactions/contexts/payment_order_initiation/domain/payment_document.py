@@ -472,4 +472,8 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         ),
     }
     doc.update(envelopes)
+    # Only a demo-clock payment carries `demo`, so an untagged document is byte-for-byte
+    # what it was. `_context_from_doc` restores the tag on resume.
+    if ctx.clock_run_id:
+        doc["demo"] = {"clockRunId": ctx.clock_run_id}
     return doc

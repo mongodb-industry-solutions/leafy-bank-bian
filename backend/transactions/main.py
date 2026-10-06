@@ -14,7 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from api_models import (
+    CutoffDecisionRequest,
     FraudEvaluationRequest,
+    HoldNextValueDateRequest,
+    PaymentOrderApproveRequest,
+    PaymentOrderFundsRecheckRequest,
+    ScreeningResolveRequest,
     InboundMessageRequest,
     InboundSimulateRequest,
     StatementGenerateRequest,
@@ -30,7 +35,7 @@ from database.connection import MongoDBConnection
 from contexts.payment_rail.domain import pacs008
 from encoder.json_encoder import MyJSONEncoder
 from routers.workflow import router as workflow_router
-from services.payments_service import PaymentsService
+from services.payments_service import PaymentNotFound, PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
 from workers import inbound_sim_worker, settlement_completion_worker, statement_sim_worker
@@ -596,6 +601,72 @@ async def transaction_authorization_resolve(
     except Exception as e:
         logging.error("TransactionAuthorization/Resolve failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal authorization error.")
+
+
+# --- Cutoff plan A2: decisions on the four demo-clock holds -----------------
+#
+# Tagged (demo-clock) payments only: an untagged payment is a 400, a missing one a 404.
+
+def _hold_response(payment_doc: dict, **extra) -> Response:
+    return _bian_response({
+        "paymentId": payment_doc["paymentId"],
+        "status": payment_doc["status"],
+        **extra,
+        "payment": _strip(payment_doc),
+    })
+
+
+def _run_hold_decision(label: str, action) -> Response:
+    try:
+        return action()
+    except PaymentNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error("%s failed: %s", label, e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/PaymentOrderProcedure/Approve")
+async def payment_order_procedure_approve(body: PaymentOrderApproveRequest):
+    """A second signatory approves or rejects a payment held at PENDING_APPROVAL."""
+    return _run_hold_decision("PaymentOrderProcedure/Approve", lambda: _hold_response(
+        payments_service.approve_payment(
+            body.paymentId, approver_id=body.approverId, decision=body.decision)))
+
+
+@app.post("/PaymentOrderProcedure/FundsRecheck")
+async def payment_order_procedure_funds_recheck(body: PaymentOrderFundsRecheckRequest):
+    """Re-test a PENDING_FUNDS hold; still short returns `stillShortBy` with no transition."""
+    def action():
+        payment_doc, still_short_by = payments_service.recheck_funds(body.paymentId)
+        return _hold_response(payment_doc, stillShortBy=still_short_by)
+    return _run_hold_decision("PaymentOrderProcedure/FundsRecheck", action)
+
+
+@app.post("/TransactionAuthorization/Screening/Resolve")
+async def transaction_authorization_screening_resolve(body: ScreeningResolveRequest):
+    """An analyst clears or confirms a potential sanctions match held at PENDING_SCREENING."""
+    return _run_hold_decision("TransactionAuthorization/Screening/Resolve", lambda: _hold_response(
+        payments_service.resolve_screening(
+            body.paymentId, analyst_id=body.analystId, outcome=body.outcome)))
+
+
+@app.post("/PaymentOrderProcedure/CutoffDecision")
+async def payment_order_procedure_cutoff_decision(body: CutoffDecisionRequest):
+    """EXPEDITE or NEXT_VALUE_DATE on a payment held at CUTOFF_EXCEPTION."""
+    return _run_hold_decision("PaymentOrderProcedure/CutoffDecision", lambda: _hold_response(
+        payments_service.decide_cutoff(
+            body.paymentId, decision=body.decision, decided_by=body.decidedBy)))
+
+
+@app.post("/PaymentOrderProcedure/HoldNextValueDate")
+async def payment_order_procedure_hold_next_value_date(body: HoldNextValueDateRequest):
+    """Record a next-value-date decision on a pending hold. No state change."""
+    return _run_hold_decision("PaymentOrderProcedure/HoldNextValueDate", lambda: _hold_response(
+        payments_service.hold_next_value_date(
+            body.paymentId, decided_by=body.decidedBy, reason=body.reason)))
 
 
 # --- Stage 5: PaymentRail (SD 47741) ---------------------------------------

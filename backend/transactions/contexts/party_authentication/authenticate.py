@@ -21,12 +21,16 @@ authentication is indistinguishable from a successful one; after this it is reco
 `method: NONE` and rendered as a non-pass. A real identity provider drops into this seam
 without changing the stage.
 
-## Stage 2 adds no lifecycle state
+## Stage 2 adds no lifecycle state — except one demo hold
 
 Doina's canonical sequence goes `INITIATED -> VALIDATED` with nothing between, and the spec
 enum and `_FORWARD` agree. This is a **gate**: it passes, or it raises `ValueError` and the
 saga marks the payment REJECTED at INITIATED. Its visibility comes from `checks[]`, not from
 the state machine (doc 15 B5).
+
+The exception (cutoff plan A2, D1): a **tagged** (demo-clock) payment that needs a second
+approver advances to `PENDING_APPROVAL` and stops, so a real signatory can approve it via
+`POST /PaymentOrderProcedure/Approve`. Untagged payments keep the simulated approver.
 
 Reads  ctx: debtor_customer_id, customer_ref, debtor_account_ref, debtor_account,
             debtor_customer, instructed_amount, authentication, payment_oid, collections
@@ -37,11 +41,10 @@ Deliberately NOT here: fraud scoring and transaction-level risk authorization. D
 both to stage 4b ("that moves to Stage 4") — conflating identity with risk is the
 anti-pattern this split exists to avoid.
 
-Deferred with a home (doc 15 §6): the **interactive** dual-approval queue. A genuinely
-obtained second approval needs a pause, an approve endpoint and a Payments Operations
-screen, and that persona has no UI yet. Phase 1 discharges the requirement with a
+Dual approval (doc 15 §6): an untagged payment discharges the requirement with a
 **labelled simulated approver** so the flagship $25,000 payment still settles end to end
-(doc 15 B4, Doina Q15).
+(doc 15 B4, Doina Q15). A tagged payment holds at `PENDING_APPROVAL` instead (D1 above); the
+approval queue that lists those holds is A3's.
 """
 
 from __future__ import annotations
@@ -49,7 +52,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from contexts.party_authentication.domain import entitlement_policy as policy
-from contexts.payment_order_initiation.domain import checks
+from contexts.payment_order_initiation.domain import checks, lifecycle
 from contexts.payment_order_initiation.domain.lifecycle import StepUpRequired
 from process.payment_context import PaymentContext
 
@@ -188,7 +191,17 @@ def run(ctx: PaymentContext) -> None:
     # Stage 2 DECIDES the requirement; stage 4b keeps the APPROVED transition it already
     # owns and now reads this decision instead of asserting one (doc 15 B4).
     approval_required = policy.approval_required(amount, segment)
-    if approval_required:
+    # D1: a tagged payment waits for a real second signatory instead of a simulated one.
+    held_for_approval = approval_required and bool(ctx.clock_run_id)
+    if held_for_approval:
+        # A3: enqueue an `approvalRequests` record here.
+        record(
+            "dual_approval", checks.WARN,
+            f"{amount:,.2f} is above the {segment or 'default'} dual-approval threshold of "
+            f"{limits['dualApprovalThreshold']:,.2f} (signing rule {signing_rule}); held "
+            f"at PENDING_APPROVAL for a second signatory.",
+        )
+    elif approval_required:
         record(
             "dual_approval", checks.PASS,
             f"{amount:,.2f} is above the {segment or 'default'} dual-approval threshold of "
@@ -208,7 +221,8 @@ def run(ctx: PaymentContext) -> None:
     # DR-2.1 / DR-2.2 (Doina 2026-09-15). `recorded` still holds all six checks here —
     # `_flush` hasn't cleared it yet — so the named booleans are derivable from the results.
     result_by_name = {c["name"]: c["result"] for c in recorded}
-    dual_status = result_by_name.get("dual_approval")
+    dual_status = "PENDING" if held_for_approval else result_by_name.get("dual_approval")
+    simulated = approval_required and not held_for_approval
 
     _flush(
         ctx, recorded,
@@ -244,8 +258,8 @@ def run(ctx: PaymentContext) -> None:
                 "perPaymentLimit": limits["perPaymentLimit"],
                 "dualApprovalThreshold": limits["dualApprovalThreshold"],
                 "dualApprovalRequired": approval_required,
-                "dualApprovalBy": SIMULATED_APPROVER if approval_required else None,
-                "dualApprovalSimulated": approval_required,
+                "dualApprovalBy": SIMULATED_APPROVER if simulated else None,
+                "dualApprovalSimulated": simulated,
                 # DR-2.1 — named entitlement-check result. `accountActive` / `limitAvailable`
                 # come from the check results; `fundsAvailable` is stage 3 (Q13), null here.
                 "accountActive": result_by_name.get("account_active") == checks.PASS,
@@ -257,14 +271,23 @@ def run(ctx: PaymentContext) -> None:
                     "required": approval_required,
                     "threshold": limits["dualApprovalThreshold"],
                     "status": dual_status,
-                    "approvers": [SIMULATED_APPROVER] if approval_required else [],
-                    "approvedBy": SIMULATED_APPROVER if approval_required else None,
-                    "approvedAt": now if approval_required else None,
+                    "approvers": [SIMULATED_APPROVER] if simulated else [],
+                    "approvedBy": SIMULATED_APPROVER if simulated else None,
+                    "approvedAt": now if simulated else None,
                 },
                 "assessedAt": now,
             },
         },
     )
+
+    if held_for_approval:
+        lifecycle.advance_ctx(
+            ctx, lifecycle.PENDING_APPROVAL,
+            actor="transactions-service",
+            reason=f"Dual approval required above {limits['dualApprovalThreshold']:,.2f}; "
+                   "awaiting a second signatory.",
+        )
+        ctx.stop(ctx.payment_doc)
 
 
 def _flush(ctx: PaymentContext, recorded: list, *, extra: dict | None = None) -> None:

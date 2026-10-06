@@ -312,6 +312,7 @@ def db():
         "payments": FakeCollection(key="paymentId"),
         "transactions": FakeCollection(key="transactionId"),
         "notifications": FakeCollection(key="notificationId"),
+        "demoClocks": FakeCollection(key="_id"),
     })
 
 

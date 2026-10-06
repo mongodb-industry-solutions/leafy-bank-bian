@@ -52,6 +52,15 @@ _DENIED_PARTIES = frozenset({
     "ACME SANCTIONED HOLDINGS",
 })
 
+# Potential matches (cutoff plan A2): names close enough to a list entry that an analyst
+# must decide. Exact upper-case match, so the rule is deterministic. Invented for the demo;
+# no simulator, autofill or recon scenario uses them (asserted by a test), so untagged
+# traffic never meets one — and if it did, PENDING is a WARN that continues.
+_POTENTIAL_MATCH_PARTIES = frozenset({
+    "NORTHGATE TRADING FZE",
+    "SEVERN MARITIME LLC",
+})
+
 # High-risk purpose codes. `purposeCodes` is a real reference collection (stage 3 resolves
 # it), so this is a risk *classification* over real codes rather than invented data.
 _HIGH_RISK_PURPOSE_CODES = frozenset({"CASH", "CGDD"})
@@ -127,6 +136,14 @@ def screen(
             matched=name,
         )
 
+    if name in _POTENTIAL_MATCH_PARTIES:
+        return ScreeningOutcome(
+            PENDING,
+            f"{party_label} '{creditor_name}' is a potential match against a list entry — "
+            f"analyst review required ({PROVIDER}, SIMULATED).",
+            matched=name,
+        )
+
     if purpose_code and purpose_code.upper() in _HIGH_RISK_PURPOSE_CODES:
         # Not a hit. An AML-relevant purpose raises attention, and the fraud score is where
         # that attention is expressed (`fraud_rules.purpose_code_risk`) — screening still
@@ -154,3 +171,7 @@ def denied_parties() -> frozenset:
 
 def restricted_countries() -> frozenset:
     return _RESTRICTED_COUNTRIES
+
+
+def potential_matches() -> frozenset:
+    return _POTENTIAL_MATCH_PARTIES

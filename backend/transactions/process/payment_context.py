@@ -94,6 +94,9 @@ class PaymentContext:
     # ⚠️ Orthogonal to `paymentMessages.direction`, which describes a MESSAGE's travel: an
     # INBOUND payment emits an OUTBOUND pacs.002 (FR-5.IN2). Never derive one from the other.
     direction: str = "OUTBOUND"
+    # Demo clock run (`shared.business_clock`). None = untagged: real time, today's behaviour.
+    # Set only by in-process callers; persisted as `payments.demo.clockRunId`.
+    clock_run_id: Optional[str] = None
 
     # --- infrastructure ------------------------------------------------------
     collections: Optional[PaymentCollections] = None
@@ -157,6 +160,13 @@ class PaymentContext:
     # `evaluate.run` skip the fraud re-score and commit the authorisation the model withheld;
     # "REJECTED" makes it raise so the saga marks the payment REJECTED. None = normal path.
     review_override: Optional[str] = None
+    # Cutoff plan A2 (tagged payments only), restored from the document on every resume.
+    # `screening_override` is an analyst's CLEAR on a PENDING_SCREENING hold: stage 4b skips
+    # the screen and still scores. `cutoff_decision` is `payments.cutoff.decision`;
+    # `value_date_override` is the ISO value date an EXPEDITE committed to.
+    screening_override: Optional[str] = None
+    cutoff_decision: Optional[str] = None
+    value_date_override: Optional[str] = None
     # --- inbound (incoming wire) ---------------------------------------------
     # The parsed pacs.008 the payment was built from, and the `paymentMessages` doc that
     # stored it. Set by `receive.run` (inbound stage 1) and read by stage 2's beneficiary

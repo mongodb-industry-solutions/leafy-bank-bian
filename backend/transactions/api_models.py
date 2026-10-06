@@ -310,6 +310,49 @@ class TransactionAuthorizationResolveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# --- cutoff plan A2: decisions on the four demo-clock holds -------------------
+# Each route refuses an untagged payment (400) and a missing one (404). Identities are
+# customer/staff ids supplied by the caller; A3 adds the directory that names them.
+
+class PaymentOrderApproveRequest(BaseModel):
+    """`POST /PaymentOrderProcedure/Approve` — a second signatory on a PENDING_APPROVAL hold."""
+    paymentId: str = Field(min_length=1)
+    approverId: str = Field(min_length=1)
+    decision: Literal["APPROVED", "REJECTED"]
+    model_config = ConfigDict(extra="forbid")
+
+
+class PaymentOrderFundsRecheckRequest(BaseModel):
+    """`POST /PaymentOrderProcedure/FundsRecheck` — re-test a PENDING_FUNDS hold."""
+    paymentId: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScreeningResolveRequest(BaseModel):
+    """`POST /TransactionAuthorization/Screening/Resolve` — an analyst on PENDING_SCREENING."""
+    paymentId: str = Field(min_length=1)
+    analystId: str = Field(min_length=1)
+    outcome: Literal["CLEAR", "HIT"]
+    model_config = ConfigDict(extra="forbid")
+
+
+class CutoffDecisionRequest(BaseModel):
+    """`POST /PaymentOrderProcedure/CutoffDecision` — a decision on CUTOFF_EXCEPTION."""
+    paymentId: str = Field(min_length=1)
+    decision: Literal["EXPEDITE", "NEXT_VALUE_DATE"]
+    decidedBy: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
+class HoldNextValueDateRequest(BaseModel):
+    """`POST /PaymentOrderProcedure/HoldNextValueDate` — record a next-value-date decision on
+    a pending hold. No state change; the payment warehouses when released."""
+    paymentId: str = Field(min_length=1)
+    decidedBy: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
 # Stage 9 — `POST /workflow/exceptions/{exceptionId}/resolve` (doc 24 B4/B6). No BIAN
 # service domain (row 9: modeled within the originating domain), so the resolve endpoint rides
 # the /workflow ops namespace, sanctioned by the `POST /pipeline/batch/trigger` precedent.

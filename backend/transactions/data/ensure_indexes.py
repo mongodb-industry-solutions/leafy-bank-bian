@@ -219,6 +219,14 @@ EXCEPTIONS_INDEXES = [
 ]
 
 
+# Demo clock runs (`shared.business_clock`). Throwaway by design: a run only matters while a
+# presenter is driving it, so a 24h TTL keeps the collection from accumulating.
+DEMO_CLOCKS_INDEXES = [
+    {"name": "idx_demo_clocks_created_at_ttl", "keys": [("createdAt", ASCENDING)],
+     "expireAfterSeconds": 86400},
+]
+
+
 def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs: list[dict]) -> list[str]:
     coll = connection.get_collection(db_name, collection)
     ensured = []
@@ -244,6 +252,7 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
             connection, db_name, "paymentMessages", PAYMENT_MESSAGES_INDEXES
         ),
         "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
+        "demoClocks": _ensure(connection, db_name, "demoClocks", DEMO_CLOCKS_INDEXES),
     }
 
 
