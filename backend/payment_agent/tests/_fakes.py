@@ -1,8 +1,9 @@
 """A small in-memory stand-in for the pymongo surface the agent uses.
 
-Supports exact-equality and dotted-path matching, `$in`, `$lt`/`$lte`/`$gte`, `None` matching a
-missing field (MongoDB semantics — defect 2026-09-30), `$set`/`$push` with dotted paths, and
-find().sort().limit(). Aggregations are not emulated; tests that need them patch the
+Supports exact-equality and dotted-path matching, `$in`/`$nin`, `$lt`/`$lte`/`$gt`/`$gte`,
+`$exists`, `None` matching a missing field (MongoDB semantics — defect 2026-09-30),
+`$set`/`$push` (with `$each`/`$slice`) with dotted paths, find().sort().limit(), count_documents, insert_one (with
+optional unique keys raising DuplicateKeyError), update_many and find_one_and_update. Aggregations are not emulated; tests that need them patch the
 `recon_evidence` function instead.
 """
 
@@ -10,6 +11,9 @@ from __future__ import annotations
 
 import copy
 from types import SimpleNamespace
+
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 _MISSING = object()
 
@@ -28,6 +32,12 @@ def _match_value(val, cond):
         v = None if val is _MISSING else val
         for op, arg in cond.items():
             if op == "$in" and v not in arg:
+                return False
+            if op == "$nin" and v in arg:
+                return False
+            if op == "$exists" and (val is not _MISSING) != bool(arg):
+                return False
+            if op == "$gt" and (v is None or not v > arg):
                 return False
             if op == "$ne" and v == arg:
                 return False
@@ -73,8 +83,10 @@ class _Cursor(list):
 
 
 class FakeColl:
-    def __init__(self, docs=None):
+    def __init__(self, docs=None, unique=None):
         self.docs = [copy.deepcopy(d) for d in (docs or [])]
+        # Each entry is a tuple of field paths; an optional `partial` query scopes it.
+        self.unique = list(unique or [])
 
     def find_one(self, q=None, proj=None, **_):
         return next((copy.deepcopy(d) for d in self.docs if matches(d, q or {})), None)
@@ -82,16 +94,66 @@ class FakeColl:
     def find(self, q=None, proj=None):
         return _Cursor(copy.deepcopy(d) for d in self.docs if matches(d, q or {}))
 
-    def update_one(self, q, upd):
+    def count_documents(self, q=None):
+        return sum(1 for d in self.docs if matches(d, q or {}))
+
+    def _check_unique(self, doc, skip=None):
+        for keys, partial in ((u[0], u[1]) if isinstance(u[0], tuple) else (u, None)
+                              for u in self.unique):
+            if partial is not None and not matches(doc, partial):
+                continue
+            key = tuple(_get(doc, k) for k in keys)
+            for other in self.docs:
+                if other is skip or (partial is not None and not matches(other, partial)):
+                    continue
+                if tuple(_get(other, k) for k in keys) == key:
+                    raise DuplicateKeyError(f"duplicate key {dict(zip(keys, key))}")
+
+    def insert_one(self, doc):
+        self._check_unique(doc)
+        doc.setdefault("_id", len(self.docs) + 1)
+        self.docs.append(copy.deepcopy(doc))
+        return SimpleNamespace(inserted_id=doc["_id"])
+
+    @staticmethod
+    def _apply(d, upd):
+        for k, v in (upd.get("$set") or {}).items():
+            _set(d, k, v)
+        for k, v in (upd.get("$push") or {}).items():
+            cur = _get(d, k)
+            items = v["$each"] if isinstance(v, dict) and "$each" in v else [v]
+            merged = ([] if cur is _MISSING or cur is None else cur) + list(items)
+            if isinstance(v, dict) and "$slice" in v:
+                merged = merged[v["$slice"]:] if v["$slice"] < 0 else merged[:v["$slice"]]
+            _set(d, k, merged)
+
+    def update_one(self, q, upd, upsert=False):
         for d in self.docs:
             if matches(d, q):
-                for k, v in (upd.get("$set") or {}).items():
-                    _set(d, k, v)
-                for k, v in (upd.get("$push") or {}).items():
-                    cur = _get(d, k)
-                    _set(d, k, ([] if cur in (_MISSING, None) else cur) + [v])
+                self._apply(d, upd)
                 return SimpleNamespace(matched_count=1)
+        if upsert:
+            doc = {k: v for k, v in q.items() if not k.startswith("$")}
+            self._apply(doc, upd)
+            self.docs.append(doc)
         return SimpleNamespace(matched_count=0)
+
+    def update_many(self, q, upd):
+        hits = [d for d in self.docs if matches(d, q)]
+        for d in hits:
+            self._apply(d, upd)
+        return SimpleNamespace(matched_count=len(hits), modified_count=len(hits))
+
+    def find_one_and_update(self, q, upd, return_document=ReturnDocument.BEFORE, **_):
+        for d in self.docs:
+            if matches(d, q):
+                before = copy.deepcopy(d)
+                candidate = copy.deepcopy(d)
+                self._apply(candidate, upd)
+                self._check_unique(candidate, skip=d)
+                self._apply(d, upd)
+                return copy.deepcopy(d) if return_document == ReturnDocument.AFTER else before
+        return None
 
 
 class FakeDB(dict):

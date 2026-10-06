@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Icon from "@leafygreen-ui/icon";
+import { SegmentedControl, SegmentedControlOption } from "@leafygreen-ui/segmented-control";
 import { H3, Body } from "@leafygreen-ui/typography";
 import { SCENARIOS, GROUPS, stepsFor } from "./scenarios";
+import { CUTOFF_SCENARIOS, CUTOFF_GROUPS } from "./cutoffScenarios";
 import styles from "./Showcase.module.css";
 
 const MODE_LABEL = {
@@ -64,9 +66,9 @@ function ScenarioCard({ scenario, ran, onPick }) {
     >
       <div className={styles.cardTop}>
         <span className={styles.modeIcon}>
-          <Icon glyph={MODE_ICON[scenario.mode]} size={16} />
+          <Icon glyph={scenario.icon || MODE_ICON[scenario.mode]} size={16} />
         </span>
-        <span className={styles.modeLabel}>{MODE_LABEL[scenario.mode]}</span>
+        <span className={styles.modeLabel}>{scenario.modeLabel || MODE_LABEL[scenario.mode]}</span>
         <span className={styles.cardBadges}>
           {scenario.recommended && <span className={styles.suggested}>Suggested</span>}
           {ran && <span className={styles.ranMark}>Run</span>}
@@ -77,7 +79,9 @@ function ScenarioCard({ scenario, ran, onPick }) {
       <DecisionFlow decision={scenario.decision} />
       <div className={styles.cardFooter}>
         <span className={styles.cardMeta}>
-          {scenario.bank} · USD {scenario.amount} · {stepsFor(scenario.key).length} steps
+          {scenario.startEt
+            ? `USD ${scenario.amount} · starts ${scenario.startEt} ET`
+            : `${scenario.bank} · USD ${scenario.amount} · ${stepsFor(scenario.key).length} steps`}
         </span>
         <span className={styles.startCue}>
           Start <Icon glyph="ArrowRight" size={14} />
@@ -87,38 +91,29 @@ function ScenarioCard({ scenario, ran, onPick }) {
   );
 }
 
-function ComingSoonCard() {
-  return (
-    <div className={`${styles.scenarioCard} ${styles.cardDisabled}`} aria-disabled="true">
-      <div className={styles.cardTop}>
-        <span className={styles.modeIcon}>
-          <Icon glyph="Clock" size={16} />
-        </span>
-        <span className={styles.modeLabel}>Coming soon</span>
-      </div>
-      <H3 className={styles.cardTitle}>Cut-off risk and exceptions</H3>
-      <Body className={styles.cardStory}>
-        Watches wires approaching the internal cut-off, finds the specific blocker, and recommends hold,
-        expedite or defer.
-      </Body>
-    </div>
-  );
-}
-
-export default function ScenarioPicker({ onPick }) {
+export default function ScenarioPicker({ agent, onAgentChange, onPick }) {
   const [ran, markRan] = useRanScenarios();
   const pick = (key) => {
     markRan(key);
     onPick(key);
   };
+  const cutoff = agent === "cutoff";
+  const groups = cutoff ? CUTOFF_GROUPS : GROUPS;
+  const scenarios = cutoff ? CUTOFF_SCENARIOS : SCENARIOS;
 
   return (
-    <div className={styles.picker}>
-      {GROUPS.map((group) => (
+    <div id="showcase-scenarios" className={styles.picker}>
+      <div className={styles.agentToggle}>
+        <SegmentedControl aria-label="Agent" aria-controls="showcase-scenarios" value={cutoff ? "cutoff" : "reconciliation"} onChange={onAgentChange}>
+          <SegmentedControlOption value="reconciliation">Reconciliation</SegmentedControlOption>
+          <SegmentedControlOption value="cutoff">Cut-off</SegmentedControlOption>
+        </SegmentedControl>
+      </div>
+      {groups.map((group) => (
         <section key={group.mode} className={`${styles.group} ${styles[`mode_${group.mode}`]}`}>
           <div className={styles.groupHead}>
             <span className={styles.groupIcon}>
-              <Icon glyph={MODE_ICON[group.mode]} size={16} />
+              <Icon glyph={group.icon || MODE_ICON[group.mode]} size={16} />
             </span>
             <div>
               <H3 className={styles.groupTitle}>{group.title}</H3>
@@ -126,23 +121,12 @@ export default function ScenarioPicker({ onPick }) {
             </div>
           </div>
           <div className={styles.pickerGrid}>
-            {SCENARIOS.filter((s) => s.mode === group.mode).map((s) => (
+            {scenarios.filter((s) => s.mode === group.mode).map((s) => (
               <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={pick} />
             ))}
           </div>
         </section>
       ))}
-      <section className={styles.group}>
-        <div className={styles.groupHead}>
-          <span className={styles.groupIcon}>
-            <Icon glyph="Clock" size={16} />
-          </span>
-          <H3 className={styles.groupTitle}>Cut-off agent</H3>
-        </div>
-        <div className={styles.pickerGrid}>
-          <ComingSoonCard />
-        </div>
-      </section>
     </div>
   );
 }

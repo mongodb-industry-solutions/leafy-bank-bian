@@ -788,3 +788,39 @@ scene + rail. One tone drives every accent. */
 .refusedIcon {
   color: #db3030;
 }
+
+/* Cut-off walkthrough */
+.agentToggle {
+  align-self: flex-start;
+}
+
+.clockStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 32px;
+  padding: 16px;
+  border: 1px solid #e8edeb;
+  border-radius: 12px;
+}
+
+.clockFigure {
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.presenterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actionLog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

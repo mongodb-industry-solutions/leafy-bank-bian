@@ -252,6 +252,20 @@ STAFF_DIRECTORY_INDEXES = [
     {"name": "idx_staff_id_unique", "keys": [("staffId", ASCENDING)], "unique": True},
 ]
 
+# Cutoff plan C2: the payment_agent's case store. One ACTIVE case per (paymentId, valueDate)
+# is the invariant `cutoff_cases.open_or_get` relies on — PARTIAL on `active == true`, so
+# closed cases accumulate as history without colliding. Cases are demo artefacts: 7-day TTL.
+CUTOFF_CASES_INDEXES = [
+    {"name": "idx_cutoff_case_id_unique", "keys": [("caseId", ASCENDING)], "unique": True},
+    {"name": "idx_cutoff_case_active_unique",
+     "keys": [("paymentId", ASCENDING), ("valueDate", ASCENDING)], "unique": True,
+     "partialFilterExpression": {"active": {"$eq": True}}},
+    {"name": "idx_cutoff_case_run_status",
+     "keys": [("clockRunId", ASCENDING), ("status", ASCENDING), ("updatedAt", DESCENDING)]},
+    {"name": "idx_cutoff_case_ttl", "keys": [("openedAt", ASCENDING)],
+     "expireAfterSeconds": 7 * 86400},
+]
+
 STAGE_EVENTS_COLLECTION = "paymentStageEvents"
 STAGE_EVENTS_TIMESERIES = {"timeField": "at", "metaField": "meta", "granularity": "minutes"}
 STAGE_EVENTS_EXPIRE_SECONDS = 30 * 86400
@@ -317,6 +331,7 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
         ),
         "screeningQueue": _ensure(connection, db_name, "screeningQueue", SCREENING_QUEUE_INDEXES),
         "staffDirectory": _ensure(connection, db_name, "staffDirectory", STAFF_DIRECTORY_INDEXES),
+        "cutoffCases": _ensure(connection, db_name, "cutoffCases", CUTOFF_CASES_INDEXES),
         STAGE_EVENTS_COLLECTION: _ensure_stage_events(connection, db_name),
     }
 

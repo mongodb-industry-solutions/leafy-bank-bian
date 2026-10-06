@@ -22,7 +22,8 @@ function exceptionChip(exceptions) {
   );
 }
 
-export default function StatusRail({ scenario, init, payment, exceptions, docs }) {
+// `chips` replaces the reconciliation chips and the documents panel (the cut-off walkthrough).
+export default function StatusRail({ scenario, init, payment, exceptions, docs, chips }) {
   const amount = Number(init?.amount ?? payment?.amount ?? 0);
   return (
     <aside className={styles.rail}>
@@ -38,7 +39,8 @@ export default function StatusRail({ scenario, init, payment, exceptions, docs }
         ) : (
           <Body className={styles.muted}>Not sent yet.</Body>
         )}
-        {init && (
+        {init && chips && <div className={styles.chipRow}>{chips}</div>}
+        {init && !chips && (
           <div className={styles.chipRow}>
             {chip("Settled", ["SETTLED", "COMPLETED"].includes(payment?.status))}
             {chip("Booked", payment?.lifecycle?.postingStatus === "POSTED")}
@@ -48,10 +50,12 @@ export default function StatusRail({ scenario, init, payment, exceptions, docs }
         )}
       </div>
 
-      <details className={styles.railDocs}>
-        <summary className={styles.railDocsSummary}>Written to MongoDB</summary>
-        <StepDocuments {...docs} />
-      </details>
+      {!chips && (
+        <details className={styles.railDocs}>
+          <summary className={styles.railDocsSummary}>Written to MongoDB</summary>
+          <StepDocuments {...docs} />
+        </details>
+      )}
     </aside>
   );
 }

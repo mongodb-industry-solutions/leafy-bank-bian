@@ -1,7 +1,7 @@
 "use client";
 
 // The raw agent trace behind the "Show agent trace" toggle, plus the steps poll hook
-// (GET agent/reconciliation/{id}/steps every 2s while `active`). ScenarioStepper owns the hook.
+// (GET agent/{path}/{id}/steps every 2s while `active`). The steppers own the hook.
 
 import { useEffect, useState } from "react";
 import { Body } from "@leafygreen-ui/typography";
@@ -24,7 +24,8 @@ function shortArgs(args) {
   return text.length > 80 ? `${text.slice(0, 77)}…` : text;
 }
 
-export function useAgentSteps(exceptionId, active) {
+// `path` is the agent's case collection: "reconciliation" (exceptions) or "cutoff/cases".
+export function useAgentSteps(exceptionId, active, path = "reconciliation") {
   const [steps, setSteps] = useState([]);
   const [started, setStarted] = useState(false);
 
@@ -38,7 +39,7 @@ export function useAgentSteps(exceptionId, active) {
     let cancelled = false;
     let timer = null;
     const poll = async () => {
-      const { data, error } = await agentApi(`reconciliation/${encodeURIComponent(exceptionId)}/steps`);
+      const { data, error } = await agentApi(`${path}/${encodeURIComponent(exceptionId)}/steps`);
       if (cancelled) return;
       // 404 until the agent starts — keep waiting quietly.
       if (!error) {
@@ -52,7 +53,7 @@ export function useAgentSteps(exceptionId, active) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [exceptionId, active]);
+  }, [exceptionId, active, path]);
 
   return { steps, started };
 }

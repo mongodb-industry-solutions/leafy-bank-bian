@@ -161,6 +161,10 @@ sidecarContainers:
         value: http://localhost:8002
       - name: ENABLE_RECONCILIATION_AGENT
         value: "true"
+      # Cutoff Risk agent: acts only on showcase payments tagged demo.clockRunId.
+      # Keep this the ONLY instance with it on for this DB (local .env should be false).
+      - name: ENABLE_CUTOFF_AGENT
+        value: "true"
       # Bedrock access comes from the pod's IRSA role (serviceAccount.irsa below).
       - name: AWS_REGION
         value: us-east-1
