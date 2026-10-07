@@ -111,7 +111,9 @@ def _utc(at: Any) -> Any:
 def candidate_query(payment_id: Optional[str] = None) -> dict:
     query = {"demo.clockRunId": {"$exists": True, "$ne": None},
              "status": {"$in": list(risk_mod.BLOCKER_FOR)},
-             "cutoff.decision": {"$nin": list(_DECIDED)}}
+             "cutoff.decision": {"$nin": list(_DECIDED)},
+             # Release (transactions) owns the payment once it starts; no new case or Bedrock run.
+             "demo.release": {"$exists": False}}
     if payment_id:
         query["paymentId"] = payment_id
     return query
@@ -179,13 +181,21 @@ def stale_outcome(db: Any, case: dict) -> Optional[str]:
         return cases.SUPERSEDED
     status = payment.get("status")
     decision = (payment.get("cutoff") or {}).get("decision")
-    if status == "REJECTED":
-        return cases.SUPERSEDED if _last_reason(payment) == SUPERSEDED_REASON else cases.REJECTED
+    rejected = status == "REJECTED"
+    if rejected and _last_reason(payment) == SUPERSEDED_REASON:
+        return cases.SUPERSEDED
+    # A recorded decision beats a plain REJECTED so a release that fails validation cannot
+    # flip the case away from its HELD / DEFERRED story.
     if decision == "HOLD_NEXT_VALUE_DATE":
         return cases.HELD_NEXT_VALUE_DATE
     if decision == "NEXT_VALUE_DATE":
         return cases.DEFERRED_NEXT_BUSINESS_DAY
+    if rejected:
+        return cases.REJECTED
     if status in _SUBMITTED_OR_LATER:
+        recommendation = ((case.get("agent") or {}).get("recommendation") or {}).get("kind")
+        if not decision and recommendation == "NONE":
+            return cases.NO_ACTION_NEEDED
         return cases.SUBMITTED_IN_TIME
     if status in risk_mod.BLOCKER_FOR:
         return None

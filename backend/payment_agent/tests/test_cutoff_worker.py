@@ -169,6 +169,77 @@ def test_stale_outcome_mapping(fields, expected):
     assert cwk.stale_outcome(db, {"paymentId": PID, "clockRunId": RUN}) == expected
 
 
+_STATUSES = ["PENDING_FUNDS", "ROUTED", "AUTHORISED", "SUBMITTED", "SETTLED", "RECONCILED", "REJECTED"]
+_BLOCKED = {"PENDING_FUNDS": None, "ROUTED": cases.RELEASED, "AUTHORISED": cases.RELEASED}
+_SENT = {"SUBMITTED", "SETTLED", "RECONCILED"}
+
+
+def _expected_outcome(decision, status):
+    if decision == "HOLD_NEXT_VALUE_DATE":
+        return cases.HELD_NEXT_VALUE_DATE
+    if decision == "NEXT_VALUE_DATE":
+        return cases.DEFERRED_NEXT_BUSINESS_DAY
+    if status == "REJECTED":
+        return cases.REJECTED
+    return cases.SUBMITTED_IN_TIME if status in _SENT else _BLOCKED[status]
+
+
+@pytest.mark.parametrize("status", _STATUSES)
+@pytest.mark.parametrize("decision", [None, "EXPEDITE", "HOLD_NEXT_VALUE_DATE", "NEXT_VALUE_DATE"])
+def test_stale_outcome_decision_by_status_matrix(decision, status):
+    db = _held()
+    fields = {"status": status}
+    if status == "REJECTED":
+        fields["lifecycle.events"] = [{"reason": "Release failed validation."}]
+    if decision:
+        fields["cutoff.decision"] = decision
+    db["payments"].update_one({"paymentId": PID}, {"$set": fields})
+    assert cwk.stale_outcome(db, {"paymentId": PID, "clockRunId": RUN}) == _expected_outcome(decision, status)
+
+
+@pytest.mark.parametrize("decision", [None, "EXPEDITE", "HOLD_NEXT_VALUE_DATE", "NEXT_VALUE_DATE"])
+def test_superseded_beats_every_decision(decision):
+    db = _held()
+    fields = {"status": "REJECTED", "lifecycle.events": [{"reason": cwk.SUPERSEDED_REASON}]}
+    if decision:
+        fields["cutoff.decision"] = decision
+    db["payments"].update_one({"paymentId": PID}, {"$set": fields})
+    assert cwk.stale_outcome(db, {"paymentId": PID, "clockRunId": RUN}) == cases.SUPERSEDED
+
+
+@pytest.mark.parametrize("kind,decision,expected", [
+    ("NONE", None, cases.NO_ACTION_NEEDED),
+    ("NONE", "EXPEDITE", cases.SUBMITTED_IN_TIME),
+    ("NEEDS_APPROVAL", None, cases.SUBMITTED_IN_TIME),
+    (None, None, cases.SUBMITTED_IN_TIME),
+])
+def test_submitted_with_no_action_recommendation(kind, decision, expected):
+    db = _held()
+    fields = {"status": "SUBMITTED"}
+    if decision:
+        fields["cutoff.decision"] = decision
+    db["payments"].update_one({"paymentId": PID}, {"$set": fields})
+    case = {"paymentId": PID, "clockRunId": RUN, "agent": {"recommendation": {"kind": kind}}}
+    assert cwk.stale_outcome(db, case) == expected
+
+
+def test_a_released_payment_is_not_a_candidate(runs):
+    db = _held()
+    db["payments"].update_one({"paymentId": PID}, {"$set": {"demo.release": {"state": "CLAIMED"}}})
+    assert cwk.candidate_query()["demo.release"] == {"$exists": False}
+    assert cwk.sweep_once(object(), db)["evaluated"] == 0
+    assert not runs and db["cutoffCases"].count_documents({}) == 0
+
+
+def test_a_next_day_open_is_outside_every_scenario_time_of_day_window():
+    # Scenario anchors (transactions `cutoff_scenarios`, ET minutes: 16:30 to 18:35).
+    open_tod = 9 * 60
+    for anchor in (16 * 60 + 30, 16 * 60 + 45, 17 * 60 + 5, 17 * 60 + 50, 18 * 60 + 35):
+        lo, hi = ev._tod_bounds(et(anchor // 60, anchor % 60))
+        assert not lo <= ev._tod(et(9, 0)) <= hi
+        assert not lo <= open_tod <= hi
+
+
 def test_a_gone_clock_run_expires_the_case():
     db = _held()
     db["demoClocks"] = FakeColl()

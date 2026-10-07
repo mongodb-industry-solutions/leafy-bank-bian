@@ -95,8 +95,14 @@ class FakeCollection:
     # -- matching / mutation
     def _matches(self, doc, flt):
         for k, v in flt.items():
+            if k == "$or":
+                if not any(self._matches(doc, sub) for sub in v):
+                    return False
+                continue
             actual = self._get(doc, k)
             if isinstance(v, dict):
+                if "$exists" in v and (self._has(doc, k) != v["$exists"]):
+                    return False
                 if "$gte" in v and not (actual is not None and actual >= v["$gte"]):
                     return False
                 if "$lte" in v and not (actual is not None and actual <= v["$lte"]):
@@ -105,7 +111,8 @@ class FakeCollection:
                     return False
                 if "$lt" in v and not (actual is not None and actual < v["$lt"]):
                     return False
-                if "$ne" in v and actual == v["$ne"]:
+                # `$ne` on a path through an array holds only when NO element equals the value.
+                if "$ne" in v and v["$ne"] in self._get_all(doc, k):
                     return False
                 if "$nin" in v and actual in v["$nin"]:
                     return False
@@ -125,6 +132,28 @@ class FakeCollection:
                 return None
             cur = cur[part]
         return cur
+
+    @staticmethod
+    def _has(doc, dotted):
+        cur = doc
+        for part in dotted.split("."):
+            if not isinstance(cur, dict) or part not in cur:
+                return False
+            cur = cur[part]
+        return True
+
+    @classmethod
+    def _get_all(cls, doc, dotted):
+        """Every value at `dotted`, fanning out through arrays like Mongo's path matching."""
+        values = [doc]
+        for part in dotted.split("."):
+            nxt = []
+            for cur in values:
+                for item in (cur if isinstance(cur, list) else [cur]):
+                    if isinstance(item, dict) and part in item:
+                        nxt.append(item[part])
+            values = nxt
+        return [x for v in values for x in (v if isinstance(v, list) else [v])] or [None]
 
     @staticmethod
     def _set(doc, dotted, val):

@@ -293,11 +293,62 @@ def test_reset_restores_the_start_minute(service, db):
 
 @pytest.mark.parametrize("kwargs", [
     {}, {"anchor": "18:00", "reset": True}, {"advance_minutes": 5, "anchor": "18:00"},
+    {"next_business_day": "09:00", "reset": True},
+    {"next_business_day": "09:00", "anchor": "18:00"},
+    {"next_business_day": "09:00", "advance_minutes": 5},
 ])
 def test_move_clock_needs_exactly_one_action(service, db, kwargs):
     run_id = cutoff_scenarios.run_one(service, "C1")["runId"]
     with pytest.raises(ValueError, match="exactly one"):
         cutoff_scenarios.move_clock(db, run_id, **kwargs)
+
+
+def test_next_business_day_jumps_to_the_next_open_and_moves_the_business_date(service, db):
+    run_id = cutoff_scenarios.run_one(service, "C1")["runId"]
+    run = db["demoClocks"].find_one({"_id": run_id})
+    expected = cutoff_policy.next_business_day(
+        datetime.fromisoformat(run["businessDate"]).date())
+
+    clock = cutoff_scenarios.move_clock(db, run_id, next_business_day="09:00")
+
+    business_et = business_clock.to_et(clock["businessNow"])
+    assert business_et.date() == expected and business_et.strftime("%H:%M") == "09:00"
+    stored = db["demoClocks"].find_one({"_id": run_id})
+    assert stored["businessDate"] == expected.isoformat()
+    now = business_clock.now(run_id, clocks=db["demoClocks"])
+    assert business_clock.minutes_since_midnight_et(now) == 9 * 60
+
+
+def test_next_business_day_from_a_friday_lands_on_monday(service, db):
+    run_id = cutoff_scenarios.run_one(service, "C1")["runId"]
+    friday = datetime(2026, 10, 9).date()
+    db["demoClocks"].update_one({"_id": run_id}, {"$set": {"businessDate": friday.isoformat()}})
+
+    clock = cutoff_scenarios.move_clock(db, run_id, next_business_day="09:00")
+
+    assert business_clock.to_et(clock["businessNow"]).date().isoformat() == "2026-10-12"
+    assert db["demoClocks"].find_one({"_id": run_id})["businessDate"] == "2026-10-12"
+
+
+def test_next_business_day_is_forward_only_and_repeatable(service, db):
+    run_id = cutoff_scenarios.run_one(service, "C1")["runId"]
+    first = cutoff_scenarios.move_clock(db, run_id, next_business_day="09:00")
+    later = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    again = cutoff_scenarios.move_clock(db, run_id, next_business_day="09:00", real_now=later)
+
+    stored = db["demoClocks"].find_one({"_id": run_id})
+    assert again["offsetSeconds"] == first["offsetSeconds"] == stored["offsetSeconds"]
+    assert stored["businessDate"] == stored[cutoff_scenarios.FAST_FORWARDED_TO]
+
+
+def test_demo_clock_request_does_not_expose_next_business_day():
+    import api_models
+
+    with pytest.raises(ValidationError):
+        api_models.DemoClockRequest(runId="CLK-1", next_business_day="09:00")
+    with pytest.raises(ValidationError):
+        api_models.DemoClockRequest(runId="CLK-1", nextBusinessDay="09:00")
 
 
 def test_unknown_run_is_a_lookup_error(db):

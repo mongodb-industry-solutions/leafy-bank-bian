@@ -430,6 +430,13 @@ class CutoffScenarioRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class CutoffReleaseRequest(BaseModel):
+    """`POST /workflow/demo/cutoff-release` — fast-forward one run's held payments to close."""
+
+    runId: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
 class DemoClockRequest(BaseModel):
     """`POST /workflow/demo/clock` — move one demo clock run. Exactly one action:
     `anchor` (HH:MM ET, forward only), `advanceMinutes` (forward), or `reset` (back to the

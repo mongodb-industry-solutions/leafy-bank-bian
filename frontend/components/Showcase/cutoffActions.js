@@ -11,6 +11,16 @@ export const startCutoffScenario = (scenario) =>
 export const moveClock = (runId, anchor) =>
   coreApi("workflow/demo/clock", { method: "POST", body: { runId, anchor } });
 
+/**
+ * Fast-forward the run to the next business day and close its held payments. Safe to repeat.
+ * Resolves with `{ clock, payments: [{ paymentId, before, action, after, error? }] }`.
+ */
+export async function fastForward(runId) {
+  const { data, error } = await coreApi("workflow/demo/cutoff-release", { method: "POST", body: { runId } });
+  if (error && String(error).startsWith("409")) return { data, error: "Busy, try again in a moment" };
+  return { data, error };
+}
+
 export const approveAsRaj = (paymentId) =>
   coreApi("PaymentOrderProcedure/Approve", {
     method: "POST",

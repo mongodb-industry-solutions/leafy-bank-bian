@@ -13,6 +13,7 @@ export const STAFF = {
 export const CUTOFF_SCENARIOS = [
   {
     key: "C1",
+    closeOut: "watch",
     mode: "approval",
     modeLabel: "Rescued in time",
     icon: "Person",
@@ -35,6 +36,7 @@ export const CUTOFF_SCENARIOS = [
   },
   {
     key: "C2",
+    closeOut: "watch",
     mode: "approval",
     modeLabel: "Rescued in time",
     icon: "Person",
@@ -57,6 +59,7 @@ export const CUTOFF_SCENARIOS = [
   },
   {
     key: "C3",
+    closeOut: "fastForward",
     mode: "refuses",
     modeLabel: "Can't make it",
     icon: "Clock",
@@ -78,6 +81,7 @@ export const CUTOFF_SCENARIOS = [
   },
   {
     key: "C5",
+    closeOut: "fastForward",
     mode: "refuses",
     modeLabel: "Can't make it",
     icon: "Clock",
@@ -100,6 +104,7 @@ export const CUTOFF_SCENARIOS = [
   },
   {
     key: "C4",
+    closeOut: "analyst",
     mode: "autonomous",
     modeLabel: "No action needed",
     icon: "Checkmark",
@@ -142,6 +147,27 @@ export const CUTOFF_GROUPS = [
   },
 ];
 
+// How the last act closes the payment. `watch`: it is already settling, so the panel only
+// watches. `fastForward` and `analyst` add one button that moves the payment on; the case
+// keeps the agent's decision either way.
+export const CLOSE_OUT = {
+  fastForward: {
+    button: "Fast-forward to next business day",
+    copy:
+      "The case keeps the agent's decision. Fast-forwarding moves the payment on to the next business day " +
+      "so it can settle.",
+    note: "Fast-forwarded to the next business day.",
+  },
+  analyst: {
+    button: "Let the analyst clear it",
+    copy: "The case stays closed as no action needed. The analyst clears screening and the wire moves on.",
+    note: "The analyst cleared screening.",
+  },
+  watch: { button: null, copy: "The wire is already on its way. Watching it settle.", note: null },
+};
+
+export const closeOutFor = (key) => CLOSE_OUT[cutoffByKey(key)?.closeOut] || CLOSE_OUT.watch;
+
 export const cutoffByKey = (key) => CUTOFF_SCENARIOS.find((s) => s.key === key) || null;
 
 // The proposal each scenario waits for before the decision act.
@@ -158,6 +184,7 @@ const STEP = {
   watchProposal: { key: "watch", act: 2, gate: "proposal", button: "Review the proposal" },
   watchNone: { key: "watch", act: 2, gate: "none", button: "See the result" },
   decide: { key: "decide", act: 4, gate: "proposal", decide: true },
+  // The closing panel's button (if the scenario has one) lives in the scene, not the step bar.
   final: { key: "final", act: 5, final: true },
 };
 

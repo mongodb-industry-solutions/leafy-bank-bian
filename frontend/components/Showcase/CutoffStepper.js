@@ -9,9 +9,9 @@ import Badge from "@leafygreen-ui/badge";
 import Button from "@leafygreen-ui/button";
 import { H2, Body } from "@leafygreen-ui/typography";
 import { usePaymentWorkflow } from "@/lib/api/hooks";
-import { cutoffActOf, cutoffActsFor, cutoffByKey, cutoffStepsFor } from "./cutoffScenarios";
+import { closeOutFor, cutoffActOf, cutoffActsFor, cutoffByKey, cutoffStepsFor } from "./cutoffScenarios";
 import {
-  approveAsRaj, clearScreening, cutoffError, findCase, moveClock, startCutoffScenario, sweepNow,
+  approveAsRaj, clearScreening, cutoffError, fastForward, findCase, moveClock, startCutoffScenario, sweepNow,
 } from "./cutoffActions";
 import StoryBar from "./StoryBar";
 import StatusRail from "./StatusRail";
@@ -21,6 +21,8 @@ import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
 const FINAL_ACT = 6;
+const CLOSE_TIMEOUT_MS = 90000;
+const SETTLED_STATUSES = ["SETTLED", "RECONCILED", "COMPLETED"];
 
 /** The newest cutoff case for the payment, re-read on the shared tick. */
 function useCutoffCase(paymentId, tick) {
@@ -117,6 +119,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   const [sweep, sweeping] = useSweeper(setError, () => setTick((t) => t + 1));
 
   const rejected = ctx.decision === "REJECT";
+  const closing = closeOutFor(scenarioKey);
   const result = caseDoc?.outcome?.result || null;
   const settledNone = !scenario.expectedOutcome && agent?.recommendation?.kind === "NONE";
   const done = rejected || !!result || (step.final && settledNone);
@@ -163,6 +166,22 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     return `Business clock moved to ${anchor} ET.`;
   }
 
+  // Fast-forward the run: the case keeps the agent's decision, the payment moves on. The 3s
+  // tick then re-reads the payment until it settles or the 90 s timeout message shows.
+  async function closeOut() {
+    const { data, error: err } = await fastForward(ctx.runId);
+    if (err) throw new Error(cutoffError(err));
+    const row = (data.payments || []).find((p) => p.paymentId === paymentId) || null;
+    setCtx((c) => ({
+      ...c,
+      offsetSeconds: data.clock?.offsetSeconds ?? c.offsetSeconds,
+      release: row,
+      closeStartedAt: row?.error ? null : Date.now(),
+    }));
+    if (row?.error) throw new Error(row.error);
+    return closing.note;
+  }
+
   async function guarded(fn) {
     if (running) return;
     setRunning(true);
@@ -187,7 +206,12 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   }
 
   function onDecided(decision, updated) {
-    setCtx((c) => ({ ...c, decision }));
+    // A watch-only scenario is already settling once approved: the 90 s clock starts now.
+    setCtx((c) => ({
+      ...c,
+      decision,
+      closeStartedAt: decision === "APPROVE" && scenario.closeOut === "watch" ? Date.now() : c.closeStartedAt,
+    }));
     if (updated) setCaseDoc(updated);
     setNote(decision === "APPROVE" ? "Approved. The agent executed the action and is verifying it." : "Rejected. The run has ended.");
     setIndex(steps.length - 1);
@@ -209,6 +233,18 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     : riskLevel === "WILL_MISS" ? "alert"
     : riskLevel === "AT_RISK" ? "waiting"
     : "neutral";
+
+  const settled = SETTLED_STATUSES.includes(payment?.status);
+  const closingVisible = !!paymentId && !rejected && (scenario.closeOut === "watch" ? ctx.decision === "APPROVE" : step.final && done);
+  const closingProps = closingVisible && {
+    copy: closing,
+    mode: scenario.closeOut,
+    payment,
+    release: ctx.release,
+    busy: running,
+    timedOut: !!ctx.closeStartedAt && !settled && now - ctx.closeStartedAt > CLOSE_TIMEOUT_MS,
+    onFastForward: () => guarded(closeOut),
+  };
 
   const showButton = !step.final && !step.decide && !!step.button;
   const presenterClock = scenario.presenter?.optional && paymentId && !done ? scenario.presenter : null;
@@ -276,6 +312,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
             rejected={rejected}
             waiting={waiting}
             revisedProposal={revisedProposal}
+            closing={closingProps || null}
           />
         </section>
 

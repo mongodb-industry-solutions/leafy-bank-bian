@@ -530,7 +530,8 @@ def verify_outcome(payment: dict, action: str, risk: Optional[dict]) -> Optional
     if action == rules.HOLD_NEXT_VALUE_DATE:
         return cases.HELD_NEXT_VALUE_DATE if cutoff.get("decision") == "HOLD_NEXT_VALUE_DATE" else None
     if action == rules.DEFER_NEXT_BUSINESS_DAY:
-        ok = payment.get("status") == "ROUTED" and cutoff.get("decision") == "NEXT_VALUE_DATE"
+        # Any status but CUTOFF_EXCEPTION: release may have moved the payment past ROUTED.
+        ok = payment.get("status") != "CUTOFF_EXCEPTION" and cutoff.get("decision") == "NEXT_VALUE_DATE"
         return cases.DEFERRED_NEXT_BUSINESS_DAY if ok else None
     if action == rules.EXPEDITE:
         if payment.get("status") not in _SUBMITTED_OR_LATER:

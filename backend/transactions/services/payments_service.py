@@ -634,8 +634,12 @@ class PaymentsService:
         cutoff = payment.get("cutoff") or {}
         ctx.screening_override = screening.get("outcome")
         ctx.cutoff_decision = cutoff.get("decision")
-        if cutoff.get("decision") == "EXPEDITE":
+        # A released warehouse re-enters at 4b with the value date it was parked for.
+        if cutoff.get("decision") in ("EXPEDITE", "HOLD_NEXT_VALUE_DATE", "NEXT_VALUE_DATE"):
             ctx.value_date_override = cutoff.get("valueDate")
+        # Cutoff release rolled an undecided payment's past value date to the business day.
+        elif ((payment.get("demo") or {}).get("release") or {}).get("valueDate"):
+            ctx.value_date_override = payment["demo"]["release"]["valueDate"]
         return ctx
 
     def _reattach_routing(self, ctx: PaymentContext, payment: dict) -> None:
@@ -905,7 +909,7 @@ class PaymentsService:
         EXPEDITE: today's value date, back to ROUTED, re-enter at stage 4b (index 5 — the
         routing snapshot already exists and is insert-only). Refused past the external
         cut-off, or while the payment has an OPEN exception. NEXT_VALUE_DATE: the next
-        business day, back to ROUTED, warehoused there (no release worker).
+        business day, back to ROUTED, warehoused there until `release_warehoused`.
         """
         payment = self._held_payment(payment_id, (lifecycle.CUTOFF_EXCEPTION,))
         ctx = self._held_context(payment)
@@ -944,6 +948,31 @@ class PaymentsService:
 
         ctx = self._held_context(updated)
         self._reattach_routing(ctx, updated)
+        return payment_lifecycle.run(ctx, start_index=5)
+
+    def release_warehoused(self, payment_id: str, *, released_by: str) -> dict:
+        """Release a payment warehoused at ROUTED once its value date has been reached.
+
+        Needs a recorded cut-off decision (NEXT_VALUE_DATE, or a HoldNextValueDate that
+        warehoused it). Stamps `cutoff.releasedAt`/`releasedBy` and leaves `cutoff.decision`
+        alone — the decision is the record of what the agent and analyst chose. Re-enters
+        at stage 4b (index 5), like an expedite; the money still moves only in stage 5.
+        """
+        payment = self._held_payment(payment_id, (lifecycle.ROUTED,))
+        cutoff = payment.get("cutoff") or {}
+        if not cutoff.get("decision"):
+            raise ValueError(f"Payment {payment_id} has no recorded cut-off decision to release.")
+        ctx = self._held_context(payment)
+        now = business_clock.ctx_now(ctx)
+        value_date = cutoff.get("valueDate")
+        if not value_date or business_clock.to_et(now).date().isoformat() < value_date:
+            raise ValueError(f"Payment {payment_id} is warehoused until {value_date}; "
+                             "that value date has not been reached.")
+        self.payments.update_one({"_id": payment["_id"]}, {"$set": {
+            "cutoff.releasedAt": now, "cutoff.releasedBy": released_by, "updatedAt": now,
+        }})
+        ctx.payment_doc = self.payments.find_one({"_id": payment["_id"]})
+        self._reattach_routing(ctx, ctx.payment_doc)
         return payment_lifecycle.run(ctx, start_index=5)
 
     def hold_next_value_date(self, payment_id: str, *, decided_by: str, reason: str) -> dict:

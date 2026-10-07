@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from api_models import (
+    CutoffReleaseRequest,
     CutoffScenarioRequest,
     DemoClockRequest,
     ExceptionResolveRequest,
@@ -258,6 +259,22 @@ def move_demo_clock(body: DemoClockRequest, request: Request) -> JSONResponse:
             request.app.state.payments_service.db, body.runId, anchor=body.anchor,
             advance_minutes=body.advanceMinutes, reset=bool(body.reset),
         ))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/demo/cutoff-release")
+def release_cutoff_run(body: CutoffReleaseRequest, request: Request) -> JSONResponse:
+    """Fast-forward one run to the next business day and close its held payments."""
+    from contexts.payment_orchestration.application import cutoff_release
+
+    try:
+        return to_json_response(cutoff_release.release_run(
+            request.app.state.payments_service, body.runId, actor=cutoff_release.ROUTE_ACTOR))
+    except cutoff_release.ReleaseBusy as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:

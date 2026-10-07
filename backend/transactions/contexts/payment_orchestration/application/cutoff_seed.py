@@ -44,6 +44,7 @@ RAJ = "CUST-abc10004"
 STAFF_MAYA = "STAFF-maya"
 STAFF_RAJ = "STAFF-raj"
 STAFF_LENA = "STAFF-lena"
+STAFF_ANALYST_3 = "STAFF-analyst-3"
 
 FUNDS_SHORT_AVAILABLE = 6_300.0
 EXPECTED_CREDIT = {"amount": 4_000.0, "currency": "USD", "expectedAtEt": "17:45",
@@ -99,7 +100,7 @@ def staff_docs(business_date: date) -> list[dict]:
                shift={"startEt": "08:00", "endEt": "17:00"}, capacity=6),
         person("STAFF-analyst-2", "Screening Analyst 2", "ANALYST",
                shift={"startEt": "08:00", "endEt": "17:00"}, capacity=6),
-        person("STAFF-analyst-3", "Screening Analyst 3", "ANALYST",
+        person(STAFF_ANALYST_3, "Screening Analyst 3", "ANALYST",
                shift={"startEt": "12:00", "endEt": "21:00"}, capacity=6),
     ]
 

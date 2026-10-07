@@ -90,6 +90,11 @@ sidecarContainers:
       # segment limit so stage 2's entitlement policy is what actually decides.
       - name: PAYMENT_LIMIT_USD
         value: "1000000"
+      # Releases abandoned CUTOFF-DEMO- runs (plan-cutoff-release). Staging-dev only.
+      - name: ENABLE_CUTOFF_RELEASE_JANITOR
+        value: "true"
+      - name: CUTOFF_RELEASE_AFTER_SECONDS
+        value: "1200"
     resources:
       limits:
         cpu: 1000m

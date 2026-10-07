@@ -308,8 +308,59 @@ function Outcome({ scenario, caseDoc, init, rejected, waiting }) {
   );
 }
 
+// Payment statuses at or past each closing stage. A button-less scenario is already past "held".
+const RELEASED = ["SUBMITTED", "SETTLED", "RECONCILED", "COMPLETED"];
+const SETTLED = ["SETTLED", "RECONCILED", "COMPLETED"];
+
+/** Held -> released -> settled -> reconciled, read from the payment itself. */
+function ClosingPanel({ closing }) {
+  const { copy, mode, payment, release, busy, timedOut, onFastForward } = closing;
+  const status = payment?.status;
+  const released = RELEASED.includes(status) || (!!release && !release.error);
+  const settled = SETTLED.includes(status);
+  const stages = [
+    { label: "Held", done: true },
+    { label: "Released", done: released },
+    { label: "Settled", done: settled },
+    { label: "Reconciled", done: status === "RECONCILED" },
+  ];
+  const valueDate = payment?.cutoff?.valueDate || payment?.valueDate;
+  return (
+    <div className={`${styles.findingCard} ${styles.closeOut}`}>
+      <Overline>Closing the payment</Overline>
+      <Body className={styles.muted}>{copy.copy}</Body>
+      <ul className={styles.actionLog}>
+        {stages.map((st) => (
+          <li key={st.label} className={`${styles.checkRow} ${st.done ? styles.checkDone : ""}`}>
+            <Icon glyph={st.done ? "Checkmark" : "Ellipsis"} size={20} />
+            <Body as="span">{st.label}</Body>
+            {st.label === "Settled" && st.done && valueDate && (
+              <Body as="span" className={styles.muted}>value date {valueDate}</Body>
+            )}
+          </li>
+        ))}
+      </ul>
+      {copy.button && !released && (
+        <div className={styles.actions}>
+          <Button variant="primary" disabled={busy} onClick={onFastForward}>
+            {busy ? "Working…" : copy.button}
+          </Button>
+        </div>
+      )}
+      {mode === "watch" && !settled && !timedOut && <Body className={styles.muted}>Waiting for settlement…</Body>}
+      {release?.error && <Body className={styles.error}>{release.error}</Body>}
+      {timedOut && (
+        <Body className={styles.error}>
+          Still not settled after 90 seconds. Check the Payments page for its current status.
+        </Body>
+      )}
+    </div>
+  );
+}
+
 export default function CutoffScene({
   act, scenario, init, businessMs, caseDoc, steps, started, canDecide, onDecided, rejected, waiting, revisedProposal,
+  closing,
 }) {
   const agent = caseDoc?.agent;
   if (act === 1 && !init) return <Body>{scenario.story}</Body>;
@@ -332,6 +383,7 @@ export default function CutoffScene({
       {act === 5 && !revisedProposal && (
         <Outcome scenario={scenario} caseDoc={caseDoc} init={init} rejected={rejected} waiting={waiting} />
       )}
+      {act === 5 && !revisedProposal && closing && <ClosingPanel closing={closing} />}
     </div>
   );
 }

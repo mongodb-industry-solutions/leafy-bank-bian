@@ -602,6 +602,18 @@ def test_expedite_verifies_only_when_submitted_by_the_external_cutoff():
                              rules.DEFER_NEXT_BUSINESS_DAY, risk) is None
 
 
+@pytest.mark.parametrize("status", ["ROUTED", "AUTHORISED", "SUBMITTED", "SETTLED"])
+def test_defer_verifies_at_any_status_but_cutoff_exception(status):
+    payment = {"status": status, "cutoff": {"decision": "NEXT_VALUE_DATE"}}
+    assert ca.verify_outcome(payment, rules.DEFER_NEXT_BUSINESS_DAY, None) == cases.DEFERRED_NEXT_BUSINESS_DAY
+
+
+def test_defer_does_not_verify_without_the_decision_or_while_excepted():
+    assert ca.verify_outcome({"status": "CUTOFF_EXCEPTION", "cutoff": {"decision": "NEXT_VALUE_DATE"}},
+                             rules.DEFER_NEXT_BUSINESS_DAY, None) is None
+    assert ca.verify_outcome({"status": "SETTLED", "cutoff": {}}, rules.DEFER_NEXT_BUSINESS_DAY, None) is None
+
+
 # --- the case store ---------------------------------------------------------------------------
 
 def _store():

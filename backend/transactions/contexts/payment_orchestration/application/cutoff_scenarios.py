@@ -42,6 +42,8 @@ SUPERSEDED_REASON = "Superseded by a new demo run."
 C3_SHORT_BY = 3_200.0
 # C3 must stay single-approval; a COMMERCIAL wire above this needs a second signatory.
 C3_MAX_AMOUNT = 10_000.0
+# Set on a run once `move_clock(next_business_day=...)` has moved it; the day it reached.
+FAST_FORWARDED_TO = "fastForwardedTo"
 
 HOLDS = (lifecycle.PENDING_APPROVAL, lifecycle.PENDING_FUNDS,
          lifecycle.PENDING_SCREENING, lifecycle.CUTOFF_EXCEPTION)
@@ -277,14 +279,21 @@ def _parse_hhmm(value: str) -> int:
 
 def move_clock(db, run_id: str, *, anchor: Optional[str] = None,
                advance_minutes: Optional[int] = None, reset: bool = False,
+               next_business_day: Optional[str] = None,
                real_now: Optional[datetime] = None) -> dict:
     """Move one run's business clock. Exactly one action.
 
     `anchor` (HH:MM ET) and `advance_minutes` only move forward — a held payment's stage
     events must never go back in time. `reset` returns to the run's start minute (Q7), the
-    one deliberate exception. Raises LookupError for an unknown run, ValueError otherwise.
+    one deliberate exception. `next_business_day` (HH:MM ET) jumps to that minute on the
+    business day after the run's date and moves the run's `businessDate` with it; it is the
+    cutoff release's option and is not exposed on `DemoClockRequest`. Calling it again is a
+    no-op: `FAST_FORWARDED_TO` remembers the day already reached. Raises LookupError for an
+    unknown run, ValueError otherwise.
     """
-    if sum((anchor is not None, advance_minutes is not None, bool(reset))) != 1:
+    actions = (anchor is not None, advance_minutes is not None, bool(reset),
+               next_business_day is not None)
+    if sum(actions) != 1:
         raise ValueError("Give exactly one of anchor, advanceMinutes or reset.")
     run = _clocks(db).find_one({"_id": run_id})
     if run is None:
@@ -310,6 +319,20 @@ def move_clock(db, run_id: str, *, anchor: Optional[str] = None,
         if advance_minutes <= 0:
             raise ValueError("advanceMinutes must be positive; the clock only moves forward.")
         offset = current + int(advance_minutes) * 60
+    elif next_business_day is not None:
+        target_date = (date.fromisoformat(run[FAST_FORWARDED_TO]) if run.get(FAST_FORWARDED_TO)
+                       else cutoff_policy.next_business_day(business_date))
+        offset = business_clock.anchor_offset(_parse_hhmm(next_business_day), real_now=real_now,
+                                              on_date=target_date)
+        if offset < current - business_now.second - 1:
+            return _clock_view(run_id, current, real_now=real_now)
+        offset = max(offset, current)
+        _clocks(db).update_one({"_id": run_id}, {"$set": {
+            "offsetSeconds": offset, "businessDate": target_date.isoformat(),
+            FAST_FORWARDED_TO: target_date.isoformat(),
+        }})
+        business_clock.forget(run_id)
+        return _clock_view(run_id, offset, real_now=real_now)
     else:
         if run.get("anchorEtMinutes") is None:
             raise ValueError(f"Clock run {run_id} has no start minute to reset to.")

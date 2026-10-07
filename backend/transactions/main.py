@@ -38,7 +38,12 @@ from routers.workflow import router as workflow_router
 from services.payments_service import PaymentNotFound, PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
-from workers import inbound_sim_worker, settlement_completion_worker, statement_sim_worker
+from workers import (
+    cutoff_release_worker,
+    inbound_sim_worker,
+    settlement_completion_worker,
+    statement_sim_worker,
+)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
@@ -161,6 +166,19 @@ if ENABLE_STATEMENT_SIM:
     logger.info(
         "started background worker: statement_sim_worker (interval=%ds)", _statement_interval,
     )
+
+# The cut-off release janitor (plan-cutoff-release R3): releases `CUTOFF-DEMO-` runs a
+# presenter abandoned. Default OFF — on in staging-dev only (see the worker's docstring).
+if cutoff_release_worker.enabled():
+    _release_after = cutoff_release_worker.release_after_seconds()
+    threading.Thread(
+        target=_restart_loop,
+        args=("cutoff_release_worker", cutoff_release_worker.run, payments_service,
+              cutoff_release_worker.DEFAULT_INTERVAL_SECONDS, _release_after),
+        daemon=True, name="cutoff_release_worker",
+    ).start()
+    logger.info("started background worker: cutoff_release_worker (release after %ds)",
+                _release_after)
 
 app.include_router(workflow_router)
 

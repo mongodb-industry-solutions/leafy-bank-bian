@@ -824,3 +824,11 @@ scene + rail. One tone drives every accent. */
   flex-direction: column;
   gap: 8px;
 }
+
+.closeOut {
+  gap: 12px;
+}
+
+.closeOut .actions {
+  margin-top: 4px;
+}

@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 # index is non-unique.
 PAYMENTS_INDEXES = [
     {"name": "idx_payment_id", "keys": [("paymentId", ASCENDING)]},
+    # Cutoff release: the release, the janitor and the agent sweeps find a run's payments by
+    # tag. PARTIAL, because only demo-clock payments carry `demo`.
+    {"name": "idx_payments_demo_run", "keys": [("demo.clockRunId", ASCENDING)],
+     "partialFilterExpression": {"demo.clockRunId": {"$exists": True}}},
     # The back-office workflow list sorts newest-first and filters by status, so createdAt
     # leads and status follows: this serves both the unfiltered list (sort alone) and the
     # status-filtered one. Doc 16 B2 asserted `idx_payments_customerId_createdAt` and
