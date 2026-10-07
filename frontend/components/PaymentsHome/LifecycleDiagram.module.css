@@ -1,0 +1,159 @@
+/* Light MongoDB palette. Green (stages 1-5), blue (6-7), purple (8-9) mirror the reference
+   diagram's banding using LeafyGreen light tints so the page stays bright. */
+.green { --bg: #f0fbf6; --line: #a6ecc8; --ink: #00684a; --chip: #00a35c; }
+.blue { --bg: #f0f7ff; --line: #c3e7fe; --ink: #1254b7; --chip: #016bf8; }
+.purple { --bg: #faf3ff; --line: #f1d4fd; --ink: #5e0c9e; --chip: #b45af2; }
+.neutral { --bg: #ffffff; --line: #e8edeb; --ink: #023430; --chip: #00684a; }
+.forest { --bg: #f9fbfa; --line: #c1e7d0; --ink: #023430; --chip: #00684a; }
+
+.scroller { width: 100%; overflow-x: auto; }
+.diagram {
+  min-width: 1180px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #c1e7d0;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(2, 52, 48, 0.06);
+}
+
+.muted { color: #5c6c75; font-size: 13px; }
+
+.head { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+.headTitle { color: #023430; }
+
+/* Personas + stages share one nine-column grid so persona spans line up with stages. */
+.nine { display: grid; grid-template-columns: repeat(9, 1fr); gap: 8px; align-items: stretch; }
+
+.persona {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 4px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.persona strong { display: block; font-size: 13px; }
+.persona span { color: #5c6c75; }
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.chevron {
+  position: relative;
+  padding: 10px 18px 10px 10px;
+  min-height: 108px;
+  background: color-mix(in srgb, var(--chip) 12%, #ffffff);
+  border-radius: 10px 10px 0 0;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--chip);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+}
+.stageTitle { color: var(--ink); font-size: 13px; line-height: 1.25; }
+.stageSub { color: #5c6c75; font-size: 11px; line-height: 1.3; }
+.aiTag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--chip);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.stageBody { padding: 10px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.stageIcon { color: var(--chip); }
+.items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.items li { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; color: #1c2d38; line-height: 1.3; }
+.items li svg { color: var(--chip); flex-shrink: 0; margin-top: 1px; }
+
+.flow { display: flex; flex-direction: column; align-items: stretch; }
+.flowBox {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--ink);
+}
+.flowArrow { display: block; margin: 2px auto; color: var(--chip); }
+
+.layer {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.layerLabel { display: flex; gap: 12px; align-items: center; }
+.layerIcon { color: var(--chip); flex-shrink: 0; }
+.layerTitle { color: var(--ink); font-size: 16px; line-height: 1.3; }
+
+.pills { display: flex; align-items: center; flex-wrap: nowrap; }
+.pillWrap { display: flex; align-items: center; flex: 1; }
+.pillArrow { color: #889397; margin: 0 4px; flex-shrink: 0; }
+.pill {
+  flex: 1;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink);
+}
+.pill strong, .pill span { display: block; }
+.pill span { color: #5c6c75; font-size: 11px; }
+
+/* Agents sit under the stage they serve: the right column is the same 9-way split. */
+.agents { display: grid; grid-template-columns: repeat(9, 1fr); gap: 8px; }
+.agent {
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--chip);
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent strong { display: flex; gap: 6px; align-items: center; }
+.tools { display: flex; gap: 12px; flex-wrap: wrap; }
+.tool { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #1c2d38; }
+.tool svg { color: var(--chip); }
+
+.collections { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 16px; }
+.coll { display: flex; gap: 8px; align-items: flex-start; font-size: 11px; color: #5c6c75; }
+.coll svg { color: #00a35c; flex-shrink: 0; }
+.coll code { display: block; font-size: 12px; font-weight: 600; color: #023430; }

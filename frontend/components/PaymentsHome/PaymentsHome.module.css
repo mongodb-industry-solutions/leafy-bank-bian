@@ -1,0 +1,57 @@
+/* MongoDB palette: Forest #023430, Green Dark 2 #00684A, Spring #00ED64, Mist #E3FCF7 */
+.page {
+  min-height: calc(100vh - 64px);
+  padding: 32px 24px 64px;
+  background: linear-gradient(180deg, #f9fbfa 0%, #e3fcf7 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+}
+
+.hero {
+  width: min(1400px, 100%);
+  padding: 48px 32px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #e3fcf7 0%, #ffffff 100%);
+  border: 1px solid #c1e7d0;
+  text-align: center;
+}
+
+.eyebrow { color: #00a35c; }
+.title { color: #00684a; margin: 12px 0 4px; }
+.tagline { color: #00a35c; font-weight: 500; margin: 0 0 16px; }
+.subtitle { color: #5c6c75; max-width: 680px; margin: 0 auto; font-size: 16px; }
+.badges { display: flex; gap: 8px; justify-content: center; margin-top: 24px; flex-wrap: wrap; }
+
+.lifecycle {
+  width: min(1400px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.features {
+  width: min(1400px, 100%);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+}
+
+.featureCard {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.featureIcon { color: #00684a; }
+.featureBody { flex: 1; color: #5c6c75; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
