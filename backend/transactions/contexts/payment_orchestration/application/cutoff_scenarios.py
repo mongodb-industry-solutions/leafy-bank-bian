@@ -40,8 +40,6 @@ CLIENT_REF_PREFIX = "CUTOFF-DEMO-"
 ACTOR = "cutoff-demo"
 SUPERSEDED_REASON = "Superseded by a new demo run."
 C3_SHORT_BY = 3_200.0
-# C3 must stay single-approval; a COMMERCIAL wire above this needs a second signatory.
-C3_MAX_AMOUNT = 10_000.0
 # Set on a run once `move_clock(next_business_day=...)` has moved it; the day it reached.
 FAST_FORWARDED_TO = "fastForwardedTo"
 
@@ -164,14 +162,27 @@ def _c3_amount(service) -> float:
     if not account:
         raise ValueError(f"{cutoff_seed.FUNDS_SHORT_ACCOUNT} is not seeded; run "
                          "load_cutoff_seed.py.")
+    if account.get("sourceSystem") != cutoff_seed.SOURCE_SYSTEM:
+        raise ValueError(f"{cutoff_seed.FUNDS_SHORT_ACCOUNT} is not owned by the cutoff demo "
+                         "seed; refusing to size C3 from it.")
     available = _as_float((account.get("balance") or {}).get("available"))
-    amount = round(available + C3_SHORT_BY, 2)
-    if amount > C3_MAX_AMOUNT:
-        raise ValueError(
-            f"{cutoff_seed.FUNDS_SHORT_ACCOUNT} holds {available:,.2f}; C3 would need "
-            f"{amount:,.2f}, above {C3_MAX_AMOUNT:,.0f}. Re-seed a fresh account."
-        )
-    return amount
+    if available != cutoff_seed.FUNDS_SHORT_AVAILABLE:
+        # Earlier runs' funds credits and settlements leave the seed account off its
+        # opening balance. Restore it so every C3 run starts from the same story.
+        _reset_funds_short_balance(service)
+        available = cutoff_seed.FUNDS_SHORT_AVAILABLE
+    return round(available + C3_SHORT_BY, 2)
+
+
+def _reset_funds_short_balance(service) -> None:
+    now = datetime.now(timezone.utc)
+    opening = cutoff_seed.FUNDS_SHORT_AVAILABLE
+    service.accounts.update_one(
+        {"accountId": cutoff_seed.FUNDS_SHORT_ACCOUNT,
+         "sourceSystem": cutoff_seed.SOURCE_SYSTEM},
+        {"$set": {"balance.current": opening, "balance.available": opening,
+                  "balance.ledger": opening, "balance.updatedAt": now, "updatedAt": now}},
+    )
 
 
 def _details(service, scenario: Scenario, payment: dict, now: datetime) -> dict:

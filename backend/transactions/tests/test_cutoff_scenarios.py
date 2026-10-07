@@ -192,13 +192,18 @@ def test_c3_is_short_by_3200_and_never_writes_the_balance(service, db):
     assert after == before
 
 
-def test_c3_refuses_when_the_account_has_drifted_too_high(service, db):
+def test_c3_resets_a_drifted_account_to_its_opening_balance(service, db):
     db["accounts"].update_one({"accountId": cutoff_seed.FUNDS_SHORT_ACCOUNT},
-                              {"$set": {"balance.available": 7_000.0}})
+                              {"$set": {"balance.available": 12_297.89,
+                                        "balance.current": 12_297.89,
+                                        "balance.ledger": 12_297.89}})
 
-    with pytest.raises(ValueError, match="Re-seed"):
-        cutoff_scenarios.run_one(service, "C3")
-    assert db["payments"].docs == []
+    result = cutoff_scenarios.run_one(service, "C3")
+
+    assert result["amount"] == cutoff_seed.FUNDS_SHORT_AVAILABLE + 3_200
+    balance = db["accounts"].find_one({"accountId": cutoff_seed.FUNDS_SHORT_ACCOUNT})["balance"]
+    assert balance["available"] == balance["current"] == balance["ledger"] == \
+        cutoff_seed.FUNDS_SHORT_AVAILABLE
 
 
 def test_c4_is_four_minutes_in_stage_at_position_two(service, db):
