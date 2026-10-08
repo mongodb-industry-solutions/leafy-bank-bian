@@ -1,13 +1,11 @@
-// Part D — the five cut-off scenarios and their step lists. The backend
+// Part D — the two cut-off scenarios and their step lists. The backend
 // `cutoff_scenarios.SCENARIOS` is the source of truth for amounts, banks and start minutes;
 // these cards only describe the story. The step machine runs in CutoffStepper.
 // Keys stay in the URL only; never put them in visible copy.
 
-// Who the presenter acts as. Raj is Maya's backup approver; analyst 3 is the only
-// screening analyst on shift after 17:00 (backend `cutoff_seed`).
+// Who the presenter acts as. Raj is Maya's backup approver (backend `cutoff_seed`).
 export const STAFF = {
   RAJ: "CUST-abc10004",
-  ANALYST: "STAFF-analyst-3",
 };
 
 export const CUTOFF_SCENARIOS = [
@@ -35,29 +33,6 @@ export const CUTOFF_SCENARIOS = [
     presenter: { clock: "18:16", clockLabel: "Move clock to 18:16" },
   },
   {
-    key: "C2",
-    closeOut: "watch",
-    mode: "approval",
-    modeLabel: "Rescued in time",
-    icon: "Person",
-    recommended: false,
-    decision: {
-      cause: { label: "Stuck in screening", code: "SCREENING" },
-      constraint: { label: "Expediting needs approval", code: "GATED" },
-      action: { label: "Expedite to Fedwire", code: "EXPEDITE" },
-    },
-    title: "Stuck in the screening queue",
-    story:
-      "An international wire sits eighth in the sanctions screening queue with one analyst left on shift. " +
-      "The agent moves it to the front, then asks to expedite once it is cleared.",
-    bank: "Emirates NBD",
-    amount: "8,750.00",
-    startEt: "17:50",
-    expected: "Submitted to Fedwire before its cut-off",
-    expectedOutcome: "SUBMITTED_IN_TIME",
-    presenter: { clock: "18:16", clockLabel: "Move clock to 18:16" },
-  },
-  {
     key: "C3",
     closeOut: "fastForward",
     mode: "refuses",
@@ -79,51 +54,6 @@ export const CUTOFF_SCENARIOS = [
     expected: "Held for the next value date",
     expectedOutcome: "HELD_NEXT_VALUE_DATE",
   },
-  {
-    key: "C5",
-    closeOut: "fastForward",
-    mode: "refuses",
-    modeLabel: "Can't make it",
-    icon: "Clock",
-    recommended: false,
-    decision: {
-      cause: { label: "Past the internal cut-off", code: "CUTOFF" },
-      constraint: { label: "Too late to expedite safely", code: "WILL_MISS" },
-      action: { label: "Defer to the next business day", code: "DEFER_NEXT_BUSINESS_DAY" },
-    },
-    title: "Ten minutes to Fedwire",
-    story:
-      "A cross-border wire reaches the cut-off exception queue ten minutes before Fedwire closes. " +
-      "The agent asks to defer it to the next business day instead of racing the clock.",
-    bank: "Royal Bank of Canada",
-    amount: "7,900.00",
-    startEt: "18:35",
-    expected: "Deferred to the next business day",
-    expectedOutcome: "DEFERRED_NEXT_BUSINESS_DAY",
-    presenter: { clock: "18:46", clockLabel: "Move clock past Fedwire (18:46)", optional: true },
-  },
-  {
-    key: "C4",
-    closeOut: "analyst",
-    mode: "autonomous",
-    modeLabel: "No action needed",
-    icon: "Checkmark",
-    recommended: false,
-    decision: {
-      cause: { label: "Second in screening", code: "SCREENING" },
-      constraint: { label: "Well inside the cut-off", code: "ON_TRACK" },
-      action: { label: "Do nothing", code: "NONE" },
-    },
-    title: "On track, leave it alone",
-    story:
-      "A wire sits second in the screening queue with hours to spare. " +
-      "The agent checks the timing against history and decides not to act.",
-    bank: "Barclays",
-    amount: "6,400.00",
-    startEt: "16:30",
-    expected: "No action needed",
-    expectedOutcome: null,
-  },
 ];
 
 export const CUTOFF_GROUPS = [
@@ -139,17 +69,11 @@ export const CUTOFF_GROUPS = [
     title: "Can't make it",
     blurb: "The agent says so early and asks to move the wire to another day.",
   },
-  {
-    mode: "autonomous",
-    icon: "Checkmark",
-    title: "No action needed",
-    blurb: "Knowing when not to act is part of the job.",
-  },
 ];
 
 // How the last act closes the payment. `watch`: it is already settling, so the panel only
-// watches. `fastForward` and `analyst` add one button that moves the payment on; the case
-// keeps the agent's decision either way.
+// watches. `fastForward` adds one button that moves the payment on; the case keeps the
+// agent's decision either way.
 export const CLOSE_OUT = {
   fastForward: {
     button: "Fast-forward to next business day",
@@ -157,11 +81,6 @@ export const CLOSE_OUT = {
       "The case keeps the agent's decision. Fast-forwarding moves the payment on to the next business day " +
       "so it can settle.",
     note: "Fast-forwarded to the next business day.",
-  },
-  analyst: {
-    button: "Let the analyst clear it",
-    copy: "The case stays closed as no action needed. The analyst clears screening and the wire moves on.",
-    note: "The analyst cleared screening.",
   },
   watch: { button: null, copy: "The wire is already on its way. Watching it settle.", note: null },
 };
@@ -171,7 +90,7 @@ export const closeOutFor = (key) => CLOSE_OUT[cutoffByKey(key)?.closeOut] || CLO
 export const cutoffByKey = (key) => CUTOFF_SCENARIOS.find((s) => s.key === key) || null;
 
 // The proposal each scenario waits for before the decision act.
-const PROPOSAL = { C1: "EXPEDITE", C2: "EXPEDITE", C3: "HOLD_NEXT_VALUE_DATE", C5: "DEFER_NEXT_BUSINESS_DAY" };
+const PROPOSAL = { C1: "EXPEDITE", C3: "HOLD_NEXT_VALUE_DATE" };
 export const expectedProposal = (key) => PROPOSAL[key] || null;
 
 // Each step: `act` (story bar), `gate` (what must be true before its button), `run` (the
@@ -180,9 +99,7 @@ const STEP = {
   start: { key: "start", act: 1, run: "start", button: "Send the wire" },
   watchClock: { key: "watch", act: 2, gate: "assessed", run: "clock", button: null },
   approveRaj: { key: "unblock", act: 3, run: "approveRaj", button: "Approve as Raj" },
-  clearScreening: { key: "unblock", act: 3, gate: "resolveBlocker", run: "clearScreening", button: "Clear screening as analyst" },
   watchProposal: { key: "watch", act: 2, gate: "proposal", button: "Review the proposal" },
-  watchNone: { key: "watch", act: 2, gate: "none", button: "See the result" },
   decide: { key: "decide", act: 4, gate: "proposal", decide: true },
   // The closing panel's button (if the scenario has one) lives in the scene, not the step bar.
   final: { key: "final", act: 5, final: true },
@@ -191,12 +108,10 @@ const STEP = {
 /** The ordered step list for a scenario. */
 export function cutoffStepsFor(key) {
   const scenario = cutoffByKey(key);
-  if (key === "C1" || key === "C2") {
+  if (key === "C1") {
     const watch = { ...STEP.watchClock, button: scenario.presenter.clockLabel };
-    const unblock = key === "C1" ? STEP.approveRaj : STEP.clearScreening;
-    return [STEP.start, watch, unblock, STEP.decide, STEP.final];
+    return [STEP.start, watch, STEP.approveRaj, STEP.decide, STEP.final];
   }
-  if (key === "C4") return [STEP.start, STEP.watchNone, STEP.final];
   return [STEP.start, STEP.watchProposal, STEP.decide, STEP.final];
 }
 
@@ -210,9 +125,7 @@ export const CUTOFF_ACTS = [
 
 /** The acts a scenario passes through. */
 export function cutoffActsFor(key) {
-  if (key === "C4") return CUTOFF_ACTS.filter((a) => a.id !== 3 && a.id !== 4);
-  if (key === "C3" || key === "C5") return CUTOFF_ACTS.filter((a) => a.id !== 3);
-  return CUTOFF_ACTS;
+  return key === "C1" ? CUTOFF_ACTS : CUTOFF_ACTS.filter((a) => a.id !== 3);
 }
 
 export const cutoffActOf = (step) => step?.act || 1;

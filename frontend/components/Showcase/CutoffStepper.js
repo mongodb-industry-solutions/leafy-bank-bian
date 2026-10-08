@@ -11,7 +11,7 @@ import { H2, Body } from "@leafygreen-ui/typography";
 import { usePaymentWorkflow } from "@/lib/api/hooks";
 import { closeOutFor, cutoffActOf, cutoffActsFor, cutoffByKey, cutoffStepsFor } from "./cutoffScenarios";
 import {
-  approveAsRaj, clearScreening, cutoffError, fastForward, findCase, moveClock, startCutoffScenario, sweepNow,
+  approveAsRaj, cutoffError, fastForward, findCase, moveClock, startCutoffScenario, sweepNow,
 } from "./cutoffActions";
 import StoryBar from "./StoryBar";
 import StatusRail from "./StatusRail";
@@ -79,13 +79,7 @@ function gateWaiting(gate, { agent, caseDoc, ctx }) {
   if (!gate) return null;
   if (!caseDoc) return "Waiting for the agent to open a case…";
   if (gate === "assessed") return agent?.assessedAt || agent?.error ? null : "Agent assessing…";
-  if (gate === "resolveBlocker") {
-    // A fresh assessment after the clock moved, not the one from before it.
-    const fresh = agent?.assessedAt && agent.assessedAt !== ctx.assessedBefore;
-    return fresh && agent?.recommendation?.kind === "RESOLVE_BLOCKER" ? null : "Agent re-assessing at the new time…";
-  }
   if (gate === "proposal") return agent?.proposedAction ? null : "Agent assessing…";
-  if (gate === "none") return agent?.recommendation?.kind === "NONE" ? null : "Agent assessing…";
   return null;
 }
 
@@ -121,8 +115,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   const rejected = ctx.decision === "REJECT";
   const closing = closeOutFor(scenarioKey);
   const result = caseDoc?.outcome?.result || null;
-  const settledNone = !scenario.expectedOutcome && agent?.recommendation?.kind === "NONE";
-  const done = rejected || !!result || (step.final && settledNone);
+  const done = rejected || !!result;
   const { steps: agentSteps, started } = useAgentSteps(caseDoc?.caseId || null, !done, "cutoff/cases");
 
   // A failed approved action sends the agent back once; its new proposal needs its own decision.
@@ -149,19 +142,13 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
       sweep(paymentId);
       return "Raj approved the wire as the backup signatory.";
     }
-    if (kind === "clearScreening") {
-      const { error: err } = await clearScreening(paymentId);
-      if (err) throw new Error(cutoffError(err));
-      sweep(paymentId);
-      return "The analyst cleared the screening match.";
-    }
     return null;
   }
 
   async function advanceClock(anchor) {
     const { data, error: err } = await moveClock(ctx.runId, anchor);
     if (err) throw new Error(cutoffError(err));
-    setCtx((c) => ({ ...c, offsetSeconds: data.offsetSeconds, assessedBefore: agent?.assessedAt || null }));
+    setCtx((c) => ({ ...c, offsetSeconds: data.offsetSeconds }));
     sweep(paymentId);
     return `Business clock moved to ${anchor} ET.`;
   }
@@ -226,7 +213,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   const sceneAct = Math.min(currentAct, 5);
   const act = acts.find((a) => a.id === sceneAct) || acts[0];
   const riskLevel = caseDoc?.risk?.riskLevel;
-  const expected = scenario.expectedOutcome ? result === scenario.expectedOutcome : settledNone;
+  const expected = result === scenario.expectedOutcome;
   // One tone for the whole page, so the story bar, scene stripe and status card agree.
   const tone = done
     ? expected ? "resolved" : "waiting"
@@ -247,7 +234,6 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   };
 
   const showButton = !step.final && !step.decide && !!step.button;
-  const presenterClock = scenario.presenter?.optional && paymentId && !done ? scenario.presenter : null;
 
   const chips = [
     <Badge key="status" variant="lightgray">{payment?.status || ctx.init?.status || "—"}</Badge>,
@@ -288,11 +274,6 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
               <Button size="small" disabled={sweeping || done} onClick={() => sweep(paymentId)}>
                 {sweeping ? "Agent running…" : "Sweep now"}
               </Button>
-              {presenterClock && (
-                <Button size="small" disabled={running} onClick={() => guarded(() => advanceClock(presenterClock.clock))}>
-                  {presenterClock.clockLabel}
-                </Button>
-              )}
             </div>
           )}
 

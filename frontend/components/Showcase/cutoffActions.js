@@ -27,12 +27,6 @@ export const approveAsRaj = (paymentId) =>
     body: { paymentId, approverId: STAFF.RAJ, decision: "APPROVED" },
   });
 
-export const clearScreening = (paymentId) =>
-  coreApi("TransactionAuthorization/Screening/Resolve", {
-    method: "POST",
-    body: { paymentId, analystId: STAFF.ANALYST, outcome: "CLEAR" },
-  });
-
 /**
  * One sweep for this payment. The backend runs the LLM inline, so this resolves tens of
  * seconds later: callers must not await it for progress (the case poll shows that).
