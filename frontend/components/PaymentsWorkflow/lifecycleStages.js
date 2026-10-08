@@ -162,6 +162,15 @@ export function buildLifecycleStages(payment, trace) {
   const reached = (...states) => events.some((e) => states.includes(e.state));
   const eventsFor = (...states) => events.filter((e) => states.includes(e.state));
 
+  // An inbound payment refused at stage 4 (P6): stage 5 prepared a pacs.002 RJCT and closed the
+  // payment REJECTED. Stages 6-9 are not reached. Keyed on the stored decision plus the status
+  // response, not on the REJECTED state alone — a payment that errored out earlier also ends
+  // REJECTED but never reached stage 5.
+  const rejectedAtStage4 =
+    inbound &&
+    payment?.acceptanceDecision?.decision === "REJECT" &&
+    !!payment?.refs?.statusResponseMessageId;
+
   // The payment's exception occurrences (joined by `get_payment`, doc 24 §3 step 8).
   // Rather than a separate stage-9 panel, each exception is routed to the stage that
   // produced it — its `source.stage` carries the originating stage number (e.g.
@@ -344,15 +353,15 @@ export function buildLifecycleStages(payment, trace) {
       // already happened before the message reached Leafy Bank." What replaces outbound's
       // orchestration + fraud scoring is a binary ACCEPT/REJECT rollup of stage 2's
       // beneficiary match and stage 3's sanctions outcome (FR-4.IN1). On REJECT the payment
-      // routes to Exceptions rather than advancing (FR-4.IN3) — never held for manual
-      // review, which is an outbound-only concept (FR-4.13) with no inbound equivalent.
+      // is rejected: stage 5 sends a pacs.002 RJCT and the payment is not posted (P6) — never
+      // held for manual review, which is an outbound-only concept (FR-4.13).
       intro: inbound
         ? "No routing choice to make here — the sending bank already chose the path before " +
           "the message arrived. Instead, this stage rolls up the two checks that came " +
           "before it — did the beneficiary match, did the originator clear sanctions — into " +
           "one decision: accept the payment, or reject it back to the sender. Accepting " +
-          "leads to a confirmation being sent at stage 5; rejecting stops the payment here " +
-          "and routes it to Exceptions instead."
+          "leads to a confirmation being sent at stage 5. Rejecting prepares a negative status " +
+          "confirmation, a pacs.002 RJCT, for Stage 5; the payment is not posted."
         : "Chooses the execution path within the already-selected rail, writes the immutable " +
           "routing snapshot, and confirms the commitment back to the originator. Then scores the " +
           "fully-formed payment for fraud and runs transaction-level authorization — approve, " +
@@ -360,7 +369,7 @@ export function buildLifecycleStages(payment, trace) {
       kind: inbound ? "acceptanceDecision" : "authorization",
       data: inbound
         ? {
-            events: eventsFor("ACCEPTED"),
+            events: eventsFor("ACCEPTED", "REJECTED"),
             acceptanceDecision: payment?.acceptanceDecision || null,
             checks: (payment?.checks || []).filter((c) =>
               String(c?.stage || "").startsWith("4 ")
@@ -412,11 +421,13 @@ export function buildLifecycleStages(payment, trace) {
       icon: "Beaker",
       stage: 5,
       reached: inbound
-        ? reached("ACCEPTED")
+        ? reached("ACCEPTED") || rejectedAtStage4
         : reached("SUBMITTED", "IN_PROGRESS") || !!tx,
       status: inbound ? undefined : (execution?.status ?? tx?.transactionStatus),
       meta: inbound
-        ? (payment?.refs?.statusResponseMessageId ? "pacs.002 ACCP" : "stage 5")
+        ? (payment?.refs?.statusResponseMessageId
+            ? `pacs.002 ${rejectedAtStage4 ? "RJCT" : "ACCP"}`
+            : "stage 5")
         : stageFiveMeta(payment, reached, execution, tx),
       // Her L938: outbound "executes" by transforming the canonical payment into an
       // outbound rail message and submitting it to a network. Inbound has nothing left to
@@ -428,15 +439,19 @@ export function buildLifecycleStages(payment, trace) {
       intro: inbound
         ? "The money already arrived, so there's nothing left to submit to a network — " +
           "\"execution\" here means telling the sending bank what happened. A confirmation " +
-          "message goes back: accepted if stage 4 approved it, rejected if it did not. " +
-          "Sending that confirmation is what advances the payment forward, ahead of the " +
-          "internal posting that follows at stage 6."
+          "message goes back: accepted (ACCP) if stage 4 approved it, rejected (RJCT, with a " +
+          "reason code) if it did not. An ACCP advances the payment to the internal posting at " +
+          "stage 6; an RJCT closes the payment as rejected and nothing is posted."
         : "Transforms the canonical payment into a rail-specific message at the rail boundary — a " +
           "pacs.008 for a wire — submits it to the network, and records the execution and its " +
           "acknowledgement. A book transfer reaches no rail and is recorded as exactly that.",
       kind: "railExecution",
+      // The stage did its job: the RJCT status report went out. The stepper must not paint it
+      // as a failure (it would read "Payment stopped at Execution") — the payment's own
+      // REJECTED status pill and the stage-4 meta carry the outcome.
+      rejectionCommunicated: rejectedAtStage4,
       data: {
-        events: inbound ? eventsFor("ACCEPTED") : eventsFor("SUBMITTED", "IN_PROGRESS"),
+        events: inbound ? eventsFor("ACCEPTED", "REJECTED") : eventsFor("SUBMITTED", "IN_PROGRESS"),
         execution,
         attempts: executions,
         // BUSINESS VIEW (her L550-553) and ISO VIEW (L555-563) — the two tabs. Outbound's
@@ -681,7 +696,9 @@ export function buildLifecycleStages(payment, trace) {
       status: payment?.lifecycle?.reconciliationStatus === "RECONCILED"
         ? "RECONCILED"
         : (trace?.reconciliation?.overallResult || undefined),
-      meta: payment?.lifecycle?.reconciliationStatus === "RECONCILED"
+      meta: rejectedAtStage4
+        ? "not applicable"
+        : payment?.lifecycle?.reconciliationStatus === "RECONCILED"
         ? (trace?.reconciliation?.overallResult === "DISCREPANT"
             ? "discrepancy accepted"
             : "reconciled")
@@ -697,8 +714,10 @@ export function buildLifecycleStages(payment, trace) {
                     ? "awaiting the correspondent statement"
                     : "awaiting the GL batch")
           : (reached("RECONCILED") ? "reconciled" : "stage 8"),
-      intro:
-        "Runs the three-way match — payment to rail, rail to settlement account, settlement " +
+      intro: rejectedAtStage4
+        ? "Not applicable: payment rejected. Nothing was posted or settled, so there is " +
+          "nothing to reconcile."
+        : "Runs the three-way match — payment to rail, rail to settlement account, settlement " +
         "account to the general ledger — and flags any discrepancy. Runs in the ledger service " +
         "after the settlement journal posts, so RECONCILED arrives asynchronously.",
       kind: "reconciliation",

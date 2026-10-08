@@ -23,7 +23,7 @@ independent draws. The scenario then mutates ONE thing on purpose, and the mutat
 | `HAPPY`     | nothing                  | the full path to SETTLED                      |
 | `PARTIAL`   | the beneficiary name     | a plausible variant -> stage 3 with a flag   |
 | `MISMATCH`  | the beneficiary name     | NO_MATCH -> the UTA queue                     |
-| `SANCTIONS`| the ORIGINATOR name      | a screening hit despite a matched beneficiary |
+| `SANCTIONS`| the ORIGINATOR name      | a screening hit -> pacs.002 RJCT (RR04), REJECTED |
 | `FX`       | the instructed currency  | the inbound FX conversion (FR-3.IN2)          |
 
 `DUPLICATE` mutates nothing and is not built here at all: a duplicate is the SAME message

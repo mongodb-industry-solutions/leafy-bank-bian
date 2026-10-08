@@ -591,6 +591,19 @@ def test_a_failed_payment_is_never_swept():
     assert result == {"reconciled": 0, "discrepant": 0, "pending": 0, "missing": 0, "eligible": 0}
 
 
+def test_a_rejected_inbound_payment_is_never_swept():
+    """P6 — a sanctions-rejected inbound wire closes REJECTED with no transaction, ledger
+    event or settlement position. REJECTED is outside {SETTLED, POSTED}, so the sweep
+    never opens a reconciliation item or a MISSING exception for it."""
+    c = FakeConnection()
+    c.seed("payments", [_payment_with_recon(rail="WIRE", state="REJECTED")])
+
+    result = reconcile_settled_payments(c, "db")
+
+    assert result == {"reconciled": 0, "discrepant": 0, "pending": 0, "missing": 0, "eligible": 0}
+    assert c.get_collection("db", "reconciliationItems").docs == []
+
+
 def test_an_already_reconciled_payment_is_not_re_swept():
     """Idempotent — the $ne RECONCILED filter excludes it, so no second lifecycle event."""
     c = FakeConnection()

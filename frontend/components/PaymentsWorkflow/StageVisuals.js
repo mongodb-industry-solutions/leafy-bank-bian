@@ -802,7 +802,7 @@ export function RailFlow({ payment, data }) {
       <div className={styles.chain} role="group" aria-label="Status response">
         <Node label="Acceptance" detail={payment?.acceptanceDecision?.decision || "—"} done={!!payment?.acceptanceDecision} />
         <Hop label="generate" />
-        <Node label="pacs.002" detail={sent ? "ACCP" : "pending"} done={sent} />
+        <Node label="pacs.002" detail={sent ? (payment?.clearing?.statusCode || "ACCP") : "pending"} done={sent} />
         <Hop label="transmit" async />
         <Node label="Sending bank" detail={sent ? "told" : "waiting"} done={sent} />
       </div>

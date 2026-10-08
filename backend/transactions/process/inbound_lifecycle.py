@@ -22,8 +22,9 @@ service and in `settlementPositions`, which never learn that inbound exists.
     1 receive      FinancialGateway        DRAFT -> RECEIVED
     2 resolve      FinancialGateway        -> VALIDATED      (or UTA hold)
     3 screen       PaymentOrderInitiation  -> ENRICHED -> FINAL_VALIDATED
-    4 accept       PaymentConfirmation     (decision; UTA hold on REJECT)
-    5 acknowledge  FinancialGateway        -> ACCEPTED       (pacs.002)
+    4 accept       PaymentConfirmation     (decision; REJECT -> RJCT at stage 5)
+    5 acknowledge  FinancialGateway        -> ACCEPTED       (pacs.002 ACCP)
+                                           or REJECTED       (pacs.002 RJCT; stages 6-8 not reached)
     6 credit       FinancialAccounting     -> IN_PROGRESS    (Dr clearing / Cr customer)
     7 settle       PaymentSettlement       -> SETTLED        (on arrival, D-IN4)
     8 reconcile    AccountReconciliation   -> RECONCILED     (async, in the ledger)

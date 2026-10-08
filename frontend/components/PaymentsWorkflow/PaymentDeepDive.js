@@ -97,7 +97,11 @@ function nodeStates(stages, paymentStatus) {
     }
     // Linear saga (stages 1-5): order is the fact.
     if (i < lastReached) return "completed";
-    if (i === lastReached) return failed ? "failed" : done ? "completed" : "current";
+    if (i === lastReached) {
+      // An inbound RJCT status report that went out is a completed stage, not a failure.
+      if (failed && s.rejectionCommunicated) return "completed";
+      return failed ? "failed" : done ? "completed" : "current";
+    }
     return "pending";
   });
 }
@@ -1043,7 +1047,9 @@ function RailViews({ data, inbound }) {
               {JSON.stringify(iso, null, 2)}
             </Code>
           </div>
-          {inbound && (
+          {/* The static example is for a payment that was accepted. A rejected payment shows its
+              own live RJCT above, and a second one beside it would read as two messages. */}
+          {inbound && data?.statusResponse?.statusCode !== "RJCT" && (
             <>
               <div className={styles.detailBlockTitle}>Example: rejected (RJCT) status report</div>
               <Body className={styles.muted}>
@@ -1209,6 +1215,9 @@ function summaryRows(stage, payment) {
           ["Status response", m?.paymentMessageId ?? payment?.refs?.statusResponseMessageId],
           ["Status", m?.statusCode ?? d?.clearing?.statusCode],
           ["Reason code", m?.reason],
+          // The plain-English reason on a refusal (`StsRsnInf/AddtlInf`), straight off the stored
+          // pacs.002 so the operator need not read the ISO view to learn why it was rejected.
+          ["Reason", m?.payload?.Document?.FIToFIPmtStsRpt?.TxInfAndSts?.[0]?.StsRsnInf?.AddtlInf],
           ["Answers message", m?.originalMessageRef],
           ["Sent to sending bank", fmtWhen(d?.clearing?.submittedAt)],
         ];

@@ -32,6 +32,12 @@ outbound story leans on that window being visible.
 
 Reads  ctx: payment_doc, creditor_account, instructed_amount, inbound_message_id
 Writes ctx: result, payment_doc, current_state
+
+## The rejected branch (P6, D1)
+
+A stage-4 REJECT still reaches stage 5, which prepares and stores the negative pacs.002
+(RJCT) and closes the payment `REJECTED`. Stages 6-8 do not run. Not an exception and not a
+UTA: the beneficiary matched, and the sender is told "no" by the status report itself.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
+from contexts.financial_gateway.application import screen_and_accept
 from contexts.financial_gateway.domain.inbound_documents import status_response_doc
 from contexts.payment_order_initiation.domain import checks, lifecycle
 from contexts.payment_rail import documents
@@ -67,15 +74,35 @@ def run(ctx: PaymentContext) -> None:
     now = datetime.now(timezone.utc)
     ctx.now = now
 
-    _acknowledge(ctx, now)
+    decision = _acceptance_decision(ctx)
+    _acknowledge(ctx, now, decision)
+    if decision["decision"] == screen_and_accept.REJECT:
+        # Stages 6-8 are not reached: nothing is credited, no `transactions` doc, no
+        # settlement position, no reconciliation. `ctx.halt` ends the saga before stage 8.
+        ctx.result = ctx.collections.payments.find_one({"_id": ctx.payment_oid})
+        ctx.halt = True
+        return
     _credit(ctx, now)
     _settle_on_arrival(ctx, now)
 
 
 # --- stage 5: the status response --------------------------------------------
 
-def _acknowledge(ctx: PaymentContext, now: datetime) -> None:
-    """FR-5.IN1/2/3 — generate the pacs.002, store it, advance to ACCEPTED.
+def _acceptance_decision(ctx: PaymentContext) -> dict:
+    """The stage-4 decision, read from the payment so a resumed saga sees it too.
+
+    Defaults to ACCEPT only when the document carries no decision at all, which stage 4
+    always writes — the default keeps a context built without stage 4 on the old path.
+    """
+    stored = (ctx.payment_doc or {}).get("acceptanceDecision")
+    return stored or {"decision": screen_and_accept.ACCEPT, "reasonCode": None}
+
+
+def _acknowledge(ctx: PaymentContext, now: datetime, decision: dict) -> None:
+    """FR-5.IN1/2/3 — generate the pacs.002, store it, advance the payment.
+
+    ACCEPT -> pacs.002 ACCP, state ACCEPTED. REJECT -> pacs.002 RJCT with the decision's
+    reason code, state REJECTED (a legal terminal from FINAL_VALIDATED: no money has moved).
 
     ⚠️ **No `paymentExecutions` document.** Her L944 is explicit: that collection exists
     specifically for tracking OUTBOUND rail-message generation attempts and stays
@@ -83,35 +110,49 @@ def _acknowledge(ctx: PaymentContext, now: datetime) -> None:
     submitted anywhere. The status response lands in `paymentMessages` instead, tagged
     `direction: OUTBOUND, purpose: STATUS_RESPONSE`.
     """
+    accepted = decision["decision"] == screen_and_accept.ACCEPT
+    reason_code = decision.get("reasonCode")
     oid = ObjectId()
     message = status_response_doc(
         oid=oid,
         payment=ctx.payment_doc,
-        accepted=True,
-        reason_code=None,
+        accepted=accepted,
+        reason_code=reason_code,
         original_message_ref=ctx.inbound_message_id,
         now=now,
     )
     _messages(ctx).insert_one(message)
 
+    status = message["statusCode"]
     checks.append_checks(ctx.collections.payments, ctx.payment_oid, [
         checks.check(
             STAGE_ACK, "status_response_transmitted", checks.PASS, mode=checks.SYNC,
             detail=(
-                f"pacs.002 {message['paymentMessageId']} (ACCP) transmitted to the sending "
-                f"bank, confirming the payment will be applied. SIMULATED."
+                f"pacs.002 {message['paymentMessageId']} ({status}) transmitted to the sending "
+                + (
+                    "bank, confirming the payment will be applied. SIMULATED."
+                    if accepted else
+                    f"bank, rejecting the payment ({reason_code}); it will not be posted. "
+                    "SIMULATED."
+                )
             ),
             actor="financial-gateway", at=now,
         )
     ])
 
+    to_state = lifecycle.ACCEPTED if accepted else lifecycle.REJECTED
     lifecycle.advance_ctx(
-        ctx, lifecycle.ACCEPTED,
+        ctx, to_state,
         actor="financial-gateway",
-        reason="Positive status report (pacs.002 ACCP) transmitted to the sending bank",
+        reason=(
+            "Positive status report (pacs.002 ACCP) transmitted to the sending bank"
+            if accepted else
+            f"Negative status report (pacs.002 RJCT, {reason_code}) transmitted to the "
+            "sending bank; payment rejected, nothing posted"
+        ),
         extra={
             "clearing.submittedAt": now,
-            "clearing.statusCode": "ACCP",
+            "clearing.statusCode": status,
             "refs.statusResponseMessageId": message["paymentMessageId"],
         },
     )

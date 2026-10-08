@@ -465,9 +465,90 @@ def test_a_sanctioned_originator_is_refused_despite_a_matched_beneficiary(servic
     assert payment["acceptanceDecision"]["decision"] == "REJECT"
     assert payment["acceptanceDecision"]["reasonCode"] == "RR04"
     assert payment["correspondent"]["sanctionsCheck"]["status"] == "HIT"
-    # FR-4.IN3 — not advanced to stage 5/6, routed to stage 9.
-    assert payment["lifecycle"]["currentState"] == "FINAL_VALIDATED"
-    assert db["exceptions"].find_one({})["category"] == exc_module.CATEGORY_UTA
+    # P6 (D1): the refusal is a negative status report, not a UTA hold. The payment closes
+    # REJECTED at stage 5; the beneficiary matched, so nothing is Unable-to-Apply.
+    assert payment["lifecycle"]["currentState"] == "REJECTED"
+    assert list(db["exceptions"].find({})) == []
+
+
+def _status_responses(db):
+    return [
+        m for m in db["paymentMessages"].find({})
+        if m["purpose"] == inbound_documents.PURPOSE_STATUS_RESPONSE
+    ]
+
+
+def test_a_rejected_inbound_stores_a_pacs002_rjct_with_the_sanctions_reason(service, db):
+    """P6 / D1 / D8 — stage 5 prepares the NEGATIVE status report: TxSts RJCT, reason RR04,
+    and the plain-English AddtlInf, stored in paymentMessages and linked from the payment."""
+    service.receive_inbound(_message(debtor_name="Vostok Heavy Industries"))
+
+    responses = _status_responses(db)
+    assert len(responses) == 1
+    stored = responses[0]
+    assert stored["statusCode"] == pacs002.REJECTED
+    assert stored["reason"] == "RR04"
+    assert stored["messageFormat"] == "pacs.002.001.08"
+
+    tx = pacs002.body(stored["payload"])["TxInfAndSts"][0]
+    assert tx["TxSts"] == "RJCT"
+    assert tx["StsRsnInf"]["Rsn"]["Cd"] == "RR04"
+    assert tx["StsRsnInf"]["AddtlInf"] == "Sanctions screening hit on originator"
+    assert tx["AccptncDtTm"] is None
+
+    payment = _payment_doc(db)
+    assert payment["status"] == "REJECTED"
+    assert payment["clearing"]["statusCode"] == "RJCT"
+    assert payment["refs"]["statusResponseMessageId"] == stored["paymentMessageId"]
+    assert [e["state"] for e in payment["lifecycle"]["events"]][-1] == "REJECTED"
+
+
+def test_a_rejected_inbound_posts_nothing_and_is_never_reconciled(service, db):
+    """Accounting invariant: a rejected payment moves no money and leaves nothing for the
+    ledger's change streams or the reconciliation sweep to pick up."""
+    before = db["accounts"].find_one({"accountId": CREDITOR})["balance"]
+    clearing_before = db["accounts"].find_one({"accountId": "ACC-CLEARING-WIRE"})["balance"]
+    service.receive_inbound(_message(debtor_name="Vostok Heavy Industries"))
+
+    assert db["accounts"].find_one({"accountId": CREDITOR})["balance"] == before
+    assert db["accounts"].find_one({"accountId": "ACC-CLEARING-WIRE"})["balance"] == clearing_before
+    assert list(db["transactions"].find({})) == []
+    assert list(db["notifications"].find({})) == []
+    assert list(db["settlementPositions"].find({})) == []
+    assert list(db["exceptions"].find({})) == []
+
+    payment = _payment_doc(db)
+    assert payment["refs"].get("transactionId") is None
+    assert payment["refs"].get("settlementPositionId") is None
+    assert payment["lifecycle"].get("settlementStatus") in (None, "PENDING")
+    # The ledger sweep selects `currentState in {SETTLED, POSTED}`; REJECTED is outside it,
+    # and stage 8 does not run for the payment at all.
+    assert payment["lifecycle"]["currentState"] not in ("SETTLED", "POSTED")
+    assert "reconciliation_deferred" not in {c["name"] for c in payment["checks"]}
+
+
+def test_a_clean_inbound_is_still_accepted_with_an_accp_status_report(service, db):
+    service.receive_inbound(_message())
+
+    stored = _status_responses(db)[0]
+    assert stored["statusCode"] == pacs002.ACCEPTED
+    assert stored["reason"] is None
+    tx = pacs002.body(stored["payload"])["TxInfAndSts"][0]
+    assert tx["TxSts"] == "ACCP"
+    assert "StsRsnInf" not in tx or tx["StsRsnInf"] is None
+    assert _payment_doc(db)["lifecycle"]["currentState"] == "SETTLED"
+    assert _payment_doc(db)["clearing"]["statusCode"] == "ACCP"
+
+
+def test_replaying_a_rejected_message_returns_the_same_payment_and_adds_nothing(service, db):
+    message = _message(debtor_name="Vostok Heavy Industries")
+    first = service.receive_inbound(message)
+    second = service.receive_inbound(message)
+
+    assert second["paymentId"] == first["paymentId"]
+    assert len(list(db["payments"].find({}))) == 1
+    assert len(_status_responses(db)) == 1
+    assert list(db["transactions"].find({})) == []
 
 
 def test_a_restricted_origin_country_is_refused(service, db):
@@ -896,7 +977,7 @@ def test_one_ambient_cycle_is_exactly_two_happy_payments_and_nothing_else(servic
     ("HAPPY", "SETTLED", name_match.MATCHED),
     ("PARTIAL", "SETTLED", name_match.PARTIAL),
     ("MISMATCH", "RECEIVED", name_match.NO_MATCH),
-    ("SANCTIONS", "FINAL_VALIDATED", name_match.MATCHED),
+    ("SANCTIONS", "REJECTED", name_match.MATCHED),
 ])
 def test_each_scenario_runs_through_the_service_to_its_named_outcome(
         service, db, scenario, expected_state, expected_resolution):
@@ -909,7 +990,7 @@ def test_each_scenario_runs_through_the_service_to_its_named_outcome(
     assert payment["beneficiaryResolution"]["matchOutcome"] == expected_resolution
     if scenario == "SANCTIONS":
         assert payment["acceptanceDecision"]["decision"] == "REJECT"
-        assert db["exceptions"].find_one({})["category"] == exc_module.CATEGORY_UTA
+        assert db["exceptions"].find_one({}) is None  # P6: RJCT status report, not a UTA
     if scenario == "MISMATCH":
         assert db["exceptions"].find_one({})["category"] == exc_module.CATEGORY_UTA
 

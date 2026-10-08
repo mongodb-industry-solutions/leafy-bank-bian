@@ -16,10 +16,10 @@ outgoing, not duplicated").
 
 ## Stage 4 — FR-4.IN1..3 (her L823)
 
-`beneficiaryResolution.matchOutcome` + sanctions outcome -> ACCEPT or REJECT. On ACCEPT the
-payment advances to stage 5 (the pacs.002); on REJECT it goes to the UTA queue rather than
-straight to a terminal, because the funds are here and someone must decide how to return
-them.
+`beneficiaryResolution.matchOutcome` + sanctions outcome -> ACCEPT or REJECT. Either way the
+payment advances to stage 5, which prepares the pacs.002: ACCP on ACCEPT, RJCT on REJECT. A
+REJECT closes the payment `REJECTED` there and posts nothing — it does not open a UTA
+exception (that is for a beneficiary Leafy Bank cannot resolve, stage 2).
 
 Reads  ctx: payment_doc, beneficiary_match, inbound_parsed, creditor_account
 Writes ctx: payment_doc (correspondent.sanctionsCheck, fx, validation, acceptanceDecision)
@@ -289,8 +289,6 @@ def _decide(ctx, screening, now) -> None:
     *"despite a matched beneficiary"* still rejects. So both inputs must be ACCEPT-able,
     not either.
     """
-    from contexts.financial_gateway.application import uta
-
     beneficiary_ok = ctx.beneficiary_match in name_match.PROCEEDING_OUTCOMES
     screening_ok = not screening.refuses
 
@@ -338,17 +336,8 @@ def _decide(ctx, screening, now) -> None:
         )
     ])
 
-    if decision == REJECT:
-        # FR-4.IN3 — do not advance to stage 5/6; route to stage 9 for return processing.
-        # As at stage 2, this is a HOLD and not a rejection: the money is here, and an
-        # operator has to choose Repair or Return.
-        uta.record(
-            ctx,
-            reason=(
-                f"Acceptance refused ({reason_code}): beneficiary match "
-                f"{ctx.beneficiary_match}, screening {screening.status}."
-            ),
-            stage=STAGE_ACCEPT,
-        )
-        ctx.halt = True
-        ctx.result = ctx.collections.payments.find_one({"_id": ctx.payment_oid})
+    # Refresh the context so stage 5 reads the decision just recorded (a bare `update_one`
+    # above leaves `ctx.payment_doc` stale). On REJECT the saga does NOT halt: stage 5 builds
+    # the negative pacs.002 and closes the payment REJECTED (P6, D1). No UTA exception is
+    # opened — the beneficiary matched, so this is not Unable-to-Apply, and nothing was posted.
+    ctx.payment_doc = ctx.collections.payments.find_one({"_id": ctx.payment_oid})
