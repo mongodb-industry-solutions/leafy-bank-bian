@@ -210,8 +210,11 @@ def test_leg2_does_not_wait_on_a_statement_for_an_inbound_payment():
     payments.update_one({"paymentId": "PAY-A"}, {"$set": {"direction": "INBOUND"}})
     positions = c.get_collection("db", "settlementPositions")
     positions.update_one({"paymentId": "PAY-A"}, {"$set": {"actualAmount": 25000.0}})
+    # The transmitted pacs.002 is the inbound rail confirmation leg 2 now compares against.
+    c.get_collection("db", "paymentMessages").insert_one(
+        {"paymentId": "PAY-A", "purpose": "STATUS_RESPONSE", "statusCode": "ACCP"})
 
-    assert compute_reconciliation("PAY-A", c, "db").legs[1].result != LEG_PENDING
+    assert compute_reconciliation("PAY-A", c, "db").legs[1].result == LEG_MATCH
 
 
 def test_a_historical_statement_is_never_matched_nor_raises_orphans():

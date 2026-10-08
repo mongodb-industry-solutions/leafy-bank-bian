@@ -618,6 +618,15 @@ function ReconciliationTieOut({ data, payment }) {
   const minors = (v) => (v == null ? null : Number(v) / 100);
   const currency = payment?.currency || "USD";
 
+  // The amount booked for this wire. New items carry it on leg 3 (position == settlement-leg
+  // journal entry). Items written before that fix stored 0/0 on a MATCH, and a book transfer
+  // stores nothing, so fall back to the settlement amount rather than show 0.00 (D7).
+  const settlementAmount = position?.actualAmount ?? position?.grossAmount ?? payment?.amount;
+  const bookedAmount = (v) => {
+    const booked = minors(v);
+    return booked ? booked : leg3?.result === "MATCH" ? settlementAmount : booked;
+  };
+
   // The five rows Doina drew (L648-652). Each carries the amount that row represents and the
   // verdict for the leg that proves it.
   const rows = [
@@ -635,7 +644,7 @@ function ReconciliationTieOut({ data, payment }) {
     },
     {
       label: "Subledger",
-      amount: minors(leg3?.leftAmount ?? leg2?.rightAmount),
+      amount: bookedAmount(leg3?.rightAmount),
       leg: leg3,
       naText: "N/A — book transfer",
     },
@@ -651,7 +660,7 @@ function ReconciliationTieOut({ data, payment }) {
     },
     {
       label: "General ledger",
-      amount: minors(leg3?.rightAmount),
+      amount: bookedAmount(leg3?.rightAmount),
       leg: leg3,
       naText: "N/A — book transfer",
     },
@@ -709,15 +718,16 @@ function ReconciliationTieOut({ data, payment }) {
                 : "=> pending the GL batch"}
         </StatusPill>
       </div>
-      {leg1?.detail && (
-        <Body className={styles.muted}>{leg1.detail}</Body>
-      )}
-      {leg2?.detail && leg2.result !== "NOT_APPLICABLE" && (
-        <Body className={styles.muted}>{leg2.detail}</Body>
-      )}
-      {leg3?.detail && (
-        <Body className={styles.muted}>{leg3.detail}</Body>
-      )}
+      {[
+        [leg1, "Leg 1 — Payment ↔ Rail: the received message (Stage 1) and the transmitted pacs.002 (Stage 5) are compared against the posted ledger entry."],
+        [leg2, "Leg 2 — Rail ↔ Settlement: the rail's confirmed outcome (pacs.002 inbound, rail confirmation outbound) is compared against the actual settlement position."],
+        [leg3, "Leg 3 — Settlement ↔ GL: the actual settlement position is compared against its settlement-leg journal entry (the second ledger event from Stage 7)."],
+      ].map(([leg, description]) => leg && leg.result !== "NOT_APPLICABLE" && (
+        <div key={leg.leg}>
+          <Body className={styles.muted}>{description}</Body>
+          {leg.detail && <Body className={styles.muted}>{leg.detail}</Body>}
+        </div>
+      ))}
     </div>
   );
 }

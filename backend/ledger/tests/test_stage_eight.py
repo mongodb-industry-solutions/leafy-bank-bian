@@ -272,6 +272,126 @@ def test_leg3_mismatch_when_clearing_account_does_not_net_to_zero():
     assert check.overall == DISCREPANT
 
 
+# --- P4: leg 3 shows the booked amount; leg 2 compares the rail's confirmed outcome ---------
+
+def _pacs002(status: str = "ACCP") -> dict:
+    # Mirrors `inbound_documents.status_response_doc` keys the ledger reads.
+    return {"paymentId": _PAY, "purpose": "STATUS_RESPONSE", "direction": "OUTBOUND",
+            "statusCode": status}
+
+
+def _inbound_wire_fixture(c: FakeConnection, amount: float = 25000.0, pacs002_status: str | None = "ACCP",
+                          position: dict | None = None) -> None:
+    pay = _payment(rail="WIRE", amount=amount, state="SETTLED")
+    pay["direction"] = "INBOUND"
+    c.seed("payments", [pay])
+    c.seed("paymentMessages", [
+        {"paymentId": _PAY, "direction": "INBOUND", "purpose": "CREDIT_TRANSFER"},
+        *([_pacs002(pacs002_status)] if pacs002_status else []),
+    ])
+    c.seed("settlementPositions", [position or _position(gross=amount)])
+    minors = int(round(amount * 100))
+    c.seed("ledgerEvents", [_principal_event(minors, credit_code="1131"), _settlement_event(minors)])
+
+
+def test_inbound_leg3_amounts_equal_the_booked_non_zero_amount():
+    c = FakeConnection()
+    _inbound_wire_fixture(c)
+
+    check = compute_reconciliation(_PAY, c, "db")
+
+    leg3 = check.legs[2]
+    assert leg3.result == LEG_MATCH
+    assert leg3.left_amount == leg3.right_amount == _MIN
+    assert check.overall == RECONCILED
+
+
+def test_outbound_leg3_amounts_equal_the_booked_non_zero_amount():
+    c = FakeConnection()
+    c.seed("payments", [_payment(rail="WIRE", state="SETTLED")])
+    c.seed("paymentExecutions", [_execution()])
+    c.seed("settlementPositions", [_position()])
+    c.seed("ledgerEvents", [_principal_event(credit_code="1131"), _settlement_event()])
+
+    leg3 = compute_reconciliation(_PAY, c, "db").legs[2]
+
+    assert leg3.result == LEG_MATCH
+    assert leg3.left_amount == leg3.right_amount == _MIN
+
+
+def test_leg3_mismatch_when_the_position_differs_from_the_booked_settlement_entry():
+    c = FakeConnection()
+    c.seed("payments", [_payment(rail="WIRE", state="SETTLED")])
+    c.seed("paymentExecutions", [_execution()])
+    c.seed("settlementPositions", [_position(actual=24000.0)])
+    c.seed("ledgerEvents", [_principal_event(credit_code="1131"), _settlement_event()])
+
+    leg3 = compute_reconciliation(_PAY, c, "db").legs[2]
+
+    # Clearing still nets to zero, but the amounts disagree — the invariant is not weakened.
+    assert leg3.result == LEG_MISMATCH
+    assert (leg3.left_amount, leg3.right_amount) == (2_400_000, _MIN)
+
+
+def test_inbound_leg2_matches_when_pacs002_and_position_agree():
+    c = FakeConnection()
+    _inbound_wire_fixture(c)
+
+    assert compute_reconciliation(_PAY, c, "db").legs[1].result == LEG_MATCH
+
+
+def test_inbound_leg2_mismatch_when_pacs002_rejected_but_position_settled():
+    c = FakeConnection()
+    _inbound_wire_fixture(c, pacs002_status="RJCT")
+
+    check = compute_reconciliation(_PAY, c, "db")
+
+    assert check.legs[1].result == LEG_MISMATCH
+    assert "pacs.002 RJCT" in check.legs[1].detail
+    assert check.overall == DISCREPANT
+
+
+def test_outbound_leg2_mismatch_when_rail_confirmed_amount_differs_from_the_position():
+    c = FakeConnection()
+    c.seed("payments", [_payment(rail="WIRE", state="SETTLED")])
+    c.seed("paymentExecutions", [_execution(amount=24000.0)])  # rail confirmed 24,000
+    c.seed("settlementPositions", [_position()])               # position settled 25,000
+    c.seed("ledgerEvents", [_principal_event(credit_code="1131"), _settlement_event()])
+
+    leg2 = compute_reconciliation(_PAY, c, "db").legs[1]
+
+    assert leg2.result == LEG_MISMATCH
+    assert (leg2.left_amount, leg2.right_amount) == (2_400_000, _MIN)
+
+
+def test_outbound_leg2_mismatch_when_the_rail_rejected_but_position_settled():
+    c = FakeConnection()
+    c.seed("payments", [_payment(rail="WIRE", state="SETTLED")])
+    c.seed("paymentExecutions", [_execution(ack_code="RJCT")])
+    c.seed("settlementPositions", [_position()])
+    c.seed("ledgerEvents", [_principal_event(credit_code="1131"), _settlement_event()])
+
+    assert compute_reconciliation(_PAY, c, "db").legs[1].result == LEG_MISMATCH
+
+
+def test_leg2_waits_when_the_rail_has_confirmed_nothing():
+    c = FakeConnection()
+    _inbound_wire_fixture(c, pacs002_status=None)
+
+    assert compute_reconciliation(_PAY, c, "db").legs[1].result == LEG_PENDING
+
+
+def test_internal_transfer_legs_are_unchanged_by_the_settlement_comparisons():
+    c = FakeConnection()
+    c.seed("payments", [_payment(rail="INTERNAL", state="POSTED")])
+    c.seed("ledgerEvents", [_principal_event()])
+
+    legs = compute_reconciliation(_PAY, c, "db").legs
+
+    assert [lg.result for lg in legs] == [LEG_NOT_APPLICABLE, LEG_NOT_APPLICABLE, LEG_MATCH]
+    assert legs[2].left_amount is None and legs[2].right_amount is None
+
+
 # --- not found -----------------------------------------------------------------
 
 def test_unknown_payment_returns_none():
@@ -353,7 +473,7 @@ def test_a_reconciliation_items_doc_validates_against_the_authored_shape():
         "legs": [
             {"leg": "PAYMENT_RAIL", "result": "MATCH", "leftAmount": _MIN, "rightAmount": _MIN, "detail": "ok"},
             {"leg": "RAIL_SETTLEMENT", "result": "MATCH", "leftAmount": _MIN, "rightAmount": _MIN, "detail": "ok"},
-            {"leg": "SETTLEMENT_GL", "result": "MATCH", "leftAmount": 0, "rightAmount": 0, "detail": "ok"},
+            {"leg": "SETTLEMENT_GL", "result": "MATCH", "leftAmount": _MIN, "rightAmount": _MIN, "detail": "ok"},
         ],
         "overallResult": "RECONCILED",
         "journalEntryId": _JNL,

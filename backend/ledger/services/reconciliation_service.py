@@ -54,8 +54,9 @@ logger = logging.getLogger(__name__)
 #   1. Payment ↔ Rail         — did the rail process what we sent?
 #   2. Rail ↔ Settlement       — did cash actually move (settlementPositions vs the settlement
 #                                ledgerEvent)?
-#   3. Settlement ↔ GL         — does the GL agree with external settlement (journal posted +
-#                                the clearing account nets to zero)?
+#   3. Settlement ↔ GL         — does the GL agree with external settlement (the settlement
+#                                position == its settlement-leg journal entry, journal posted,
+#                                and the clearing account nets to zero)?
 # Legs 1 and 2 are NOT_APPLICABLE for an internal book transfer (no rail artifact, no settlement
 # run — doc 21 B3, Q39); leg 3 then reduces to "the principal journal posted".
 
@@ -177,6 +178,31 @@ def _clearing_account_net(events: list[dict], clearing_code: str) -> int:
     return total
 
 
+def _rail_confirmation(payment: dict, connection: MongoDBConnection, db_name: str,
+                       payment_amount_minors: Optional[int]) -> Optional[tuple[bool, Optional[int], str]]:
+    """The rail's confirmed outcome for leg 2: (accepted, confirmed_amount_minors, label).
+
+    Inbound: the transmitted pacs.002 (stage 5). It carries no amount, so the amount it
+    confirmed is the payment's own. Outbound: the last `paymentExecutions` attempt's
+    `railStatus` (the rail's pacs.002 answer) and its amount. Returns None while the rail has
+    confirmed nothing (leg 2 then waits — it cannot be compared against a missing outcome).
+    """
+    payment_id = payment.get("paymentId")
+    if payment.get("direction") == "INBOUND":
+        response = connection.get_collection(db_name, "paymentMessages").find_one(
+            {"paymentId": payment_id, "purpose": "STATUS_RESPONSE"})
+        if response is None or not response.get("statusCode"):
+            return None
+        code = response["statusCode"]
+        return code == "ACCP", payment_amount_minors, f"pacs.002 {code}"
+    executions = list(connection.get_collection(db_name, "paymentExecutions")
+                      .find({"paymentId": payment_id}, {"_id": 0}).sort("attempt", 1))
+    code = ((executions[-1].get("railStatus") or {}).get("code")) if executions else None
+    if not code:
+        return None
+    return code != "RJCT", _majors_to_minors(executions[-1].get("amount")), f"rail status {code}"
+
+
 def compute_reconciliation(
     payment_id: str,
     connection: MongoDBConnection,
@@ -274,8 +300,8 @@ def compute_reconciliation(
                     LEG_PAYMENT_RAIL, LEG_MATCH,
                     left_amount=payment_amount_minors,
                     right_amount=posted_minors,
-                    detail="Inbound message received and pacs.002 (ACCP) transmitted; "
-                           "credited amount == posted clearing debit."))
+                    detail="Received inbound message (stage 1) and transmitted pacs.002 ACCP (stage 5) "
+                           "match the posted ledger entry: credited amount == posted clearing debit."))
             else:
                 legs.append(LegResult(
                     LEG_PAYMENT_RAIL, LEG_MISMATCH,
@@ -301,7 +327,8 @@ def compute_reconciliation(
                 legs.append(LegResult(LEG_PAYMENT_RAIL, LEG_MATCH,
                                       left_amount=payment_amount_minors,
                                       right_amount=rail_amt_minors,
-                                      detail=f"Rail acknowledged {rail_status.get('code')}; instruction amount == execution amount."))
+                                      detail=f"Rail acknowledged {rail_status.get('code')}; instruction amount == execution amount "
+                                             "(payment vs paymentExecutions + rail status)."))
             elif payment_amount_minors != rail_amt_minors:
                 legs.append(LegResult(LEG_PAYMENT_RAIL, LEG_MISMATCH,
                                       left_amount=payment_amount_minors,
@@ -399,6 +426,36 @@ def compute_reconciliation(
                                   right_amount=posted_minors,
                                   detail=f"Amounts match but settlementStatus is {position.get('settlementStatus')}, not SETTLED."))
 
+    # Doina: leg 2 also compares the rail's confirmed outcome (pacs.002 inbound; rail status
+    # outbound) with the actual settlement position. Applied only to a leg that passed the
+    # position-vs-ledger checks above, so it can add a MISMATCH/PENDING but never hides one.
+    # Mismatch = (a) the rail refused but the position says SETTLED, or (b) the rail-confirmed
+    # amount != the position's actual amount (gross of an approved correspondent-charge
+    # adjustment, which explains a legitimate gap between the two).
+    if legs[-1].leg == LEG_RAIL_SETTLEMENT and legs[-1].result == LEG_MATCH:
+        confirmation = _rail_confirmation(payment, connection, db_name, payment_amount_minors)
+        adj_minors = _signed_leg_amount(adjustment_event.get("creditLeg")) if adjustment_event else 0
+        if confirmation is None:
+            legs[-1] = LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
+                                 left_amount=legs[-1].left_amount, right_amount=legs[-1].right_amount,
+                                 detail="The rail has not confirmed an outcome yet — nothing to compare the settlement position against.")
+        else:
+            accepted, confirmed_minors, label = confirmation
+            if not accepted:
+                legs[-1] = LegResult(LEG_RAIL_SETTLEMENT, LEG_MISMATCH,
+                                     left_amount=confirmed_minors, right_amount=actual_minors,
+                                     detail=f"The rail's confirmed outcome is {label} (not accepted) but the settlement position is SETTLED.")
+            elif confirmed_minors is not None and actual_minors is not None \
+                    and confirmed_minors != actual_minors + adj_minors:
+                legs[-1] = LegResult(LEG_RAIL_SETTLEMENT, LEG_MISMATCH,
+                                     left_amount=confirmed_minors, right_amount=actual_minors,
+                                     detail=f"Rail-confirmed amount ({label}) != the settlement position's actual amount.")
+            else:
+                legs[-1] = LegResult(LEG_RAIL_SETTLEMENT, LEG_MATCH,
+                                     left_amount=legs[-1].left_amount, right_amount=legs[-1].right_amount,
+                                     detail=f"Rail confirmed {label}; its outcome matches the actual settlement position. "
+                                            + legs[-1].detail)
+
     # --- Leg 3: Settlement account ↔ GL ------------------------------------------
     # External: the settlement journal posted AND the clearing account nets to zero across the
     # payment's events (the in-flight position is cleared — R10). Internal: the principal
@@ -426,17 +483,42 @@ def compute_reconciliation(
                 legs.append(LegResult(LEG_SETTLEMENT_GL, LEG_MISMATCH,
                                       detail="Settlement posted but settlementPositions.clearingAccountCode is missing — cannot verify the clearing account nets to zero."))
             else:
+                # Doina: compare the settlement position against its settlement-leg journal
+                # entry (the second ledger event, stage 7). left = the position's actual
+                # amount (its expected amount while an outbound statement line is awaited —
+                # leg 2 owns that wait); right = the booked settlement debit, net of an
+                # approved correspondent-charge adjustment exactly as leg 2 reads it.
+                # The clearing-net-zero invariant stays a second, independent condition.
+                position_minors = _majors_to_minors(
+                    position.get("actualAmount") if position.get("actualAmount") is not None
+                    else position.get("expectedAmount", position.get("grossAmount")))
+                booked_minors = _signed_leg_amount(settlement_event.get("debitLeg"))
+                if adjustment_event is not None:
+                    booked_minors -= _signed_leg_amount(adjustment_event.get("creditLeg"))
                 net = _clearing_account_net(all_events, clearing_code)
-                if net == 0:
+                amounts_equal = position_minors is not None and position_minors == booked_minors
+                if (adjustment_event is None and position.get("adjustmentPending")
+                        and position_minors != booked_minors):
+                    legs.append(LegResult(LEG_SETTLEMENT_GL, LEG_PENDING,
+                                          left_amount=position_minors, right_amount=booked_minors,
+                                          detail="Correspondent-charge adjustment approved; awaiting its ledger event.",
+                                          reason=REASON_AWAITING_ADJUSTMENT))
+                elif amounts_equal and net == 0:
                     legs.append(LegResult(LEG_SETTLEMENT_GL, LEG_MATCH,
-                                          left_amount=0,
-                                          right_amount=net,
-                                          detail=f"Settlement journal posted; clearing account {clearing_code} nets to zero across the payment's events."))
+                                          left_amount=position_minors,
+                                          right_amount=booked_minors,
+                                          detail=f"Settlement position == settlement-leg journal entry ({booked_minors / 100:,.2f}); "
+                                                 f"clearing account {clearing_code} nets to zero across the payment's events."))
                 else:
+                    problems = []
+                    if not amounts_equal:
+                        problems.append("settlement position amount != settlement-leg journal entry amount")
+                    if net != 0:
+                        problems.append(f"clearing account {clearing_code} nets to {net}, not zero — in-flight position not cleared")
                     legs.append(LegResult(LEG_SETTLEMENT_GL, LEG_MISMATCH,
-                                          left_amount=0,
-                                          right_amount=net,
-                                          detail=f"Settlement journal posted but clearing account {clearing_code} nets to {net}, not zero — in-flight position not cleared."))
+                                          left_amount=position_minors,
+                                          right_amount=booked_minors,
+                                          detail="Settlement journal posted but " + "; ".join(problems) + "."))
 
     # --- overall -----------------------------------------------------------------
     results = [lg.result for lg in legs]
