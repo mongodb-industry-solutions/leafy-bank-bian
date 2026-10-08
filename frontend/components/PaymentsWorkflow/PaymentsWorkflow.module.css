@@ -1070,6 +1070,55 @@
   margin-top: 4px;
 }
 
+.reconLegs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pw-border);
+}
+
+.reconLeg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reconLegHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reconLegTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reconLegTag {
+  color: var(--pw-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.reconLegDesc {
+  color: var(--pw-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* The backend's verdict sentence for this leg, set apart from the static description. */
+.reconLegResult {
+  padding-left: 10px;
+  border-left: 2px solid var(--pw-border);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 /* ── key/value ── */
 
 .kv {

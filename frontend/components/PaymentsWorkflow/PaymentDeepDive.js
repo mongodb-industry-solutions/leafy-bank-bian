@@ -722,16 +722,24 @@ function ReconciliationTieOut({ data, payment }) {
                 : "=> pending the GL batch"}
         </StatusPill>
       </div>
-      {[
-        [leg1, "Leg 1 — Payment ↔ Rail: the received message (Stage 1) and the transmitted pacs.002 (Stage 5) are compared against the posted ledger entry."],
-        [leg2, "Leg 2 — Rail ↔ Settlement: the rail's confirmed outcome (pacs.002 inbound, rail confirmation outbound) is compared against the actual settlement position."],
-        [leg3, "Leg 3 — Settlement ↔ GL: the actual settlement position is compared against its settlement-leg journal entry (the second ledger event from Stage 7)."],
-      ].map(([leg, description]) => leg && leg.result !== "NOT_APPLICABLE" && (
-        <div key={leg.leg}>
-          <Body className={styles.muted}>{description}</Body>
-          {leg.detail && <Body className={styles.muted}>{leg.detail}</Body>}
-        </div>
-      ))}
+      <div className={styles.reconLegs}>
+        {[
+          [leg1, "Leg 1", "Payment ↔ Rail", "Compares the received message (Stage 1) and the transmitted pacs.002 (Stage 5) against the posted ledger entry."],
+          [leg2, "Leg 2", "Rail ↔ Settlement", "Compares the rail's confirmed outcome (pacs.002 inbound, rail confirmation outbound) against the actual settlement position."],
+          [leg3, "Leg 3", "Settlement ↔ GL", "Compares the actual settlement position against its settlement-leg journal entry (the second ledger event from Stage 7)."],
+        ].map(([leg, tag, name, description]) => leg && leg.result !== "NOT_APPLICABLE" && (
+          <div className={styles.reconLeg} key={leg.leg}>
+            <div className={styles.reconLegHead}>
+              <span className={styles.reconLegTitle}>
+                <span className={styles.reconLegTag}>{tag}</span> {name}
+              </span>
+              <StatusPill family={verdictVariant(leg.result)}>{verdictLabel(leg.result)}</StatusPill>
+            </div>
+            <div className={styles.reconLegDesc}>{description}</div>
+            {leg.detail && <div className={styles.reconLegResult}>{leg.detail}</div>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
