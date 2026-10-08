@@ -115,8 +115,13 @@ export function CategoryTable({ payment }) {
 export function FxProvenance({ payment }) {
   const fx = payment?.fx;
   if (!fx?.fxRate) return null;
+  // Inbound: show what the sender instructed against what the beneficiary was credited.
+  // Outbound is left alone: its `amount` is the debtor-currency figure, a different split.
+  const inbound = payment?.direction === "INBOUND" && payment?.instructedAmount != null;
   const rows = [
     ["Pair", [fx.sourceCurrency, fx.targetCurrency].filter(Boolean).join(" → ")],
+    ["Instructed", inbound ? fmtAmount(payment.instructedAmount, fx.sourceCurrency) : null],
+    ["Credited", inbound ? fmtAmount(payment.amount, fx.targetCurrency) : null],
     ["Rate", fx.fxRate],
     ["Source", fx.rateSource],
     ["Quote", fx.quoteId],
@@ -184,9 +189,11 @@ const initials = (name) =>
     .map((w) => w[0].toUpperCase())
     .join("");
 
-function PartyBox({ role, party, tag }) {
+// `lines` are extra labelled rows ([label, value]) shown first. A caller that lists the BIC
+// there passes `bicInLines` so the Bank row does not repeat it.
+function PartyBox({ role, party, tag, lines = [], bicInLines = false }) {
   const account = party?.accountNo ? `····${String(party.accountNo).slice(-4)}` : null;
-  const bank = [party?.bankName, party?.bic, party?.bankCountry].filter(Boolean);
+  const bank = [party?.bankName, bicInLines ? null : party?.bic, party?.bankCountry].filter(Boolean);
   return (
     <div className={styles.party}>
       <div className={styles.partyTop}>
@@ -200,6 +207,12 @@ function PartyBox({ role, party, tag }) {
         </div>
       </div>
       <dl className={styles.partyLines}>
+        {lines.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
         {bank.length > 0 && (
           <div>
             <dt>Bank</dt>
@@ -240,16 +253,52 @@ function creditorTag(payment) {
   return "claimed, not yet confirmed";
 }
 
+/**
+ * What the sender instructed, as opposed to what was credited. `amount`/`currency` on the
+ * payment are post-FX once stage 3 converts, so the originator's pair comes from
+ * `instructedAmount`/`instructedCurrency` (then `fx.sourceCurrency`). Payments written before
+ * those were stored fall back to `amount`/`currency`, which are the same pair whenever no
+ * conversion happened.
+ */
+export function instructedOf(payment) {
+  return {
+    amount: payment?.instructedAmount ?? payment?.amount,
+    currency: payment?.instructedCurrency ?? payment?.fx?.sourceCurrency ?? payment?.currency,
+  };
+}
+
 /** Debtor, the amount and rail travelling between them, creditor, and the snapshot note. */
 export function PartyFlow({ payment }) {
   const inbound = payment?.direction === "INBOUND";
   const wireType = payment?.wireDetails?.wireType;
+  const instructed = instructedOf(payment);
+  // Inbound stage 1 is the message as received: the originator's amount and currency, and
+  // the sending bank's BIC under its own label. Outbound keeps the compact Bank line.
+  const originatorLines = inbound
+    ? [
+        ["Amount", fmtAmount(instructed.amount, instructed.currency)],
+        ["Originator Currency", instructed.currency || "—"],
+        ["Originating Bank BIC", payment?.debtor?.bic || "—"],
+      ]
+    : [];
+  const beneficiaryLines = inbound
+    ? [["Beneficiary Currency", payment?.fx?.targetCurrency ?? payment?.currency ?? "—"]]
+    : [];
   return (
     <div className={styles.flowFrame}>
       <div className={styles.flow}>
-        <PartyBox role={inbound ? "Originator" : "Payer"} party={payment?.debtor} />
+        <PartyBox
+          role={inbound ? "Originator" : "Payer"}
+          party={payment?.debtor}
+          lines={originatorLines}
+          bicInLines={inbound}
+        />
         <div className={styles.flowLink}>
-          <span className={styles.flowAmount}>{fmtAmount(payment?.amount, payment?.currency)}</span>
+          <span className={styles.flowAmount}>
+            {inbound
+              ? fmtAmount(instructed.amount, instructed.currency)
+              : fmtAmount(payment?.amount, payment?.currency)}
+          </span>
           <span className={styles.flowArrow} aria-hidden="true" />
           <span className={styles.flowRail}>
             {[payment?.rail, wireType].filter(Boolean).join(" · ")}
@@ -259,6 +308,7 @@ export function PartyFlow({ payment }) {
           role={inbound ? "Claimed beneficiary" : "Beneficiary"}
           party={payment?.creditor}
           tag={creditorTag(payment)}
+          lines={beneficiaryLines}
         />
       </div>
       <div className={styles.snapshotNote}>
@@ -613,7 +663,9 @@ export function InboundValidationChecks({ payment, checks }) {
         result={fx ? resultOf(fx) : "PASS"} mode={fx?.mode} detail={fx?.detail}
         label="Incoming FX conversion"
         value={fxDone && f?.fxRate
-          ? `${f.sourceCurrency} to ${f.targetCurrency} at ${f.fxRate}`
+          ? `${payment?.instructedAmount != null
+              ? `${fmtAmount(payment.instructedAmount, f.sourceCurrency)} to ${fmtAmount(payment.amount, f.targetCurrency)}`
+              : `${f.sourceCurrency} to ${f.targetCurrency}`} at ${f.fxRate}`
           : fx ? undefined : "not required"}
       />
       <CheckLine

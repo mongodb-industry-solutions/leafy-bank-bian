@@ -70,10 +70,52 @@ SENDERS = (
      "country": "US", "accountNo": "US-ACH-021000021-991177"},
 )
 
-# The reference currency for the FX scenario: a currency a Leafy Bank USD account is not
-# denominated in, so the conversion genuinely fires. Rates come from
-# `screen_and_accept._FX_RATES`, not from here — this only picks the pair.
+# The instructed currency of the bare `FX` scenario (no explicit originator currency): one a
+# Leafy Bank USD account is not denominated in, so the conversion genuinely fires. Rates come
+# from `screen_and_accept._FX_RATES`, not from here — this only picks the pair. The modal
+# sends `originator_currency` explicitly, which always wins over this default.
 _FX_SOURCE_CURRENCY = "EUR"
+
+
+def resolve_sender(bic: Optional[str] = None, wire_type: Optional[str] = None) -> dict:
+    """The originator row for a requested BIC and/or wire type. Pure apart from the draw.
+
+    Inbound DOMESTIC vs INTERNATIONAL is not a field of the message: stage 3 derives it from
+    the originator's BIC country (characters 5-6, `screen_and_accept._country_of`) against
+    our home country. So the wire type the presenter asked for can only be honoured by
+    choosing a sender whose BIC country agrees — and a typed BIC whose country contradicts
+    the requested type is refused rather than silently reclassified.
+
+    - known BIC -> its row (bank, country, account travel together);
+    - unknown BIC -> a generated originator at that BIC, country read from the BIC;
+    - no BIC -> a random known sender of the requested type.
+    """
+    if bic:
+        bic = bic.upper()
+        # A branch-coded BIC (11 chars) is the same institution as its 8-char head.
+        known = next((s for s in SENDERS if s["bic"] == bic[:8]), None)
+        sender = {**known, "bic": bic} if known else {
+            "name": f"{bic[:4]} Originator Ltd",
+            "bic": bic,
+            "bankName": f"{bic[:4]} Bank",
+            "country": bic[4:6],
+            "accountNo": f"{bic[4:6]}-ACC-{random.randint(10**9, 10**10 - 1)}",
+        }
+        if wire_type and _wire_type_of(sender) != wire_type:
+            home = bank_identity.OUR_BANK_COUNTRY
+            raise ValueError(
+                f"BIC {bic} is in {sender['country']}, so it sends an "
+                f"{_wire_type_of(sender).lower()} wire to {home}; it cannot be a "
+                f"{wire_type.lower()} one. Change Wire Type, or use a "
+                f"{home if wire_type == 'DOMESTIC' else 'non-' + home} BIC."
+            )
+        return sender
+    pool = [s for s in SENDERS if not wire_type or _wire_type_of(s) == wire_type]
+    return random.choice(pool)
+
+
+def _wire_type_of(sender: dict) -> str:
+    return "DOMESTIC" if sender["country"] == bank_identity.OUR_BANK_COUNTRY else "INTERNATIONAL"
 
 
 def partial_name(name: str) -> str:
@@ -105,6 +147,7 @@ def build_message(
     beneficiary_identifier: str,
     identifier_is_iban: bool,
     account_currency: str = "USD",
+    originator_currency: Optional[str] = None,
     amount: Optional[float] = None,
     sender: Optional[dict] = None,
     uetr: Optional[str] = None,
@@ -121,13 +164,15 @@ def build_message(
     sender = sender or random.choice(SENDERS)
     scenario = scenario.upper()
 
-    # The instructed currency: FX deliberately differs from the beneficiary account's, every
-    # other scenario pays in the account's own so the happy path is unconverted.
-    currency = (
+    # The instructed currency. An explicit originator currency wins (the modal: differing
+    # from the account's is what triggers stage 3's FX). Otherwise FX deliberately differs
+    # from the beneficiary account's, and every other scenario pays in the account's own so
+    # the happy path is unconverted.
+    currency = originator_currency or (
         _FX_SOURCE_CURRENCY if scenario == SCENARIO_FX and account_currency == "USD"
         else account_currency
     )
-    amount = amount if amount is not None else round(random.uniform(1_000.0, 25_000.0), 2)
+    amount = round(amount, 2) if amount is not None else round(random.uniform(1_000.0, 25_000.0), 2)
 
     # The claimed name, by scenario. HAPPY names the account holder exactly; PARTIAL
     # introduces the typo; MISMATCH claims someone else entirely. SANCTIONS leaves the

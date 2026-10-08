@@ -66,6 +66,30 @@ _FX_RATES = {
     ("USD", "GBP"): 0.7874,
 }
 _FX_SOURCE = "SIMULATED-FX-v1"
+_PIVOT = "USD"
+
+
+def rate(source: str, target: str):
+    """The simulated `source -> target` rate, or None when the table cannot price the pair.
+
+    Order of preference: identity, the direct entry, the inverse of the direct entry, then a
+    cross through USD (EUR->CAD = EUR->USD x USD->CAD). Static demo rates only — a pair is
+    unsupported when neither leg of the pivot exists, and the caller keeps its WARN path.
+    """
+    if source == target:
+        return 1.0
+    direct = _FX_RATES.get((source, target))
+    if direct is not None:
+        return direct
+    inverse = _FX_RATES.get((target, source))
+    if inverse is not None:
+        return round(1 / inverse, 6)
+    if _PIVOT in (source, target):
+        return None
+    into_pivot, out_of_pivot = rate(source, _PIVOT), rate(_PIVOT, target)
+    if into_pivot is None or out_of_pivot is None:
+        return None
+    return round(into_pivot * out_of_pivot, 6)
 
 
 def run(ctx: PaymentContext) -> None:
@@ -181,8 +205,8 @@ def _attach_fx(ctx, now, recorded):
     if not target or target == source:
         return None
 
-    rate = _FX_RATES.get((source, target))
-    if rate is None:
+    fx_rate = rate(source, target)
+    if fx_rate is None:
         # No rate for this pair. The payment is NOT refused — it is credited in the
         # instructed currency and flagged, because refusing a customer's incoming money over
         # a missing demo rate would be the wrong failure. Same posture as stage 3's thin
@@ -199,13 +223,13 @@ def _attach_fx(ctx, now, recorded):
         )
         return None
 
-    converted = round(ctx.instructed_amount * rate, 2)
+    converted = round(ctx.instructed_amount * fx_rate, 2)
     recorded.append(
         checks.check(
             STAGE_SCREEN, "inbound_fx_applied", checks.PASS, mode=checks.SYNC,
             detail=(
                 f"{source} {ctx.instructed_amount:,.2f} -> {target} {converted:,.2f} "
-                f"at {rate} ({_FX_SOURCE}, SIMULATED)."
+                f"at {fx_rate} ({_FX_SOURCE}, SIMULATED)."
             ),
             actor="financial-gateway", at=now,
         )
@@ -225,7 +249,7 @@ def _attach_fx(ctx, now, recorded):
     return {
         "sourceCurrency": source,
         "targetCurrency": target,
-        "fxRate": rate,
+        "fxRate": fx_rate,
         "rateTimestamp": now,
         "rateSource": _FX_SOURCE,
         "quoteId": None,

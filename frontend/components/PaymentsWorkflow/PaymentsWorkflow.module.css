@@ -160,22 +160,37 @@
   flex: none;
 }
 
-/* The manual incoming-wire trigger (PaymentsLens header). Self-contained so the header
-   row's flex gap does the layout — no grid/table dependency. */
-.inboundTrigger {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* The Generate Incoming Wire modal (GenerateIncomingWireModal.js). */
+.wireModal {
+  width: 520px;
+  max-width: 92vw;
 }
 
-.inboundError {
+.wireForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.wireRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.wireHint {
   font-size: 12px;
-  line-height: 20px;
-  color: var(--pw-danger, #b4502b);
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 18px;
+  color: var(--pw-muted, #5c6c75);
+  margin-top: -6px;
+}
+
+.wireFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
 }
 
 .panelBody {

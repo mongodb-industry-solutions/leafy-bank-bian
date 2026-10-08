@@ -91,6 +91,11 @@ def _settlement_adjustment_for(payment: dict, exc: dict) -> Optional[dict]:
     }
 
 
+class InboundSimulationRejected(ValueError):
+    """The requested simulated wire cannot be built (no account in the requested currency, or
+    a BIC that contradicts the wire type). The route maps it to 422, not the generic 400."""
+
+
 class PaymentNotFound(LookupError):
     """No payment with that id. The cutoff-hold routes map this to 404."""
 
@@ -253,7 +258,17 @@ class PaymentsService:
                                   include_orphan=include_orphan,
                                   skip_presenter_driven=skip_presenter_driven)
 
-    def simulate_inbound(self, scenario: str = "HAPPY", *, account_id: Optional[str] = None) -> dict:
+    def simulate_inbound(
+        self,
+        scenario: str = "HAPPY",
+        *,
+        account_id: Optional[str] = None,
+        wire_type: Optional[str] = None,
+        amount: Optional[float] = None,
+        originator_currency: Optional[str] = None,
+        beneficiary_currency: Optional[str] = None,
+        originating_bank_bic: Optional[str] = None,
+    ) -> dict:
         """Generate one simulated inbound pacs.008 and run it (demo trigger).
 
         One code path for both triggers — the background worker and the manual route — so
@@ -268,6 +283,12 @@ class PaymentsService:
         `DUPLICATE` runs the SAME message twice and returns the FIRST result: the second is
         an idempotent replay that returns the same payment, and that identity IS the demo
         beat ("the same wire arriving twice credits the customer once").
+
+        The keyword fields beyond `account_id` are the Generate Incoming Wire modal's inputs.
+        `beneficiary_currency` picks an EXISTING open customer account in that currency and
+        refuses (`InboundSimulationRejected`) when there is none — the simulator never
+        invents an account. `originator_currency` is the message's instructed currency, so a
+        pair that differs from the account's is what makes stage 3 convert.
         """
         from contexts.financial_gateway.domain import simulate
 
@@ -293,6 +314,13 @@ class PaymentsService:
         ))
         if account_id is not None:
             candidates = [a for a in candidates if a.get("accountId") == account_id]
+        if beneficiary_currency:
+            candidates = [a for a in candidates if a.get("currency") == beneficiary_currency]
+            if not candidates:
+                raise InboundSimulationRejected(
+                    f"No open customer account in {beneficiary_currency} to receive the "
+                    f"wire. Pick a Beneficiary Currency the bank holds an account in."
+                )
         if not candidates:
             raise ValueError(
                 "No active customer account to name as the inbound beneficiary — "
@@ -310,6 +338,11 @@ class PaymentsService:
                 "the beneficiary name match has nothing to match against."
             )
 
+        try:
+            sender = simulate.resolve_sender(originating_bank_bic, wire_type)
+        except ValueError as exc:
+            raise InboundSimulationRejected(str(exc)) from exc
+
         identifier = account.get("iban") or account.get("accountNumber")
         message = simulate.build_message(
             scenario=scenario.upper(),
@@ -317,6 +350,11 @@ class PaymentsService:
             beneficiary_identifier=identifier,
             identifier_is_iban=bool(account.get("iban")),
             account_currency=account.get("currency") or "USD",
+            originator_currency=originator_currency,
+            amount=amount,
+            # Pass a sender only when the caller constrained it; otherwise build_message
+            # keeps its own random draw, exactly as before.
+            sender=sender if (originating_bank_bic or wire_type) else None,
         )
 
         first = self.receive_inbound(message)

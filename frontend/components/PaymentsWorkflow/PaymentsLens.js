@@ -13,8 +13,9 @@ import { Select, Option } from "@leafygreen-ui/select";
 import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
 import PaymentDeepDive from "./PaymentDeepDive";
+import GenerateIncomingWireModal from "./GenerateIncomingWireModal";
 import { usePaymentsList } from "@/lib/api/hooks";
-import { coreApi, workflowApi } from "@/lib/api/client";
+import { workflowApi } from "@/lib/api/client";
 import { fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
 
 const PAGE_SIZE = 10;
@@ -22,6 +23,13 @@ const PAGE_SIZE = 10;
 // Mirrors the spec's rail enum. Kept as a literal rather than fetched: it is a contract
 // the backend validates against, not data.
 const RAILS = ["INTERNAL", "WIRE", "ACH", "CARD", "RTP"];
+
+// `Outgoing` includes payments written before the incoming wire, which carry no `direction`
+// (the backend filters OUTBOUND as "not INBOUND").
+const DIRECTIONS = [
+  { value: "INBOUND", label: "Incoming" },
+  { value: "OUTBOUND", label: "Outgoing" },
+];
 
 const STATUSES = [
   "DRAFT", "INITIATED", "VALIDATED", "ENRICHED", "FINAL_VALIDATED", "ROUTED",
@@ -56,6 +64,19 @@ function Filters({ value, onChange }) {
         >
           {RAILS.map((r) => (
             <Option key={r} value={r}>{r}</Option>
+          ))}
+        </Select>
+      </div>
+      <div className={styles.filterField}>
+        <Select
+          label="Direction"
+          size="small"
+          placeholder="All"
+          value={value.direction ?? ""}
+          onChange={(v) => set("direction", v)}
+        >
+          {DIRECTIONS.map((d) => (
+            <Option key={d.value} value={d.value}>{d.label}</Option>
           ))}
         </Select>
       </div>
@@ -255,45 +276,33 @@ const ACTION_LABELS = {
 };
 
 /**
- * The manual incoming-wire trigger (2026-09-29): one click generates a simulated external
- * pacs.008, runs it through the inbound lifecycle, and jumps to the new payment — the same
- * "watch it land" flow the outbound wizard's View-lifecycle gives.
+ * The manual incoming-wire trigger: opens the Generate Incoming Wire form, which simulates an
+ * external pacs.008, runs it through the inbound lifecycle, and jumps to the new payment —
+ * the same "watch it land" flow the outbound wizard's View-lifecycle gives.
  *
- * No scenario picker, deliberately (Kiran, 2026-09-29): the button is the happy path and
- * nothing else — the same traffic the 5-minute background simulator generates
- * (`ENABLE_INBOUND_SIM`, two per cycle). The variant scenarios (name mismatch, sanctioned
- * sender, FX, duplicate) stay on the API route
- * (`POST /FinancialGateway/{id}/Inbound/Simulate`), where a presenter or a test fires them
- * deliberately — they hold or refuse a payment, and that is work a human should have to
- * ask for, not a dropdown away from an idle click.
+ * Reverses the 2026-09-29 "no scenario picker" decision (Kiran, 2026-10-08, after Doina's
+ * Oct 6 review): the presenter now chooses wire type, amount, currencies, sending bank and
+ * scenario. The 5-minute background simulator (`ENABLE_INBOUND_SIM`) is unchanged and stays
+ * happy-path only.
  */
 function InboundTrigger({ onRefresh, onJump }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const fire = async () => {
-    setBusy(true);
-    setError(null);
-    const { data, error: err } = await coreApi(
-      "FinancialGateway/GW-WIRE-01/Inbound/Simulate",
-      { method: "POST", body: {} }
-    );
-    setBusy(false);
-    if (err || !data?.paymentId) {
-      setError(err || "No payment came back.");
-      return;
-    }
-    if (onRefresh) onRefresh();
-    if (onJump) onJump(data.paymentId);
-  };
+  const [open, setOpen] = useState(false);
 
   return (
-    <div className={styles.inboundTrigger}>
-      <Button size="small" leftGlyph={<Icon glyph="Import" />} disabled={busy} onClick={fire}>
-        {busy ? "Arriving…" : "Simulate incoming wire"}
+    <>
+      <Button size="small" leftGlyph={<Icon glyph="Import" />} onClick={() => setOpen(true)}>
+        Generate incoming wire
       </Button>
-      {error && <span className={styles.inboundError}>{error}</span>}
-    </div>
+      <GenerateIncomingWireModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onGenerated={(paymentId) => {
+          setOpen(false);
+          if (onRefresh) onRefresh();
+          if (onJump) onJump(paymentId);
+        }}
+      />
+    </>
   );
 }
 
@@ -415,7 +424,7 @@ export default function PaymentsLens({
   onSelect,
 }) {
   const [filters, setFilters] = useState({
-    status: "", rail: "", customerId: "", from: "", to: "", skip: 0,
+    status: "", rail: "", direction: "", customerId: "", from: "", to: "", skip: 0,
   });
   // Detailed filters are tucked away: search covers the common case.
   const [showFilters, setShowFilters] = useState(false);
@@ -432,8 +441,8 @@ export default function PaymentsLens({
   const move = (delta) =>
     setFilters((f) => ({ ...f, skip: Math.max(0, f.skip + delta * PAGE_SIZE) }));
   const clearFilters = () =>
-    setFilters({ status: "", rail: "", customerId: "", from: "", to: "", skip: 0 });
-  const activeFilterCount = [filters.status, filters.rail, filters.customerId, filters.from, filters.to]
+    setFilters({ status: "", rail: "", direction: "", customerId: "", from: "", to: "", skip: 0 });
+  const activeFilterCount = [filters.status, filters.rail, filters.direction, filters.customerId, filters.from, filters.to]
     .filter(Boolean).length;
 
   // Selecting a payment ADVANCES to the lifecycle in place, rather than appending it below

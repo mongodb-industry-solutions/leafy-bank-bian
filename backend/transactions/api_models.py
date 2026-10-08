@@ -15,7 +15,7 @@ project before (umbrella defects.md, 2026-04-28).
 from datetime import date, datetime, timezone
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # --- Enums, verbatim from the spec's $jsonSchema -----------------------------
 
@@ -27,6 +27,9 @@ PriorityLiteral = Literal["NORMAL", "HIGH", "URGENT"]
 ChargeBearerLiteral = Literal["DEBT", "CRED", "SHAR", "SLEV"]
 ChannelLiteral = Literal["API", "WEB", "MOBILE", "BRANCH", "BATCH"]
 AccountTypeLiteral = Literal["Savings", "Current", "Checking", "FixedDeposit"]
+# The currencies the Generate Incoming Wire modal offers. Not a spec enum: it is the demo's
+# simulated-FX table (`screen_and_accept._FX_RATES`) plus the seeded customer accounts.
+InboundCurrencyLiteral = Literal["USD", "CAD", "EUR", "GBP"]
 ClearingSystemCodeLiteral = Literal["USABA", "USPID", "GBDSC", "CHBCC", "DEBLZ", "CACPA"]
 WireTypeLiteral = Literal["DOMESTIC", "INTERNATIONAL"]
 SecCodeLiteral = Literal["PPD", "CCD", "WEB", "TEL"]
@@ -491,12 +494,39 @@ class InboundSimulateRequest(BaseModel):
     The demo control for the incoming-wire story. `scenario` names the mutation the
     generated message carries (see `simulate.py` for what each one exercises); HAPPY is the
     default because it is the one a presenter clicks mid-story.
+
+    The optional fields are the "Generate Incoming Wire" modal's inputs (Doina Oct 6). Every
+    one omitted reproduces the original random trigger. A DOMESTIC wire has one currency by
+    definition, so the beneficiary's currency wins and the originator's is forced equal to it
+    (a missing one is filled from the other).
     """
 
     scenario: Literal[
         "HAPPY", "PARTIAL", "MISMATCH", "SANCTIONS", "FX", "DUPLICATE",
     ] = "HAPPY"
+    wireType: Optional[WireTypeLiteral] = None
+    amount: Optional[float] = Field(default=None, gt=0)
+    originatorCurrency: Optional[InboundCurrencyLiteral] = None
+    beneficiaryCurrency: Optional[InboundCurrencyLiteral] = None
+    # ISO 9362: 8 characters, or 11 with the branch code.
+    originatingBankBic: Optional[str] = Field(
+        default=None, pattern=r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$"
+    )
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("originatingBankBic", mode="before")
+    @classmethod
+    def _normalise_bic(cls, value):
+        # A typed BIC arrives in whatever case the presenter used; the pattern is upper-case.
+        return value.strip().upper() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def _domestic_has_one_currency(self):
+        if self.wireType != "DOMESTIC":
+            return self
+        currency = self.beneficiaryCurrency or self.originatorCurrency
+        self.beneficiaryCurrency = self.originatorCurrency = currency
+        return self
 
 
 class StatementGenerateRequest(BaseModel):

@@ -762,7 +762,7 @@ export function useGlDashboard(periodCode, enabled, months = 3, refreshKey) {
  * `filters` is destructured into the dependency list rather than passed whole, so a caller
  * re-creating the object literal each render does not refetch forever.
  */
-export function usePaymentsList({ status, rail, customerId, from, to, limit = 25, skip = 0 } = {}, refreshKey = 0) {
+export function usePaymentsList({ status, rail, direction, customerId, from, to, limit = 25, skip = 0 } = {}, refreshKey = 0) {
   const [data, setData] = useState({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -770,7 +770,7 @@ export function usePaymentsList({ status, rail, customerId, from, to, limit = 25
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    workflowApi("payments", { status, rail, customerId, from, to, limit, skip }).then(
+    workflowApi("payments", { status, rail, direction, customerId, from, to, limit, skip }).then(
       ({ data: d, error: err }) => {
         if (cancelled) return;
         if (err) setError(err);
@@ -784,9 +784,59 @@ export function usePaymentsList({ status, rail, customerId, from, to, limit = 25
     return () => {
       cancelled = true;
     };
-  }, [status, rail, customerId, from, to, limit, skip, refreshKey]);
+  }, [status, rail, direction, customerId, from, to, limit, skip, refreshKey]);
 
   return { ...data, loading, error };
+}
+
+/**
+ * The "Generate Incoming Wire" trigger: one call simulates an external pacs.008 and runs it
+ * through the inbound lifecycle. `simulate(fields)` resolves to the new `paymentId`, or null
+ * with `error` set. Backend refusals (422: no account in the beneficiary currency, a BIC that
+ * contradicts the wire type) are unwrapped to their `detail` sentence — the modal shows them
+ * verbatim, so they must not read as a leaked HTTP response.
+ *
+ * `fields` are the modal's camelCase inputs (`scenario`, `wireType`, `amount`,
+ * `originatorCurrency`, `beneficiaryCurrency`, `originatingBankBic`); blanks are dropped so
+ * the backend's defaults apply.
+ */
+export function useSimulateInboundWire() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const simulate = async (fields = {}) => {
+    setBusy(true);
+    setError(null);
+    const body = Object.fromEntries(
+      Object.entries(fields).filter(([, v]) => v !== "" && v !== null && v !== undefined)
+    );
+    const { data, error: err } = await coreApi(
+      "FinancialGateway/GW-WIRE-01/Inbound/Simulate",
+      { method: "POST", body }
+    );
+    setBusy(false);
+    if (err || !data?.paymentId) {
+      setError(simulateErrorText(err) || "No payment came back.");
+      return null;
+    }
+    return data.paymentId;
+  };
+
+  return { simulate, busy, error, clearError: () => setError(null) };
+}
+
+/** `422: {"detail": "..."}` -> the detail sentence; FastAPI validation arrays -> their `msg`s. */
+function simulateErrorText(err) {
+  if (!err) return null;
+  const json = err.slice(err.indexOf("{"));
+  try {
+    const detail = JSON.parse(json).detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) return detail.map((d) => d.msg).join("; ");
+  } catch {
+    // Not JSON (a network error message): show it as it is.
+  }
+  return err;
 }
 
 /** Payments that ended in a terminal state — the Operations lens. */

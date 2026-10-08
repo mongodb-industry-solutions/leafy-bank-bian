@@ -32,6 +32,8 @@ def _matches(doc, flt):
         if isinstance(cond, dict):
             if "$in" in cond and val not in cond["$in"]:
                 return False
+            if "$ne" in cond and val == cond["$ne"]:
+                return False
             if "$gte" in cond and (val is None or val < cond["$gte"]):
                 return False
             if "$lte" in cond and (val is None or val > cond["$lte"]):
@@ -238,6 +240,24 @@ def test_every_filter_narrows(conn, kwargs, expected):
     out = svc.list_payments(conn, "db", **kwargs)
     assert [p["paymentId"] for p in out["items"]] == expected
     assert out["total"] == len(expected)
+
+
+def test_the_direction_filter_treats_legacy_documents_as_outbound():
+    """D4. Payments written before the incoming wire have no `direction` field at all, and
+    they are all outbound — so OUTBOUND is "not INBOUND", never `== "OUTBOUND"`."""
+    inbound = {**_payment("PAY-IN"), "direction": "INBOUND"}
+    outbound = {**_payment("PAY-OUT"), "direction": "OUTBOUND"}
+    legacy = _payment("PAY-OLD")  # no `direction` key
+    assert "direction" not in legacy
+    conn = FakeConnection(FakePayments([inbound, outbound, legacy]))
+
+    def ids(**kw):
+        return sorted(p["paymentId"] for p in svc.list_payments(conn, "db", **kw)["items"])
+
+    assert ids(direction="INBOUND") == ["PAY-IN"]
+    assert ids(direction="OUTBOUND") == ["PAY-OLD", "PAY-OUT"]
+    assert ids() == ["PAY-IN", "PAY-OLD", "PAY-OUT"]
+    assert svc.list_payments(conn, "db", direction="OUTBOUND")["total"] == 2
 
 
 def test_total_counts_the_filter_not_the_page(conn):

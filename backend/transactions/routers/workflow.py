@@ -13,7 +13,7 @@ ops namespace, sanctioned by the ledger's `POST /pipeline/batch/trigger` precede
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -43,6 +43,7 @@ def list_payments(
     status: Optional[str] = Query(None),
     customer_id: Optional[str] = Query(None, alias="customerId"),
     rail: Optional[str] = Query(None),
+    direction: Optional[Literal["INBOUND", "OUTBOUND"]] = Query(None),
     date_from: Optional[datetime] = Query(None, alias="from"),
     date_to: Optional[datetime] = Query(None, alias="to"),
     limit: int = Query(25, ge=1, le=100),
@@ -51,7 +52,7 @@ def list_payments(
     connection, db_name = _deps(request)
     data = workflow_read_service.list_payments(
         connection, db_name,
-        status=status, customer_id=customer_id, rail=rail,
+        status=status, customer_id=customer_id, rail=rail, direction=direction,
         date_from=date_from, date_to=date_to, limit=limit, skip=skip,
     )
     return to_json_response(data)

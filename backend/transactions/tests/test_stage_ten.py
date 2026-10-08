@@ -933,6 +933,158 @@ def test_the_fx_scenario_converts_before_crediting(service, db):
     assert txn["currency"] == "USD"
 
 
+# --- the Generate Incoming Wire modal's request ---------------------------------
+
+def _add_account(db, account_id, currency):
+    db["accounts"].docs.append(_account(account_id, CUST_C, currency=currency))
+
+
+def test_a_modal_shaped_request_yields_the_message_it_describes(service, db):
+    """Amount, originator currency and BIC land on the pacs.008 as sent — read back by the
+    real parser, so this grades the generator against the consumer."""
+    from contexts.financial_gateway.domain import simulate
+
+    message = simulate.build_message(
+        scenario="HAPPY", beneficiary_name=_HOLDER_NAME, beneficiary_identifier=_IBAN,
+        identifier_is_iban=True, account_currency="USD", originator_currency="CAD",
+        amount=10_000.0, sender=simulate.resolve_sender("BARCGB22", "INTERNATIONAL"),
+    )
+    parsed = inbound_pacs008.parse(message)
+
+    assert parsed["amount"] == 10_000.0
+    assert parsed["currency"] == "CAD"
+    assert parsed["debtor"]["bic"] == "BARCGB22"
+
+
+def test_an_unknown_bic_gets_a_generated_originator_in_the_bics_country():
+    from contexts.financial_gateway.domain import simulate
+
+    sender = simulate.resolve_sender("ABCDJPJT", "INTERNATIONAL")
+
+    assert sender["bic"] == "ABCDJPJT"
+    assert sender["country"] == "JP"
+    assert sender["name"] and sender["bankName"]
+
+
+@pytest.mark.parametrize("wire_type,expected_country_is_home", [
+    ("DOMESTIC", True), ("INTERNATIONAL", False),
+])
+def test_the_sender_is_chosen_so_the_wire_type_is_the_requested_one(
+        wire_type, expected_country_is_home):
+    from contexts.financial_gateway.domain import simulate
+
+    for _ in range(20):  # the draw is random; every draw must agree
+        sender = simulate.resolve_sender(None, wire_type)
+        assert (sender["country"] == "US") is expected_country_is_home
+
+
+def test_a_bic_that_contradicts_the_wire_type_is_refused(service, db):
+    from services.payments_service import InboundSimulationRejected
+
+    with pytest.raises(InboundSimulationRejected, match="BIC DEUTDEFF"):
+        service.simulate_inbound(
+            "HAPPY", account_id=CREDITOR, wire_type="DOMESTIC",
+            originating_bank_bic="DEUTDEFF",
+        )
+
+
+def test_a_domestic_wire_has_no_fx_and_is_classified_domestic(service, db):
+    payment = service.simulate_inbound(
+        "HAPPY", account_id=CREDITOR, wire_type="DOMESTIC", amount=10_000.0,
+        originator_currency="USD", beneficiary_currency="USD",
+    )
+
+    assert payment["status"] == "SETTLED"
+    assert payment["amount"] == 10_000.0
+    assert payment.get("fx") is None
+    assert payment["validation"]["determinedCategory"] == "DOMESTIC"
+
+
+def test_cad_into_a_usd_account_converts_at_the_simulated_rate(service, db):
+    """Doina's case: a CAD originator, a USD beneficiary account."""
+    payment = service.simulate_inbound(
+        "HAPPY", account_id=CREDITOR, wire_type="INTERNATIONAL", amount=10_000.0,
+        originator_currency="CAD", beneficiary_currency="USD",
+        originating_bank_bic="BARCGB22",
+    )
+
+    assert payment["instructedAmount"] == 10_000.0
+    assert payment["instructedCurrency"] == "CAD"
+    assert payment["fx"]["sourceCurrency"] == "CAD"
+    assert payment["fx"]["targetCurrency"] == "USD"
+    assert payment["fx"]["fxRate"] == 0.735
+    assert payment["amount"] == 7_350.0
+    assert payment["currency"] == "USD"
+    assert payment["validation"]["determinedCategory"] == "CROSS_BORDER"
+    assert db["transactions"].find_one({})["amount"] == 7_350.0
+
+
+def test_eur_into_a_cad_account_crosses_through_usd(service, db):
+    """No EUR->CAD entry exists: EUR->USD x USD->CAD, where USD->CAD is the inverse of the
+    CAD->USD entry. Also covers a beneficiary account that is not USD."""
+    from contexts.financial_gateway.application import screen_and_accept
+
+    db["accounts"].docs = [a for a in db["accounts"].docs if a["accountId"] != CREDITOR]
+    _add_account(db, "ACC-cad0001", "CAD")
+
+    payment = service.simulate_inbound(
+        "HAPPY", wire_type="INTERNATIONAL", amount=1_000.0,
+        originator_currency="EUR", beneficiary_currency="CAD",
+    )
+
+    expected_rate = screen_and_accept.rate("EUR", "CAD")
+    assert expected_rate == round(1.0850 * round(1 / 0.7350, 6), 6)
+    assert payment["fx"]["fxRate"] == expected_rate
+    assert payment["currency"] == "CAD"
+    assert payment["amount"] == round(1_000.0 * expected_rate, 2)
+
+
+def test_the_fx_rate_helper_prefers_identity_then_direct_then_inverse_then_pivot():
+    from contexts.financial_gateway.application.screen_and_accept import rate
+
+    assert rate("USD", "USD") == 1.0
+    assert rate("EUR", "USD") == 1.0850                      # direct
+    assert rate("USD", "EUR") == 0.9217                      # direct, not 1/1.0850
+    assert rate("USD", "CAD") == round(1 / 0.7350, 6)        # inverse
+    assert rate("GBP", "EUR") == round(1.2700 * 0.9217, 6)   # pivot
+    assert rate("USD", "JPY") is None and rate("JPY", "EUR") is None
+
+
+def test_no_account_in_the_requested_beneficiary_currency_is_refused(service, db):
+    from services.payments_service import InboundSimulationRejected
+
+    with pytest.raises(InboundSimulationRejected, match="No open customer account in GBP"):
+        service.simulate_inbound("HAPPY", beneficiary_currency="GBP")
+    assert list(db["payments"].find({})) == []
+
+
+def test_the_simulate_request_model_keeps_its_contract():
+    from pydantic import ValidationError
+
+    from api_models import InboundSimulateRequest
+
+    with pytest.raises(ValidationError):                      # extra="forbid" survives
+        InboundSimulateRequest(scenario="HAPPY", surprise=1)
+    for bad_bic in ("DEUT", "DEUTDEFF1", "DEUT-DEFF", "DEUTDEFFXX"):  # 8 or 11 only
+        with pytest.raises(ValidationError):
+            InboundSimulateRequest(originatingBankBic=bad_bic)
+    with pytest.raises(ValidationError):
+        InboundSimulateRequest(amount=0)
+    with pytest.raises(ValidationError):
+        InboundSimulateRequest(originatorCurrency="JPY")
+
+    assert InboundSimulateRequest(originatingBankBic=" deutdeff ").originatingBankBic == "DEUTDEFF"
+    assert InboundSimulateRequest(originatingBankBic="CHASUS33XXX").originatingBankBic == "CHASUS33XXX"
+    assert InboundSimulateRequest().scenario == "HAPPY"       # bare body still works
+
+    domestic = InboundSimulateRequest(
+        wireType="DOMESTIC", originatorCurrency="CAD", beneficiaryCurrency="USD")
+    assert domestic.originatorCurrency == domestic.beneficiaryCurrency == "USD"
+    international = InboundSimulateRequest(
+        wireType="INTERNATIONAL", originatorCurrency="CAD", beneficiaryCurrency="USD")
+    assert (international.originatorCurrency, international.beneficiaryCurrency) == ("CAD", "USD")
+
+
 def test_the_duplicate_scenario_is_one_payment_not_two(service, db):
     """The same message sent twice is one payment and one credit — the demo beat the
     DUPLICATE scenario exists for, asserted on the balance rather than on an id."""

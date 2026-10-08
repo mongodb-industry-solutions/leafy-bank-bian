@@ -92,6 +92,7 @@ def _build_filter(
     status: Optional[str] = None,
     customer_id: Optional[str] = None,
     rail: Optional[str] = None,
+    direction: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
 ) -> dict:
@@ -108,6 +109,12 @@ def _build_filter(
         query["customerId"] = customer_id
     if rail:
         query["rail"] = rail
+    if direction == "INBOUND":
+        query["direction"] = "INBOUND"
+    elif direction == "OUTBOUND":
+        # `$ne`, not `== "OUTBOUND"`: payments written before the incoming wire carry no
+        # `direction` at all, and they are all outbound. `$ne` also matches a missing field.
+        query["direction"] = {"$ne": "INBOUND"}
     if date_from or date_to:
         window: dict = {}
         if date_from:
@@ -127,13 +134,14 @@ def list_payments(
     rail: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    direction: Optional[str] = None,
     limit: int = 25,
     skip: int = 0,
 ) -> dict:
     """Newest-first page of payments, plus the total matching the same filter."""
     coll = _payments(connection, db_name)
     query = _build_filter(
-        status=status, customer_id=customer_id, rail=rail,
+        status=status, customer_id=customer_id, rail=rail, direction=direction,
         date_from=date_from, date_to=date_to,
     )
     cursor = (

@@ -35,7 +35,7 @@ from database.connection import MongoDBConnection
 from contexts.payment_rail.domain import pacs008
 from encoder.json_encoder import MyJSONEncoder
 from routers.workflow import router as workflow_router
-from services.payments_service import PaymentNotFound, PaymentsService
+from services.payments_service import InboundSimulationRejected, PaymentNotFound, PaymentsService
 from services.transactions_service import TransactionsService
 from shared import registry
 from workers import (
@@ -345,7 +345,14 @@ def financial_gateway_inbound_simulate(
     refusal in the queue reads as a broken bank, not a demo beat).
     """
     try:
-        payment_doc = payments_service.simulate_inbound(body.scenario)
+        payment_doc = payments_service.simulate_inbound(
+            body.scenario,
+            wire_type=body.wireType,
+            amount=body.amount,
+            originator_currency=body.originatorCurrency,
+            beneficiary_currency=body.beneficiaryCurrency,
+            originating_bank_bic=body.originatingBankBic,
+        )
         return _bian_response({
             "paymentId": payment_doc["paymentId"],
             "status": payment_doc["status"],
@@ -356,6 +363,8 @@ def financial_gateway_inbound_simulate(
         })
     except HTTPException:
         raise
+    except InboundSimulationRejected as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
