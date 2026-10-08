@@ -311,10 +311,10 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
           {stage.key === "g:Accounting & Posting" && (
             <>
               <PostingChain payment={payment} trace={trace} />
-              <PostingDirection payment={payment} />
+              <PostingDirection payment={payment} trace={trace} />
             </>
           )}
-          {stage.key === "g:Clearing & settlement" && (
+          {stage.key === "g:Clearing & Settlement" && (
             <>
               <FundsFlow payment={payment} position={settlementPosition} />
               <SettlementOutcomes position={settlementPosition} direction={payment?.direction} />
@@ -434,7 +434,7 @@ function KeyValues({ rows }) {
  * B1). `source` is shown because "where did this value come from" is the question an operator
  * asks first.
  */
-function EnrichmentDiff({ enrichment }) {
+function EnrichmentDiff({ enrichment, inbound }) {
   const resolved = enrichment?.resolved || [];
 
   if (!enrichment) {
@@ -443,7 +443,9 @@ function EnrichmentDiff({ enrichment }) {
   if (!resolved.length) {
     return (
       <Body className={styles.muted}>
-        Nothing required enrichment — every field was already resolved at initiation.
+        {inbound
+          ? "No routing or fee enrichment needed for inbound payments: already handled by the sending bank."
+          : "Nothing required enrichment — every field was already resolved at initiation."}
       </Body>
     );
   }
@@ -495,9 +497,13 @@ function EnrichmentBody({ stage, payment, checkList }) {
       <SummaryCard label="What was determined" rows={summaryRows(stage, payment)} />
       <Card
         label="Progressive enrichment"
-        note="Stage 3 is a hard gate: the rail message is only built from a payment that passed here."
+        note={
+          payment?.direction === "INBOUND"
+            ? "Stage 3 is a hard gate: a payment cannot reach the Stage 4 acceptance decision until screening, classification and any required FX conversion are recorded."
+            : "Stage 3 is a hard gate: the rail message is only built from a payment that passed here."
+        }
       >
-        <EnrichmentDiff enrichment={stage.data?.enrichment} />
+        <EnrichmentDiff enrichment={stage.data?.enrichment} inbound={payment?.direction === "INBOUND"} />
       </Card>
       <TransitionsCard events={events} stageKey="validation" payment={payment} />
     </div>
@@ -1246,7 +1252,7 @@ function summaryRows(stage, payment) {
       ];
     }
     case "legs": {
-      // Stage 7 — clearing & settlement. `data` is { position, clearing }. Surface the
+      // Stage 7 — Clearing & Settlement. `data` is { position, clearing }. Surface the
       // four-way outcome (FR-7.3) and, for UNMATCHED, the discrepancy amount that routes
       // toward the Stage 9 exception queue — not just the settlement status.
       const pos = d?.position;
@@ -2241,7 +2247,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
   // Group first so the stepper reads as Doina's 8 stages — stage 6 as one
   // "Accounting & Posting" node with the four panels nested — rather than ~12 nodes.
   const stages = useMemo(
-    () => (payment ? groupLifecycleStages(buildLifecycleStages(payment, trace)) : null),
+    () => (payment ? groupLifecycleStages(buildLifecycleStages(payment, trace), payment.direction) : null),
     [payment, trace]
   );
   const states = useMemo(

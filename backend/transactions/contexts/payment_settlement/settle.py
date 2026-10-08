@@ -76,7 +76,7 @@ logger = logging.getLogger(__name__)
 STAGE = "7 settle"
 
 # --- settlement models (B5, her L631) ----------------------------------------
-# 1. Correspondent  → Cr 1111 Nostro Accounts
+# 1. Correspondent  → Cr 1111 Nostro/Central Bank Cash
 # 2. Central bank   → Cr 1121 Minimum Reserve Requirements
 # 3. Vostro         → stubbed (Q48 — correspondentBanks has no SSI / settlement-account link)
 #
@@ -85,7 +85,7 @@ STAGE = "7 settle"
 _SETTLEMENT_MODELS: dict[str, dict] = {
     "CORRESPONDENT": {
         "settlementAccountCode": "1111",
-        "settlementAccountName": "Nostro Accounts",
+        "settlementAccountName": "Nostro/Central Bank Cash",
         "label": "Via correspondent bank",
     },
     "CENTRAL_BANK": {

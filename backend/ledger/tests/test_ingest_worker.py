@@ -299,3 +299,24 @@ def test_an_inbound_transaction_posts_the_mirror_legs_with_no_rule_change():
     # The idempotency key is unchanged — `trace_payment` looks the principal event up by
     # exactly `paymentId`, for inbound as for outbound.
     assert event["idempotencyKey"] == txn["paymentId"]
+
+
+def test_an_inbound_payment_to_savings_posts_exactly_dr_1131_cr_2121_with_controls():
+    """Doina's incoming example, Stage 6: Dr 1131 Wire Clearing / Cr 2121, rolling up to the
+    1130 and 2120 controls."""
+    coa = ChartOfAccounts([
+        {"accountCode": "1100", "accountName": "Cash and Cash Equivalents", "isPostingAccount": False, "status": "ACTIVE", "parentAccountCode": None},
+        {"accountCode": "1130", "accountName": "Clearing - Control", "isPostingAccount": False, "status": "ACTIVE", "parentAccountCode": "1100"},
+        {"accountCode": "1131", "accountName": "Wire Clearing Account", "isPostingAccount": True, "status": "ACTIVE", "parentAccountCode": "1130"},
+        {"accountCode": "2100", "accountName": "Customer Deposits", "isPostingAccount": False, "status": "ACTIVE", "parentAccountCode": None},
+        {"accountCode": "2120", "accountName": "Savings Accounts - Control", "isPostingAccount": False, "status": "ACTIVE", "parentAccountCode": "2100"},
+        {"accountCode": "2121", "accountName": "Retail Savings Accounts", "isPostingAccount": True, "status": "ACTIVE", "parentAccountCode": "2120"},
+    ])
+    txn = _txn(payer={"accountId": "ACC-CLEARING-WIRE"}, payee={"accountId": "ACC-beneficiary"},
+               direction="INBOUND")
+
+    event = build_ledger_event(
+        txn, _account("ACC-CLEARING-WIRE", "1131"), _account("ACC-beneficiary", "2121"), coa)
+
+    assert (event["debitLeg"]["glAccountCode"], event["debitLeg"]["controlAccountCode"]) == ("1131", "1130")
+    assert (event["creditLeg"]["glAccountCode"], event["creditLeg"]["controlAccountCode"]) == ("2121", "2120")

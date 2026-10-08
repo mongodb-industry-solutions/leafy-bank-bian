@@ -11,7 +11,7 @@ import styles from "../Showcase.module.css";
 function effectOf(proposal, bank) {
   switch (proposal.action) {
     case "POST_ADJUSTMENT":
-      return `A correcting journal: Dr 5214 correspondent charges / Cr 1111 nostro, ${major(proposal.params?.amount)}.`;
+      return `A correcting journal: Dr 5214 correspondent charges / Cr 1111 Nostro/Central Bank Cash, ${major(proposal.params?.amount)}.`;
     case "ACCEPT_DISCREPANCY":
       return "No journal. The exception closes and the payment reconciles with the gap accepted.";
     case "LINK_STATEMENT_ENTRY":

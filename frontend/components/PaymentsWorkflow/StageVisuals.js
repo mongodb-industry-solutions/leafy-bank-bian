@@ -265,7 +265,7 @@ export function PartyFlow({ payment }) {
         <Icon glyph="Lock" size={14} />
         <span>
           {inbound ? "Taken from the message" : "Frozen"}
-          {payment?.initiatedAt ? ` at ${fmtWhen(payment.initiatedAt)}` : ""}. Not a live record.
+          {payment?.initiatedAt ? ` at ${fmtWhen(payment.initiatedAt)}` : ""}. Debtor and Creditor are stored as point in time snapshots.
         </span>
         <Tooltip
           trigger={
@@ -372,7 +372,7 @@ const STAGE_STATES = {
     INBOUND: { states: [S("ACCEPTED")], note: "set on transmission, before internal posting" },
   },
   "g:Accounting & Posting": { both: { states: [S("POSTED")], note: "lifecycle.postingStatus" } },
-  "g:Clearing & settlement": {
+  "g:Clearing & Settlement": {
     both: { states: [S("PENDING"), S("SETTLED")], note: "lifecycle.settlementStatus" },
   },
   reconciliation: { both: { states: [S("SETTLED"), S("RECONCILED")], note: "terminal state" } },
@@ -807,20 +807,27 @@ export function SettlementOutcomes({ position, direction }) {
       </div>
       <div className={styles.cardNote}>
         Second ledger event, separate from the stage 6 posting:{" "}
-        {inbound ? "Dr Nostro cash / Cr Wire clearing" : "Dr Wire clearing / Cr Nostro cash"}.
+        {inbound ? "Dr Nostro/Central Bank Cash / Cr Wire clearing" : "Dr Wire clearing / Cr Nostro/Central Bank Cash"}.
       </div>
     </>
   );
 }
 
 /** The mirror posting an inbound or outbound wire makes at stage 6. */
-export function PostingDirection({ payment }) {
+export function PostingDirection({ payment, trace }) {
   if (payment?.rail !== "WIRE") return null;
   const inbound = payment?.direction === "INBOUND";
+  // Show the posted accounts (code + name) once the ledger event exists; the generic role
+  // names are the fallback before it does.
+  const names = trace?.accountNames ?? {};
+  const account = (leg, fallback) =>
+    leg?.glAccountCode ? `${leg.glAccountCode} ${names[leg.glAccountCode] || fallback}` : fallback;
+  const debit = account(trace?.ledgerEvent?.debitLeg, inbound ? "Wire clearing" : "Customer deposit liability");
+  const credit = account(trace?.ledgerEvent?.creditLeg, inbound ? "Customer deposit liability" : "Wire clearing");
   return (
     <div className={styles.cardNote}>
       {inbound ? "Inbound posts the mirror of an outbound wire:" : "Outbound wire:"}{" "}
-      {inbound ? "Dr Wire clearing / Cr Customer deposit liability" : "Dr Customer deposit liability / Cr Wire clearing"}.
+      Dr {debit} / Cr {credit}.
     </div>
   );
 }

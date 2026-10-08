@@ -58,11 +58,11 @@
       "$oid": "1887987f8b8072909b630760"
     },
     "accountCode": "1111",
-    "accountName": "Nostro Accounts",
+    "accountName": "Nostro/Central Bank Cash",
     "accountType": "ASSET",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "currency": "USD",
-    "description": "Correspondent bank nostro balances",
+    "description": "Correspondent bank nostro balances and central bank cash",
     "isPostingAccount": true,
     "level": 4,
     "normalBalance": "DEBIT",

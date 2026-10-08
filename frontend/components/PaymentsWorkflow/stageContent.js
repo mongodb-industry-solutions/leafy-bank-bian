@@ -81,7 +81,7 @@ const COPY = {
       why: "Multi-document ACID transactions keep debits equal to credits, and change streams run the posting without polling.",
     },
   },
-  "g:Clearing & settlement": {
+  "g:Clearing & Settlement": {
     both: {
       business: "The money actually moves between banks and the books record the settlement.",
       technical: "A settlementPositions document holds the expected amount; a change stream on the SETTLED flip writes the settlement ledger event.",
@@ -158,7 +158,7 @@ const WRITES = {
     W("settlementPositions", "update", "Expected amount, window and settled status", position),
   ],
   settlementPosting: [
-    W("ledgerEvents", "insert", "Settlement event {paymentId}-SETTLEMENT: clearing account to nostro",
+    W("ledgerEvents", "insert", "Settlement event {paymentId}-SETTLEMENT: clearing account to Nostro/Central Bank Cash",
       ledgerEvents(["SETTLEMENT"]), "Ledger service, change stream on payments"),
   ],
   reconciliation: [
@@ -312,7 +312,7 @@ function factsFor(stage, payment) {
           totals && !totals.balanced ? "warn" : undefined],
       ];
     }
-    case "g:Clearing & settlement": {
+    case "g:Clearing & Settlement": {
       const conf = child(stage, "settlementConfirm")?.data;
       const pos = conf?.position;
       const delta = settlementDelta(pos);
@@ -372,7 +372,7 @@ const BIAN = {
   "g:Accounting & Posting": {
     both: { domains: ["Financial Accounting", "Position Keeping", "Current Account"] },
   },
-  "g:Clearing & settlement": {
+  "g:Clearing & Settlement": {
     [OUT]: {
       domains: ["Internal Bank Account", "Payment Settlement", "Correspondent Bank Directory"],
     },

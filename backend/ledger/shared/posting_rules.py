@@ -332,7 +332,7 @@ def decompose_settlement(
     This event moves the clearing position to the settlement account:
 
       - Dr 1131 Wire Clearing       (clearing position reduced — the hold is released)
-      - Cr 1111 Nostro Accounts      (model 1: settled via a correspondent)
+      - Cr 1111 Nostro/Central Bank Cash (model 1: settled via a correspondent)
         or Cr 1121 Minimum Reserve Requirements (model 2: settled directly at the central bank)
 
     Both GL codes are validated as active posting leaves. The ``entityReference`` on both
@@ -393,7 +393,7 @@ def decompose_inbound_settlement(
     An inbound wire's money arrived the other way round — FROM the correspondent into our
     nostro — so both legs flip:
 
-      - Dr 1111 Nostro Accounts (or 1121)  — the nostro position funds the credit
+      - Dr 1111 Nostro/Central Bank Cash (or 1121)  — the nostro position funds the credit
       - Cr 1131 Wire Clearing               — releasing the hold stage 6 took on it
 
     Doina's FR-7.IN1 is explicit: *"the mirror of outgoing FR-7.1."* The clearing account

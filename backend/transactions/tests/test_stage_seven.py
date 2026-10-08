@@ -220,6 +220,9 @@ def test_a_correspondent_wire_settles_through_nostro(service, db):
     assert len(positions) == 1
     assert positions[0]["model"] == "CORRESPONDENT"
     assert positions[0]["settlementAccountCode"] == "1111"
+    # GL 1111 is named for both of its uses (correspondent nostro and central bank cash).
+    selected = next(c for c in _payment(db)["checks"] if c["name"] == "settlement_model_selected")
+    assert "1111 (Nostro/Central Bank Cash)" in selected["detail"]
 
 
 def test_a_domestic_wire_settles_through_central_bank(service, db):

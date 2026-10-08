@@ -271,7 +271,7 @@ const STEP = {
     narration:
       "A branch operator sends an international wire for a customer. In one synchronous call " +
       "the payment passes the first five lifecycle stages: initiation, authentication and " +
-      "entitlement, validation and enrichment, orchestration (fraud scoring and funds " +
+      "entitlement, Validation & Enrichment, orchestration (fraud scoring and funds " +
       "reservation), and rail execution, where it leaves the bank as an ISO 20022 pacs.008. " +
       "Each stage is recorded on the payment document, and the customer's account is " +
       "debited in the same ACID transaction.",

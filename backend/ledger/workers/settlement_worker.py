@@ -5,7 +5,7 @@ to `SETTLED`, this worker produces the **second** `ledgerEvents` document — th
 accounting event (doc 21 B2):
 
     Dr 1131 Wire Clearing       (clearing position reduced)
-    Cr 1111 Nostro Accounts      (model 1: via correspondent)
+    Cr 1111 Nostro/Central Bank Cash (model 1: via correspondent)
        or Cr 1121 Minimum Reserve Requirements (model 2: direct to central bank)
 
 The first event (PAYMENT_PRINCIPAL, ``Dr customer / Cr 1131``) is produced by

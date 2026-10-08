@@ -81,7 +81,7 @@ def test_settlement_legs_are_balanced():
     debit = next(l for l in legs if l.side == SIDE_DEBIT)
     credit = next(l for l in legs if l.side == SIDE_CREDIT)
     assert debit.gl_account_code == "1131"  # Wire Clearing
-    assert credit.gl_account_code == "1111"  # Nostro Accounts
+    assert credit.gl_account_code == "1111"  # Nostro/Central Bank Cash
     assert debit.amount_minor == credit.amount_minor == 25000
     assert debit.event_type == EVENT_PAYMENT_SETTLEMENT
 
@@ -177,6 +177,9 @@ def test_an_inbound_settlement_builds_the_mirror_legs():
 
     assert event["debitLeg"]["glAccountCode"] == "1111", "the nostro must be DEBITED inbound"
     assert event["creditLeg"]["glAccountCode"] == "1131", "the clearing hold must be RELEASED"
+    # Stage 7 legs and control roll-ups are exactly Dr 1111 (1110) / Cr 1131 (1130).
+    assert event["debitLeg"]["controlAccountCode"] == "1110"
+    assert event["creditLeg"]["controlAccountCode"] == "1130"
     assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"]
     assert event["idempotencyKey"] == "PAY-test0001-SETTLEMENT", (
         "the key is per-payment, not per-direction — one payment, one settlement event"
@@ -298,3 +301,14 @@ def test_a_chart_without_5214_degrades_instead_of_crashing_the_worker():
         "settlementAdjustment": {"amount": 25.0, "currency": "USD"},
     }}
     assert build_adjustment_event(payment, _CLEARING_ACCOUNT, _COA) is None
+
+
+def test_the_seed_names_gl_1111_nostro_central_bank_cash():
+    """The rename must reach the seed, or a fresh database shows the old name."""
+    import json
+    from pathlib import Path
+
+    seed = Path(__file__).resolve().parents[2] / "data" / "sample" / "leafy_bank_bian.glAccounts.json"
+    by_code = {a["accountCode"]: a for a in json.loads(seed.read_text())}
+    assert by_code["1111"]["accountName"] == "Nostro/Central Bank Cash"
+    assert by_code["1121"]["accountName"] == "Minimum Reserve Requirements"

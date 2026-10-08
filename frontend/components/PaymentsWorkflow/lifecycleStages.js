@@ -279,7 +279,7 @@ export function buildLifecycleStages(payment, trace) {
       // `kind: "enrichment"` renders the diff — her L459-460 acceptance — alongside the
       // state transitions and the stage's own checks.
       key: "validation",
-      label: "Validation & enrichment",
+      label: "Validation & Enrichment",
       icon: "Checkmark",
       stage: 3,
       // Same three states both ways — RECEIVED and INITIATED both forward into VALIDATED
@@ -603,7 +603,7 @@ export function buildLifecycleStages(payment, trace) {
           }
         : null,
     },
-    // Stage 7 — Clearing & settlement, split into two sub-steps so the rail shows the
+    // Stage 7 — Clearing & Settlement, split into two sub-steps so the rail shows the
     // progression Doina's A.1 describes: external settlement is CONFIRMED first (independent
     // of the GL batch), then the second accounting event is POSTED to the GL by the batch.
     // The split makes the "external settlement has gone green, and only after the GL batch
@@ -617,7 +617,7 @@ export function buildLifecycleStages(payment, trace) {
       label: "External settlement",
       icon: "ArrowLeftRight",
       stage: 7,
-      group: "Clearing & settlement",
+      group: "Clearing & Settlement",
       reached: !!position || !!payment?.lifecycle?.settlementStatus,
       status: payment?.lifecycle?.settlementStatus || undefined,
       meta: position?.modelLabel || (clearing.settledAt ? "settled" : "pending"),
@@ -638,15 +638,19 @@ export function buildLifecycleStages(payment, trace) {
       label: "Settlement posting",
       icon: "Copy",
       stage: 7,
-      group: "Clearing & settlement",
+      group: "Clearing & Settlement",
       reached: !!se,
       status: se?.postingStatus,
       meta: se?.postingResult?.journalEntryId || (se ? "pending journal" : null),
-      intro:
-        "The second, distinct accounting event — Dr Wire Clearing / Cr Nostro or " +
-        "Central Bank — posted once external settlement is confirmed. It only turns green " +
-        "once the batch journals it, so this step completes after the External settlement " +
-        "step above it.",
+      intro: inbound
+        ? "The second, distinct accounting event \u2014 Dr Nostro or Central Bank / Cr Wire " +
+          "Clearing \u2014 posted once external settlement is confirmed. This step turns green " +
+          "once the GL batch journals the settlement event, which can only happen after " +
+          "external settlement is confirmed above."
+        : "The second, distinct accounting event \u2014 Dr Wire Clearing / Cr Nostro or " +
+          "Central Bank \u2014 posted once external settlement is confirmed. This step turns " +
+          "green once the GL batch journals the settlement event, which can only happen after " +
+          "external settlement is confirmed above.",
       kind: "ledgerEvent",
       data: se,
       legs: se
@@ -738,6 +742,35 @@ export function buildLifecycleStages(payment, trace) {
     });
 }
 
+const ACCOUNTING_INTRO =
+  "Accounting & Posting uses the same pipeline for incoming as for outgoing: payment " +
+  "\u2192 transaction \u2192 ledger event \u2192 sub-ledger entries \u2192 journal entry. " +
+  "It is shown as four panels: the balanced debit/credit event, a second event for any " +
+  "wire fee, the paired sub-ledger entries, and the aggregated journal. Posting (stage 6) " +
+  "happens before settlement (stage 7). Only the direction of the debit/credit legs " +
+  "differs. Outgoing: Dr Customer Deposit Liability / Cr Wire Clearing Account. " +
+  "Incoming: Dr Wire Clearing Account / Cr Customer Deposit Liability, the reverse of " +
+  "outgoing's posting.";
+
+const SETTLEMENT_INTRO_INBOUND =
+  "For incoming wires, Leafy Bank is the party receiving external settlement, not sending " +
+  "it. expectedPosition is derived from the inbound message's instructed amount. Once " +
+  "external settlement is confirmed, a second, separate ledger event debits the settlement " +
+  "account (Nostro/Central Bank Cash) and credits the Wire Clearing Account. The cash lands " +
+  "in the bank's own account, and the clearing position from Stage 6 is cleared.";
+
+const SETTLEMENT_INTRO_OUTBOUND =
+  "For outgoing wires, Leafy Bank sends external settlement. Once external settlement is " +
+  "confirmed, a second, separate ledger event debits the Wire Clearing Account and credits " +
+  "the settlement account (Nostro/Central Bank Cash), clearing the position from Stage 6.";
+
+function groupIntro(label, direction) {
+  if (label === "Clearing & Settlement") {
+    return direction === "INBOUND" ? SETTLEMENT_INTRO_INBOUND : SETTLEMENT_INTRO_OUTBOUND;
+  }
+  return ACCOUNTING_INTRO;
+}
+
 /**
  * Presentational grouping of `buildLifecycleStages` output: collapse every panel that shares a
  * `group` into ONE rail node, so the lifecycle reads as Doina's eight stages — not as ~12 nodes
@@ -754,7 +787,7 @@ export function buildLifecycleStages(payment, trace) {
  * this function needs no change. Kept as a pure function so the rail, the timeline and the
  * grouping stay testable without a component tree.
  */
-export function groupLifecycleStages(stages) {
+export function groupLifecycleStages(stages, direction) {
   if (!stages?.length) return [];
   const groups = [];       // { key, label, stage, group?, children[] }
   const byLabel = new Map();
@@ -796,15 +829,7 @@ export function groupLifecycleStages(stages) {
       reached: anyReached,
       status: terminal?.status ?? undefined,
       meta: reachedCount ? `${reachedCount} of ${children.length} reached` : undefined,
-      intro:
-        "Accounting & Posting uses the same pipeline for incoming as for outgoing: payment " +
-        "\u2192 transaction \u2192 ledger event \u2192 sub-ledger entries \u2192 journal entry. " +
-        "It is shown as four panels: the balanced debit/credit event, a second event for any " +
-        "wire fee, the paired sub-ledger entries, and the aggregated journal. Posting (stage 6) " +
-        "happens before settlement (stage 7). Only the direction of the debit/credit legs " +
-        "differs. Outgoing: Dr Customer Deposit Liability / Cr Wire Clearing Account. " +
-        "Incoming: Dr Wire Clearing Account / Cr Customer Deposit Liability, the reverse of " +
-        "outgoing's posting.",
+      intro: groupIntro(g.label, direction),
       children,
     };
   });

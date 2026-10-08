@@ -60,7 +60,7 @@ const SETTLE = [
   W("payments", "update", "lifecycle.currentState SETTLED, lifecycle.settlementStatus SETTLED, clearing.settledAt",
     ({ payment }) => nonEmpty(paymentDoc(payment))),
   W("settlementPositions", "update", "expectedWindow: when the statement line is due", position),
-  W("ledgerEvents", "insert", "Settlement event {paymentId}-SETTLEMENT: clearing account to nostro",
+  W("ledgerEvents", "insert", "Settlement event {paymentId}-SETTLEMENT: clearing account to Nostro/Central Bank Cash",
     ledgerEvents(["SETTLEMENT"]), "Ledger service, change stream on payments"),
 ];
 
@@ -108,7 +108,7 @@ const INVESTIGATE = [
 // What Approve writes depends on the scenario's action.
 const APPROVE_BY_SCENARIO = {
   R1: [
-    W("ledgerEvents", "insert", "Adjustment {paymentId}-ADJ: Dr 5214 correspondent charges / Cr 1111 nostro, 25.00",
+    W("ledgerEvents", "insert", "Adjustment {paymentId}-ADJ: Dr 5214 correspondent charges / Cr 1111 Nostro/Central Bank Cash, 25.00",
       ledgerEvents(["ADJ"]), "Ledger service, change stream"),
     W("settlementPositions", "update", "adjustmentPending", position),
     W("payments", "update", "clearing.settlementAdjustment", ({ payment }) => nonEmpty(paymentDoc(payment))),
