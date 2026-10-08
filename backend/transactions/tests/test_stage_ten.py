@@ -132,7 +132,8 @@ def test_the_parser_round_trips_the_real_mappers_output():
 
     assert parsed["amount"] == 25_000.0
     assert parsed["currency"] == "USD"
-    assert parsed["uetr"] == "UETR-inbound-001"
+    # The mapper strips the internal `UETR-` prefix, so the parsed message carries the bare id.
+    assert parsed["uetr"] == "inbound-001"
     assert parsed["chargeBearer"] == "SHAR"
     assert parsed["purposeCode"] == "SUPP"
     assert parsed["remittanceUnstructured"] == "Invoice 4471"
@@ -180,7 +181,7 @@ def test_the_idempotency_key_prefers_the_uetr_and_never_fabricates_one():
     """A fabricated key would be unique every time — silently disabling dedupe, which is
     worse than having none."""
     parsed = inbound_pacs008.parse(_message())
-    assert inbound_pacs008.idempotency_key(parsed) == "INBOUND-UETR-inbound-001"
+    assert inbound_pacs008.idempotency_key(parsed) == "INBOUND-inbound-001"
 
     no_uetr = inbound_pacs008.parse(_message(uetr=None))
     assert inbound_pacs008.idempotency_key(no_uetr) == (
@@ -670,19 +671,38 @@ def test_the_status_report_quotes_the_senders_references_not_ours():
         "paymentId": "PAY-local",
         "uetr": "UETR-x",
         "senderReferences": {"msgId": "THEIR-MSG", "endToEndId": "THEIR-E2E",
-                             "txId": "THEIR-TX"},
+                             "txId": "THEIR-TX", "instructionId": "THEIR-INSTR"},
         "debtor": {"bic": "DEUTDEFF", "bankName": "Deutsche"},
     }
     body = pacs002.body(pacs002.build(payment=payment, accepted=True, now=NOW))
 
     assert body["OrgnlGrpInfAndSts"]["OrgnlMsgId"] == "THEIR-MSG"
     status = body["TxInfAndSts"][0]
+    assert status["OrgnlInstrId"] == "THEIR-INSTR"
     assert status["OrgnlEndToEndId"] == "THEIR-E2E"
     assert status["OrgnlTxId"] == "THEIR-TX"
-    # The UETR travels unchanged across every hop — the point of it.
-    assert status["OrgnlUETR"] == "UETR-x"
+    # The UETR travels unchanged across every hop — the point of it. The stored `UETR-`
+    # prefix is internal; ISO schema validation wants the bare value.
+    assert status["OrgnlUETR"] == "x"
+    assert "OrgnlTxRef" not in status and "OrgnlTxRef" not in str(body["OrgnlGrpInfAndSts"])
+    assert "MsgRef" not in str(body)
     # Our own reference is still present, as the account-servicer reference.
     assert status["AcctSvcrRef"] == "PAY-local"
+
+
+def test_iso_uetr_strips_the_storage_prefix_and_is_idempotent():
+    uuid = "97ad5f26-ec2a-48fc-b4b2-5583b16aac27"
+    assert pacs008.iso_uetr(f"UETR-{uuid}") == uuid
+    assert pacs008.iso_uetr(uuid) == uuid
+    assert pacs008.iso_uetr(None) is None
+
+
+def test_the_return_carries_a_bare_uetr():
+    payment = {"paymentId": "PAY-1", "uetr": "UETR-abc"}
+    transaction = pacs004.body(
+        pacs004.build(payment=payment, return_reason_code="AC01", now=NOW)
+    )["TxInf"][0]
+    assert transaction["OrgnlUETR"] == "abc"
 
 
 def test_a_refusal_carries_a_reason_and_an_acceptance_does_not():

@@ -99,7 +99,7 @@ def build(
         },
         "OrgnlEndToEndId": sender.get("endToEndId"),
         "OrgnlTxId": sender.get("txId"),
-        "OrgnlUETR": payment.get("uetr"),
+        "OrgnlUETR": pacs008.iso_uetr(payment.get("uetr")),
         # ⚠️ `RtrdIntrBkSttlmAmt`, not `IntrBkSttlmAmt` — see the module docstring.
         "RtrdIntrBkSttlmAmt": {
             f"{pacs008.ATTRIBUTE_PREFIX}Ccy": payment.get("instructedCurrency")

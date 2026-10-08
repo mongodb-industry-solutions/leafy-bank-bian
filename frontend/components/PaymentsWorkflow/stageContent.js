@@ -168,11 +168,27 @@ const WRITES = {
   ],
 };
 
+// Inbound has no rail submission, so stage 5 swaps the outbound rows: paymentExecutions
+// becomes an explicit "not applicable" card (shown rather than hidden, so the absence is
+// visible) and paymentMessages describes the pacs.002 status response.
+const INBOUND_WRITES = {
+  execution: [
+    {
+      collection: "paymentExecutions",
+      notApplicable: true,
+      fields: "Not applicable to inbound payments: no rail submission. The status response is stored in paymentMessages.",
+      pick: () => null,
+    },
+    W("paymentMessages", "insert", "The pacs.002 status response sent to the sending bank", executionMessages),
+  ],
+};
+
 /** The writes behind a stage, de-duplicated by collection and operation for grouped stages. */
-export function stageWrites(stage) {
+export function stageWrites(stage, direction) {
   const panels = stage.children?.length > 1 ? stage.children : [stage];
+  const writesOf = (p) => (direction === IN && INBOUND_WRITES[p.key]) || WRITES[p.key] || [];
   const seen = new Set();
-  return panels.flatMap((p) => WRITES[p.key] || []).filter((w) => {
+  return panels.flatMap(writesOf).filter((w) => {
     const id = `${w.collection}|${w.op}|${w.fields}`;
     if (seen.has(id)) return false;
     seen.add(id);

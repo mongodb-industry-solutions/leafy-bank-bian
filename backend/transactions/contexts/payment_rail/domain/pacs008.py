@@ -74,6 +74,18 @@ _NB_OF_TXS = "1"
 # ISO 20022 SettlementMethod1Code, the subset a wire can take. Derived from the routing
 # decision, never stored on the payment — see `settlement_method()` and Q40.
 SETTLEMENT_CLEARING = "CLRG"
+
+# `payment.uetr` is stored with a `UETR-` prefix, but ISO's UETR is a bare UUIDv4 and a prefixed
+# value fails schema validation. Strip at message-build time only, so stored values and lookups
+# keep working. Idempotent: legacy and bare values pass through unchanged.
+_UETR_STORAGE_PREFIX = "UETR-"
+
+
+def iso_uetr(uetr: Optional[str]) -> Optional[str]:
+    """The UETR as it appears in an ISO 20022 message (bare UUID)."""
+    if not uetr:
+        return uetr
+    return uetr.removeprefix(_UETR_STORAGE_PREFIX)
 SETTLEMENT_COVER = "INDA"
 
 
@@ -231,7 +243,7 @@ def build(payment: dict, *, settlement_mtd: Optional[str] = None,
             "InstrId": payment.get("instructionId"),
             "EndToEndId": payment.get("endToEndId"),
             "TxId": payment.get("txnId"),
-            "UETR": payment.get("uetr"),
+            "UETR": iso_uetr(payment.get("uetr")),
         },
         "PmtTpInf": _payment_type_information(
             wire.get("paymentTypeInformation"), payment.get("categoryPurpose")

@@ -397,7 +397,7 @@ export function StatePath({ events, inbound }) {
 export function IntakeOrder() {
   return (
     <div className={styles.statePath} aria-label="Inbound intake order">
-      <span className={styles.stateChip}>1 · raw pacs.008 stored (canonicalJsonStorage)</span>
+      <span className={styles.stateChip}>1 · raw pacs.008 stored (paymentMessages)</span>
       <span className={styles.statePathArrow} aria-hidden="true">→</span>
       <span className={styles.stateChip}>2 · payment created (payments)</span>
       <span className={styles.statePathNote}>the original message survives a parse failure</span>

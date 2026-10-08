@@ -21,12 +21,14 @@ function WriteRow({ write, sources, open }) {
       <summary className={styles.summary}>
         <span className={styles.head}>
           <span className={styles.collection}>{write.collection}</span>
-          <Badge variant={OP_VARIANT[write.op] || "lightgray"}>{write.op}</Badge>
+          {!write.notApplicable && (
+            <Badge variant={OP_VARIANT[write.op] || "lightgray"}>{write.op}</Badge>
+          )}
         </span>
         <span className={styles.fields}>{write.fields}</span>
         {write.via && <span className={styles.via}>{write.via}</span>}
       </summary>
-      {docs ? (
+      {write.notApplicable ? null : docs ? (
         <div className={styles.code}>
           <Code language="json" copyButtonAppearance="hover">
             {JSON.stringify(docs.length === 1 ? docs[0] : docs, null, 2)}

@@ -262,7 +262,7 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
   const claimer = grouped ? stage.children.find((c) => (c.exceptions || []).length) : null;
   const copy = stageCopy(stage, payment?.direction);
   const outcome = lens === "technical" ? copy?.technical : copy?.business;
-  const writes = stageWrites(stage);
+  const writes = stageWrites(stage, payment?.direction);
   const sources = { payment, trace };
   const bian = stageBian(stage, payment?.direction);
   const facts = stageFacts(stage, payment);
@@ -926,7 +926,29 @@ function Checks({ checks, defaultOpen = false }) {
  * component says so instead of rendering two empty tabs. An empty tab reads as broken; a
  * sentence reads as a design decision, which is what it is.
  */
-function RailViews({ data }) {
+// Static illustration of a refused status report, shown beside the live ACCP message at
+// inbound stage 5. Same structure as pacs002.build (Document/FIToFIPmtStsRpt with GrpHdr,
+// OrgnlGrpInfAndSts, TxInfAndSts[]); values are Doina's Oct 6 example. RR04 (regulatory)
+// replaces her AC04 because the scheme code list defines AC04 as a closed account.
+const RJCT_EXAMPLE = {
+  Document: {
+    FIToFIPmtStsRpt: {
+      GrpHdr: { MsgId: "STSRPT-20261001-000046", CreDtTm: "2026-10-01T14:40:55Z" },
+      OrgnlGrpInfAndSts: { OrgnlMsgId: "MSG-SENDER-00098245", OrgnlMsgNmId: "pacs.008.001.08" },
+      TxInfAndSts: [
+        {
+          OrgnlInstrId: "WIRE-INB-00098245",
+          OrgnlEndToEndId: "E2E-LEAFY-00098245",
+          OrgnlTxId: "TXN-00098245",
+          TxSts: "RJCT",
+          StsRsnInf: { Rsn: { Cd: "RR04" }, AddtlInf: "Sanctions screening hit on originator" },
+        },
+      ],
+    },
+  },
+};
+
+function RailViews({ data, inbound }) {
   const business = data?.business;
   const iso = data?.iso;
   const xml = data?.xml;
@@ -1011,6 +1033,20 @@ function RailViews({ data }) {
               {JSON.stringify(iso, null, 2)}
             </Code>
           </div>
+          {inbound && (
+            <>
+              <div className={styles.detailBlockTitle}>Example: rejected (RJCT) status report</div>
+              <Body className={styles.muted}>
+                Illustration only, not this payment&apos;s message. A payment refused at Stage 4
+                would be answered with a pacs.002 like this one; RR04 is the regulatory (sanctions) reason code.
+              </Body>
+              <div className={styles.codeScroll}>
+                <Code language="json" copyButtonAppearance="hover">
+                  {JSON.stringify(RJCT_EXAMPLE, null, 2)}
+                </Code>
+              </div>
+            </>
+          )}
         </div>
       </Tab>
       {/* The same message serialised to real pacs.008 XML — stdlib ElementTree on the
@@ -1523,10 +1559,10 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
             <Card
               label={inbound ? "Business view and pacs.002" : "Canonical payment to ISO 20022"}
               note={inbound
-                ? "The payment has not settled on Leafy Bank's books yet, and will only do so if it is ACCEPTED. A simulated pacs.002 is created in the canonicalJsonStorage collection, confirming or rejecting the payment."
+                ? "The payment has not settled on Leafy Bank's books yet, and will only do so if it is ACCEPTED. A simulated pacs.002 is created in the paymentMessages collection, confirming or rejecting the payment."
                 : "The ISO message is built only at the rail boundary, never earlier in the lifecycle."}
             >
-              <RailViews data={stage.data} />
+              <RailViews data={stage.data} inbound={inbound} />
             </Card>
             {hasChecks && (
               <Card label="Checks"><Checks checks={checkList} /></Card>

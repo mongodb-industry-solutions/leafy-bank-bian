@@ -70,7 +70,6 @@ def build(
     payment: dict,
     accepted: bool,
     reason_code: Optional[str] = None,
-    original_message_ref: Optional[str] = None,
     additional_info: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> dict:
@@ -95,23 +94,27 @@ def build(
 
     # `OrgnlGrpInfAndSts` identifies the message being answered. The sender's own MsgId is
     # what they will match on — quoting our own here would make the report unmatchable.
+    # No `OrgnlTxRef`: Doina's Oct 6 review wants it inside this block without `MsgRef`, which
+    # was its only content, so an empty element is omitted. Our own link to the stored
+    # pacs.008 lives on the paymentMessages document (`originalMessageRef`), not in the message.
     original_group = {
         "OrgnlMsgId": sender.get("msgId"),
         "OrgnlMsgNmId": pacs008.MESSAGE_FORMAT,
     }
 
     transaction_status = {
-        # `OrgnlEndToEndId` / `OrgnlTxId` echo the SENDER's references, for the same reason.
+        # `OrgnlInstrId` / `OrgnlEndToEndId` / `OrgnlTxId` echo the SENDER's references, for
+        # the same reason.
+        "OrgnlInstrId": sender.get("instructionId"),
         "OrgnlEndToEndId": sender.get("endToEndId"),
         "OrgnlTxId": sender.get("txId"),
         # The UETR travels unchanged across every hop — the point of it.
-        "OrgnlUETR": payment.get("uetr"),
+        "OrgnlUETR": pacs008.iso_uetr(payment.get("uetr")),
         "TxSts": status,
         "StsRsnInf": _status_reason(reason_code, additional_info),
         # When the payment was accepted. Only on ACCP: a refusal was never accepted.
         "AccptncDtTm": now if accepted else None,
         "AcctSvcrRef": payment.get("paymentId"),
-        "OrgnlTxRef": {"MsgRef": original_message_ref} if original_message_ref else None,
     }
 
     # `TxInfAndSts` is **1..n** in ISO — a status report can cover many transactions. We

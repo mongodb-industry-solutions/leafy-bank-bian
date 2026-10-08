@@ -152,7 +152,7 @@ def test_the_message_identifies_itself(wire_payment, db):  # noqa: F811
     without one is unidentifiable on the network, and `UETR` is the field the whole ISO
     tracking story hangs on."""
     pmt_id = _txn(db["paymentExecutions"].docs[0]["message"])["PmtId"]
-    assert pmt_id["UETR"] == wire_payment["uetr"]
+    assert pmt_id["UETR"] == pacs008.iso_uetr(wire_payment["uetr"])
     assert pmt_id["EndToEndId"] == wire_payment["endToEndId"]
     assert pmt_id["InstrId"] == wire_payment["instructionId"]
     assert pmt_id["TxId"] == wire_payment["txnId"]
@@ -188,6 +188,8 @@ def test_every_iso_value_comes_from_the_canonical_payment(wire_payment, db):  # 
     message = db["paymentExecutions"].docs[0]["message"]
     allowed = _payment_values(wire_payment) | {
         pacs008._NB_OF_TXS,
+        # The UETR is the stored value minus its internal `UETR-` prefix.
+        pacs008.iso_uetr(wire_payment["uetr"]),
         pacs008.SETTLEMENT_CLEARING,
         pacs008.SETTLEMENT_COVER,
         # Our own agent identity — a constant of the bank, not of the payment.

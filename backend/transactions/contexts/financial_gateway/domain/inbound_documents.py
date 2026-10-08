@@ -124,7 +124,6 @@ def status_response_doc(
         payment=payment,
         accepted=accepted,
         reason_code=reason_code,
-        original_message_ref=original_message_ref,
         now=now,
     )
     return {
