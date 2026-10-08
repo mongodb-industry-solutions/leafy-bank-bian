@@ -64,6 +64,10 @@ APPROVE = "APPROVE"
 REJECT = "REJECT"
 SUPERSEDED = "SUPERSEDED"
 
+# Graph steps per invoke. A normal run is ~10-25 (investigate/tools rounds, approval,
+# execute, verify, one reinvestigate pass); 50 leaves headroom without allowing a runaway.
+RECURSION_LIMIT = 50
+
 VERIFIED = "VERIFIED"
 VERIFIED_REFUSED = "REFUSED"
 VERIFIED_NOT_APPLIED = "NOT_APPLIED"
@@ -687,7 +691,10 @@ def build_cutoff_agent(model: Any, db: Any, checkpointer: Any):
 
 
 def _config(case_id: str) -> dict:
-    return {"configurable": {"thread_id": case_id}}
+    # Bound the investigate <-> tools loop: a model that keeps calling refused tools would
+    # otherwise burn Bedrock turns on an ever-growing history. Hitting the cap raises
+    # GraphRecursionError, which `investigate` records in `agent.error`.
+    return {"configurable": {"thread_id": case_id}, "recursion_limit": RECURSION_LIMIT}
 
 
 def investigate(agent: Any, db: Any, case_id: str, payment_id: str) -> Optional[dict]:

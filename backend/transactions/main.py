@@ -267,7 +267,7 @@ def _initiate_kwargs(body) -> dict:
 
 
 @app.post("/PaymentOrderInitiation/Initiate")
-async def payment_order_procedure_initiate(
+def payment_order_procedure_initiate(
     body: PaymentOrderInitiateRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
@@ -295,7 +295,7 @@ async def payment_order_procedure_initiate(
 
 
 @app.post("/FinancialGateway/{financialgatewayid}/Inbound/Initiate")
-async def financial_gateway_inbound_initiate(
+def financial_gateway_inbound_initiate(
     financialgatewayid: str,
     body: InboundMessageRequest,
 ):
@@ -333,7 +333,7 @@ async def financial_gateway_inbound_initiate(
 
 
 @app.post("/FinancialGateway/{financialgatewayid}/Inbound/Simulate")
-async def financial_gateway_inbound_simulate(
+def financial_gateway_inbound_simulate(
     financialgatewayid: str,
     body: InboundSimulateRequest,
 ):
@@ -364,7 +364,7 @@ async def financial_gateway_inbound_simulate(
 
 
 @app.post("/FinancialGateway/{financialgatewayid}/Statement/Generate")
-async def financial_gateway_statement_generate(
+def financial_gateway_statement_generate(
     financialgatewayid: str,
     body: StatementGenerateRequest,
 ):
@@ -397,7 +397,7 @@ async def financial_gateway_statement_generate(
 
 
 @app.post("/PaymentOrderProcedure/Resume")
-async def payment_order_procedure_resume(
+def payment_order_procedure_resume(
     body: PaymentOrderResumeRequest,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
@@ -436,7 +436,7 @@ async def payment_order_procedure_resume(
 
 
 @app.post("/PaymentOrderInitiation/BulkInitiate")
-async def payment_order_procedure_bulk_initiate(
+def payment_order_procedure_bulk_initiate(
     body: PaymentOrderBulkInitiateRequest,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
@@ -479,7 +479,7 @@ async def payment_order_procedure_bulk_initiate(
 
 
 @app.get("/PaymentOrderInitiation/{paymentorderinitiationid}/Retrieve")
-async def payment_order_initiation_retrieve(paymentorderinitiationid: str):
+def payment_order_initiation_retrieve(paymentorderinitiationid: str):
     try:
         payment = payments_service.retrieve_payment(paymentorderinitiationid)
         if not payment:
@@ -534,7 +534,7 @@ def _stage_four_artifacts(payment_id: str) -> dict:
 
 
 @app.get("/PaymentOrchestration/{paymentorchestrationid}/Retrieve")
-async def payment_orchestration_retrieve(paymentorchestrationid: str):
+def payment_orchestration_retrieve(paymentorchestrationid: str):
     """The routing decision as taken, plus the payment order it led to.
 
     `paymentorchestrationid` is the `paymentId` — orchestration has no identity of its own in
@@ -562,7 +562,7 @@ async def payment_orchestration_retrieve(paymentorchestrationid: str):
 
 
 @app.get("/TransactionAuthorization/{transactionauthorizationid}/Retrieve")
-async def transaction_authorization_retrieve(transactionauthorizationid: str):
+def transaction_authorization_retrieve(transactionauthorizationid: str):
     """The authorization decision, the fraud assessment, and the screening result."""
     try:
         found = _stage_four_artifacts(transactionauthorizationid)
@@ -588,7 +588,7 @@ async def transaction_authorization_retrieve(transactionauthorizationid: str):
 
 
 @app.post("/TransactionAuthorization/Resolve")
-async def transaction_authorization_resolve(
+def transaction_authorization_resolve(
     body: TransactionAuthorizationResolveRequest,
 ):
     """An operator's manual-review decision on a payment HELD at MANUAL_FRAUD_REVIEW (FR-4.13).
@@ -647,7 +647,7 @@ def _run_hold_decision(label: str, action) -> Response:
 
 
 @app.post("/PaymentOrderProcedure/Approve")
-async def payment_order_procedure_approve(body: PaymentOrderApproveRequest):
+def payment_order_procedure_approve(body: PaymentOrderApproveRequest):
     """A second signatory approves or rejects a payment held at PENDING_APPROVAL."""
     return _run_hold_decision("PaymentOrderProcedure/Approve", lambda: _hold_response(
         payments_service.approve_payment(
@@ -655,7 +655,7 @@ async def payment_order_procedure_approve(body: PaymentOrderApproveRequest):
 
 
 @app.post("/PaymentOrderProcedure/FundsRecheck")
-async def payment_order_procedure_funds_recheck(body: PaymentOrderFundsRecheckRequest):
+def payment_order_procedure_funds_recheck(body: PaymentOrderFundsRecheckRequest):
     """Re-test a PENDING_FUNDS hold; still short returns `stillShortBy` with no transition."""
     def action():
         payment_doc, still_short_by = payments_service.recheck_funds(body.paymentId)
@@ -664,7 +664,7 @@ async def payment_order_procedure_funds_recheck(body: PaymentOrderFundsRecheckRe
 
 
 @app.post("/TransactionAuthorization/Screening/Resolve")
-async def transaction_authorization_screening_resolve(body: ScreeningResolveRequest):
+def transaction_authorization_screening_resolve(body: ScreeningResolveRequest):
     """An analyst clears or confirms a potential sanctions match held at PENDING_SCREENING."""
     return _run_hold_decision("TransactionAuthorization/Screening/Resolve", lambda: _hold_response(
         payments_service.resolve_screening(
@@ -672,7 +672,7 @@ async def transaction_authorization_screening_resolve(body: ScreeningResolveRequ
 
 
 @app.post("/PaymentOrderProcedure/CutoffDecision")
-async def payment_order_procedure_cutoff_decision(body: CutoffDecisionRequest):
+def payment_order_procedure_cutoff_decision(body: CutoffDecisionRequest):
     """EXPEDITE or NEXT_VALUE_DATE on a payment held at CUTOFF_EXCEPTION."""
     return _run_hold_decision("PaymentOrderProcedure/CutoffDecision", lambda: _hold_response(
         payments_service.decide_cutoff(
@@ -680,7 +680,7 @@ async def payment_order_procedure_cutoff_decision(body: CutoffDecisionRequest):
 
 
 @app.post("/PaymentOrderProcedure/HoldNextValueDate")
-async def payment_order_procedure_hold_next_value_date(body: HoldNextValueDateRequest):
+def payment_order_procedure_hold_next_value_date(body: HoldNextValueDateRequest):
     """Record a next-value-date decision on a pending hold. No state change."""
     return _run_hold_decision("PaymentOrderProcedure/HoldNextValueDate", lambda: _hold_response(
         payments_service.hold_next_value_date(
@@ -706,7 +706,7 @@ async def payment_order_procedure_hold_next_value_date(body: HoldNextValueDateRe
 # the rail directly.
 
 @app.get("/PaymentRail/{paymentrailid}/Retrieve")
-async def payment_rail_retrieve(paymentrailid: str):
+def payment_rail_retrieve(paymentrailid: str):
     """The rail operating session for one payment: every execution attempt, in order."""
     try:
         payment = payments_service.retrieve_payment(paymentrailid)
@@ -733,7 +733,7 @@ async def payment_rail_retrieve(paymentrailid: str):
 
 
 @app.get("/PaymentRail/{paymentrailid}/OutboundTransaction/{outboundtransactionid}/Retrieve")
-async def payment_rail_outbound_transaction_retrieve(
+def payment_rail_outbound_transaction_retrieve(
     paymentrailid: str, outboundtransactionid: str
 ):
     """One execution attempt: the pacs.008 as sent, plus the stored message record.
@@ -772,7 +772,7 @@ async def payment_rail_outbound_transaction_retrieve(
 
 
 @app.post("/FraudEvaluation/Evaluate")
-async def fraud_evaluation_evaluate(body: FraudEvaluationRequest):
+def fraud_evaluation_evaluate(body: FraudEvaluationRequest):
     """Score a payment's rules WITHOUT persisting anything.
 
     Reads the stored payment and re-runs the rule set over it, so an operator can see which
@@ -793,7 +793,7 @@ async def fraud_evaluation_evaluate(body: FraudEvaluationRequest):
 
 
 @app.post("/PaymentConfirmation/Execute")
-async def payment_confirmation_execute(body: PaymentConfirmationRequest):
+def payment_confirmation_execute(body: PaymentConfirmationRequest):
     """Re-send the originator confirmation for a payment that has an execution path.
 
     Her L502 places this *"once orchestration has committed to an execution path, independent
@@ -817,7 +817,7 @@ async def payment_confirmation_execute(body: PaymentConfirmationRequest):
 
 
 @app.post("/PaymentSettlement/Initiate")
-async def payment_settlement_initiate(body: PaymentSettlementInitiateRequest):
+def payment_settlement_initiate(body: PaymentSettlementInitiateRequest):
     """BIAN `POST /PaymentSettlement/Initiate` (doc 21 B6 — SD 40033, no published API).
 
     Triggers or re-triggers settlement for one payment at IN_PROGRESS. The `outcome`
