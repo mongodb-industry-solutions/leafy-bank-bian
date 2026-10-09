@@ -1,7 +1,7 @@
 "use client";
 
 import { useUser } from "@/lib/context/UserContext";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { coreApi, pipelineApi, workflowApi, agentApi } from "./client";
 
 // BIAN backend field names differ from what composed hooks expect.
@@ -1084,4 +1084,46 @@ export function useBankAssistedParties() {
   }, []);
 
   return { customers, allAccounts, accountsByCustomer, loading };
+}
+
+/**
+ * Payments Operations dashboard: one round trip for every widget. Polls every `pollMs`
+ * while the tab is visible and keeps the previous data on screen during a refetch, so the
+ * page never flashes a skeleton under the reader's cursor.
+ */
+export function useDashboard(window = "24h", pollMs = 30000) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    workflowApi("dashboard", { window }).then(({ data: d, error: err }) => {
+      if (cancelled) return;
+      if (err) setError(err);
+      else {
+        setData(d);
+        setError(null);
+        setUpdatedAt(new Date());
+      }
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [window, tick]);
+
+  useEffect(() => {
+    if (!pollMs) return undefined;
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") setTick((t) => t + 1);
+    }, pollMs);
+    return () => clearInterval(id);
+  }, [pollMs]);
+
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
+  return { data, error, loading, updatedAt, refresh };
 }

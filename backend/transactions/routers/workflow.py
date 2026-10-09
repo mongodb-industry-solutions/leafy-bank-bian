@@ -28,7 +28,7 @@ from api_models import (
 )
 from process.exceptions import ExceptionActionNotLegal, ExceptionConflict, ExceptionNotFound
 from routers._util import to_json_response
-from services import workflow_read_service
+from services import dashboard_read_service, workflow_read_service
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 
@@ -172,6 +172,15 @@ def stats(
     connection, db_name = _deps(request)
     data = workflow_read_service.get_stats(connection, db_name, date_from=date_from, date_to=date_to)
     return to_json_response(data)
+
+
+@router.get("/dashboard")
+def dashboard(
+    request: Request,
+    window: Literal["24h", "7d", "30d"] = Query("24h"),
+) -> JSONResponse:
+    connection, db_name = _deps(request)
+    return to_json_response(dashboard_read_service.get_dashboard(connection, db_name, window=window))
 
 
 @router.get("/resolve/{ref}")

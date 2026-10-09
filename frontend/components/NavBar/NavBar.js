@@ -46,9 +46,10 @@ const NavBarContent = ({ bianModelUrl }) => {
     const isPaymentsWorkflow = pathname?.startsWith("/payments-workflow");
     // /showcase is the second tab of this surface; the same tab bar renders on both routes.
     const isShowcase = pathname?.startsWith("/showcase");
+    const isDashboard = pathname?.startsWith("/payments-dashboard");
     // Exact match: "/payments-workflow" also starts with "/payments".
     const isPaymentsHome = pathname === "/payments";
-    const isWorkflowSurface = isPaymentsHome || isPaymentsWorkflow || isShowcase;
+    const isWorkflowSurface = isPaymentsHome || isPaymentsWorkflow || isShowcase || isDashboard;
     // Before a user is chosen (welcome modal), show only the logo — no nav links or user controls.
     // The GL monitor runs as an implicit ops user, so it's always treated as signed in.
     // selectedUser is set as soon as the login flow starts (to prefetch data in the
@@ -80,6 +81,9 @@ const NavBarContent = ({ bianModelUrl }) => {
                     <>
                         <Link href="/payments" className={styles.navLink}>
                             <Body weight="medium" className={isPaymentsHome ? styles.navLinkActive : ""}>Overview</Body>
+                        </Link>
+                        <Link href="/payments-dashboard" className={styles.navLink}>
+                            <Body weight="medium" className={isDashboard ? styles.navLinkActive : ""}>Operations</Body>
                         </Link>
                         <Link href="/payments-workflow" className={styles.navLink}>
                             <Body weight="medium" className={isPaymentsWorkflow ? styles.navLinkActive : ""}>Payments</Body>
