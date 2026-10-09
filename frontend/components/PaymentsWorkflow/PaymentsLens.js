@@ -31,6 +31,12 @@ const DIRECTIONS = [
   { value: "OUTBOUND", label: "Outgoing" },
 ];
 
+// Stage 3's corridor determination. Bank-internal transfers count as Domestic.
+const CORRIDORS = [
+  { value: "DOMESTIC", label: "Domestic" },
+  { value: "INTERNATIONAL", label: "International" },
+];
+
 const STATUSES = [
   "DRAFT", "INITIATED", "VALIDATED", "ENRICHED", "FINAL_VALIDATED", "ROUTED",
   "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED", "SUBMITTED", "IN_PROGRESS", "POSTED", "SETTLED",
@@ -77,6 +83,19 @@ function Filters({ value, onChange }) {
         >
           {DIRECTIONS.map((d) => (
             <Option key={d.value} value={d.value}>{d.label}</Option>
+          ))}
+        </Select>
+      </div>
+      <div className={styles.filterField}>
+        <Select
+          label="Domestic / International"
+          size="small"
+          placeholder="All"
+          value={value.corridor ?? ""}
+          onChange={(v) => set("corridor", v)}
+        >
+          {CORRIDORS.map((c) => (
+            <Option key={c.value} value={c.value}>{c.label}</Option>
           ))}
         </Select>
       </div>
@@ -424,7 +443,7 @@ export default function PaymentsLens({
   onSelect,
 }) {
   const [filters, setFilters] = useState({
-    status: "", rail: "", direction: "", customerId: "", from: "", to: "", skip: 0,
+    status: "", rail: "", direction: "", corridor: "", customerId: "", from: "", to: "", skip: 0,
   });
   // Detailed filters are tucked away: search covers the common case.
   const [showFilters, setShowFilters] = useState(false);
@@ -441,8 +460,8 @@ export default function PaymentsLens({
   const move = (delta) =>
     setFilters((f) => ({ ...f, skip: Math.max(0, f.skip + delta * PAGE_SIZE) }));
   const clearFilters = () =>
-    setFilters({ status: "", rail: "", direction: "", customerId: "", from: "", to: "", skip: 0 });
-  const activeFilterCount = [filters.status, filters.rail, filters.direction, filters.customerId, filters.from, filters.to]
+    setFilters({ status: "", rail: "", direction: "", corridor: "", customerId: "", from: "", to: "", skip: 0 });
+  const activeFilterCount = [filters.status, filters.rail, filters.direction, filters.corridor, filters.customerId, filters.from, filters.to]
     .filter(Boolean).length;
 
   // Selecting a payment ADVANCES to the lifecycle in place, rather than appending it below

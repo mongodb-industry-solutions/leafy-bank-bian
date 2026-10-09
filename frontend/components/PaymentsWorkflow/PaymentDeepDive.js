@@ -467,7 +467,12 @@ function EnrichmentDiff({ enrichment, inbound }) {
       </div>
       {resolved.map((r) => (
         <div className={styles.enrichRow} role="row" key={r.field}>
-          <span className={styles.enrichField}>{r.field}</span>
+          <span className={styles.enrichField}>
+            {/* Break after each dot, so a long path wraps between segments, not mid-word. */}
+            {r.field.split(".").map((part, i) => (
+              <Fragment key={i}>{i > 0 && <>.<wbr /></>}{part}</Fragment>
+            ))}
+          </span>
           {hasCaptured && <span>{fmtEnriched(r.from) === "—" ? "" : fmtEnriched(r.from)}</span>}
           <span className={styles.enrichValue}>{fmtEnriched(r.to)}</span>
           <span className={styles.enrichSource}>
@@ -795,6 +800,7 @@ const CHECK_LABEL = {
   customer_entitled: "User entitled to debit",
   payment_limit_available: "Payment limit available",
   dual_approval: "Required approval",
+  funds_available: "Verify and reserve funds",
 };
 const humanizeLabel = (s) =>
   (s || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -1186,6 +1192,8 @@ function summaryRows(stage, payment) {
       const originatorScreen = d?.originatorSanctionsCheck;
       return [
         ["Corridor", corridorLabel(payment)],
+        // Stage 3 reserves the funds (available -> hold); stage 5 releases it and debits.
+        ["Funds reservation", payment?.refs?.fundsReservationId ?? null],
         ["Originator sanctions screening", originatorScreen
           ? `${originatorScreen.status}${originatorScreen.provider ? ` · ${originatorScreen.provider}` : ""}`
           : null],

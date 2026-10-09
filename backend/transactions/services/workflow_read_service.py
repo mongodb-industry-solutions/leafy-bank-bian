@@ -87,12 +87,22 @@ def _payments(connection: MongoDBConnection, db_name: str):
     return connection.get_collection(db_name, "payments")
 
 
+# `validation.determinedCategory` is the corridor stage 3 records. Outbound writes the
+# lower-case names, inbound writes DOMESTIC / CROSS_BORDER. A payment refused before stage 3
+# has no category, so the stage 1 `wireDetails.wireType` is the fallback.
+_CORRIDOR_CATEGORIES = {
+    "DOMESTIC": ["domestic-same-bank", "domestic-different-bank", "DOMESTIC"],
+    "INTERNATIONAL": ["cross-border", "CROSS_BORDER"],
+}
+
+
 def _build_filter(
     *,
     status: Optional[str] = None,
     customer_id: Optional[str] = None,
     rail: Optional[str] = None,
     direction: Optional[str] = None,
+    corridor: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
 ) -> dict:
@@ -115,6 +125,12 @@ def _build_filter(
         # `$ne`, not `== "OUTBOUND"`: payments written before the incoming wire carry no
         # `direction` at all, and they are all outbound. `$ne` also matches a missing field.
         query["direction"] = {"$ne": "INBOUND"}
+    if corridor in _CORRIDOR_CATEGORIES:
+        query["$or"] = [
+            {"validation.determinedCategory": {"$in": _CORRIDOR_CATEGORIES[corridor]}},
+            {"validation.determinedCategory": {"$exists": False},
+             "wireDetails.wireType": corridor},
+        ]
     if date_from or date_to:
         window: dict = {}
         if date_from:
@@ -135,6 +151,7 @@ def list_payments(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     direction: Optional[str] = None,
+    corridor: Optional[str] = None,
     limit: int = 25,
     skip: int = 0,
 ) -> dict:
@@ -142,7 +159,7 @@ def list_payments(
     coll = _payments(connection, db_name)
     query = _build_filter(
         status=status, customer_id=customer_id, rail=rail, direction=direction,
-        date_from=date_from, date_to=date_to,
+        corridor=corridor, date_from=date_from, date_to=date_to,
     )
     cursor = (
         coll.find(query, _LIST_PROJECTION)

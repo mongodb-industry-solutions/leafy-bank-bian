@@ -44,6 +44,7 @@ def list_payments(
     customer_id: Optional[str] = Query(None, alias="customerId"),
     rail: Optional[str] = Query(None),
     direction: Optional[Literal["INBOUND", "OUTBOUND"]] = Query(None),
+    corridor: Optional[Literal["DOMESTIC", "INTERNATIONAL"]] = Query(None),
     date_from: Optional[datetime] = Query(None, alias="from"),
     date_to: Optional[datetime] = Query(None, alias="to"),
     limit: int = Query(25, ge=1, le=100),
@@ -53,7 +54,7 @@ def list_payments(
     data = workflow_read_service.list_payments(
         connection, db_name,
         status=status, customer_id=customer_id, rail=rail, direction=direction,
-        date_from=date_from, date_to=date_to, limit=limit, skip=skip,
+        corridor=corridor, date_from=date_from, date_to=date_to, limit=limit, skip=skip,
     )
     return to_json_response(data)
 

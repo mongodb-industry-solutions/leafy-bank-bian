@@ -762,7 +762,7 @@ export function useGlDashboard(periodCode, enabled, months = 3, refreshKey) {
  * `filters` is destructured into the dependency list rather than passed whole, so a caller
  * re-creating the object literal each render does not refetch forever.
  */
-export function usePaymentsList({ status, rail, direction, customerId, from, to, limit = 25, skip = 0 } = {}, refreshKey = 0) {
+export function usePaymentsList({ status, rail, direction, corridor, customerId, from, to, limit = 25, skip = 0 } = {}, refreshKey = 0) {
   const [data, setData] = useState({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -770,7 +770,7 @@ export function usePaymentsList({ status, rail, direction, customerId, from, to,
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    workflowApi("payments", { status, rail, direction, customerId, from, to, limit, skip }).then(
+    workflowApi("payments", { status, rail, direction, corridor, customerId, from, to, limit, skip }).then(
       ({ data: d, error: err }) => {
         if (cancelled) return;
         if (err) setError(err);
@@ -784,7 +784,7 @@ export function usePaymentsList({ status, rail, direction, customerId, from, to,
     return () => {
       cancelled = true;
     };
-  }, [status, rail, direction, customerId, from, to, limit, skip, refreshKey]);
+  }, [status, rail, direction, corridor, customerId, from, to, limit, skip, refreshKey]);
 
   return { ...data, loading, error };
 }

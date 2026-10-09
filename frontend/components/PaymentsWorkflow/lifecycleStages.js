@@ -129,7 +129,7 @@ export function buildLifecycleStages(payment, trace) {
 
   // Stage 2's own checks only. Every other stage filters its checks by stage prefix
   // (3/4/5 below); stage 2 historically passed the whole `checks` array, so it rendered
-  // every check from every stage under "Authentication & entitlement" and counted them
+  // every check from every stage under "Authentication & Authorization" and counted them
   // all in the meta. Doina's FR-2.6 is explicit that fraud/risk auth belong to stage 4,
   // not here — so the filter is a correctness fix, not cosmetics.
   const stageTwoChecks = checks.filter((c) => String(c?.stage || "").startsWith("2 "));
@@ -238,7 +238,7 @@ export function buildLifecycleStages(payment, trace) {
     },
     {
       key: "authentication",
-      label: inbound ? "Message Authentication & Beneficiary Resolution" : "Authentication & entitlement",
+      label: inbound ? "Message Authentication & Beneficiary Resolution" : "Authentication & Authorization",
       icon: "Lock",
       stage: 2,
       reached: inbound
@@ -310,7 +310,10 @@ export function buildLifecycleStages(payment, trace) {
           "cross-border. Routing and fee work do not apply here — that already happened on " +
           "the sender's side before the message reached Leafy Bank."
         : "Validates the instructed payment — structure, the debtor and creditor accounts, and " +
-          "duplicate and idempotency — then enriches the gaps: bank and clearing-member IDs, " +
+          "duplicate and idempotency — then verifies the available balance and reserves the " +
+          "funds: a hold is placed on the debtor's account, the available balance drops by the " +
+          "amount, and a reservation id is returned. The reservation is released and the debit " +
+          "posted at settlement (stage 5). Then enriches the gaps: bank and clearing-member IDs, " +
           "routing data, a purpose code, regulatory info and FX. Records the domestic/cross-" +
           "border determination, and confirms the chosen payment type is viable on the rail.",
       kind: "enrichment",
@@ -338,7 +341,7 @@ export function buildLifecycleStages(payment, trace) {
       // backend check NAMES match her four lines one-for-one. MANUAL_FRAUD_REVIEW is the REVIEW
       // hold (FR-4.13): the payment is routed but not yet authorised.
       key: "authorization",
-      label: inbound ? "Acceptance Decision & Compliance Authorization" : "Orchestration & authorization",
+      label: inbound ? "Acceptance Decision & Compliance Authorization" : "Orchestration & Approval",
       icon: "Diagram3",
       stage: 4,
       // Inbound has no ROUTED/AUTHORISED/APPROVED — FINAL_VALIDATED forwards straight to

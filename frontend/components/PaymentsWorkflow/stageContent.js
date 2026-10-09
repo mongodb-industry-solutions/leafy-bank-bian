@@ -41,7 +41,7 @@ const COPY = {
   validation: {
     [OUT]: {
       business: "The payment is checked for completeness and viability, and missing details such as FX and fees are filled in.",
-      technical: "$jsonSchema validation, then enrichment{} and validation{} written back to the payments document.",
+      technical: "$jsonSchema validation, then enrichment{} and validation{} written back to the payments document. The funds check reserves the amount in fundsReservations and moves it from balance.available to balance.hold.",
       why: "Required fields are enforced by the database's own $jsonSchema validator, the enrichment record keeps each field's before and after, and the fx object carries rate provenance a single scalar could not.",
     },
     [IN]: {
@@ -127,7 +127,12 @@ const WRITES = {
     W("payments", "update", "authentication{} and entitlement{}: what was checked and what it was judged against", whole),
   ],
   validation: [
-    W("payments", "update", "enrichment{}, validation{} and checks[] from this stage", whole),
+    W("payments", "update", "enrichment{}, validation{}, checks[] and refs.fundsReservationId from this stage", whole),
+    W("fundsReservations", "insert", "The hold on the debtor's available balance (available down, hold up), with its reservation id",
+      ({ payment }) => nonEmpty(payment?.refs?.fundsReservationId
+        ? { reservationId: payment.refs.fundsReservationId, paymentId: payment.paymentId,
+            accountId: payment.debtor?.accountId, amount: payment.amount, status: "ACTIVE until posting" }
+        : null)),
   ],
   authorization: [
     W("routingSnapshots", "insert", "The routing decision: network, correspondent, cut-off, rationale",
@@ -172,6 +177,10 @@ const WRITES = {
 // becomes an explicit "not applicable" card (shown rather than hidden, so the absence is
 // visible) and paymentMessages describes the pacs.002 status response.
 const INBOUND_WRITES = {
+  // Funds are reserved against a customer debit; inbound has none.
+  validation: [
+    W("payments", "update", "enrichment{}, validation{} and checks[] from this stage", whole),
+  ],
   execution: [
     {
       collection: "paymentExecutions",

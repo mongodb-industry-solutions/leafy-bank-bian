@@ -615,3 +615,19 @@ def test_get_payment_attaches_the_statement_carrying_its_line_even_with_an_alter
     payment = svc.get_payment(conn, "db", "PAY-1")
     assert [s["paymentMessageId"] for s in payment["statements"]] == ["PM-1"]
     assert payment["messages"] == []  # the statement is not one of this payment's own messages
+
+
+def test_the_corridor_filter_uses_the_stage_three_category_with_a_wire_type_fallback():
+    """Outbound writes lower-case categories, inbound writes DOMESTIC / CROSS_BORDER, and a
+    payment refused before stage 3 has neither, only the stage 1 `wireType`."""
+    domestic = svc._build_filter(corridor="DOMESTIC")["$or"]
+    international = svc._build_filter(corridor="INTERNATIONAL")["$or"]
+
+    assert domestic[0]["validation.determinedCategory"]["$in"] == [
+        "domestic-same-bank", "domestic-different-bank", "DOMESTIC"]
+    assert international[0]["validation.determinedCategory"]["$in"] == [
+        "cross-border", "CROSS_BORDER"]
+    assert domestic[1]["wireDetails.wireType"] == "DOMESTIC"
+    assert international[1]["wireDetails.wireType"] == "INTERNATIONAL"
+    assert "$or" not in svc._build_filter()
+    assert "$or" not in svc._build_filter(corridor="bogus")

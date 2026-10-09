@@ -1739,8 +1739,8 @@
   line-height: 20px;
 }
 
-.enrichWithBefore { --enrich-cols: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr); }
-.enrichNoBefore { --enrich-cols: minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr); }
+.enrichWithBefore { --enrich-cols: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.3fr); }
+.enrichNoBefore { --enrich-cols: minmax(0, 1.5fr) minmax(0, 1.2fr) minmax(0, 1.4fr); }
 
 .enrichHead,
 .enrichRow {
@@ -1783,6 +1783,20 @@
 
 .enrichSource {
   justify-self: start;
+  max-width: 100%;
+}
+
+/* A long source name (REGULATORY-REPORTING-RULES) wraps inside its column instead of
+   running past the card edge. */
+.enrichSource > span {
+  max-width: 100%;
+  height: auto;
+  min-height: 24px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 700px) {
