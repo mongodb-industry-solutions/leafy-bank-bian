@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Icon from "@leafygreen-ui/icon";
@@ -24,7 +24,6 @@ const TrendChart = dynamic(() => import("./AxisCharts").then((m) => m.TrendChart
 const WINDOWS = [
   ["24h", "24 hours"],
   ["7d", "7 days"],
-  ["30d", "30 days"],
 ];
 
 const TYPE_STYLE = {
@@ -51,6 +50,12 @@ const STAGE_COLOR = {
 };
 
 const humanize = (s) => (s ?? "").toLowerCase().replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+
+function formatSeconds(v) {
+  if (v < 1) return `${Math.round(v * 1000)}ms`;
+  if (v < 120) return `${v}s`;
+  return v < 7200 ? `${Math.round(v / 60)}m` : `${(v / 3600).toFixed(1)}h`;
+}
 
 function age(iso) {
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -104,6 +109,32 @@ function Kpi({ label, value, tone, sub, children }) {
   );
 }
 
+function SystemStatus() {
+  const [status, setStatus] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      fetch("/api/system-status", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => !cancelled && setStatus(d))
+        .catch(() => !cancelled && setStatus({ operational: false, services: [] }));
+    load();
+    const id = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+  if (!status) return null;
+  const down = status.services.filter((s) => !s.ok).map((s) => s.name);
+  return (
+    <span className={status.operational ? styles.sysOk : styles.sysDown} title={down.length ? `Unreachable: ${down.join(", ")}` : undefined}>
+      <span className={styles.dot} style={{ background: status.operational ? "#00a35c" : "#cf4a4a" }} />
+      {status.operational ? "All systems operational" : `Degraded: ${down.join(", ") || "unknown"}`}
+    </span>
+  );
+}
+
 export default function PaymentsDashboard() {
   const [windowName, setWindowName] = useState("24h");
   const { data, error, loading, updatedAt, refresh } = useDashboard(windowName);
@@ -126,6 +157,7 @@ export default function PaymentsDashboard() {
               <SegmentedControlOption key={value} value={value}>{label}</SegmentedControlOption>
             ))}
           </SegmentedControl>
+          <SystemStatus />
           <span className={styles.updated}>
             {updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : "Loading…"}
           </span>
@@ -143,7 +175,10 @@ export default function PaymentsDashboard() {
 }
 
 function Body({ data, loading }) {
-  const { kpis, volume, stages, types, exceptionTrend, exceptionReasons, attention, recent, window } = data;
+  const {
+    kpis, volume, stages, types, exceptionTrend, exceptionReasons, attention, recent, window,
+    processingTimes, reconciliation, settlement, agentImpact,
+  } = data;
   const prev = kpis.previous;
   const stageSegments = stages.map((s) => ({ label: s.stage, value: s.count, color: STAGE_COLOR[s.stage] }));
   const typeRows = types.map((t) => ({ label: typeLabel(t.type), value: t.count, color: typeColor(t.type) }));
@@ -171,6 +206,12 @@ function Body({ data, loading }) {
         <Kpi label="Exceptions" value={kpis.exceptions} tone="kpiRed">
           <Delta now={kpis.exceptions} before={prev.exceptions} lowerIsBetter />
         </Kpi>
+        <Kpi
+          label="Resolved by agents"
+          value={kpis.resolvedByAgents}
+          tone="kpiPurple"
+          sub={agentImpact.involved ? `of ${agentImpact.involved} investigated` : "no investigations"}
+        />
       </div>
 
       <div className={styles.row3}>
@@ -254,6 +295,101 @@ function Body({ data, loading }) {
           ) : (
             <Empty>No open exceptions.</Empty>
           )}
+        </Panel>
+      </div>
+
+      <div className={styles.row2}>
+        <Panel title="Average time in stage">
+          {processingTimes.length ? (
+            <BarList
+              rows={processingTimes.map((p) => ({ label: p.stage, value: p.avgSeconds }))}
+              format={formatSeconds}
+            />
+          ) : (
+            <Empty>No stage timings in this window.</Empty>
+          )}
+        </Panel>
+        <Panel title="Reconciliation status">
+          {reconciliation.total ? (
+            <div className={styles.donutRow}>
+              <Donut
+                segments={[
+                  { label: "Reconciled", value: reconciliation.reconciled, color: "#00a35c" },
+                  { label: "Pending", value: reconciliation.pending, color: "#e8c547" },
+                  { label: "Discrepancies", value: reconciliation.discrepancies, color: "#cf4a4a" },
+                ]}
+                total={`${reconciliation.reconciledPct}%`}
+                caption="Reconciled"
+              />
+              <Legend
+                segments={[
+                  { label: "Reconciled", value: reconciliation.reconciled, color: "#00a35c" },
+                  { label: "Pending", value: reconciliation.pending, color: "#e8c547" },
+                  { label: "Discrepancies", value: reconciliation.discrepancies, color: "#cf4a4a" },
+                ]}
+              />
+            </div>
+          ) : (
+            <Empty>No payments have reached reconciliation in this window.</Empty>
+          )}
+        </Panel>
+      </div>
+
+      <div className={styles.row2}>
+        <Panel title="Settlement activity">
+          {settlement.length ? (
+            <table className={styles.table}>
+              <thead>
+                <tr><th>Settlement model</th><th className={styles.num}>Positions</th><th className={styles.num}>Settled</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {settlement.map((s) => (
+                  <tr key={s.scheme}>
+                    <td>{s.scheme}</td>
+                    <td className={styles.num}>{s.positions}</td>
+                    <td className={styles.num}>{s.settled}</td>
+                    <td>
+                      {s.returned ? (
+                        <StatusPill family="red">{s.returned} returned</StatusPill>
+                      ) : s.delayed ? (
+                        <StatusPill family="yellow">{s.delayed} delayed</StatusPill>
+                      ) : (
+                        <StatusPill family="green">On track</StatusPill>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <Empty>No settlement positions in this window.</Empty>
+          )}
+        </Panel>
+        <Panel title="Agent impact">
+          <div className={styles.agentRate}>
+            <span>Agent success rate</span>
+            <strong>{agentImpact.successRate != null ? `${agentImpact.successRate}%` : "—"}</strong>
+          </div>
+          <div className={styles.barTrack}>
+            <span className={styles.barFill} style={{ width: `${agentImpact.successRate ?? 0}%`, background: "#00a35c" }} />
+          </div>
+          <p className={styles.agentNote}>
+            {agentImpact.involved
+              ? `${agentImpact.resolved} of ${agentImpact.involved} reconciliation issues resolved autonomously`
+              : "The reconciliation agent has not investigated any issues in this window."}
+          </p>
+          {agentImpact.recent.map((a) => (
+            <div key={a.exceptionId} className={styles.insight}>
+              <div className={styles.insightHead}>
+                <PaymentLink id={a.paymentId} />
+                <StatusPill family={a.verification === "RESOLVED" ? "green" : "yellow"}>
+                  {humanize(a.verification ?? a.status)}
+                </StatusPill>
+              </div>
+              <div>{a.rootCause ?? humanize(a.category)}</div>
+              {a.confidence && <div className={styles.deltaNone}>Confidence: {humanize(a.confidence)}</div>}
+            </div>
+          ))}
         </Panel>
       </div>
 

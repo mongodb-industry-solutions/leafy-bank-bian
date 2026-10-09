@@ -66,7 +66,7 @@ export function Legend({ segments }) {
 }
 
 /** Horizontal ranked bars. `rows`: [{label, value, color?}]. */
-export function BarList({ rows, color = "#00a35c", showShare = false }) {
+export function BarList({ rows, color = "#00a35c", showShare = false, format = (v) => v.toLocaleString() }) {
   const max = Math.max(...rows.map((r) => r.value), 1);
   const sum = rows.reduce((acc, r) => acc + r.value, 0);
   return (
@@ -80,7 +80,7 @@ export function BarList({ rows, color = "#00a35c", showShare = false }) {
               style={{ width: `${(r.value / max) * 100}%`, background: r.color ?? color }}
             />
           </span>
-          <span className={styles.barValue}>{r.value.toLocaleString()}</span>
+          <span className={styles.barValue}>{format(r.value)}</span>
           {showShare && <span className={styles.legendShare}>{sum ? Math.round((r.value / sum) * 100) : 0}%</span>}
         </li>
       ))}

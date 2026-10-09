@@ -180,7 +180,7 @@ def dashboard(
     window: Literal["24h", "7d", "30d"] = Query("24h"),
 ) -> JSONResponse:
     connection, db_name = _deps(request)
-    return to_json_response(dashboard_read_service.get_dashboard(connection, db_name, window=window))
+    return to_json_response(dashboard_read_service.get_dashboard_cached(connection, db_name, window=window))
 
 
 @router.get("/resolve/{ref}")

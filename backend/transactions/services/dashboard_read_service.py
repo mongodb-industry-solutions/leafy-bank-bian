@@ -7,6 +7,8 @@ browser only maps and draws. Buckets are hourly for 24h and daily for longer win
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -20,6 +22,13 @@ WINDOWS = {
     "7d": (timedelta(days=7), "day", timedelta(days=1)),
     "30d": (timedelta(days=30), "day", timedelta(days=1)),
 }
+
+# Dwell averages do not need every payment: the newest N is a representative sample, and the
+# cap keeps the `$unwind` over `lifecycle.events[]` bounded as the collection grows.
+DWELL_SAMPLE_LIMIT = 5000
+
+# Every open dashboard tab polls; one computation per window per TTL serves them all.
+CACHE_TTL_SECONDS = 15
 
 COMPLETED_STATES = (lifecycle.SETTLED, lifecycle.RECONCILED)
 EXCEPTION_STATES = tuple(sorted(lifecycle.TERMINALS))
@@ -115,6 +124,126 @@ def _bucketed(coll, match: dict, field: str, key_expr, unit: str) -> list[dict]:
     return list(coll.aggregate(pipeline))
 
 
+def processing_times(rows: list[dict]) -> list[dict]:
+    """Average dwell per display stage from per-state `{_id: state, avgMs, n}` rows.
+
+    Weighted by sample count so a rare state does not skew its stage. Stages with no
+    samples are omitted rather than shown as zero.
+    """
+    by_state = {r["_id"]: r for r in rows if r.get("avgMs") is not None}
+    out = []
+    for label, states in STAGE_BUCKETS:
+        if label == "Exception":
+            continue
+        samples = sum(int(by_state[s]["n"]) for s in states if s in by_state)
+        if not samples:
+            continue
+        total_ms = sum(by_state[s]["avgMs"] * int(by_state[s]["n"]) for s in states if s in by_state)
+        out.append({"stage": label, "avgSeconds": round(total_ms / samples / 1000, 1), "samples": samples})
+    return out
+
+
+def _dwell_rows(coll, match: dict) -> list[dict]:
+    """Time spent in each state: gap between consecutive `lifecycle.events[].at`."""
+    events = {"$ifNull": ["$lifecycle.events", []]}
+    pipeline = [
+        {"$match": match},
+        {"$sort": {"createdAt": -1}},
+        {"$limit": DWELL_SAMPLE_LIMIT},
+        {"$project": {"pairs": {"$map": {
+            "input": {"$range": [0, {"$max": [0, {"$subtract": [{"$size": events}, 1]}]}]},
+            "as": "i",
+            "in": {
+                "state": {"$arrayElemAt": ["$lifecycle.events.state", "$$i"]},
+                "ms": {"$subtract": [
+                    {"$arrayElemAt": ["$lifecycle.events.at", {"$add": ["$$i", 1]}]},
+                    {"$arrayElemAt": ["$lifecycle.events.at", "$$i"]},
+                ]},
+            },
+        }}}},
+        {"$unwind": "$pairs"},
+        {"$match": {"pairs.ms": {"$gte": 0}}},
+        {"$group": {"_id": "$pairs.state", "avgMs": {"$avg": "$pairs.ms"}, "n": {"$sum": 1}}},
+    ]
+    return list(coll.aggregate(pipeline))
+
+
+def _reconciliation(coll, match: dict) -> dict:
+    """Reconciliation outcome per payment, from `lifecycle.reconciliationStatus` (written
+    onto `payments` by the ledger). Payments not yet at that stage carry no value."""
+    counts = {"reconciled": 0, "pending": 0, "discrepancies": 0}
+    key = {"RECONCILED": "reconciled", "PENDING": "pending", "DISCREPANT": "discrepancies"}
+    for r in coll.aggregate([
+        {"$match": {**match, "lifecycle.reconciliationStatus": {"$ne": None}}},
+        {"$group": {"_id": "$lifecycle.reconciliationStatus", "n": {"$sum": 1}}},
+    ]):
+        if r["_id"] in key:
+            counts[key[r["_id"]]] = int(r["n"])
+    total = sum(counts.values())
+    return {**counts, "total": total,
+            "reconciledPct": round(counts["reconciled"] / total * 100, 1) if total else None}
+
+
+def _settlement(connection, db_name: str, match: dict) -> list[dict]:
+    """Settlement positions per settlement model (correspondent, central bank, vostro)."""
+    coll = connection.get_collection(db_name, "settlementPositions")
+    rows = coll.aggregate([
+        {"$match": match},
+        {"$group": {
+            "_id": {"$ifNull": ["$modelLabel", "$model"]},
+            "positions": {"$sum": 1},
+            "settled": {"$sum": {"$cond": [{"$eq": ["$settlementStatus", "SETTLED"]}, 1, 0]}},
+            "delayed": {"$sum": {"$cond": [{"$eq": ["$outcome", "DELAYED"]}, 1, 0]}},
+            "returned": {"$sum": {"$cond": [{"$eq": ["$settlementStatus", "RETURNED"]}, 1, 0]}},
+        }},
+        {"$sort": {"positions": -1}},
+    ])
+    return [
+        {"scheme": r["_id"] or "Unknown", "positions": int(r["positions"]), "settled": int(r["settled"]),
+         "delayed": int(r["delayed"]), "returned": int(r["returned"])}
+        for r in rows
+    ]
+
+
+def _agent_impact(exceptions, match: dict) -> dict:
+    """Reconciliation-agent involvement, from the `agent{}` block on shared `exceptions`.
+
+    Only the agent's own verification counts as autonomous: an operator or the ledger
+    watchdog resolving an exception is not credited to the agent.
+    """
+    agent_match = {**match, "agent": {"$ne": None}}
+    involved = resolved = 0
+    for r in exceptions.aggregate([
+        {"$match": agent_match},
+        {"$group": {
+            "_id": {"$eq": ["$agent.verification.result", "RESOLVED"]},
+            "n": {"$sum": 1},
+        }},
+    ]):
+        involved += int(r["n"])
+        if r["_id"] is True:
+            resolved += int(r["n"])
+    recent = []
+    cursor = exceptions.find(agent_match, {
+        "_id": 0, "exceptionId": 1, "paymentId": 1, "category": 1, "status": 1, "updatedAt": 1,
+        "agent.rootCause": 1, "agent.confidence": 1, "agent.verification": 1,
+    }).sort("updatedAt", -1).limit(3)
+    for e in cursor:
+        agent = e.get("agent") or {}
+        recent.append({
+            "exceptionId": e.get("exceptionId"), "paymentId": e.get("paymentId"),
+            "category": e.get("category"), "status": e.get("status"),
+            "rootCause": agent.get("rootCause"), "confidence": agent.get("confidence"),
+            "verification": (agent.get("verification") or {}).get("result"),
+            "updatedAt": e.get("updatedAt"),
+        })
+    return {
+        "involved": involved, "resolved": resolved,
+        "successRate": round(resolved / involved * 100, 1) if involved else None,
+        "recent": recent,
+    }
+
+
 def get_dashboard(
     connection: MongoDBConnection,
     db_name: str,
@@ -157,18 +286,41 @@ def get_dashboard(
     ]
 
     kpis = _kpis(by_status)
+    agent = _agent_impact(exceptions, {"historical": None, "createdAt": {"$gte": start, "$lt": end}})
     return {
         "window": {"name": window, "from": start, "to": end, "bucket": unit},
         "kpis": {
             **kpis,
             "successRate": round(kpis["completed"] / kpis["total"] * 100, 1) if kpis["total"] else None,
             "previous": previous,
+            "resolvedByAgents": agent["resolved"],
         },
         "volume": {"types": rails, "series": fill_series(starts, volume_rows, rails)},
         "stages": stage_breakdown(by_status),
         "types": by_type,
         "exceptionTrend": fill_series(starts, trend_rows, ["count"]),
         "exceptionReasons": reasons,
+        "processingTimes": processing_times(_dwell_rows(payments, in_window)),
+        "reconciliation": _reconciliation(payments, in_window),
+        "settlement": _settlement(connection, db_name, in_window),
+        "agentImpact": agent,
         "attention": workflow_read_service.list_exceptions(connection, db_name, limit=5, status="OPEN")["items"],
         "recent": workflow_read_service.list_payments(connection, db_name, limit=5)["items"],
     }
+
+
+_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+_cache_lock = threading.Lock()
+
+
+def get_dashboard_cached(connection: MongoDBConnection, db_name: str, *, window: str = "24h") -> dict:
+    """`get_dashboard` behind a short per-window cache. The lock makes concurrent requests
+    wait for one computation instead of each running the aggregates."""
+    key = (db_name, window)
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and time.monotonic() - hit[0] < CACHE_TTL_SECONDS:
+            return hit[1]
+        data = get_dashboard(connection, db_name, window=window)
+        _cache[key] = (time.monotonic(), data)
+        return data
