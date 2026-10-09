@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Icon from "@leafygreen-ui/icon";
 import { SegmentedControl, SegmentedControlOption } from "@leafygreen-ui/segmented-control";
 import { H3, Body } from "@leafygreen-ui/typography";
+import ScenarioInfo from "./ScenarioBrief";
 import { SCENARIOS, GROUPS, stepsFor } from "./scenarios";
 import { CUTOFF_SCENARIOS, CUTOFF_GROUPS } from "./cutoffScenarios";
 import styles from "./Showcase.module.css";
@@ -59,6 +60,7 @@ function DecisionFlow({ decision }) {
 
 function ScenarioCard({ scenario, ran, onPick }) {
   return (
+    <div className={styles.cardWrap}>
     <button
       type="button"
       className={`${styles.scenarioCard} ${styles[`mode_${scenario.mode}`]}`}
@@ -88,6 +90,8 @@ function ScenarioCard({ scenario, ran, onPick }) {
         </span>
       </div>
     </button>
+    <ScenarioInfo scenario={scenario} className={styles.cardInfo} />
+    </div>
   );
 }
 

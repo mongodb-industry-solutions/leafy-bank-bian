@@ -15,7 +15,7 @@ import styles from "./Showcase.module.css";
 
 const OP_VARIANT = { insert: "green", upsert: "green", update: "blue" };
 
-function WriteRow({ write, sources }) {
+export function WriteRow({ write, sources }) {
   const docs = write.pick(sources);
   return (
     <details className={styles.write}>

@@ -6,6 +6,8 @@
 import Badge from "@leafygreen-ui/badge";
 import { H3, Body } from "@leafygreen-ui/typography";
 import StepDocuments from "./StepDocuments";
+import LiveLog from "./LiveLog";
+import ScenarioInfo from "./ScenarioBrief";
 import styles from "./Showcase.module.css";
 
 const chip = (label, ok) => <Badge key={label} variant={ok ? "green" : "lightgray"}>{label}</Badge>;
@@ -23,7 +25,7 @@ function exceptionChip(exceptions) {
 }
 
 // `chips` replaces the reconciliation chips and the documents panel (the cut-off walkthrough).
-export default function StatusRail({ scenario, init, payment, exceptions, docs, chips }) {
+export default function StatusRail({ scenario, init, payment, exceptions, docs, chips, events }) {
   const amount = Number(init?.amount ?? payment?.amount ?? 0);
   return (
     <aside className={styles.rail}>
@@ -31,9 +33,12 @@ export default function StatusRail({ scenario, init, payment, exceptions, docs, 
         <H3 as="p" className={styles.paneTitle}>
           {init ? `${payment?.currency || "USD"} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : `USD ${scenario.amount}`}
         </H3>
-        <Body className={styles.muted}>
-          {scenario.bank} · {scenario.title}
-        </Body>
+        <div className={styles.railTitleRow}>
+          <Body className={styles.muted}>
+            {scenario.bank} · {scenario.title}
+          </Body>
+          <ScenarioInfo scenario={scenario} />
+        </div>
         {init ? (
           <Body className={styles.mono}>{init.paymentId}</Body>
         ) : (
@@ -50,7 +55,9 @@ export default function StatusRail({ scenario, init, payment, exceptions, docs, 
         )}
       </div>
 
-      {!chips && (
+      {events && <LiveLog events={events} sources={docs?.sources} />}
+
+      {!chips && !events && (
         <details className={styles.railDocs}>
           <summary className={styles.railDocsSummary}>Written to MongoDB</summary>
           <StepDocuments {...docs} />

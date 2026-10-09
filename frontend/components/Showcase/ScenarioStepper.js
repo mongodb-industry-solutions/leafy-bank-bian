@@ -20,6 +20,8 @@ import DecisionScene from "./scenes/DecisionScene";
 import ResultScene from "./scenes/ResultScene";
 import { gapOf, railLegOf } from "./scenes/format";
 import StepDocuments from "./StepDocuments";
+import { useLiveLog } from "./LiveLog";
+import { writesFor } from "./stepWrites";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
@@ -195,6 +197,10 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   const outcome = reconciled ? "RECONCILED" : answered ? "ANSWERED" : escalated ? "ESCALATED" : null;
 
   const { steps: agentSteps, started: agentStarted } = useAgentSteps(followedId, !outcome);
+  const { events: liveEvents, push: pushEvent } = useLiveLog(
+    { payment, trace, steps: agentSteps, agent, bank: scenario.bank, quietWrites: true },
+    paymentId
+  );
 
   // The first non-zero gap seen is the "before" of the result scene; reconciling zeroes the live one.
   const railLeg = railLegOf(trace);
@@ -203,6 +209,18 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   useEffect(() => {
     if (liveGap) setGapBefore((prev) => prev ?? liveGap);
   }, [liveGap]);
+
+  // One expandable "Written to MongoDB" event per step that has run. A gated step
+  // (Investigate, Approve) writes while it is on screen, so the current one counts too.
+  useEffect(() => {
+    if (!paymentId) return;
+    const lastWritten = step.gate || step.final ? index : index - 1;
+    steps.slice(0, lastWritten + 1).forEach((s) => {
+      const writes = writesFor(s.key, scenarioKey);
+      if (writes.length) pushEvent({ key: `writes:${s.key}`, lane: "mongo", title: `Written to MongoDB · ${s.label}`, writes });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, paymentId]);
 
   const countdownLeft = step.countdown && ctx.settledAt
     ? Math.max(0, Math.ceil(OVERDUE_SECONDS - (now - ctx.settledAt) / 1000))
@@ -262,6 +280,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
         local = { ...local, ...patch };
         setCtx(local);
         setNote(n);
+        if (n) pushEvent({ lane: "human", title: n });
         setIndex(Math.min(at + 1, steps.length - 1));
       }
       setTick((t) => t + 1);
@@ -274,6 +293,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
 
   function onDecided(decision) {
     setCtx((c) => ({ ...c, decision, followedId }));
+    pushEvent({ lane: "human", title: decision === "APPROVE" ? "You approved the proposal" : "You rejected the proposal", tone: decision === "APPROVE" ? "good" : "alert" });
     setNote(decision === "APPROVE" ? "Approved. The agent executed the action and verified it." : "Rejected. The run has ended.");
     setIndex((i) => Math.min(i + 1, steps.length - 1));
     setTick((t) => t + 1);
@@ -387,6 +407,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
           init={ctx.init}
           payment={payment}
           exceptions={trackedExceptions}
+          events={liveEvents}
           docs={{ steps, index, scenarioKey, sources: { payment, trace, ownException, orphan, agent, followedException, scenarioKey } }}
         />
       </div>

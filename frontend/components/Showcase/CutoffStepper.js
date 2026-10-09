@@ -16,6 +16,7 @@ import {
 import StoryBar from "./StoryBar";
 import StatusRail from "./StatusRail";
 import { useAgentSteps } from "./AgentThinking";
+import { useLiveLog } from "./LiveLog";
 import CutoffScene, { OUTCOME_LABEL, RISK_VARIANT } from "./scenes/CutoffScene";
 import styles from "./Showcase.module.css";
 
@@ -117,6 +118,10 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   const result = caseDoc?.outcome?.result || null;
   const done = rejected || !!result;
   const { steps: agentSteps, started } = useAgentSteps(caseDoc?.caseId || null, !done, "cutoff/cases");
+  const { events: liveEvents, push: pushEvent } = useLiveLog(
+    { payment, steps: agentSteps, agent, bank: scenario.bank },
+    paymentId
+  );
 
   // A failed approved action sends the agent back once; its new proposal needs its own decision.
   const revisedProposal =
@@ -175,7 +180,10 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     setError(null);
     try {
       const n = await fn();
-      if (n) setNote(n);
+      if (n) {
+        setNote(n);
+        pushEvent({ lane: "human", title: n });
+      }
       setTick((t) => t + 1);
       return true;
     } catch (e) {
@@ -200,6 +208,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
       closeStartedAt: decision === "APPROVE" && scenario.closeOut === "watch" ? Date.now() : c.closeStartedAt,
     }));
     if (updated) setCaseDoc(updated);
+    pushEvent({ lane: "human", title: decision === "APPROVE" ? "You approved the proposal" : "You rejected the proposal", tone: decision === "APPROVE" ? "good" : "alert" });
     setNote(decision === "APPROVE" ? "Approved. The agent executed the action and is verifying it." : "Rejected. The run has ended.");
     setIndex(steps.length - 1);
     setTick((t) => t + 1);
@@ -297,7 +306,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
           />
         </section>
 
-        <StatusRail scenario={scenario} init={ctx.init} payment={payment} exceptions={[]} chips={chips} />
+        <StatusRail scenario={scenario} init={ctx.init} payment={payment} exceptions={[]} chips={chips} events={liveEvents} />
       </div>
     </div>
   );

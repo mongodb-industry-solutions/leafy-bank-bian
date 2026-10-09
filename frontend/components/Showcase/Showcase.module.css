@@ -286,7 +286,7 @@
 .decisionRow {
   position: relative;
   display: grid;
-  grid-template-columns: 56px 1fr;
+  grid-template-columns: 78px 1fr;
   align-items: baseline;
   gap: 8px;
   cursor: help;
@@ -295,7 +295,7 @@
 .decisionRow + .decisionRow::before {
   content: "";
   position: absolute;
-  left: 28px;
+  left: 39px;
   top: -8px;
   height: 8px;
   border-left: 1px dashed #b8c4c2;
@@ -831,4 +831,214 @@ scene + rail. One tone drives every accent. */
 
 .closeOut .actions {
   margin-top: 4px;
+}
+
+/* Live events: newest on top, each line slides in from the right. */
+.liveLog {
+  background: #fff;
+  border: 1px solid #e8edeb;
+  border-radius: 16px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liveLogHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.liveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00a35c;
+  animation: livePulse 2s infinite;
+}
+
+.liveList {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 0 0;
+  max-height: 340px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liveItem {
+  --lane: #5c6c75;
+  border-left: 3px solid var(--lane);
+  background: #f9fbfa;
+  border-radius: 0 8px 8px 0;
+  padding: 6px 10px;
+  animation: liveSlideIn 0.35s ease-out;
+}
+
+.lane_agent { --lane: #7c3aed; }
+.lane_mongo { --lane: #00a35c; }
+.lane_human { --lane: #f57c00; }
+.lane_code { --lane: #0b61a4; }
+
+.liveTone_alert { background: #fef2f2; }
+.liveTone_good { background: #f0faf4; }
+.liveTone_wait { background: #fffbeb; }
+
+.liveMeta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.liveLane {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lane);
+}
+
+.liveTitle {
+  font-weight: 600;
+}
+
+@keyframes liveSlideIn {
+  from { opacity: 0; transform: translateX(32px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveItem, .liveDot { animation: none; }
+}
+
+.liveWrites > summary {
+  cursor: pointer;
+}
+
+.liveWrites .writeList {
+  margin-top: 8px;
+}
+
+/* Scenario info: a small "i" that reveals the full brief on hover or focus. */
+.infoWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.infoBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid #b8c4c2;
+  border-radius: 50%;
+  background: #fff;
+  color: #3d4f58;
+  cursor: help;
+}
+
+.infoBtn:hover,
+.infoBtn:focus-visible {
+  border-color: #00684a;
+  color: #00684a;
+}
+
+.infoPop {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  width: 380px;
+  max-width: 80vw;
+  padding-top: 8px;
+  text-align: left;
+  cursor: default;
+}
+
+.infoPopInner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #d8e0dd;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 30, 43, 0.16);
+}
+
+.infoWrap:hover .infoPop,
+.infoWrap:focus-within .infoPop {
+  display: block;
+}
+
+.briefFact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dial {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dialTrack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dialStop {
+  width: 18px;
+  height: 8px;
+  border-radius: 4px;
+  background: #d8e0dd;
+}
+
+.dialStopOn {
+  background: #00684a;
+}
+
+.dialLabel {
+  font-weight: 600;
+  color: #00684a;
+}
+
+
+.cardWrap {
+  position: relative;
+  display: flex;
+}
+
+.cardWrap > .scenarioCard {
+  flex: 1;
+}
+
+.cardInfo {
+  position: absolute;
+  top: 22px;
+  right: 20px;
+}
+
+.railTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cardWrap .cardTop {
+  padding-right: 36px;
 }
