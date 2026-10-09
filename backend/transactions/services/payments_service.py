@@ -58,6 +58,7 @@ from contexts.payment_order_initiation.adapters.mongo_reference_data import (
 )
 from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_rail.adapters.simulated_wire_rail import SimulatedWireRail
+from contexts.payment_order_initiation.application import funds_reservation
 from contexts.payment_order_initiation.domain import checks, lifecycle
 from process.payment_context import PaymentCollections, PaymentContext
 from contexts.payment_orchestration.domain import cutoff_policy
@@ -749,6 +750,9 @@ class PaymentsService:
                 self.payments, payment["_id"],
                 reason="Declined by operator manual review.", actor=actor,
             )
+            funds_reservation.release_for_payment(
+                self.db, payment_id, reason="Payment rejected by an operator decision",
+            )
             return updated or self.payments.find_one({"paymentId": payment_id})
 
         if decision != "APPROVED":
@@ -828,6 +832,9 @@ class PaymentsService:
                 self.payments, payment["_id"],
                 reason=f"Rejected by second signatory {approver_id}.", actor=approver_id,
             )
+            funds_reservation.release_for_payment(
+                self.db, payment_id, reason="Payment rejected by an operator decision",
+            )
             hold_queues.close_approval_request(self.db, payment_id=payment_id,
                                                status=hold_queues.REJECTED, by=approver_id, at=now)
             return updated or self.payments.find_one({"paymentId": payment_id})
@@ -895,6 +902,9 @@ class PaymentsService:
             updated = lifecycle.reject(
                 self.payments, payment["_id"],
                 reason=f"Sanctions HIT confirmed by analyst {analyst_id}.", actor=analyst_id,
+            )
+            funds_reservation.release_for_payment(
+                self.db, payment_id, reason="Payment rejected by an operator decision",
             )
             hold_queues.close_screening_item(self.db, payment_id=payment_id,
                                              status=hold_queues.HIT, by=analyst_id, at=now)

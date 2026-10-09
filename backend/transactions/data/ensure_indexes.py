@@ -149,6 +149,17 @@ PAYMENT_EXECUTIONS_INDEXES = [
     },
 ]
 
+# `fundsReservations` — the stage 3 hold on a debtor's available balance. One reservation per
+# payment, so `paymentId` is unique and a replayed stage 3 cannot hold the money twice.
+FUNDS_RESERVATIONS_INDEXES = [
+    {"name": "idx_funds_reservation_payment_unique", "keys": [("paymentId", ASCENDING)],
+     "unique": True},
+    {"name": "idx_funds_reservation_id_unique", "keys": [("reservationId", ASCENDING)],
+     "unique": True},
+    {"name": "idx_funds_reservation_account_status",
+     "keys": [("accountId", ASCENDING), ("status", ASCENDING)]},
+]
+
 # `paymentMessages` — Doina's rename (L780). Insert-only: nothing updates a message record,
 # because a re-mapping is a new attempt with a new message.
 #
@@ -327,6 +338,9 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
         ),
         "paymentMessages": _ensure(
             connection, db_name, "paymentMessages", PAYMENT_MESSAGES_INDEXES
+        ),
+        "fundsReservations": _ensure(
+            connection, db_name, "fundsReservations", FUNDS_RESERVATIONS_INDEXES
         ),
         "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
         "demoClocks": _ensure(connection, db_name, "demoClocks", DEMO_CLOCKS_INDEXES),

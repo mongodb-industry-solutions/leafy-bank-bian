@@ -31,6 +31,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from contexts.fraud_evaluation.domain import sanctions
+from contexts.payment_order_initiation.application import funds_reservation
 from contexts.payment_order_initiation.domain import lifecycle
 from contexts.payment_orchestration.application import cutoff_seed
 from contexts.payment_orchestration.domain import cutoff_policy
@@ -131,6 +132,7 @@ def _supersede(service, key: str, *, at: datetime) -> list[str]:
                                           "status": {"$in": list(HOLDS)}}):
         payment_id = payment["paymentId"]
         lifecycle.reject(service.payments, payment["_id"], reason=SUPERSEDED_REASON, actor=ACTOR)
+        funds_reservation.release_for_payment(db, payment_id, reason=SUPERSEDED_REASON)
         hold_queues.close_approval_request(db, payment_id=payment_id,
                                            status=hold_queues.CANCELLED, by=ACTOR, at=at)
         hold_queues.close_screening_item(db, payment_id=payment_id,

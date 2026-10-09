@@ -38,7 +38,7 @@ import logging
 from contexts.account_reconciliation import reconcile
 from contexts.fraud_evaluation import evaluate
 from contexts.party_authentication import authenticate
-from contexts.payment_order_initiation.application import capture
+from contexts.payment_order_initiation.application import capture, funds_reservation
 from contexts.payment_order_initiation.domain import enrichment, lifecycle, validation
 from contexts.payment_order_initiation.domain.lifecycle import StepUpRequired
 from contexts.payment_orchestration import orchestrate
@@ -142,4 +142,9 @@ def _mark_rejected(ctx: PaymentContext, label: str, exc: ValueError) -> None:
         ctx.collections.payments,
         ctx.payment_oid,
         reason=f"Rejected at stage {label.strip()}: {exc}",
+    )
+    # Free the stage 3 funds hold; a no-op when none is ACTIVE (rejected before stage 3, or
+    # after the debit).
+    funds_reservation.release_for_payment(
+        ctx.collections.db, ctx.payment_id, reason=f"Payment rejected at stage {label.strip()}",
     )

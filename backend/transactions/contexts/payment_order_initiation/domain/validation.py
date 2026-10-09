@@ -52,6 +52,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from contexts.payment_order_initiation.application import funds_reservation
 from contexts.payment_order_initiation.domain import (
     bank_identity,
     checks,
@@ -211,10 +212,13 @@ def run(ctx: PaymentContext) -> None:
     _record_corridor(record, ctx, external, creditor_party)
 
     # --- 10. funds_available (R6) -------------------------------------------
-    # Pre-flight floor. Re-checked inside the ACID transaction in stage 5, which is the
-    # check that actually holds — this one gives a clean 400 instead of a rollback.
+    # Check and reserve in one conditional update: the available balance is reduced by the
+    # instructed amount and the reservation id is returned (Doina, Oct 2026). Stage 5 releases
+    # the reservation and posts the debit; any earlier rejection releases it too. Stage 5's
+    # own `$gte` guard stays as the backstop.
+    reservation = funds_reservation.reserve(ctx, now=now)
     available = (debtor.get("balance", {}) or {}).get("available", 0)
-    if available < ctx.instructed_amount and _holds_for_funds(ctx):
+    if reservation is None and _holds_for_funds(ctx):
         # D2 (cutoff plan A2): a tagged wire waits for funds instead of being refused.
         record(
             "funds_available", checks.WARN,
@@ -232,17 +236,22 @@ def run(ctx: PaymentContext) -> None:
         )
         ctx.stop(ctx.payment_doc)
         return
-    if available < ctx.instructed_amount:
+    if reservation is None:
         refuse(
             "funds_available",
             f"Insufficient available balance: {available:,.2f} "
             f"{debtor_currency} available, {ctx.instructed_amount:,.2f} required.",
             field="debtor.accountId", code="INSUFFICIENT_FUNDS",
         )
+    ctx.collections.payments.update_one(
+        {"_id": ctx.payment_oid},
+        {"$set": {"refs.fundsReservationId": reservation["reservationId"]}},
+    )
     record(
         "funds_available", checks.PASS,
-        f"{available:,.2f} {debtor_currency} available covers "
-        f"{ctx.instructed_amount:,.2f}. Re-checked atomically at settlement.",
+        f"{ctx.instructed_amount:,.2f} {debtor_currency} reserved against "
+        f"{ctx.debtor_account_ref} as {reservation['reservationId']}; the available balance "
+        "is reduced now. Released and debited at settlement.",
     )
 
     checks.stamp_validation_summary(ctx.collections.payments, ctx.payment_oid, recorded)

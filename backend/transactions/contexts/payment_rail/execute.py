@@ -93,6 +93,7 @@ from typing import Optional
 from bson import ObjectId
 from pymongo.client_session import ClientSession
 
+from contexts.payment_order_initiation.application import funds_reservation
 from contexts.payment_order_initiation.domain import checks, lifecycle
 from contexts.payment_rail import documents
 from contexts.payment_rail.domain import execution_documents, pacs008
@@ -510,6 +511,13 @@ def _money_move(ctx: PaymentContext, *, settle_atomically: bool = True) -> dict:
     amount = ctx.instructed_amount
 
     def callback(session: ClientSession) -> dict:
+        # Stage 3 reserved this amount (available -> hold). Release it, then post the debit,
+        # in this one transaction. A payment with no reservation (created before reservations
+        # existed) skips the release and debits as before.
+        funds_reservation.release(
+            c.db, ctx.payment_id, reason="Released at posting; debit follows",
+            session=session, at=now,
+        )
         debtor_after = c.accounts.find_one_and_update(
             {
                 "accountId": ctx.debtor_account_ref,
