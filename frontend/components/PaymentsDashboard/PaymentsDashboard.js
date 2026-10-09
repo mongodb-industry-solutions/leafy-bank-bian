@@ -22,8 +22,8 @@ const TrendChart = dynamic(() => import("./AxisCharts").then((m) => m.TrendChart
 });
 
 const WINDOWS = [
-  ["24h", "24 hours"],
   ["7d", "7 days"],
+  ["30d", "30 days"],
 ];
 
 const TYPE_STYLE = {
@@ -136,7 +136,7 @@ function SystemStatus() {
 }
 
 export default function PaymentsDashboard() {
-  const [windowName, setWindowName] = useState("24h");
+  const [windowName, setWindowName] = useState("30d");
   const { data, error, loading, updatedAt, refresh } = useDashboard(windowName);
 
   return (
