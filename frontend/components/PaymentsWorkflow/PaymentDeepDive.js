@@ -1278,7 +1278,8 @@ function summaryRows(stage, payment) {
       return [
         // The accounting-leg identity carried from the ledger event (DR-7.3 / Doina Sep 18) —
         // SETTLEMENT (external settlement posting) vs PAYMENT_PRINCIPAL (initial posting).
-        ["Leg type", first?.eventType],
+        // Stage 6 posts a principal pair and a fee pair, so list every distinct leg type.
+        ["Leg type", [...new Set((d ?? []).map((e) => e.eventType).filter(Boolean))].join(", ") || null],
         ["Posting date", fmtWhen(first?.postingDate)],
         ["Period", first?.periodCode],
         ["Journal entry", first?.journalEntryId],

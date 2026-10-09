@@ -505,3 +505,45 @@ def test_a_transaction_without_a_txn_id_leaves_the_ref_unset_rather_than_guessin
     assert p["refs"]["transactionId"] is None
     # The other three still land — one missing ref must not block the posting fact.
     assert p["lifecycle"]["postingStatus"] == "POSTED"
+
+
+# --- the trace returns BOTH stage-6 sub-ledger pairs (Doina, PAY-e41a0795) -----
+
+def _trace_with_fee_and_settlement():
+    from services import pipeline_read_service
+    from tests._fakedb import FakeConnection
+
+    pay = "PAY-trace001"
+
+    def sl(event_id, side, code):
+        return {"sourceReference": {"sourceId": event_id}, "side": side,
+                "controlAccountCode": code, "journalEntryId": "JNL-1"}
+
+    c = FakeConnection()
+    c.seed("payments", [{"paymentId": pay}])
+    c.seed("transactions", [{"paymentId": pay}])
+    c.seed("ledgerEvents", [
+        {"eventId": "EVT-P", "idempotencyKey": pay},
+        {"eventId": "EVT-F", "idempotencyKey": f"{pay}-FEE"},
+        {"eventId": "EVT-S", "idempotencyKey": f"{pay}-SETTLEMENT"},
+    ])
+    c.seed("subLedgerEntries", [
+        sl("EVT-F", "CREDIT", "4211"), sl("EVT-F", "DEBIT", "2110"),
+        sl("EVT-S", "DEBIT", "1131"), sl("EVT-S", "CREDIT", "1111"),
+        sl("EVT-P", "CREDIT", "1130"), sl("EVT-P", "DEBIT", "2110"),
+    ])
+    return pipeline_read_service.trace_payment(pay, c, "db")
+
+
+def test_trace_subledger_includes_the_fee_pair_after_the_principal_pair():
+    entries = _trace_with_fee_and_settlement()["subLedgerEntries"]
+
+    assert [(e["sourceReference"]["sourceId"], e["side"]) for e in entries] == [
+        ("EVT-P", "DEBIT"), ("EVT-P", "CREDIT"), ("EVT-F", "DEBIT"), ("EVT-F", "CREDIT"),
+    ]
+
+
+def test_trace_subledger_leaves_stage_seven_settlement_rows_out():
+    entries = _trace_with_fee_and_settlement()["subLedgerEntries"]
+
+    assert all(e["sourceReference"]["sourceId"] != "EVT-S" for e in entries)

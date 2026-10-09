@@ -478,10 +478,20 @@ def trace_payment(
     )
 
     # Stage 3 — subLedgerEntries (sourceReference.sourceId == eventId).
+    # Stage 6 posts TWO events (principal, then fee), each fanned out to its own DR + CR
+    # sub-ledger pair. Reading only the principal's left the fee pair invisible while the
+    # general ledger, which merges every pair, showed both (Doina, PAY-e41a0795). The
+    # settlement event is stage 7's and is excluded. Principal rows sort first: the journal
+    # lookup below takes the first row's `journalEntryId`.
     subledger_entries = None
-    if ledger_event:
-        event_id = ledger_event.get("eventId")
-        rows = list(sl_coll.find({"sourceReference.sourceId": event_id}, {"_id": 0}))
+    stage_six_events = [e for e in (ledger_event, fee_event) if e and e.get("eventId")]
+    if stage_six_events:
+        order = {e["eventId"]: i for i, e in enumerate(stage_six_events)}
+        rows = list(sl_coll.find(
+            {"sourceReference.sourceId": {"$in": list(order)}}, {"_id": 0},
+        ))
+        rows.sort(key=lambda r: (order.get(r["sourceReference"]["sourceId"], len(order)),
+                                 0 if r.get("side") == "DEBIT" else 1))
         subledger_entries = rows if rows else None
 
     # Stage 4 — journalEntry (journalId stamped on subledger entry after gl_batch).
