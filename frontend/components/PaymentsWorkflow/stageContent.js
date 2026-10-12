@@ -41,7 +41,7 @@ const COPY = {
   validation: {
     [OUT]: {
       business: "The payment is checked for completeness and viability, and missing details such as FX and fees are filled in.",
-      technical: "$jsonSchema validation, then enrichment{} and validation{} written back to the payments document. The funds check reserves the amount in fundsReservations and moves it from balance.available to balance.hold.",
+      technical: "$jsonSchema validation, then enrichment{} and validation{} written back to the payments document. The funds check moves the amount from balance.available to balance.hold on the account and records the reservation id in refs.fundsReservationId on the payment.",
       why: "Required fields are enforced by the database's own $jsonSchema validator, the enrichment record keeps each field's before and after, and the fx object carries rate provenance a single scalar could not.",
     },
     [IN]: {
@@ -134,13 +134,8 @@ const WRITES = {
     history({ stages: ["2"] }),
   ],
   validation: [
-    W("payments", "update", "enrichment{}, validation{} and refs.fundsReservationId from this stage; the checks go to paymentHistory", whole),
+    W("payments", "update", "enrichment{}, validation{} and refs.fundsReservationId (the funds hold) from this stage; the checks go to paymentHistory", whole),
     history({ states: ["VALIDATED", "ENRICHED", "FINAL_VALIDATED"], stages: ["3"] }),
-    W("fundsReservations", "insert", "The hold on the debtor's available balance (available down, hold up), with its reservation id",
-      ({ payment }) => nonEmpty(payment?.refs?.fundsReservationId
-        ? { reservationId: payment.refs.fundsReservationId, paymentId: payment.paymentId,
-            accountId: payment.debtor?.accountId, amount: payment.amount, status: "ACTIVE until posting" }
-        : null)),
   ],
   authorization: [
     W("routingSnapshots", "insert", "The routing decision: network, correspondent, cut-off, rationale",

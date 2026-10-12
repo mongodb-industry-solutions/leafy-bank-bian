@@ -243,10 +243,6 @@ def run(ctx: PaymentContext) -> None:
             f"{debtor_currency} available, {ctx.instructed_amount:,.2f} required.",
             field="debtor.accountId", code="INSUFFICIENT_FUNDS",
         )
-    ctx.collections.payments.update_one(
-        {"_id": ctx.payment_oid},
-        {"$set": {"refs.fundsReservationId": reservation["reservationId"]}},
-    )
     record(
         "funds_available", checks.PASS,
         f"{ctx.instructed_amount:,.2f} {debtor_currency} reserved against "

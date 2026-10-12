@@ -18,11 +18,14 @@ payment, yet the ledger still shows it as theirs. Without this, two concurrent w
 both pass the stage 3 pre-flight check against the same balance and one would fail late, in
 stage 5's ACID transaction, after fraud scoring and routing had already been spent on it.
 
-## One reservation per payment
+## No separate collection
 
-`fundsReservations` has a unique index on `paymentId`, and `reserve` is idempotent: a saga
-re-entry at stage 3 (a resume from PENDING_APPROVAL, a retried request) finds its ACTIVE
-reservation and returns it instead of holding the money twice.
+The payment already carries everything a reservation record would repeat (account, amount),
+so the only state is two scalars on the payment: `refs.fundsReservationId` (set at reserve)
+and `refs.fundsReleasedAt` (set at release). Each transition is one transaction that flips
+the payment marker and moves the balance together, so a replay cannot hold or release twice.
+The released amount is the payment's `instructedAmount`; it must not change between stage 3
+and release.
 
 ## Who releases
 
@@ -31,7 +34,7 @@ reservation and returns it instead of holding the money twice.
 - **A rejection** (`release_for_payment`): any pre-execution terminal state frees the money.
   Callers are the saga's `_mark_rejected` and the operator decisions in `PaymentsService`.
 
-Release is a no-op when nothing is ACTIVE, so a late or repeated call is safe.
+Release is a no-op when nothing is held, so a late or repeated call is safe.
 """
 
 from __future__ import annotations
@@ -42,10 +45,12 @@ from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-COLLECTION = "fundsReservations"
+ID_FIELD = "refs.fundsReservationId"
+RELEASED_AT_FIELD = "refs.fundsReleasedAt"
 
-ACTIVE = "ACTIVE"
-RELEASED = "RELEASED"
+
+class _InsufficientFunds(Exception):
+    """Raised inside the reserve transaction so the payment marker rolls back too."""
 
 
 def reservation_id_for(payment_id: str) -> str:
@@ -56,33 +61,31 @@ def reservation_id_for(payment_id: str) -> str:
 def reserve(ctx, *, now: Optional[datetime] = None) -> Optional[dict]:
     """Hold `ctx.instructed_amount` on the debtor account.
 
-    Returns the ACTIVE reservation, or None when the available balance does not cover the
+    Returns `{"reservationId": ...}`, or None when the available balance does not cover the
     amount (nothing is written). The balance check and the decrement are one conditional
     update, so two payments racing for the same balance cannot both succeed.
     """
     c = ctx.collections
-    reservations = c.db[COLLECTION]
+    reservation_id = reservation_id_for(ctx.payment_id)
 
-    existing = reservations.find_one({"paymentId": ctx.payment_id, "status": ACTIVE})
+    existing = c.payments.find_one(
+        {"paymentId": ctx.payment_id, ID_FIELD: {"$ne": None}, RELEASED_AT_FIELD: None}
+    )
     if existing is not None:
-        return existing
+        return {"reservationId": existing["refs"]["fundsReservationId"]}
 
     now = now or datetime.now(timezone.utc)
     amount = ctx.instructed_amount
-    doc = {
-        "reservationId": reservation_id_for(ctx.payment_id),
-        "paymentId": ctx.payment_id,
-        "accountId": ctx.debtor_account_ref,
-        "amount": amount,
-        "currency": (ctx.debtor_account or {}).get("currency"),
-        "status": ACTIVE,
-        "reason": "Funds reserved at stage 3 validation",
-        "createdAt": now,
-        "releasedAt": None,
-        "releaseReason": None,
-    }
 
-    def callback(session) -> Optional[dict]:
+    def callback(session) -> dict:
+        # Marker first: a concurrent replay matches nothing here and cannot decrement twice.
+        marked = c.payments.update_one(
+            {"paymentId": ctx.payment_id, ID_FIELD: None},
+            {"$set": {ID_FIELD: reservation_id, RELEASED_AT_FIELD: None}},
+            session=session,
+        )
+        if marked.matched_count == 0:
+            return {"reservationId": reservation_id}
         held = c.accounts.find_one_and_update(
             {"accountId": ctx.debtor_account_ref, "balance.available": {"$gte": amount}},
             {"$inc": {"balance.available": -amount, "balance.hold": amount},
@@ -90,40 +93,45 @@ def reserve(ctx, *, now: Optional[datetime] = None) -> Optional[dict]:
             session=session,
         )
         if held is None:
-            return None
-        reservations.insert_one(dict(doc), session=session)
-        return doc
+            raise _InsufficientFunds
+        return {"reservationId": reservation_id}
 
-    return _in_transaction(c.db, callback)
+    try:
+        return _in_transaction(c.db, callback)
+    except _InsufficientFunds:
+        return None
 
 
 def release(
     db, payment_id: str, *, reason: str, session=None, at: Optional[datetime] = None,
 ) -> Optional[dict]:
-    """Return the held amount to the available balance. None when nothing was ACTIVE.
+    """Return the held amount to the available balance. None when nothing was held.
 
     Pass `session` from a caller already inside a transaction (stage 5's money move); without
-    one, the release opens its own so the status flip and the balance restore stay atomic.
+    one, the release opens its own so the marker flip and the balance restore stay atomic.
+    `reason` is for the caller's log line; the payment's own event trail carries the why.
     """
     now = at or datetime.now(timezone.utc)
 
     def callback(txn_session) -> Optional[dict]:
-        released = db[COLLECTION].find_one_and_update(
-            {"paymentId": payment_id, "status": ACTIVE},
-            {"$set": {"status": RELEASED, "releasedAt": now, "releaseReason": reason}},
+        payment = db["payments"].find_one_and_update(
+            {"paymentId": payment_id, ID_FIELD: {"$ne": None}, RELEASED_AT_FIELD: None},
+            {"$set": {RELEASED_AT_FIELD: now}},
             session=txn_session,
             return_document=True,
         )
-        if released is None:
+        if payment is None:
             return None
+        amount = payment["instructedAmount"]
         db["accounts"].update_one(
-            {"accountId": released["accountId"]},
-            {"$inc": {"balance.available": released["amount"],
-                      "balance.hold": -released["amount"]},
+            {"accountId": payment["debtor"]["accountId"]},
+            {"$inc": {"balance.available": amount, "balance.hold": -amount},
              "$set": {"balance.updatedAt": now, "updatedAt": now}},
             session=txn_session,
         )
-        return released
+        logger.info("released funds reservation %s: %s",
+                    payment["refs"]["fundsReservationId"], reason)
+        return {"reservationId": payment["refs"]["fundsReservationId"], "amount": amount}
 
     if session is not None:
         return callback(session)
