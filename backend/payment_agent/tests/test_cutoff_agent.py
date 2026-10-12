@@ -826,3 +826,22 @@ def test_the_submitted_time_is_read_from_the_latest_submitted_event():
 
     assert ca._submitted_at(db, PID) == et(18, 20)
     assert ca._submitted_at(db, "NONE") is None
+
+
+def test_the_trace_attaches_history_to_the_payment():
+    import payment_trace
+
+    db = FakeDB()
+    db["payments"] = FakeColl([{"paymentId": PID, "lifecycle": {"currentState": "SETTLED", "eventCount": 2}}])
+    db["paymentHistory"] = FakeColl([
+        {"paymentId": PID, "kind": "EVENT", "seq": 2, "state": "SETTLED"},
+        {"paymentId": PID, "kind": "CHECK", "seq": 1, "name": "funds_available"},
+        {"paymentId": PID, "kind": "EVENT", "seq": 1, "state": "DRAFT"},
+        {"paymentId": "OTHER", "kind": "EVENT", "seq": 1, "state": "DRAFT"},
+    ])
+
+    payment = payment_trace.gather_trace(db, PID)["payment"]
+
+    assert [e["state"] for e in payment["lifecycle"]["events"]] == ["DRAFT", "SETTLED"]
+    assert [c["name"] for c in payment["checks"]] == ["funds_available"]
+    assert payment["lifecycle"]["currentState"] == "SETTLED"

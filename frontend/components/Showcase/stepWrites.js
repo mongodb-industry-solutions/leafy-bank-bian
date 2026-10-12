@@ -8,13 +8,37 @@
 //   trace   — GET /pipeline/trace/{id}: the ledger's documents for the payment
 
 // get_payment joins these onto the payments doc; strip them to show the doc as stored.
-const JOINED = ["executions", "messages", "settlementPositions", "routingSnapshot", "exceptions", "statements"];
+const JOINED = ["executions", "messages", "settlementPositions", "routingSnapshot", "exceptions", "statements", "checks"];
 
 export function paymentDoc(payment) {
   if (!payment) return null;
   const doc = { ...payment };
   JOINED.forEach((k) => delete doc[k]);
+  // `lifecycle.events[]` and `checks[]` live in `paymentHistory`; the API joins them back.
+  // The stored payment keeps only `lifecycle.eventCount` and `checkCount`.
+  if (doc.lifecycle) {
+    const { events, ...lifecycle } = doc.lifecycle;
+    doc.lifecycle = lifecycle;
+  }
   return doc;
+}
+
+// The `paymentHistory` documents behind the joined `lifecycle.events[]` and `checks[]`: one per
+// event or check, `seq` in write order. Rebuilt from the API's joined arrays, so `_id` follows
+// the stored `{paymentId}:{kind}:{seq}` form. `states` picks events, `stages` picks checks
+// by their leading stage number ("3 validate" -> "3").
+export function historyDocs(payment, { states = [], stages = [] }) {
+  if (!payment) return null;
+  const base = (kind, seq) => ({
+    _id: `${payment.paymentId}:${kind}:${seq}`, paymentId: payment.paymentId, rail: payment.rail, kind, seq,
+  });
+  const events = (payment.lifecycle?.events || [])
+    .map((e, i) => ({ ...base("EVENT", i + 1), ...e }))
+    .filter((e) => states.includes(e.state));
+  const checks = (payment.checks || [])
+    .map((c, i) => ({ ...base("CHECK", i + 1), ...c }))
+    .filter((c) => stages.includes(String(c.stage || "").split(" ")[0]));
+  return nonEmpty([...events, ...checks]);
 }
 
 export const nonEmpty = (docs) => {
@@ -42,7 +66,7 @@ const followed = ({ followedException, agent }) =>
 const W = (collection, op, fields, pick, via) => ({ collection, op, fields, pick, via });
 
 const INITIATE = [
-  W("payments", "insert", "The payment itself: lifecycle.currentState IN_PROGRESS, lifecycle.settlementStatus PENDING, checks[] from every stage, clearing.*",
+  W("payments", "insert", "The payment itself: lifecycle.currentState IN_PROGRESS, lifecycle.settlementStatus PENDING, clearing.*; its events and checks go to paymentHistory",
     ({ payment }) => nonEmpty(paymentDoc(payment))),
   W("transactions", "insert", "The money movement, written in the same ACID transaction that debits the customer's account",
     ({ trace }) => nonEmpty(trace?.transaction)),

@@ -7,7 +7,7 @@
 import { fmtAmount, fmtWhen } from "@/lib/paymentsWorkflow/status";
 import { legTotals } from "./lifecycleStages";
 import {
-  paymentDoc, nonEmpty, position, statements, ledgerEvents,
+  paymentDoc, nonEmpty, position, statements, ledgerEvents, historyDocs,
 } from "../Showcase/stepWrites";
 
 const OUT = "OUTBOUND";
@@ -58,7 +58,7 @@ const COPY = {
     },
     [IN]: {
       business: "The bank decides whether to accept the incoming payment, after compliance checks.",
-      technical: "The accept or reject decision, with its checks, is recorded on the payment and in lifecycle.events.",
+      technical: "The accept or reject decision, with its checks, is recorded on the payment and in paymentHistory.",
       why: "Accept or reject is one acceptanceDecision object, rolled up from results already stored on the same document.",
     },
   },
@@ -117,17 +117,25 @@ const executionMessages = ({ payment }) =>
 
 const whole = ({ payment }) => nonEmpty(paymentDoc(payment));
 
+// One `paymentHistory` row per stage: its lifecycle events and checks, as stored.
+const HISTORY_FIELDS = "Lifecycle events and checks from this stage, one document each with a contiguous seq";
+const history = (filter, fields = HISTORY_FIELDS) =>
+  W("paymentHistory", "insert", fields, ({ payment }) => historyDocs(payment, filter));
+
 // Writes per lifecycle stage key. A panel inside a grouped stage uses its own key; a grouped
 // stage's rail is the union of its panels.
 const WRITES = {
   initiation: [
     W("payments", "insert", "The payment, with debtor and creditor embedded as an immutable snapshot", whole),
+    history({ states: ["DRAFT", "INITIATED", "RECEIVED"] }, "The DRAFT event, inserted in the same transaction as the payment"),
   ],
   authentication: [
     W("payments", "update", "authentication{} and entitlement{}: what was checked and what it was judged against", whole),
+    history({ stages: ["2"] }),
   ],
   validation: [
-    W("payments", "update", "enrichment{}, validation{}, checks[] and refs.fundsReservationId from this stage", whole),
+    W("payments", "update", "enrichment{}, validation{} and refs.fundsReservationId from this stage; the checks go to paymentHistory", whole),
+    history({ states: ["VALIDATED", "ENRICHED", "FINAL_VALIDATED"], stages: ["3"] }),
     W("fundsReservations", "insert", "The hold on the debtor's available balance (available down, hold up), with its reservation id",
       ({ payment }) => nonEmpty(payment?.refs?.fundsReservationId
         ? { reservationId: payment.refs.fundsReservationId, paymentId: payment.paymentId,
@@ -137,11 +145,13 @@ const WRITES = {
   authorization: [
     W("routingSnapshots", "insert", "The routing decision: network, correspondent, cut-off, rationale",
       ({ payment }) => nonEmpty(payment?.routingSnapshot)),
-    W("payments", "update", "fraud{} and authorization checks", whole),
+    W("payments", "update", "fraud{} and authorization", whole),
+    history({ states: ["ROUTED", "AUTHORISED", "APPROVED", "ACCEPTED", "REJECTED"], stages: ["4"] }),
   ],
   execution: [
     W("paymentExecutions", "insert", "The rail submission attempt", ({ payment }) => nonEmpty(payment?.executions)),
     W("paymentMessages", "insert", "The ISO 20022 message sent and the status received", executionMessages),
+    history({ states: ["SUBMITTED", "IN_PROGRESS"], stages: ["5"] }),
   ],
   ledgerEvent: [
     W("ledgerEvents", "insert", "Principal event, idempotencyKey {paymentId}", ledgerEvents([""]),
@@ -158,9 +168,11 @@ const WRITES = {
   generalLedger: [
     W("journalEntries", "insert", "Balanced double-entry journals, posted in one ACID transaction",
       ({ trace }) => nonEmpty(trace?.allJournalEntries)),
+    history({ states: ["POSTED"] }, "The POSTED event, written by the ledger service in the same transaction as the state change"),
   ],
   settlementConfirm: [
     W("settlementPositions", "update", "Expected amount, window and settled status", position),
+    history({ states: ["SETTLED"], stages: ["7"] }),
   ],
   settlementPosting: [
     W("ledgerEvents", "insert", "Settlement event {paymentId}-SETTLEMENT: clearing account to Nostro/Central Bank Cash",
@@ -170,6 +182,7 @@ const WRITES = {
     W("paymentMessages", "update", "camt.053 statement lines matched to this payment", statements),
     W("reconciliationItems", "upsert", "The three-way check: legs[] and overallResult",
       ({ trace }) => nonEmpty(trace?.reconciliationItem)),
+    history({ states: ["RECONCILED"], stages: ["8"] }, "The RECONCILED event, written by the ledger service"),
   ],
 };
 
@@ -179,7 +192,8 @@ const WRITES = {
 const INBOUND_WRITES = {
   // Funds are reserved against a customer debit; inbound has none.
   validation: [
-    W("payments", "update", "enrichment{}, validation{} and checks[] from this stage", whole),
+    W("payments", "update", "enrichment{} and validation{} from this stage; the checks go to paymentHistory", whole),
+    history({ states: ["VALIDATED", "ENRICHED", "FINAL_VALIDATED"], stages: ["3"] }),
   ],
   execution: [
     {
