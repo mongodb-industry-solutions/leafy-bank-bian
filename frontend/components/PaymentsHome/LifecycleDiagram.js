@@ -17,9 +17,9 @@ const STAGES = [
     items: ["Capture debtor & creditor", "Idempotency key", "Snapshot parties"] },
   { n: 2, title: "Authentication & Authorization", sub: "Verify customer and permissions", tone: "green", icon: "Key",
     items: ["Verify caller", "Check entitlements", "Step-up if needed"] },
-  { n: 3, title: "Validate & Enrich", sub: "Validate the instruction and enrich data", tone: "green", icon: "Sparkle", agent: true,
+  { n: 3, title: "Validate & Enrich", sub: "Validate the instruction and enrich data", tone: "green", icon: "Sparkle",
     items: ["Enrich beneficiary", "Validate bank details", "Verify & reserve funds", "Estimate fees / FX"] },
-  { n: 4, title: "Orchestration & Approval", sub: "Score fraud, pick the rail, prepare ISO 20022", tone: "green", icon: "Lock",
+  { n: 4, title: "Orchestration & Approval", sub: "Score fraud, pick the rail, prepare ISO 20022", tone: "green", icon: "Lock", agent: true,
     items: ["Sanctions/AML screening", "Fraud decision", "Choose network", "Routing snapshot"] },
   { n: 5, title: "Payment Execution", sub: "Send and receive confirmations", tone: "green", icon: "ArrowRight",
     items: ["Build pacs.008", "Send to correspondent", "Receive pacs.002"] },
@@ -42,8 +42,6 @@ const CANONICAL = [
 ];
 
 const AGENTS = [
-  { name: "Payment Enrichment Agent", at: "Stage 3", tone: "green",
-    tools: [["Database", "Reference data lookup"], ["Edit", "Payment update"], ["CheckmarkWithCircle", "Validation"]] },
   { name: "Cut-off Agent", at: "Stage 4", tone: "blue",
     tools: [["Clock", "Cut-off window & timing"], ["Bell", "Blocker remedies"], ["Person", "Approved resolution"]] },
   { name: "Reconciliation Agent", at: "Stage 8", tone: "purple",
