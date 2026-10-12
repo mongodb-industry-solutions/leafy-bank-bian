@@ -20,7 +20,7 @@ const STAGES = [
   { n: 3, title: "Validate & Enrich", sub: "Validate the instruction and enrich data", tone: "green", icon: "Sparkle", agent: true,
     items: ["Enrich beneficiary", "Validate bank details", "Verify & reserve funds", "Estimate fees / FX"] },
   { n: 4, title: "Orchestration & Approval", sub: "Score fraud, pick the rail, prepare ISO 20022", tone: "green", icon: "Lock",
-    items: ["Fraud decision", "Choose network", "Routing snapshot"] },
+    items: ["Sanctions/AML screening", "Fraud decision", "Choose network", "Routing snapshot"] },
   { n: 5, title: "Payment Execution", sub: "Send and receive confirmations", tone: "green", icon: "ArrowRight",
     items: ["Build pacs.008", "Send to correspondent", "Receive pacs.002"] },
   { n: 6, title: "Accounting & Posting", sub: "Ledger events, sub-ledger, GL", tone: "blue", icon: "Diagram3",
@@ -42,9 +42,11 @@ const CANONICAL = [
 ];
 
 const AGENTS = [
-  { name: "Payment Enrichment Agent", at: "Stage 3", tone: "green", cols: "3 / 6",
+  { name: "Payment Enrichment Agent", at: "Stage 3", tone: "green",
     tools: [["Database", "Reference data lookup"], ["Edit", "Payment update"], ["CheckmarkWithCircle", "Validation"]] },
-  { name: "Reconciliation Agent", at: "Stage 8", tone: "purple", cols: "7 / 10",
+  { name: "Cut-off Agent", at: "Stage 4", tone: "blue",
+    tools: [["Clock", "Cut-off window & timing"], ["Bell", "Blocker remedies"], ["Person", "Approved resolution"]] },
+  { name: "Reconciliation Agent", at: "Stage 8", tone: "purple",
     tools: [["MagnifyingGlass", "Payment trace lookup"], ["Warning", "Reconciliation analysis"], ["Person", "Exception & resolution"]] },
 ];
 
@@ -145,7 +147,7 @@ export default function LifecycleDiagram() {
           <LayerLabel icon="Wizard" title="Agentic AI Support" body="Targeted agents that improve efficiency and reduce manual work" />
           <div className={styles.agents}>
             {AGENTS.map((a) => (
-              <div key={a.name} className={`${styles.agent} ${styles[a.tone]}`} style={{ gridColumn: a.cols }}>
+              <div key={a.name} className={`${styles.agent} ${styles[a.tone]}`}>
                 <strong><Icon glyph="Sparkle" /> {a.name} <span className={styles.muted}>({a.at})</span></strong>
                 <div className={styles.tools}>
                   {a.tools.map(([g, t]) => (

@@ -801,6 +801,7 @@ const CHECK_LABEL = {
   payment_limit_available: "Payment limit available",
   dual_approval: "Required approval",
   funds_available: "Verify and reserve funds",
+  sanctions_screening: "Sanctions/AML screening check",
 };
 const humanizeLabel = (s) =>
   (s || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());

@@ -135,8 +135,8 @@
 .pill strong, .pill span { display: block; }
 .pill span { color: #5c6c75; font-size: 11px; }
 
-/* Agents sit under the stage they serve: the right column is the same 9-way split. */
-.agents { display: grid; grid-template-columns: repeat(9, 1fr); gap: 8px; }
+/* One equal card per agent; the "Stage N" label in each title says where it applies. */
+.agents { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .agent {
   padding: 10px 14px;
   background: var(--bg);

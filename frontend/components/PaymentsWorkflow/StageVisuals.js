@@ -767,7 +767,7 @@ export function FraudMeter({ fraud, sanctions }) {
       <div className={styles.chipRow}>
         {rules.length ? rules.map((r) => <span key={r} className={styles.chip}>{r}</span>) : <span className={styles.chip}>no rules fired</span>}
         {sanctions?.status && (
-          <span className={styles.chip}>sanctions {sanctions.status}{sanctions.provider ? ` · ${sanctions.provider}` : ""}</span>
+          <span className={styles.chip}>sanctions/AML {sanctions.status}{sanctions.provider ? ` · ${sanctions.provider}` : ""}</span>
         )}
       </div>
     </Card>

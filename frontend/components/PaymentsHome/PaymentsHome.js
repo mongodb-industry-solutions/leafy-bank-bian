@@ -15,7 +15,7 @@ const FEATURES = [
     badge: { variant: "green", text: "Live lifecycle" },
   },
   {
-    icon: "Bulb", title: "Agentic Showcase", href: "/showcase",
+    icon: "Bulb", title: "Agentic", href: "/showcase",
     body: "Watch an agent investigate reconciliation breaks and cutoff risk, then decide.",
     badge: { variant: "blue", text: "AI-assisted" },
   },

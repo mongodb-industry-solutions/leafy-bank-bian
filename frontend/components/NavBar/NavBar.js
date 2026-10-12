@@ -92,7 +92,7 @@ const NavBarContent = ({ bianModelUrl }) => {
                             same surface, so it is a Link, not a lens toggle. The page mints
                             its own operator session. */}
                         <Link href="/showcase" className={styles.navLink}>
-                            <Body weight="medium" className={isShowcase ? styles.navLinkActive : ""}>Showcase</Body>
+                            <Body weight="medium" className={isShowcase ? styles.navLinkActive : ""}>Agentic</Body>
                         </Link>
                     </>
                 )}

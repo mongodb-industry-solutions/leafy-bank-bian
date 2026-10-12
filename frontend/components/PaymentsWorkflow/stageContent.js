@@ -299,7 +299,7 @@ function factsFor(stage, payment) {
           ["Decision", ad?.decision],
           ["Reason code", ad?.reasonCode],
           ["Beneficiary match", ad?.beneficiaryMatch],
-          ["Sanctions", ad?.sanctionsStatus],
+          ["Sanctions/AML", ad?.sanctionsStatus],
         ];
       }
       const f = d?.fraud;
@@ -307,7 +307,7 @@ function factsFor(stage, payment) {
         ["Fraud decision", f?.decision],
         ["Fraud score", f?.score != null ? `${f.score}/100` : null],
         ["Clearing network", d?.network],
-        ["Sanctions", d?.sanctions?.status],
+        ["Sanctions/AML", d?.sanctions?.status],
         ["Confirmation", payment?.confirmation?.confirmationId],
       ];
     }
