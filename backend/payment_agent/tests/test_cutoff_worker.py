@@ -40,6 +40,18 @@ def runs(monkeypatch):
     return calls
 
 
+def _apply(db, fields):
+    """Set `fields` on the payment. `_last_reason` is not a payment field: it becomes the
+    payment's latest lifecycle `EVENT` in `paymentHistory`."""
+    fields = dict(fields)
+    reason = fields.pop("_last_reason", None)
+    if fields:
+        db["payments"].update_one({"paymentId": PID}, {"$set": fields})
+    if reason is not None:
+        db["paymentHistory"].docs.append(
+            {"paymentId": PID, "kind": "EVENT", "seq": 99, "state": "REJECTED", "reason": reason})
+
+
 def _held(at=None):
     at = at or et(17, 5)
     db = _world("PENDING_APPROVAL", "DOMESTIC", at)
@@ -154,8 +166,8 @@ def test_a_failed_run_does_not_mark_the_key_as_run(runs, monkeypatch):
 # --- stale cases ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("fields,expected", [
-    ({"status": "REJECTED", "lifecycle.events": [{"reason": cwk.SUPERSEDED_REASON}]}, cases.SUPERSEDED),
-    ({"status": "REJECTED", "lifecycle.events": [{"reason": "Declined."}]}, cases.REJECTED),
+    ({"status": "REJECTED", "_last_reason": cwk.SUPERSEDED_REASON}, cases.SUPERSEDED),
+    ({"status": "REJECTED", "_last_reason": "Declined."}, cases.REJECTED),
     ({"cutoff.decision": "HOLD_NEXT_VALUE_DATE"}, cases.HELD_NEXT_VALUE_DATE),
     ({"status": "ROUTED", "cutoff.decision": "NEXT_VALUE_DATE"}, cases.DEFERRED_NEXT_BUSINESS_DAY),
     ({"status": "SUBMITTED"}, cases.SUBMITTED_IN_TIME),
@@ -164,8 +176,7 @@ def test_a_failed_run_does_not_mark_the_key_as_run(runs, monkeypatch):
 ])
 def test_stale_outcome_mapping(fields, expected):
     db = _held()
-    if fields:
-        db["payments"].update_one({"paymentId": PID}, {"$set": fields})
+    _apply(db, fields)
     assert cwk.stale_outcome(db, {"paymentId": PID, "clockRunId": RUN}) == expected
 
 
@@ -190,20 +201,20 @@ def test_stale_outcome_decision_by_status_matrix(decision, status):
     db = _held()
     fields = {"status": status}
     if status == "REJECTED":
-        fields["lifecycle.events"] = [{"reason": "Release failed validation."}]
+        fields["_last_reason"] = "Release failed validation."
     if decision:
         fields["cutoff.decision"] = decision
-    db["payments"].update_one({"paymentId": PID}, {"$set": fields})
+    _apply(db, fields)
     assert cwk.stale_outcome(db, {"paymentId": PID, "clockRunId": RUN}) == _expected_outcome(decision, status)
 
 
 @pytest.mark.parametrize("decision", [None, "EXPEDITE", "HOLD_NEXT_VALUE_DATE", "NEXT_VALUE_DATE"])
 def test_superseded_beats_every_decision(decision):
     db = _held()
-    fields = {"status": "REJECTED", "lifecycle.events": [{"reason": cwk.SUPERSEDED_REASON}]}
+    fields = {"status": "REJECTED", "_last_reason": cwk.SUPERSEDED_REASON}
     if decision:
         fields["cutoff.decision"] = decision
-    db["payments"].update_one({"paymentId": PID}, {"$set": fields})
+    _apply(db, fields)
     assert cwk.stale_outcome(db, {"paymentId": PID, "clockRunId": RUN}) == cases.SUPERSEDED
 
 
@@ -255,8 +266,7 @@ def test_stale_cases_close_through_supersede(runs, monkeypatch):
     monkeypatch.setattr(ca, "is_awaiting_approval", lambda agent, cid: cid in paused)
     monkeypatch.setattr(ca, "resume", lambda agent, db, cid, decision, note=None, by="operator":
                         resumed.append((cid, decision)) or paused.discard(cid))
-    db["payments"].update_one({"paymentId": PID}, {"$set": {
-        "status": "REJECTED", "lifecycle.events": [{"reason": cwk.SUPERSEDED_REASON}]}})
+    _apply(db, {"status": "REJECTED", "_last_reason": cwk.SUPERSEDED_REASON})
     assert cwk.sweep_once(object(), db)["closed"] == 1
     closed = cases.get(db, case_id)
     assert resumed == [(case_id, ca.SUPERSEDED)]

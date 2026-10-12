@@ -15,6 +15,7 @@ the shape. The `settlementStatus` enum values are asserted here against the spec
 import pytest
 
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
+    joined,
     DEBTOR,
     _initiate,
     _initiate_external,
@@ -26,7 +27,7 @@ from tests.test_payments_service import (  # reuse the fixtures, don't fork them
 
 def _payment(db):
     pays = getattr(db["payments"], "docs", None) or db["payments"].inserted
-    return pays[0]
+    return joined(db, pays[0])
 
 
 def _settlement_positions(db):

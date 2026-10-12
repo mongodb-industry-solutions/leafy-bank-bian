@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from contexts.payment_order_initiation.domain import lifecycle
+from contexts.payment_order_initiation.domain import lifecycle, lifecycle_history
 from services import workflow_read_service as svc
 
 
@@ -163,9 +163,33 @@ class FakeArtifacts:
                     return False
                 if "$nin" in v and actual in v["$nin"]:
                     return False
+                if "$lte" in v and (actual is None or actual > v["$lte"]):
+                    return False
             elif actual != v:
                 return False
         return True
+
+
+def _split_history(coll):
+    """Move each fixture payment's embedded `lifecycle.events[]` / `checks[]` into
+    `paymentHistory` documents and leave the counters, as the writers store them. The
+    fixtures describe a payment as the API shows it; this turns that into the stored shape."""
+    history = []
+    for doc in coll.docs:
+        lc = doc.setdefault("lifecycle", {})
+        for kind, entries in ((lifecycle_history.EVENT, lc.pop("events", [])),
+                              (lifecycle_history.CHECK, doc.pop("checks", []))):
+            for seq, entry in enumerate(entries, start=1):
+                history.append({
+                    "_id": lifecycle_history.history_id(doc["paymentId"], kind, seq),
+                    "paymentId": doc["paymentId"], "rail": doc.get("rail"),
+                    "kind": kind, "seq": seq, **entry,
+                })
+        lc["eventCount"] = sum(1 for h in history
+                               if h["paymentId"] == doc["paymentId"] and h["kind"] == "EVENT")
+        lc["checkCount"] = sum(1 for h in history
+                               if h["paymentId"] == doc["paymentId"] and h["kind"] == "CHECK")
+    return history
 
 
 class FakeConnection:
@@ -180,6 +204,7 @@ class FakeConnection:
             "routingSnapshots": FakeArtifacts(  # stage 4 — one doc, or none pre-stage-4
                 [routing_snapshot] if routing_snapshot else None),
             "exceptions": FakeArtifacts(exceptions),  # stage 9 — empty by default
+            lifecycle_history.HISTORY: FakeArtifacts(_split_history(coll)),
         }
 
     def get_collection(self, db_name, name):
@@ -309,9 +334,10 @@ def test_get_payment_returns_lifecycle_events(conn):
 
 
 def test_get_payment_tolerates_a_pre_stage_2_document(conn):
-    """The gate: a payment written before stage 2 has no `checks[]` and must still load."""
+    """The gate: a payment written before stage 2 has no checks and must still load, with an
+    empty trail rather than a missing key."""
     payment = svc.get_payment(conn, "db", "PAY-1")
-    assert "checks" not in payment
+    assert payment["checks"] == []
 
 
 def test_get_payment_missing_returns_none(conn):

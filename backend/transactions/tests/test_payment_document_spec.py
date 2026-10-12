@@ -228,11 +228,11 @@ def test_a_tagged_document_adds_only_the_demo_extras(schema):
 def test_stage_two_slots_are_empty_at_creation():
     """Stage 2 fills these; stage 1 only opens the slot, exactly as it does for `fraud`.
 
-    `checks` is `[]` rather than absent so a reader needs no `$exists` branch — but
-    `append_checks` uses `$push`/`$each`, which creates the array either way, so documents
-    written before this change stay readable."""
+    The per-check trail is not on the document at all: it lives in `paymentHistory`, with
+    the `lifecycle.checkCount` counter standing in."""
     doc = payment_document.build(_ctx())
-    assert doc["checks"] == []
+    assert "checks" not in doc
+    assert doc["lifecycle"]["checkCount"] == 0
     assert doc["authentication"] is None
     assert doc["entitlement"] is None
     assert doc["enrichment"] is None
@@ -458,7 +458,9 @@ def test_manual_fraud_review_is_declared_in_the_canonical_enum():
     doc = payment_document.build(_ctx(payment_rail="WIRE"))
     doc["lifecycle"]["currentState"] = "MANUAL_FRAUD_REVIEW"
     doc["status"] = "MANUAL_FRAUD_REVIEW"
-    doc["lifecycle"]["events"].append({
+    # Events are stored in `paymentHistory`, not on the payment; the guard still validates an
+    # event's enum values against the spec's `lifecycle.events[]` shape, so embed one here.
+    doc["lifecycle"].setdefault("events", []).append({
         "state": "MANUAL_FRAUD_REVIEW", "at": doc["createdAt"],
         "actor": "fraud-service", "actorType": "SERVICE", "reason": "held for review",
     })

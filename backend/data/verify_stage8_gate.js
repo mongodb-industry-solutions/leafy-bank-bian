@@ -50,6 +50,12 @@ if (argPid) {
   }
 }
 const pid = p.paymentId;
+// Events and checks live in paymentHistory, not on the payment: join them back.
+{
+  const hist = dbc.paymentHistory.find({ paymentId: p.paymentId }).sort({ seq: 1 }).toArray();
+  p.lifecycle.events = hist.filter(h => h.kind === "EVENT");
+  p.checks = hist.filter(h => h.kind === "CHECK");
+}
 const isInternal = p.rail === "INTERNAL";
 const MIN = Math.round((p.amount || 0) * 100);   // majors → minors
 print(`TARGET: ${pid} | db=${dbName} | rail=${p.rail} | amount=${p.amount} ${p.currency}`);

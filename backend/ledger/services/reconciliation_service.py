@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database.connection import MongoDBConnection
+from services import payment_history
 from services.exceptions_service import (
     ACTION_RECHECK,
     CATEGORY_RECONCILIATION_DISCREPANCY,
@@ -569,8 +570,8 @@ def compute_reconciliation(
 #     not have posted yet).
 #
 # The RECONCILED write mirrors `posting_writeback_service._write_back`'s POSTED write: a direct
-# `$set` of `currentState`/`status`/`reconciliationStatus` + a `$push` of one `lifecycle.events`
-# entry, guarded on `currentState` in the query so a FAILED/RETURNED payment can never reach it.
+# `$set` of `currentState`/`status`/`reconciliationStatus` + one `EVENT` document in
+# `paymentHistory` (same transaction, `services/payment_history.py`), guarded on `currentState` in the query so a FAILED/RETURNED payment can never reach it.
 # It does NOT import the transactions service's `lifecycle` module (mirror-drift, defects.md
 # 2026-06-18); the event shape is mirrored and asserted by
 # `test_the_reconciled_event_matches_the_state_machines_own_shape`.
@@ -627,25 +628,24 @@ def _stamp_reconciled(payments, payment_id: str, check: ReconciliationCheck, ri_
     now = _now_utc()
     item = _upsert_reconciliation_item(ri_coll, check)
 
-    payments.update_one(
+    payment_history.advance_with_event(
+        payments,
         {"paymentId": payment_id, "lifecycle.currentState": {"$in": list(_ELIGIBLE_STATES)}},
         {
-            "$set": {
-                "lifecycle.currentState": _RECONCILED_STATE,
-                "lifecycle.stateEnteredAt": now,
-                "lifecycle.reconciliationStatus": RECONCILED,
-                "status": _RECONCILED_STATE,
-                "updatedAt": now,
-                "refs.reconciliationItemId": item["reconciliationItemId"],
-                "refs.settlementPositionId": check.settlement_position_id,
-            },
-            "$push": {"lifecycle.events": {
-                "state": _RECONCILED_STATE,
-                "at": now,
-                "actor": _ACTOR,
-                "actorType": _ACTOR_TYPE,
-                "reason": f"Three-way reconciliation passed — {item['reconciliationItemId']}",
-            }},
+            "lifecycle.currentState": _RECONCILED_STATE,
+            "lifecycle.stateEnteredAt": now,
+            "lifecycle.reconciliationStatus": RECONCILED,
+            "status": _RECONCILED_STATE,
+            "updatedAt": now,
+            "refs.reconciliationItemId": item["reconciliationItemId"],
+            "refs.settlementPositionId": check.settlement_position_id,
+        },
+        {
+            "state": _RECONCILED_STATE,
+            "at": now,
+            "actor": _ACTOR,
+            "actorType": _ACTOR_TYPE,
+            "reason": f"Three-way reconciliation passed — {item['reconciliationItemId']}",
         },
     )
 
@@ -821,7 +821,11 @@ def reconcile_settled_payments(connection: MongoDBConnection, db_name: str,
         payment_id = doc.get("paymentId")
         if not payment_id:
             continue
-        _, outcome = reconcile_payment(payment_id, connection, db_name, now=now)
+        try:
+            _, outcome = reconcile_payment(payment_id, connection, db_name, now=now)
+        except Exception:  # noqa: BLE001 — one payment must not abort the sweep; it is retried next cycle
+            logger.exception("reconciliation failed for %s; retried next cycle", payment_id)
+            continue
         if outcome is not None:
             counts[outcome] += 1
 

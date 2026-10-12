@@ -2,6 +2,10 @@
 """
 Core-banking recreate + populate for leafy_bank_bian.
 
+NOTE: a snapshot taken before the lifecycle-history-out change has `lifecycle.events[]` and
+`checks[]` embedded in `payments` and no `paymentHistory`; after loading one, run
+`migrate_history_out.py --apply`.
+
 Replays the mongodump snapshot at dump-core/leafy_bank_bian/ (9 collections:
 customers, accounts, glAccounts, payments, transactions, notifications,
 ledgerEvents, subLedgerEntries, journalEntries) into a target database, then
@@ -72,7 +76,7 @@ DEFAULT_DUMP_DIR = ROOT / "bian-data-model" / "migration" / "db-setup" / "dump-c
 # enforcement in Mongo), but this order reads naturally and matches the dump.
 COLLECTIONS = [
     "customers", "accounts", "glAccounts",
-    "payments", "transactions", "notifications",
+    "payments", "paymentHistory", "transactions", "notifications",
     "ledgerEvents", "subLedgerEntries", "journalEntries",
 ]
 BATCH = 1000

@@ -88,7 +88,7 @@ def _payment(*, rail: str = "INTERNAL", amount: float = 25000.0, state: str = "P
         "amount": amount,
         "currency": "USD",
         "status": state,
-        "lifecycle": {"currentState": state, "events": [{"state": state}]},
+        "lifecycle": {"currentState": state, "eventCount": 1},
         "refs": {"journalEntryId": journal_ref},
     }
 
@@ -640,11 +640,13 @@ def test_the_reconciled_event_matches_the_state_machines_own_shape():
     c.seed("ledgerEvents", [_principal_event()])
     reconcile_settled_payments(c, "db")
 
-    event = c.get_collection("db", "payments").docs[0]["lifecycle"]["events"][-1]
+    event = max((d for d in c.get_collection("db", "paymentHistory").docs if d["kind"] == "EVENT"),
+                key=lambda d: d["seq"])
     expected_keys = set(tx_lifecycle._event(
         "RECONCILED", "x", "SERVICE", "r", datetime(2026, 9, 3, tzinfo=timezone.utc),
     ).keys())
-    assert set(event.keys()) == expected_keys
+    envelope = {"_id", "paymentId", "rail", "kind", "seq"}
+    assert set(event.keys()) - envelope == expected_keys
     assert event["state"] == "RECONCILED"
     assert event["actorType"] == "SERVICE"
 

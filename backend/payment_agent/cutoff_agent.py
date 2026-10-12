@@ -49,6 +49,7 @@ import cutoff_cases as cases
 import cutoff_clock
 import cutoff_evidence as ev
 import cutoff_risk as risk_mod
+import payment_history
 import cutoff_rules as rules
 import cutoff_window as cw
 import transactions_client
@@ -517,19 +518,21 @@ def execute_proposal(payment_id: str, case_id: str, proposal: dict, decided_by: 
                                                decided_by=decided_by)
 
 
-def _submitted_at(payment: dict) -> Optional[datetime]:
-    for e in reversed((payment.get("lifecycle") or {}).get("events") or []):
-        if e.get("state") == "SUBMITTED":
-            return e.get("at")
-    return None
+def _submitted_at(db: Any, payment_id: str) -> Optional[datetime]:
+    event = payment_history.latest_event_with_state(db, payment_id, "SUBMITTED")
+    return event.get("at") if event else None
 
 
 def _as_utc(at: Any) -> Any:
     return at.replace(tzinfo=timezone.utc) if isinstance(at, datetime) and at.tzinfo is None else at
 
 
-def verify_outcome(payment: dict, action: str, risk: Optional[dict]) -> Optional[str]:
-    """The case outcome when the payment shows the approved decision, else None."""
+def verify_outcome(payment: dict, action: str, risk: Optional[dict],
+                   submitted_at: Optional[datetime] = None) -> Optional[str]:
+    """The case outcome when the payment shows the approved decision, else None.
+
+    `submitted_at` is the time of the payment's SUBMITTED lifecycle event; only EXPEDITE reads it.
+    """
     cutoff = payment.get("cutoff") or {}
     if action == rules.HOLD_NEXT_VALUE_DATE:
         return cases.HELD_NEXT_VALUE_DATE if cutoff.get("decision") == "HOLD_NEXT_VALUE_DATE" else None
@@ -540,7 +543,7 @@ def verify_outcome(payment: dict, action: str, risk: Optional[dict]) -> Optional
     if action == rules.EXPEDITE:
         if payment.get("status") not in _SUBMITTED_OR_LATER:
             return None
-        submitted, external = _as_utc(_submitted_at(payment)), _as_utc((risk or {}).get("externalCutoffAt"))
+        submitted, external = _as_utc(submitted_at), _as_utc((risk or {}).get("externalCutoffAt"))
         if submitted is not None and external is not None and submitted > external:
             return None
         return cases.SUBMITTED_IN_TIME
@@ -645,7 +648,8 @@ def build_cutoff_agent(model: Any, db: Any, checkpointer: Any):
         outcome = None
         if result is None:
             payment = db["payments"].find_one({"paymentId": payment_id}, {"_id": 0}) or {}
-            outcome = verify_outcome(payment, action, case.get("risk"))
+            submitted_at = (_submitted_at(db, payment_id) if action == rules.EXPEDITE else None)
+            outcome = verify_outcome(payment, action, case.get("risk"), submitted_at)
             result = VERIFIED if outcome else VERIFIED_NOT_APPLIED
         cases.set_agent_fields(db, case_id, {
             "verification": {"result": result, "outcome": outcome, "at": _now().isoformat(),

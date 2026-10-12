@@ -16,6 +16,7 @@ import pathlib
 import pytest
 
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
+    joined,
     _initiate,
     _initiate_external,
     db,          # noqa: F401 - pytest fixture
@@ -30,7 +31,7 @@ def _txn(db):
 
 def _payment(db):
     pays = getattr(db["payments"], "docs", None) or db["payments"].inserted
-    return pays[0]
+    return joined(db, pays[0])
 
 
 # --- the fee crosses the boundary (step 5) -----------------------------------

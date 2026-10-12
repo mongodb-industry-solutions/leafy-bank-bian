@@ -22,6 +22,7 @@ from contexts.payment_orchestration.domain import cutoff_policy
 from services.payments_service import PaymentsService
 from shared import business_clock, hold_queues
 from tests.test_payments_service import (
+    joined,
     FakeCollection,
     FakeConnection,
     FakeDb,
@@ -75,15 +76,15 @@ def service(db):
 
 
 def _stored(db, result):
-    return db["payments"].find_one({"paymentId": result["paymentId"]})
+    return joined(db, db["payments"].find_one({"paymentId": result["paymentId"]}))
 
 
 def _move(db, run_id, hh, mm):
     return cutoff_scenarios.move_clock(db, run_id, anchor=f"{hh:02d}:{mm:02d}")
 
 
-def _states(payment):
-    return [e["state"] for e in payment["lifecycle"]["events"]]
+def _states(db, payment):
+    return [e["state"] for e in joined(db, payment)["lifecycle"]["events"]]
 
 
 # --- each scenario reaches its hold -------------------------------------------
@@ -159,7 +160,7 @@ def test_c1_story_runs_to_submitted(service, db):
 
     expedited = service.decide_cutoff(result["paymentId"], decision="EXPEDITE",
                                       decided_by="OPS-1")
-    assert lifecycle.SUBMITTED in _states(expedited)
+    assert lifecycle.SUBMITTED in _states(db, expedited)
     assert expedited["status"] == lifecycle.IN_PROGRESS
     assert len(db["transactions"].inserted) == 1
 
@@ -177,7 +178,7 @@ def test_c2_story_clear_after_internal_cutoff_then_expedite(service, db):
 
     expedited = service.decide_cutoff(result["paymentId"], decision="EXPEDITE",
                                       decided_by="OPS-1")
-    assert lifecycle.SUBMITTED in _states(expedited)
+    assert lifecycle.SUBMITTED in _states(db, expedited)
     assert expedited["status"] == lifecycle.IN_PROGRESS
 
 

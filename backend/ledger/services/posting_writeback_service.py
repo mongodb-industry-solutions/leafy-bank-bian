@@ -35,6 +35,7 @@ import logging
 from datetime import datetime, timezone
 
 from database.connection import MongoDBConnection
+from services import payment_history
 
 logger = logging.getLogger(__name__)
 
@@ -200,25 +201,30 @@ def _write_back(
         # POSTED first, so it never settled, never posted its settlement leg and never
         # reached a statement (PAY-31f6d99c, 2026-09-30). The posting axis above still
         # records POSTED; only the state waits, exactly as for a SETTLED internal transfer.
-        payments.update_one(
-            {"paymentId": payment_id, "lifecycle.currentState": _IN_PROGRESS,
-             "lifecycle.settlementStatus": {"$ne": _SETTLEMENT_PENDING}},
-            {
-                "$set": {
+        try:
+            payment_history.advance_with_event(
+                payments,
+                {"paymentId": payment_id, "lifecycle.currentState": _IN_PROGRESS,
+                 "lifecycle.settlementStatus": {"$ne": _SETTLEMENT_PENDING}},
+                {
                     "lifecycle.currentState": _POSTED,
                     "lifecycle.stateEnteredAt": now,
                     "status": _POSTED,
                     "updatedAt": now,
                 },
-                "$push": {"lifecycle.events": {
+                {
                     "state": _POSTED,
                     "at": now,
                     "actor": _ACTOR,
                     "actorType": _ACTOR_TYPE,
                     "reason": f"Posted to the general ledger by {journal_id}",
-                }},
-            },
-        )
+                },
+            )
+        except Exception:  # noqa: BLE001 — one payment's lost race must not skip the rest of the journal
+            logger.exception(
+                "POSTED transition failed for %s (journal %s); the posting axis is stamped, "
+                "currentState was not advanced", payment_id, journal_id,
+            )
 
     logger.info(
         "journal %s written back to %d payment(s)", journal_id, updated,

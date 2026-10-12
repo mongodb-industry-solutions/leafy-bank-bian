@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from contexts.payment_order_initiation.domain import lifecycle
+from contexts.payment_order_initiation.domain import lifecycle, lifecycle_history
 from database.connection import MongoDBConnection
 from services import workflow_read_service
 
@@ -24,7 +24,7 @@ WINDOWS = {
 }
 
 # Dwell averages do not need every payment: the newest N is a representative sample, and the
-# cap keeps the `$unwind` over `lifecycle.events[]` bounded as the collection grows.
+# cap keeps the `$lookup` + `$unwind` over lifecycle events bounded as the collection grows.
 DWELL_SAMPLE_LIMIT = 5000
 
 # Every open dashboard tab polls; one computation per window per TTL serves them all.
@@ -144,20 +144,33 @@ def processing_times(rows: list[dict]) -> list[dict]:
 
 
 def _dwell_rows(coll, match: dict) -> list[dict]:
-    """Time spent in each state: gap between consecutive `lifecycle.events[].at`."""
-    events = {"$ifNull": ["$lifecycle.events", []]}
+    """Time spent in each state: gap between consecutive lifecycle `EVENT`s in `paymentHistory`."""
+    events = "$events"
     pipeline = [
         {"$match": match},
         {"$sort": {"createdAt": -1}},
         {"$limit": DWELL_SAMPLE_LIMIT},
+        # Joined after the cap, so the lookup runs for the sampled payments only. Uses the
+        # `{paymentId, kind, seq}` index on `paymentHistory`.
+        {"$lookup": {
+            "from": lifecycle_history.HISTORY,
+            "localField": "paymentId",
+            "foreignField": "paymentId",
+            "pipeline": [
+                {"$match": {"kind": lifecycle_history.EVENT}},
+                {"$sort": {"seq": 1}},
+                {"$project": {"_id": 0, "state": 1, "at": 1}},
+            ],
+            "as": "events",
+        }},
         {"$project": {"pairs": {"$map": {
             "input": {"$range": [0, {"$max": [0, {"$subtract": [{"$size": events}, 1]}]}]},
             "as": "i",
             "in": {
-                "state": {"$arrayElemAt": ["$lifecycle.events.state", "$$i"]},
+                "state": {"$arrayElemAt": ["$events.state", "$$i"]},
                 "ms": {"$subtract": [
-                    {"$arrayElemAt": ["$lifecycle.events.at", {"$add": ["$$i", 1]}]},
-                    {"$arrayElemAt": ["$lifecycle.events.at", "$$i"]},
+                    {"$arrayElemAt": ["$events.at", {"$add": ["$$i", 1]}]},
+                    {"$arrayElemAt": ["$events.at", "$$i"]},
                 ]},
             },
         }}}},

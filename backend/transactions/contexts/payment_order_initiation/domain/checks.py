@@ -1,4 +1,7 @@
-"""`payments.checks[]` — the per-check audit trail every stage from 2 on appends to.
+"""The per-check audit trail every stage from 2 on appends to (`CHECK` docs in `paymentHistory`).
+
+Originally the embedded array `payments.checks[]`; moved out with `lifecycle.events[]` because
+both grew without bound (see `lifecycle_history.py`). The rationale below still holds.
 
 ## Why this array exists
 
@@ -10,24 +13,25 @@ result "none" — and doc 07's P1 item 4 asks for exactly this artifact: *per-ch
 actor, timestamp, sync/async*, for stage 2 **and** stage 3.
 
 One general array rather than a per-stage structure (doc 15 B3): stage 2 appends its six
-entries, stage 3 appends its ten, and a consumer filters by `stage`. The demo trace is
-then a single document read, which is the point D2 made when it embedded `lifecycle{}`.
+entries, stage 3 appends its ten, and a consumer filters by `stage`. The trace is one query on `paymentHistory` (`lifecycle_history.attach`).
 
 ## The rules
 
 * **Append-only.** Never rewritten, never reordered — same contract as `lifecycle.events[]`.
   A correction is a new entry.
-* **Not `required`, and nullable.** Added the way D2/D3 added their blocks, so documents
-  written before this change stay valid and a reader must tolerate the array being absent
-  rather than `[]`. Doina ratifies it as Q12; the D2/D3 precedent is to build and then ratify.
 * Nothing here touches `status` or `lifecycle` — a check is evidence, not a state change.
   Stage 2 records six checks and moves the payment nowhere (doc 15 B5).
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Optional
+
+from contexts.payment_order_initiation.domain import lifecycle_history as history
+
+logger = logging.getLogger(__name__)
 
 # `result` vocabulary. PENDING exists for an ASYNC check whose answer has not arrived;
 # stage 2's checks are all SYNC, so it goes unused until a later stage needs it.
@@ -96,27 +100,39 @@ def check(
 
 
 def append_checks(payments, payment_oid, entries, *, session=None) -> None:
-    """Append entries to `payments.checks[]`. A no-op for an empty list.
+    """Record `entries` as `CHECK` documents in `paymentHistory`. A no-op for an empty list.
 
-    `$push`/`$each` creates the array when it is absent, so no `$exists` branch and no
-    migration of existing documents. `updatedAt` moves with the write — a check is a
-    modification of the payment record even though it changes no state.
+    One transaction: `$inc lifecycle.checkCount` by N on the payment, then insert the N
+    documents with the `seq` range that increment allocated. Concurrent appends to one payment
+    serialise on that `$inc`, so `seq` stays contiguous. `updatedAt` moves with the write — a
+    check is a modification of the payment record even though it changes no state.
 
-    Deliberately not folded into `lifecycle.advance`'s `extra`: stage 2 records checks and
-    performs **no** transition, so the two cannot be assumed to travel together. A stage
-    that does both may still pass its checks through `advance(extra=...)` instead, and get
-    one write.
+    Deliberately separate from `lifecycle.advance`: stage 2 records checks and performs
+    **no** transition, so the two cannot be assumed to travel together.
     """
     if not entries:
         return
-    payments.update_one(
-        {"_id": payment_oid},
-        {
-            "$push": {"checks": {"$each": list(entries)}},
-            "$set": {"updatedAt": datetime.now(timezone.utc)},
-        },
-        session=session,
-    )
+    entries = list(entries)
+
+    def work(s):
+        updated = payments.find_one_and_update(
+            {"_id": payment_oid},
+            {
+                "$inc": {"lifecycle.checkCount": len(entries)},
+                "$set": {"updatedAt": datetime.now(timezone.utc)},
+            },
+            session=s,
+            return_document=True,
+        )
+        if updated is None:
+            # Same tolerance as the old `update_one`: a check recorded against a payment that
+            # is gone must not replace the business error the caller is about to raise.
+            logger.warning("cannot record %d checks: payment %s not found", len(entries), payment_oid)
+            return
+        history.collection(payments).insert_many(
+            history.check_documents(updated, entries), session=s)
+
+    history.run_in_transaction(payments, session, work)
 
 
 def stamp_validation_summary(payments, payment_oid, recorded: list) -> None:

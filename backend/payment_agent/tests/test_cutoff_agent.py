@@ -81,7 +81,7 @@ def _world(status, wire_type, at, *, entered=None, amount=10_000.0, tagged=True)
         "wireDetails": {"wireType": wire_type}, "instructedCurrency": "USD",
         "instructedAmount": amount, "debtor": {"accountId": "ACC-1"}, "customerId": "CUST-1",
         "demo": {"clockRunId": RUN, "scenario": "C"} if tagged else None,
-        "lifecycle": {"stateEnteredAt": entered or at, "events": []}, "cutoff": {},
+        "lifecycle": {"stateEnteredAt": entered or at}, "cutoff": {},
     }])
     db["staffDirectory"] = FakeColl(_staff())
     db["cutoffCases"] = FakeColl(unique=[("caseId",),
@@ -593,10 +593,9 @@ def test_the_system_prompt_and_steps_are_shared_with_recon(routes):
 
 def test_expedite_verifies_only_when_submitted_by_the_external_cutoff():
     risk = {"externalCutoffAt": et(18, 45)}
-    submitted = lambda at: {"status": "SUBMITTED", "lifecycle": {"events": [
-        {"state": "SUBMITTED", "at": at}]}}
-    assert ca.verify_outcome(submitted(et(18, 44)), rules.EXPEDITE, risk) == cases.SUBMITTED_IN_TIME
-    assert ca.verify_outcome(submitted(et(18, 46)), rules.EXPEDITE, risk) is None
+    submitted = {"status": "SUBMITTED"}
+    assert ca.verify_outcome(submitted, rules.EXPEDITE, risk, et(18, 44)) == cases.SUBMITTED_IN_TIME
+    assert ca.verify_outcome(submitted, rules.EXPEDITE, risk, et(18, 46)) is None
     assert ca.verify_outcome({"status": "MANUAL_FRAUD_REVIEW"}, rules.EXPEDITE, risk) is None
     assert ca.verify_outcome({"status": "ROUTED", "cutoff": {"decision": "EXPEDITE"}},
                              rules.DEFER_NEXT_BUSINESS_DAY, risk) is None
@@ -814,3 +813,16 @@ def test_fake_lease_filter_matches_a_missing_lease_like_mongodb():
     assert cases.claim_lease(db, "CUT-noagent", "a")
     assert cases.claim_lease(db, "CUT-nolease", "a")
     assert not cases.claim_lease(db, "CUT-nolease", "b")
+
+
+def test_the_submitted_time_is_read_from_the_latest_submitted_event():
+    db = FakeDB()
+    db["paymentHistory"] = FakeColl([
+        {"paymentId": PID, "kind": "EVENT", "seq": 2, "state": "SUBMITTED", "at": et(18, 10)},
+        {"paymentId": PID, "kind": "EVENT", "seq": 3, "state": "IN_PROGRESS", "at": et(18, 11)},
+        {"paymentId": PID, "kind": "EVENT", "seq": 4, "state": "SUBMITTED", "at": et(18, 20)},
+        {"paymentId": "OTHER", "kind": "EVENT", "seq": 5, "state": "SUBMITTED", "at": et(19, 0)},
+    ])
+
+    assert ca._submitted_at(db, PID) == et(18, 20)
+    assert ca._submitted_at(db, "NONE") is None

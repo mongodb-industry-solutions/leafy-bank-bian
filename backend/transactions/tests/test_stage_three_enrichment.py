@@ -417,6 +417,7 @@ def test_the_wire_bic_rule_matches_the_specs_own_expr():
 # --------------------------------------------------------------------------- #
 
 from test_payments_service import (  # noqa: E402
+    joined,
     EXTERNAL_CREDITOR,
     _checks,
     _initiate,
@@ -428,7 +429,7 @@ from test_payments_service import (  # noqa: E402
 
 
 def _states(db):
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     return [e["state"] for e in payment["lifecycle"]["events"]]
 
 
@@ -441,7 +442,7 @@ def test_an_internal_transfer_walks_enriched_and_final_validated(service, db):
 def test_an_internal_transfer_reports_the_specs_own_intrabank_wording(service, db):
     """The spec's `internal_transfer` sample uses exactly this reason."""
     _initiate(service)
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     enriched = next(
         e for e in payment["lifecycle"]["events"] if e["state"] == "ENRICHED"
     )
@@ -451,7 +452,7 @@ def test_an_internal_transfer_reports_the_specs_own_intrabank_wording(service, d
 def test_an_internal_transfer_records_an_empty_diff(service, db):
     """Nothing to resolve, so `resolved[]` is empty — but `enrichment{}` still exists."""
     _initiate(service)
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     assert payment["enrichment"] is not None
     assert payment["enrichment"]["resolved"] == []
     assert payment["enrichment"]["actor"] == "transactions-service"
@@ -491,7 +492,7 @@ def test_an_external_wire_warns_when_the_directory_is_empty(service, db):
 def test_an_external_wire_still_gets_our_own_routing_number(service, db):
     """Our side comes from a constant, so it resolves even with no directory at all."""
     _initiate_external(service)
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     assert payment["debtor"]["clearingSystemMemberId"] == bank_identity.OUR_ABA
     assert [
         e for e in payment["enrichment"]["resolved"]
@@ -502,7 +503,7 @@ def test_an_external_wire_still_gets_our_own_routing_number(service, db):
 def test_the_external_creditor_bic_survives_enrichment(service, db):
     """A resolution must never blank a value the caller supplied."""
     _initiate_external(service)
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     assert payment["creditor"]["bic"] == EXTERNAL_CREDITOR["bic"]
 
 

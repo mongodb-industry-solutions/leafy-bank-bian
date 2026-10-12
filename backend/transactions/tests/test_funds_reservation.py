@@ -7,6 +7,7 @@ import pytest
 from contexts.payment_order_initiation.application import funds_reservation as fr
 from process import payment_lifecycle
 from tests.test_payments_service import (  # noqa: F401  (fixtures)
+    joined,
     CREDITOR,
     DEBTOR,
     FakeCollection,
@@ -76,7 +77,7 @@ def test_a_settled_payment_releases_then_debits_once(service, db):
     assert (balance["available"], balance["current"], balance["ledger"]) == (9_750.0,) * 3
     assert balance["hold"] == 0
     assert payment["refs"]["fundsReservationId"] == reservation["reservationId"]
-    funds = next(c for c in payment["checks"] if c["name"] == "funds_available")
+    funds = next(c for c in joined(db, payment)["checks"] if c["name"] == "funds_available")
     assert reservation["reservationId"] in funds["detail"]
 
 

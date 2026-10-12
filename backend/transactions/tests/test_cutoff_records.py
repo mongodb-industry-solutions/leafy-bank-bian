@@ -203,12 +203,13 @@ def test_tagged_transitions_append_events_with_prev_stage_and_duration(service, 
 def test_stage_event_duration_and_naive_datetimes():
     coll = FakeCollection()
     entered = datetime(2026, 10, 6, 21, 0)               # naive: read as UTC
-    payment = {"paymentId": "P", "rail": "WIRE", "lifecycle": {"events": [
+    payment = {"paymentId": "P", "rail": "WIRE"}
+    events = [
         {"state": "ROUTED", "at": entered},
         {"state": "PENDING_SCREENING", "at": entered + timedelta(minutes=4)},
-    ]}}
+    ]
 
-    stage_events.append(coll, payment, at=entered + timedelta(minutes=4))
+    stage_events.append(coll, payment, at=entered + timedelta(minutes=4), events=events)
 
     [event] = coll.docs
     assert event["durationMs"] == 4 * 60 * 1000
@@ -318,6 +319,7 @@ def test_registry_covers_the_a3_collections(monkeypatch):
     monkeypatch.setattr(ensure_indexes, "_ensure",
                         lambda conn, db_name, coll, specs: seen.append(coll) or [])
     monkeypatch.setattr(ensure_indexes, "_ensure_time_series", lambda *a, **kw: None)
+    monkeypatch.setattr(ensure_indexes, "_ensure_payment_history", lambda *a, **kw: [])
 
     ensure_indexes.ensure_transactions_indexes(FakeConnection(None), "db")
 

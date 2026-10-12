@@ -17,6 +17,7 @@ from contexts.financial_gateway.application.statement import generate_statement
 from contexts.financial_gateway.domain import camt053
 from contexts.payment_settlement import settle
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
+    joined,
     FakeConnection,
     _initiate,
     _initiate_external,
@@ -126,7 +127,7 @@ def test_an_orphan_has_no_payment_behind_it(service, db):
     orphans = [e for e in doc["entries"] if e["simulatedPaymentId"] is None]
     assert len(orphans) == 1
     assert orphans[0]["reference"].startswith(camt053.ORPHAN_REF_PREFIX)
-    assert db["payments"].find_one({"paymentId": orphans[0]["reference"]}) is None
+    assert joined(db, db["payments"].find_one({"paymentId": orphans[0]["reference"]})) is None
 
 
 def test_unsettled_and_internal_payments_are_not_booked(service, db):
@@ -137,7 +138,7 @@ def test_unsettled_and_internal_payments_are_not_booked(service, db):
 
 def test_the_lever_is_persisted_for_hold_and_resume(service, db):
     pid = _settled_wire(service, db, camt053.FEE_DEDUCTED)
-    assert db["payments"].find_one({"paymentId": pid})["simulatedStatementOutcome"] == "FEE_DEDUCTED"
+    assert joined(db, db["payments"].find_one({"paymentId": pid}))["simulatedStatementOutcome"] == "FEE_DEDUCTED"
 
 
 def test_an_unknown_statement_outcome_is_rejected_at_the_contract():

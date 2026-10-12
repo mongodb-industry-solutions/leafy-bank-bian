@@ -24,6 +24,7 @@ from services.payments_service import PaymentNotFound, PaymentsService
 from shared import business_clock
 from tests.test_payment_document_spec import _KNOWN_DEMO_EXTRAS, _KNOWN_EXTRAS, _schema
 from tests.test_payments_service import (
+    joined,
     CREDITOR,
     CUST_C,
     CUST_D,
@@ -125,7 +126,7 @@ def _names(payment, result=None):
 
 
 def _stored(db, payment):
-    return db["payments"].find_one({"paymentId": payment["paymentId"]})
+    return joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
 
 
 def _assert_demo_extras_only(doc):
@@ -177,13 +178,13 @@ def test_tagged_dual_approval_holds_at_pending_approval(service, db):
     payment = _domestic(service, _run_at(db, 10, 0), instructed_amount=25_000.0)
 
     assert payment["status"] == "PENDING_APPROVAL"
-    dual = next(c for c in payment["checks"] if c["name"] == "dual_approval")
+    dual = next(c for c in joined(db, payment)["checks"] if c["name"] == "dual_approval")
     assert dual["result"] == "WARN"
     entitlement = payment["entitlement"]
     assert entitlement["dualApprovalSimulated"] is False
     assert entitlement["dualApproval"]["status"] == "PENDING"
     assert entitlement["dualApproval"]["approvedBy"] is None
-    assert "3 validate" not in {c["stage"] for c in payment["checks"]}
+    assert "3 validate" not in {c["stage"] for c in joined(db, payment)["checks"]}
     assert db["transactions"].inserted == []
     _assert_demo_extras_only(_stored(db, payment))
 
@@ -200,14 +201,14 @@ def test_approve_by_second_signatory_resumes_to_settled(service, db):
     assert len(db["transactions"].inserted) == 1
     assert resumed["entitlement"]["dualApproval"]["approvedBy"] == APPROVER
     assert resumed["entitlement"]["dualApprovalSimulated"] is False
-    approvals = [c for c in resumed["checks"] if c["name"] == "dual_approval"]
+    approvals = [c for c in joined(db, resumed)["checks"] if c["name"] == "dual_approval"]
     assert [c["result"] for c in approvals] == ["WARN", "PASS"]
     assert approvals[-1]["actor"] == APPROVER
     # R3: re-running validation must not flag the payment as a duplicate of itself.
     assert resumed["idempotency"]["duplicateOf"] is None
-    duplicates = [c for c in resumed["checks"] if c["name"] == "duplicate_detection"]
+    duplicates = [c for c in joined(db, resumed)["checks"] if c["name"] == "duplicate_detection"]
     assert [c["result"] for c in duplicates] == ["PASS"]
-    states = [e["state"] for e in resumed["lifecycle"]["events"]]
+    states = [e["state"] for e in joined(db, resumed)["lifecycle"]["events"]]
     assert states[:4] == ["DRAFT", "INITIATED", "PENDING_APPROVAL", "VALIDATED"]
 
 
@@ -228,7 +229,7 @@ def test_approve_rejected_terminates(service, db):
                                        decision="REJECTED")
 
     assert rejected["status"] == "REJECTED"
-    assert rejected["lifecycle"]["events"][-1]["actor"] == APPROVER
+    assert joined(db, rejected)["lifecycle"]["events"][-1]["actor"] == APPROVER
     assert db["transactions"].inserted == []
 
 
@@ -258,7 +259,7 @@ def test_tagged_short_wire_holds_at_pending_funds(short_service, short_db):
     payment = _domestic(short_service, _run_at(short_db, 10, 0), instructed_amount=5_000.0)
 
     assert payment["status"] == "PENDING_FUNDS"
-    funds = next(c for c in payment["checks"] if c["name"] == "funds_available")
+    funds = next(c for c in joined(short_db, payment)["checks"] if c["name"] == "funds_available")
     assert (funds["result"], funds["code"]) == ("WARN", "INSUFFICIENT_FUNDS_HELD")
     assert payment["validation"]["overallStatus"] == "PASSED"
     assert short_db["transactions"].inserted == []
@@ -271,7 +272,7 @@ def test_funds_recheck_still_short_stays_pending(short_service, short_db):
 
     assert short_by == 4_000.0
     assert payment["status"] == "PENDING_FUNDS"
-    assert payment["lifecycle"]["events"] == _stored(short_db, held)["lifecycle"]["events"]
+    assert joined(short_db, payment)["lifecycle"]["events"] == _stored(short_db, held)["lifecycle"]["events"]
 
 
 def _credit(db, amount):
@@ -287,7 +288,7 @@ def test_funds_recheck_after_credit_resumes(short_service, short_db):
 
     assert short_by is None
     assert payment["status"] == "IN_PROGRESS"
-    states = [e["state"] for e in payment["lifecycle"]["events"]]
+    states = [e["state"] for e in joined(short_db, payment)["lifecycle"]["events"]]
     assert states[2:4] == ["PENDING_FUNDS", "VALIDATED"]
     assert payment["idempotency"]["duplicateOf"] is None
 
@@ -296,13 +297,13 @@ def test_tagged_short_internal_transfer_still_rejects(short_service, short_db):
     with pytest.raises(ValueError, match="Insufficient available balance"):
         _initiate(short_service, instructed_amount=5_000.0,
                   clock_run_id=_run_at(short_db, 10, 0))
-    assert short_db["payments"].docs[-1]["status"] == "REJECTED"
+    assert joined(short_db, short_db["payments"].docs[-1])["status"] == "REJECTED"
 
 
 def test_untagged_short_wire_still_rejects(short_service, short_db):
     with pytest.raises(ValueError, match="Insufficient available balance"):
         _domestic(short_service, instructed_amount=5_000.0)
-    assert short_db["payments"].docs[-1]["status"] == "REJECTED"
+    assert joined(short_db, short_db["payments"].docs[-1])["status"] == "REJECTED"
 
 
 # --- D4 screening -------------------------------------------------------------
@@ -362,8 +363,8 @@ def test_screening_clear_before_cutoff_resumes_and_rescores(service, db):
                                         outcome="CLEAR")
 
     assert resumed["status"] == "IN_PROGRESS"
-    assert _names(resumed).count("risk_assessment") == 1
-    screens = [c for c in resumed["checks"] if c["name"] == "sanctions_screening"]
+    assert _names(joined(db, resumed)).count("risk_assessment") == 1
+    screens = [c for c in joined(db, resumed)["checks"] if c["name"] == "sanctions_screening"]
     assert [(c["result"], c["actor"]) for c in screens] == [
         ("WARN", "fraud-service"), ("PASS", "ANALYST-1"),
     ]
@@ -402,16 +403,16 @@ def test_screening_clear_after_internal_cutoff_diverts_to_cutoff_exception(servi
                                       decided_by="OPS-1")
 
     assert expedited["status"] == "IN_PROGRESS"
-    states = [e["state"] for e in expedited["lifecycle"]["events"]]
+    states = [e["state"] for e in joined(db, expedited)["lifecycle"]["events"]]
     assert states.count("PENDING_SCREENING") == 1, "a cleared name must not hold again"
-    assert _names(expedited).count("risk_assessment") == 1
+    assert _names(joined(db, expedited)).count("risk_assessment") == 1
 
 
 def test_untagged_potential_match_warns_and_continues(service, db):
     payment = _domestic(service, creditor_party=POTENTIAL)
 
     assert payment["status"] == "IN_PROGRESS"
-    screen = next(c for c in payment["checks"] if c["name"] == "sanctions_screening")
+    screen = next(c for c in joined(db, payment)["checks"] if c["name"] == "sanctions_screening")
     assert screen["result"] == "WARN"
     assert "screening" not in payment
 
@@ -427,11 +428,11 @@ def test_tagged_wire_after_internal_cutoff_holds(service, db, initiate, before, 
     late = initiate(service, _run_at(db, *after), instructed_amount=260.0)
 
     assert on_time["status"] == "IN_PROGRESS"
-    assert next(c for c in on_time["checks"] if c["name"] == "cutoff_window")["result"] == "PASS"
+    assert next(c for c in joined(db, on_time)["checks"] if c["name"] == "cutoff_window")["result"] == "PASS"
     assert on_time["cutoff"]["phaseAtCheck"] == "BEFORE_INTERNAL"
 
     assert late["status"] == "CUTOFF_EXCEPTION"
-    assert next(c for c in late["checks"] if c["name"] == "cutoff_window")["result"] == "WARN"
+    assert next(c for c in joined(db, late)["checks"] if c["name"] == "cutoff_window")["result"] == "WARN"
     assert late["cutoff"]["phaseAtCheck"] == "AFTER_INTERNAL"
     assert late["cutoff"]["resumeFrom"] == "4a"
     assert late["refs"]["routingSnapshotId"], "routing is recorded before the hold"
@@ -506,8 +507,8 @@ def test_untagged_late_wire_still_warns_and_settles(service, db):
     payment = _domestic(service)
 
     assert payment["status"] == "IN_PROGRESS"
-    assert "within_cutoff" in _names(payment)
-    assert "cutoff_window" not in _names(payment)
+    assert "within_cutoff" in _names(joined(db, payment))
+    assert "cutoff_window" not in _names(joined(db, payment))
     assert "cutoff" not in payment
 
 

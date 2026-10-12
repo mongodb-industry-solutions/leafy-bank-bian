@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from contexts.financial_gateway.application import recon_scenarios
 from contexts.financial_gateway.domain import camt053
-from tests.test_payments_service import FakeConnection, db, service  # noqa: F401 (fixtures)
+from tests.test_payments_service import joined, FakeConnection, db, service  # noqa: F401 (fixtures)
 from tests.test_statement_camt053 import _later
 
 
@@ -29,7 +29,7 @@ def test_every_scenario_wire_settles_on_the_correspondent_nostro(service, db):
     assert set(out["payments"]) == {"R1", "R1b", "R2", "R3", "R4"}
     assert out["settled"] == 5
     for key, p in out["payments"].items():
-        doc = db["payments"].find_one({"paymentId": p["paymentId"]})
+        doc = joined(db, db["payments"].find_one({"paymentId": p["paymentId"]}))
         assert doc["lifecycle"]["settlementStatus"] == "SETTLED", key
         assert doc["clearing"]["settlementAccountCode"] == "1111", key
         assert doc["simulatedStatementOutcome"] == p["statementOutcome"]
@@ -65,7 +65,7 @@ def test_no_scenario_wire_is_held_for_fraud_review_or_flagged_duplicate(service,
     _fund(db)
     out = _run(service, db)
     for key, p in out["payments"].items():
-        doc = db["payments"].find_one({"paymentId": p["paymentId"]})
+        doc = joined(db, db["payments"].find_one({"paymentId": p["paymentId"]}))
         assert doc["fraud"]["decision"] == "APPROVED", (key, doc["fraud"])
 
 
@@ -81,7 +81,7 @@ def test_run_one_initiates_exactly_one_wire_with_its_lever(service, db):
     _fund(db)
     out = recon_scenarios.run_one(service, "R1")
     assert db["payments"].count_documents({}) == 1
-    doc = db["payments"].find_one({"paymentId": out["paymentId"]})
+    doc = joined(db, db["payments"].find_one({"paymentId": out["paymentId"]}))
     assert doc["chargeBearer"] == "DEBT"
     assert doc["simulatedStatementOutcome"] == camt053.FEE_DEDUCTED
     assert doc["lifecycle"]["settlementStatus"] != "SETTLED", "no settle on initiate"
@@ -96,7 +96,7 @@ def test_r5_and_timing_lag_initiate_clean_wires(service, db):
     assert r5["statementOutcome"] == tl["statementOutcome"] == camt053.CLEAN
     assert tl["bic"] == "UBSWCHZH" and tl["chargeBearer"] == "SHAR"
     for p in (r5, tl):
-        doc = db["payments"].find_one({"paymentId": p["paymentId"]})
+        doc = joined(db, db["payments"].find_one({"paymentId": p["paymentId"]}))
         assert doc["fraud"]["decision"] == "APPROVED"
 
 
@@ -132,7 +132,7 @@ def test_settle_due_route_settles_the_initiated_wire(service, db):
     req = _request(service, db)
     body = json.loads(initiate_recon_scenario(ReconScenarioRequest(scenario="R2"), req).body)
     assert json.loads(settle_due(req).body) == {"settled": 1}
-    doc = db["payments"].find_one({"paymentId": body["paymentId"]})
+    doc = joined(db, db["payments"].find_one({"paymentId": body["paymentId"]}))
     assert doc["lifecycle"]["settlementStatus"] == "SETTLED"
     assert set(body) == {"scenario", "paymentId", "status", "amount", "chargeBearer",
                          "statementOutcome", "bic", "bankName", "includeOrphan"}

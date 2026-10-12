@@ -61,14 +61,22 @@ def _with_payment(state: str = "IN_PROGRESS", **extra) -> FakeConnection:
     # while this test passed. Phase C's "check fixtures for fidelity" rule, and the same
     # class as stage 1's `_account()` setting `accountType` where the code reads `type`.
     c.seed("transactions", [{"paymentId": _PAY, "txnId": "TXN-0001"}])
+    # Events live in `paymentHistory`; the payment carries the counter.
     c.seed("payments", [{
         "paymentId": _PAY,
         "status": state,
-        "lifecycle": {"currentState": state, "events": [{"state": state}]},
+        "lifecycle": {"currentState": state, "eventCount": 1},
         "refs": {"journalEntryId": None, "ledgerEventId": None, "transactionId": None},
         **extra,
     }])
+    c.seed("paymentHistory", [{"_id": f"{_PAY}:EVENT:1", "paymentId": _PAY, "kind": "EVENT",
+                               "seq": 1, "state": state}])
     return c
+
+
+def _events(c: FakeConnection) -> list:
+    docs = c.get_collection("db", "paymentHistory").docs
+    return sorted((d for d in docs if d["kind"] == "EVENT"), key=lambda d: d["seq"])
 
 
 def _post(c: FakeConnection):
@@ -87,7 +95,7 @@ def test_an_in_progress_payment_reaches_posted_with_exactly_one_new_event():
     p = c.get_collection("db", "payments").docs[0]
     assert p["lifecycle"]["currentState"] == "POSTED"
     assert p["status"] == "POSTED"
-    states = [e["state"] for e in p["lifecycle"]["events"]]
+    states = [e["state"] for e in _events(c)]
     assert states == ["IN_PROGRESS", "POSTED"]
 
 
@@ -103,7 +111,7 @@ def test_a_wire_awaiting_settlement_stays_in_progress_but_gains_the_posting_fact
     assert p["status"] == "IN_PROGRESS"
     assert p["lifecycle"]["postingStatus"] == "POSTED"
     assert p["refs"]["journalEntryId"] == journal["journalId"]
-    assert [e["state"] for e in p["lifecycle"]["events"]] == ["IN_PROGRESS"]
+    assert [e["state"] for e in _events(c)] == ["IN_PROGRESS"]
 
 
 def test_a_settled_payment_keeps_its_state_but_gains_the_posting_fact():
@@ -115,7 +123,7 @@ def test_a_settled_payment_keeps_its_state_but_gains_the_posting_fact():
     assert p["lifecycle"]["currentState"] == "SETTLED"
     assert p["lifecycle"]["postingStatus"] == "POSTED"
     assert p["refs"]["journalEntryId"] == journal["journalId"]
-    assert [e["state"] for e in p["lifecycle"]["events"]] == ["SETTLED"]
+    assert [e["state"] for e in _events(c)] == ["SETTLED"]
 
 
 def test_all_four_spec_fields_are_written():
@@ -190,7 +198,7 @@ def test_a_replayed_batch_appends_no_second_lifecycle_event():
     from services.posting_writeback_service import write_back
     write_back("JNL-REPLAY", [_EVENT], c, "db")     # same payment, already POSTED
     p = c.get_collection("db", "payments").docs[0]
-    assert [e["state"] for e in p["lifecycle"]["events"]] == ["IN_PROGRESS", "POSTED"]
+    assert [e["state"] for e in _events(c)] == ["IN_PROGRESS", "POSTED"]
 
 
 def test_a_write_back_failure_leaves_the_journal_committed():
@@ -205,13 +213,30 @@ def test_a_write_back_failure_leaves_the_journal_committed():
     assert c.get_collection("db", "payments").docs[0]["lifecycle"]["currentState"] == "IN_PROGRESS"
 
 
+def test_a_failed_event_insert_rolls_the_posted_transition_back():
+    """The POSTED state change and its `EVENT` are one transaction: no state without a
+    trail, no trail without a state."""
+    c = _with_payment("IN_PROGRESS")
+    c.raise_on = "paymentHistory"
+    from services.posting_writeback_service import write_back
+    write_back("JNL-X", [_EVENT], c, "db")           # never raises (module docstring)
+    p = c.get_collection("db", "payments").docs[0]
+    assert p["lifecycle"]["currentState"] == "IN_PROGRESS"
+    assert p["status"] == "IN_PROGRESS"
+    assert p["lifecycle"]["eventCount"] == 1
+    assert [e["state"] for e in _events(c)] == ["IN_PROGRESS"]
+
+
 def test_the_written_event_matches_the_state_machines_own_shape():
-    """The ledger writes `lifecycle.events[]` without importing the transactions service's
+    """The ledger writes `EVENT` documents to `paymentHistory` without importing the transactions service's
     state machine (B1(d)). This is the assertion that keeps the two shapes in agreement."""
     c = _with_payment("IN_PROGRESS")
     _post(c)
-    event = c.get_collection("db", "payments").docs[0]["lifecycle"]["events"][-1]
-    assert set(event) == {"state", "at", "actor", "actorType", "reason"}
+    event = _events(c)[-1]
+    assert set(event) == {"_id", "paymentId", "rail", "kind", "seq",
+                          "state", "at", "actor", "actorType", "reason"}
+    assert event["_id"] == f"{_PAY}:EVENT:{event['seq']}"
+    assert event["seq"] == c.get_collection("db", "payments").docs[0]["lifecycle"]["eventCount"]
 
 
 def test_payment_ids_come_from_ledger_events_not_from_payments():

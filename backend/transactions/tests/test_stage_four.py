@@ -24,6 +24,7 @@ from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_orchestration.domain import documents, routing
 from services.payments_service import PaymentsService
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
+    joined,
     CREDITOR,
     CUST_C,
     CUST_D,
@@ -501,7 +502,7 @@ def test_nothing_ever_updates_a_routing_snapshot():
 # --- behaviour, through the saga ---------------------------------------------
 
 def _checks(db, stage_prefix):
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     return [c for c in payment.get("checks", []) if c["stage"].startswith(stage_prefix)]
 
 
@@ -554,7 +555,7 @@ def test_every_stage_four_check_declares_a_mode_and_an_actor(rich_service, rich_
 def test_the_internal_transfer_still_walks_every_stage_four_state_and_settles(service, db):
     """The regression that matters: stage 4 must not break the path to the ledger."""
     payment = _initiate(service)
-    states = [e["state"] for e in payment["lifecycle"]["events"]]
+    states = [e["state"] for e in joined(db, payment)["lifecycle"]["events"]]
     assert ["ROUTED", "AUTHORISED", "APPROVED"] == [
         s for s in states if s in {"ROUTED", "AUTHORISED", "APPROVED"}
     ]
@@ -600,8 +601,8 @@ def test_the_payment_order_does_not_exist_before_the_authorization_decision(serv
 
     # The order is committed at APPROVED, so it is stamped onto the document by the
     # APPROVED transition — not the ROUTED one.
-    approved = next(e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED")
-    routed = next(e for e in payment["lifecycle"]["events"] if e["state"] == "ROUTED")
+    approved = next(e for e in joined(db, payment)["lifecycle"]["events"] if e["state"] == "APPROVED")
+    routed = next(e for e in joined(db, payment)["lifecycle"]["events"] if e["state"] == "ROUTED")
     assert routed["at"] <= approved["at"]
     assert order["routingSnapshotId"] == payment["refs"]["routingSnapshotId"]
     assert order["authorization"]["decision"] == "APPROVED"
@@ -650,7 +651,7 @@ def test_a_declined_payment_is_rejected_and_never_passes_through_authorised(rich
             category_purpose="CASH",
         )
 
-    payment = rich_db["payments"].docs[-1]
+    payment = joined(rich_db, rich_db["payments"].docs[-1])
     states = [e["state"] for e in payment["lifecycle"]["events"]]
     assert "AUTHORISED" not in states
     assert "APPROVED" not in states
@@ -676,7 +677,7 @@ def test_a_reviewed_payment_holds_at_pending_review_and_commits_nothing(rich_ser
     assert payment["clearing"].get("authorisedAt") is None, "a reviewed payment is not authorised"
     assert rich_db["transactions"].inserted == [], "money must not move on a held payment"
     # The MANUAL_FRAUD_REVIEW transition is recorded in the event trail with its reason.
-    review_event = next(e for e in payment["lifecycle"]["events"]
+    review_event = next(e for e in joined(rich_db, payment)["lifecycle"]["events"]
                         if e["state"] == "MANUAL_FRAUD_REVIEW")
     assert "manual review" in review_event["reason"]
 
@@ -718,7 +719,7 @@ def test_operator_approve_resolves_pending_review_and_commits_the_authorisation(
     # Same document, one id end to end — no second payment created.
     assert len(rich_db["payments"].docs) == 1
     # The operator decision is in the check trail.
-    approve_checks = [c for c in resolved.get("checks", [])
+    approve_checks = [c for c in joined(rich_db, resolved).get("checks", [])
                       if c["name"] == "manual_review_approved"]
     assert len(approve_checks) == 1
     assert approve_checks[0]["actor"] == "operator-review"
@@ -747,11 +748,11 @@ def test_operator_decline_terminates_pending_review_to_rejected(rich_service, ri
     assert resolved.get("order") is None, "a declined payment commits nothing"
     assert resolved["clearing"].get("authorisedAt") is None
     assert rich_db["transactions"].inserted == [], "money must not move on a decline"
-    decline_checks = [c for c in resolved.get("checks", [])
+    decline_checks = [c for c in joined(rich_db, resolved).get("checks", [])
                       if c["name"] == "manual_review_declined"]
     assert len(decline_checks) == 1
     assert decline_checks[0]["actor"] == "operator-review"
-    reject_event = next(e for e in resolved["lifecycle"]["events"]
+    reject_event = next(e for e in joined(rich_db, resolved)["lifecycle"]["events"]
                         if e["state"] == "REJECTED")
     assert "operator" in reject_event["reason"].lower()
 
@@ -772,7 +773,7 @@ def test_a_sanctions_hit_refuses_and_records_the_screening_result(service, db):
         _initiate(service, creditor_account_ref=None, creditor_party=denied,
                   payment_rail="WIRE")
 
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     assert payment["lifecycle"]["currentState"] == "REJECTED"
     assert payment["correspondent"]["sanctionsCheck"]["status"] == "HIT"
     failing = [c for c in payment["checks"] if c["result"] == "FAIL"]
@@ -931,7 +932,7 @@ def test_fraud_evaluation_evaluate_scores_without_persisting(rich_service, rich_
         "AMOUNT_TIER", "CROSS_BORDER", "NEW_BENEFICIARY", "VELOCITY", "PURPOSE_CODE_RISK",
     }
     # And nothing changed on the document.
-    assert rich_db["payments"].docs[-1]["fraud"] == recorded
+    assert joined(rich_db, rich_db["payments"].docs[-1])["fraud"] == recorded
 
 
 def test_fraud_evaluation_returns_none_for_an_unknown_payment(service):
@@ -950,7 +951,7 @@ def test_payment_confirmation_refuses_when_nothing_is_committed(rich_service, ri
 
 def test_payment_confirmation_re_sends_for_a_committed_payment(rich_service, rich_db):
     payment = _international(rich_service, instructed_amount=25_000.0)
-    before = len(rich_db["payments"].docs[-1]["checks"])
+    before = len(joined(rich_db, rich_db["payments"].docs[-1])["checks"])
 
     result = rich_service.confirm_to_originator(payment["paymentId"])
 
@@ -959,7 +960,7 @@ def test_payment_confirmation_re_sends_for_a_committed_payment(rich_service, ric
     assert result["confirmationId"] == payment["confirmation"]["confirmationId"]
     assert result["clearingNetwork"] == "SWIFT"
     # Append-only: the re-send is a new entry, never a rewrite of the original.
-    assert len(rich_db["payments"].docs[-1]["checks"]) == before + 1
+    assert len(joined(rich_db, rich_db["payments"].docs[-1])["checks"]) == before + 1
 
 
 def test_a_confirmation_artifact_is_written_at_approval_before_settlement(rich_service, rich_db):
@@ -980,9 +981,9 @@ def test_a_confirmation_artifact_is_written_at_approval_before_settlement(rich_s
     # `lifecycle.advance` mints its own datetime internally (microseconds apart).
     from datetime import datetime as _dt
     assert isinstance(conf["confirmedAt"], _dt)
-    approved = next(e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED")
-    assert "SETTLED" not in [e["state"] for e in payment["lifecycle"]["events"]] or (
-        conf["confirmedAt"] <= next(e for e in payment["lifecycle"]["events"]
+    approved = next(e for e in joined(rich_db, payment)["lifecycle"]["events"] if e["state"] == "APPROVED")
+    assert "SETTLED" not in [e["state"] for e in joined(rich_db, payment)["lifecycle"]["events"]] or (
+        conf["confirmedAt"] <= next(e for e in joined(rich_db, payment)["lifecycle"]["events"]
                                     if e["state"] == "SETTLED")["at"]
     )
 
@@ -994,7 +995,7 @@ def test_the_confirmation_is_distinct_from_the_stage_five_notification(rich_serv
     An internal transfer settles in the same ACID block, so it writes exactly one
     notification — the cleanest path to assert the invariant alongside the confirmation."""
     _initiate(rich_service)
-    payment = rich_db["payments"].docs[-1]
+    payment = joined(rich_db, rich_db["payments"].docs[-1])
 
     assert payment["confirmation"] is not None, "stage-4b confirmation present"
     # Stage 5's sender-only invariant still holds — one notification, not two.

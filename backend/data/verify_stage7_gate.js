@@ -40,6 +40,12 @@ if (!p) {
   quit(1);
 }
 const pid = p.paymentId;
+// Events and checks live in paymentHistory, not on the payment: join them back.
+{
+  const hist = dbc.paymentHistory.find({ paymentId: p.paymentId }).sort({ seq: 1 }).toArray();
+  p.lifecycle.events = hist.filter(h => h.kind === "EVENT");
+  p.checks = hist.filter(h => h.kind === "CHECK");
+}
 print(`TARGET: ${pid} | db=${dbName} | rail=${p.rail} | amount=${p.amount} ${p.currency} | isInternal=${p.isInternal}`);
 print("    initiatedAt:", EJSON.stringify(p.initiatedAt));
 

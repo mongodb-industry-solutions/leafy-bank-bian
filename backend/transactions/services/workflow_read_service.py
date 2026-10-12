@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from contexts.payment_order_initiation.domain import lifecycle
+from contexts.payment_order_initiation.domain import lifecycle, lifecycle_history
 from contexts.payment_rail.domain import pacs008
 from database.connection import MongoDBConnection
 
@@ -205,6 +205,10 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
     payment = _payments(connection, db_name).find_one({"paymentId": payment_id}, {"_id": 0})
     if payment is None:
         return None
+    # `lifecycle.events[]` and `checks[]` live in `paymentHistory`; join them back so the
+    # response keeps the shape it had when both were embedded.
+    payment = lifecycle_history.attach(
+        connection.get_collection(db_name, lifecycle_history.HISTORY), payment)
     # Empty lists, not absent keys: a payment written before stage 5 existed, or an internal
     # transfer that legitimately has no artifacts (doc 19 B4), must read as "none" rather
     # than making the UI branch on `undefined`.

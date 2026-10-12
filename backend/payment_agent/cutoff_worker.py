@@ -40,6 +40,7 @@ import cutoff_agent
 import cutoff_cases as cases
 import cutoff_clock
 import cutoff_risk as risk_mod
+import payment_history
 
 logger = logging.getLogger(__name__)
 
@@ -167,9 +168,9 @@ def _evaluate(agent: Any, db: Any, payment: dict, source: str, real_now: datetim
     return _run_case(agent, db, case_id, payment_id, key)
 
 
-def _last_reason(payment: dict) -> Optional[str]:
-    events = (payment.get("lifecycle") or {}).get("events") or []
-    return events[-1].get("reason") if events else None
+def _last_reason(db: Any, payment: dict) -> Optional[str]:
+    event = payment_history.latest_event(db, payment.get("paymentId"))
+    return event.get("reason") if event else None
 
 
 def stale_outcome(db: Any, case: dict) -> Optional[str]:
@@ -182,7 +183,7 @@ def stale_outcome(db: Any, case: dict) -> Optional[str]:
     status = payment.get("status")
     decision = (payment.get("cutoff") or {}).get("decision")
     rejected = status == "REJECTED"
-    if rejected and _last_reason(payment) == SUPERSEDED_REASON:
+    if rejected and _last_reason(db, payment) == SUPERSEDED_REASON:
         return cases.SUPERSEDED
     # A recorded decision beats a plain REJECTED so a release that fails validation cannot
     # flip the case away from its HELD / DEFERRED story.

@@ -289,6 +289,50 @@ STAGE_EVENTS_INDEXES = [
 ]
 
 
+# Lifecycle events and checks, one document per entry, discriminated by `kind` (see
+# `contexts/payment_order_initiation/domain/lifecycle_history.py`). `_id` is
+# "{paymentId}:{kind}:{seq}", which already makes `(paymentId, kind, seq)` unique; the index
+# serves "every event/check of one payment in order" and the dashboard's `$lookup` on paymentId.
+PAYMENT_HISTORY_COLLECTION = "paymentHistory"
+PAYMENT_HISTORY_INDEXES = [
+    {"name": "idx_payment_history_seq",
+     "keys": [("paymentId", ASCENDING), ("kind", ASCENDING), ("seq", ASCENDING)],
+     "unique": True},
+]
+
+_HISTORY_COMMON = {
+    "paymentId": {"bsonType": "string"},
+    "kind": {"enum": ["EVENT", "CHECK"]},
+    "seq": {"bsonType": "int", "minimum": 1},
+    "at": {"bsonType": "date"},
+}
+PAYMENT_HISTORY_VALIDATOR = {"$jsonSchema": {
+    "bsonType": "object",
+    "required": ["paymentId", "kind", "seq", "at"],
+    "properties": _HISTORY_COMMON,
+    "oneOf": [
+        {"properties": {"kind": {"enum": ["EVENT"]}},
+         "required": ["state", "actor", "actorType", "reason"]},
+        {"properties": {"kind": {"enum": ["CHECK"]},
+                        "result": {"enum": ["PASS", "FAIL", "SKIP", "PENDING", "WARN"]},
+                        "mode": {"enum": ["SYNC", "ASYNC"]}},
+         "required": ["stage", "name", "result", "mode", "actor"]},
+    ],
+}}
+
+
+def _ensure_payment_history(connection: MongoDBConnection, db_name: str) -> list[str]:
+    """Create `paymentHistory` with its validator (or refresh the validator), then its index."""
+    db = connection.get_database(db_name)
+    if PAYMENT_HISTORY_COLLECTION in db.list_collection_names():
+        db.command("collMod", PAYMENT_HISTORY_COLLECTION,
+                   validator=PAYMENT_HISTORY_VALIDATOR, validationAction="error")
+    else:
+        db.create_collection(PAYMENT_HISTORY_COLLECTION,
+                             validator=PAYMENT_HISTORY_VALIDATOR, validationAction="error")
+    return _ensure(connection, db_name, PAYMENT_HISTORY_COLLECTION, PAYMENT_HISTORY_INDEXES)
+
+
 def _ensure_time_series(db, name: str, *, timeseries: dict, expire_after_seconds: int) -> None:
     """Create a time-series collection if absent; refuse one that exists as a regular collection.
 
@@ -329,6 +373,7 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
     """Ensure indexes for the transactions service's collections. Returns a collection→names map."""
     return {
         "payments": _ensure(connection, db_name, "payments", PAYMENTS_INDEXES),
+        PAYMENT_HISTORY_COLLECTION: _ensure_payment_history(connection, db_name),
         "transactions": _ensure(connection, db_name, "transactions", TRANSACTIONS_INDEXES),
         "routingSnapshots": _ensure(
             connection, db_name, "routingSnapshots", ROUTING_SNAPSHOTS_INDEXES

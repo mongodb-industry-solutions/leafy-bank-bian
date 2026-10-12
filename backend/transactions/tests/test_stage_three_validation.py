@@ -212,6 +212,7 @@ def test_phase_1_rails_are_the_two_the_demo_executes():
 # stage that never gets dispatched.
 
 from test_payments_service import (  # noqa: E402  (fixtures must import after the helpers)
+    joined,
     CREDITOR,
     CUST_C,
     CUST_D,
@@ -263,7 +264,7 @@ def test_the_corridor_category_audit_snapshot_is_persisted(service, db):
     survives even a later refusal — the snapshot records what was determined, regardless of
     outcome. `validation` is initialised `{}` so the parent exists for the dotted write."""
     _initiate(service)
-    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    payment = joined(db, db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]}))
     assert payment["validation"]["determinedCategory"] == "domestic-same-bank"
 
 
@@ -432,7 +433,7 @@ def test_the_duplicate_warning_names_the_payment_it_resembles(service, db):
     payments = db["payments"].docs
     second_doc = payments[-1]
     entry = next(
-        c for c in second_doc["checks"]
+        c for c in joined(db, second_doc)["checks"]
         if c["name"] == "duplicate_detection" and c["stage"] == STAGE
     )
     assert entry["result"] == "WARN"
@@ -446,7 +447,7 @@ def test_a_content_duplicate_stamps_idempotency_duplicateOf(service, db):
     first = _initiate(service)
     _initiate(service)
 
-    second_doc = db["payments"].docs[-1]
+    second_doc = joined(db, db["payments"].docs[-1])
     assert second_doc["idempotency"]["duplicateOf"] == first["paymentId"]
 
 
@@ -455,7 +456,7 @@ def test_validation_overall_status_is_passed_on_a_clean_run(service, db):
     PASSED with an empty `failureReasons[]`. Re-stamped by enrichment's final-validation,
     so the value reflects the latest validation pass too."""
     _initiate(service)
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     assert payment["validation"]["overallStatus"] == "PASSED"
     assert payment["validation"]["failureReasons"] == []
 
@@ -471,7 +472,7 @@ def test_validation_overall_status_is_failed_with_a_structured_reason_on_refusal
     with pytest.raises(ValueError, match="Creditor account is CLOSED"):
         _initiate(svc)
 
-    payment = db["payments"].docs[-1]
+    payment = joined(db, db["payments"].docs[-1])
     assert payment["validation"]["overallStatus"] == "FAILED"
     reasons = payment["validation"]["failureReasons"]
     assert len(reasons) == 1
@@ -484,7 +485,7 @@ def test_a_different_amount_is_not_a_duplicate(service, db):
     _initiate(service)
     _initiate(service, instructed_amount=251.0)
 
-    second_doc = db["payments"].docs[-1]
+    second_doc = joined(db, db["payments"].docs[-1])
     entry = next(
         c for c in second_doc["checks"]
         if c["name"] == "duplicate_detection" and c["stage"] == STAGE

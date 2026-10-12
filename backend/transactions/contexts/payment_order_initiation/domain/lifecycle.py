@@ -13,8 +13,10 @@ The canonical schema (`doinas-research/propose_payments.json`) is explicit:
 
 So every transition writes both. `status` is a mirror, never an independent value.
 
-`lifecycle.events[]` is **append-only** — chronological, one entry per transition, never
-rewritten or reordered. A correction is a new entry, not an edit.
+Every transition is an **append-only** `EVENT` document in `paymentHistory` (see
+`lifecycle_history.py`) — chronological, one per transition, never rewritten or reordered. A
+correction is a new entry, not an edit. `payments` itself keeps only the fixed-size state and
+the counter `lifecycle.eventCount`, so the payment document does not grow with its history.
 
 ## Divergence from Doina's doc, deliberate
 
@@ -30,7 +32,7 @@ ledger service owns posting via change streams and never touches this state mach
 directly (`ledger/services/posting_writeback_service.py`), because the canonical spec assigns
 the field to that service in so many words: *"Owned by the ledger service via CDC, never
 written by the payment path."* It also advances `currentState` to `POSTED`, guarded on
-`IN_PROGRESS`, using the same `events[]` shape `_event` produces below — asserted by
+`IN_PROGRESS`, writing the same `EVENT` shape `_event` produces below — asserted by
 `test_the_written_event_matches_the_state_machines_own_shape` rather than by importing this
 module across a service boundary. So the "nothing writes `payments.lifecycle` except this
 module" rule above now has exactly one documented exception, and it is spec-mandated.
@@ -44,6 +46,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from contexts.payment_order_initiation.domain import lifecycle_history as history
 from shared import business_clock, stage_events as stage_event_log
 
 
@@ -225,16 +228,39 @@ class IllegalTransition(RuntimeError):
 
 # --- transitions -------------------------------------------------------------
 
-def initial_block(*, actor: str, actor_type: str, reason: str, now: datetime) -> dict:
+CAPTURE_ACTOR = "transactions-service"
+CAPTURE_REASON = "Payment instruction captured"
+
+
+def initial_block(*, now: datetime) -> dict:
     """The `lifecycle{}` block for a payment being created at DRAFT.
 
-    Pure — used by `payment_document.build`, which does no I/O.
+    Pure — used by `payment_document.build`, which does no I/O. The DRAFT `EVENT` is not in
+    the block; `insert_payment` writes it in the same transaction as the payment itself.
     """
     return {
         "currentState": DRAFT,
         "stateEnteredAt": now,
-        "events": [_event(DRAFT, actor, actor_type, reason, now)],
+        "eventCount": 1,
+        "checkCount": 0,
     }
+
+
+def insert_payment(payments, payment_doc: dict, *, session=None) -> None:
+    """Insert a new payment and its DRAFT `EVENT` atomically.
+
+    Raises `DuplicateKeyError` (unchanged from a bare `insert_one`) when the idempotency
+    index rejects the payment; the transaction aborts, so no orphan DRAFT event remains.
+    """
+    draft = _event(
+        DRAFT, CAPTURE_ACTOR, "SERVICE", CAPTURE_REASON, payment_doc["lifecycle"]["stateEnteredAt"])
+
+    def work(s):
+        payments.insert_one(payment_doc, session=s)
+        history.collection(payments).insert_one(
+            history.event_document(payment_doc, 1, draft), session=s)
+
+    history.run_in_transaction(payments, session, work)
 
 
 def advance(
@@ -285,19 +311,36 @@ def advance(
             "updatedAt": now,
             **(extra or {}),
         },
-        "$push": {"lifecycle.events": _event(to_state, actor, actor_type, reason, now)},
+        # The post-update counter is the new event's `seq`.
+        "$inc": {"lifecycle.eventCount": 1},
     }
+    event = _event(to_state, actor, actor_type, reason, now)
 
-    updated = payments.find_one_and_update(query, update, session=session, return_document=True)
-    if updated is None:
-        # Either the payment vanished or its state was not `from_state`. Both are bugs at
-        # this layer — a lost race on a state transition is not a business outcome.
-        raise IllegalTransition(
-            f"could not advance {payment_oid} to {to_state}"
-            + (f" from {from_state}" if from_state else "")
+    def work(s):
+        updated = payments.find_one_and_update(
+            query, update, session=s, return_document=True)
+        if updated is None:
+            # Either the payment vanished or its state was not `from_state`. Both are bugs at
+            # this layer — a lost race on a state transition is not a business outcome. Raised
+            # before any history insert, so a lost race leaves no event behind.
+            raise IllegalTransition(
+                f"could not advance {payment_oid} to {to_state}"
+                + (f" from {from_state}" if from_state else "")
+            )
+        history.collection(payments).insert_one(
+            history.event_document(updated, updated["lifecycle"]["eventCount"], event),
+            session=s,
         )
+        return updated
+
+    updated = history.run_in_transaction(payments, session, work)
     if stage_events is not None:
-        stage_event_log.append(stage_events, updated, at=now)
+        stage_event_log.append(
+            stage_events, updated, at=now,
+            events=history.previous_and_current_event(
+                history.collection(payments), updated["paymentId"],
+                updated["lifecycle"]["eventCount"]),
+        )
     return updated
 
 

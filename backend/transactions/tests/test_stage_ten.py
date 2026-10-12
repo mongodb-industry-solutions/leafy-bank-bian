@@ -32,6 +32,7 @@ from contexts.financial_gateway.domain import (
 from contexts.payment_rail.domain import pacs008
 from process import exceptions as exc_module
 from tests.test_payments_service import (  # noqa: F401 - fixtures are used by name
+    joined,
     CREDITOR,
     CUST_C,
     FakeCollection,
@@ -116,9 +117,9 @@ def _fix_debtor_agent(message, bic, bank_name):
 def _payment_doc(db, payment_id=None):
     docs = list(db["payments"].find({}))
     if payment_id:
-        return next(d for d in docs if d["paymentId"] == payment_id)
+        return joined(db, next(d for d in docs if d["paymentId"] == payment_id))
     assert len(docs) == 1, f"expected one payment, got {len(docs)}"
-    return docs[0]
+    return joined(db, docs[0])
 
 
 # =============================================================================
@@ -272,7 +273,7 @@ def test_an_inbound_wire_runs_from_received_to_settled(service, db):
     assert payment["rail"] == "WIRE"
     assert payment["lifecycle"]["currentState"] == "SETTLED"
 
-    states = [e["state"] for e in payment["lifecycle"]["events"]]
+    states = [e["state"] for e in joined(db, payment)["lifecycle"]["events"]]
     assert states == [
         "DRAFT", "RECEIVED", "VALIDATED", "ENRICHED", "FINAL_VALIDATED",
         "ACCEPTED", "IN_PROGRESS", "SETTLED",
@@ -394,7 +395,7 @@ def test_a_plausible_variant_proceeds_with_a_flag(service, db):
     # The CLAIMED name is preserved, not overwritten — erasing it would erase the very
     # discrepancy the flag exists to report.
     assert payment["creditor"]["name"] == variant
-    flagged = [c for c in payment["checks"] if c["name"] == "beneficiary_name_matched"]
+    flagged = [c for c in joined(db, payment)["checks"] if c["name"] == "beneficiary_name_matched"]
     assert flagged and flagged[0]["result"] == "WARN"
 
 
@@ -419,7 +420,7 @@ def test_an_unrelated_name_becomes_an_unable_to_apply(service, db):
     assert exception["detail"]["claimedName"] == "Completely Different Person"
     assert payment["beneficiaryResolution"]["claimedName"] == "Completely Different Person"
     assert payment["beneficiaryResolution"]["nameOfRecord"] == _HOLDER_NAME
-    results = {c["name"]: c["result"] for c in payment["checks"]}
+    results = {c["name"]: c["result"] for c in joined(db, payment)["checks"]}
     assert results["beneficiary_account_open"] == "PASS"
     assert results["beneficiary_name_matched"] == "FAIL"
 
@@ -500,7 +501,7 @@ def test_a_rejected_inbound_stores_a_pacs002_rjct_with_the_sanctions_reason(serv
     assert payment["status"] == "REJECTED"
     assert payment["clearing"]["statusCode"] == "RJCT"
     assert payment["refs"]["statusResponseMessageId"] == stored["paymentMessageId"]
-    assert [e["state"] for e in payment["lifecycle"]["events"]][-1] == "REJECTED"
+    assert [e["state"] for e in joined(db, payment)["lifecycle"]["events"]][-1] == "REJECTED"
 
 
 def test_a_rejected_inbound_posts_nothing_and_is_never_reconciled(service, db):

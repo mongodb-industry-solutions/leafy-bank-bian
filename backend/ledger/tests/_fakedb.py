@@ -7,6 +7,7 @@ collection's write fail, which is how the rollback tests force a failure.
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Optional
 
 
@@ -83,6 +84,9 @@ class FakeCollection:
         self.name = name
         self.docs: list[dict] = []
         self._owner = owner
+        # pymongo's `Collection.database`: writers reach `.client` and sibling collections
+        # (`paymentHistory`) through it. The owning FakeConnection plays the database.
+        self.database = owner
 
     # --- reads ---
     def find_one(self, query: dict, projection=None, sort=None, session=None) -> Optional[dict]:
@@ -159,6 +163,12 @@ class FakeCollection:
             self.docs.append(target_doc)
         for k, v in update.get("$set", {}).items():
             _set_path(target_doc, k, v)
+        for k, v in update.get("$inc", {}).items():
+            head, _, rest = k.rpartition(".")
+            holder = target_doc
+            for part in head.split(".") if head else []:
+                holder = holder.setdefault(part, {})
+            holder[rest] = holder.get(rest, 0) + v
         for k, v in update.get("$push", {}).items():
             target = target_doc
             parts = k.split(".")
@@ -184,6 +194,10 @@ class _FakeSession:
         owner._snapshot()
         return _Txn()
 
+    def with_transaction(self, callback):
+        with self.start_transaction():
+            return callback(self)
+
 
 class _FakeClient:
     def __init__(self, owner): self._owner = owner
@@ -205,6 +219,9 @@ class FakeConnection:
     def get_collection(self, db_name: str, name: str) -> FakeCollection:
         return self.collections.setdefault(name, FakeCollection(name, self))
 
+    def __getitem__(self, name: str) -> FakeCollection:
+        return self.get_collection("db", name)
+
     def seed(self, name: str, docs: list[dict]) -> FakeCollection:
         coll = self.get_collection("db", name)
         coll.docs.extend(dict(d) for d in docs)
@@ -214,7 +231,7 @@ class FakeConnection:
     # but it is exactly the property the rollback tests assert — an aborted transaction
     # leaves nothing behind.
     def _snapshot(self) -> None:
-        self._saved = {n: [dict(d) for d in c.docs] for n, c in self.collections.items()}
+        self._saved = {n: copy.deepcopy(c.docs) for n, c in self.collections.items()}
 
     def _restore(self) -> None:
         for name, docs in self._saved.items():

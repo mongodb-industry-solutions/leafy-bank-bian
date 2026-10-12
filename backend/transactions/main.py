@@ -283,7 +283,7 @@ def payment_order_procedure_initiate(
             "status": payment_doc["status"],
             "stepUpRequired": payment_doc.get("stepUpRequired", False),
             "stepUpReason": payment_doc.get("stepUpReason"),
-            "payment": _strip(payment_doc),
+            "payment": _strip(payments_service.with_history(payment_doc)),
         })
     except HTTPException:
         raise
@@ -319,7 +319,7 @@ def financial_gateway_inbound_initiate(
             "direction": payment_doc.get("direction"),
             "beneficiaryResolution": payment_doc.get("beneficiaryResolution"),
             "acceptanceDecision": payment_doc.get("acceptanceDecision"),
-            "payment": _strip(payment_doc),
+            "payment": _strip(payments_service.with_history(payment_doc)),
         })
     except HTTPException:
         raise
@@ -433,7 +433,7 @@ def payment_order_procedure_resume(
         return _bian_response({
             "paymentId": payment_doc["paymentId"],
             "status": payment_doc["status"],
-            "payment": _strip(payment_doc),
+            "payment": _strip(payments_service.with_history(payment_doc)),
         })
     except HTTPException:
         raise
@@ -619,7 +619,7 @@ def transaction_authorization_resolve(
         return _bian_response({
             "paymentId": payment_doc["paymentId"],
             "status": payment_doc["status"],
-            "payment": _strip(payment_doc),
+            "payment": _strip(payments_service.with_history(payment_doc)),
         })
     except HTTPException:
         raise
@@ -639,7 +639,7 @@ def _hold_response(payment_doc: dict, **extra) -> Response:
         "paymentId": payment_doc["paymentId"],
         "status": payment_doc["status"],
         **extra,
-        "payment": _strip(payment_doc),
+        "payment": _strip(payments_service.with_history(payment_doc)),
     })
 
 

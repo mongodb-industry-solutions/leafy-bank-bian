@@ -25,6 +25,7 @@ from contexts.payment_rail.adapters.simulated_wire_rail import SimulatedWireRail
 from contexts.payment_rail.domain import execution_documents, pacs008
 from contexts.payment_rail.ports.rail import NullRailGateway, RailAck
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
+    joined,
     EXTERNAL_CREDITOR,
     _initiate,
     db,          # noqa: F401 - pytest fixture
@@ -263,7 +264,7 @@ def test_the_skipped_checks_say_why(service, db):  # noqa: F811
     the demo's own explanation of why a book transfer is cheaper — D9's point, made by the
     document instead of by a slide."""
     payment = _initiate(service, payment_rail="INTERNAL")
-    stage_five = [c for c in payment["checks"] if c["stage"] == "5 execute"]
+    stage_five = [c for c in joined(db, payment)["checks"] if c["stage"] == "5 execute"]
     skipped = {c["name"]: c for c in stage_five if c["result"] == "SKIP"}
     assert set(skipped) == {
         "iso20022_message_generated",

@@ -27,7 +27,7 @@ from routers import workflow
 from shared import business_clock
 from tests.test_cutoff_scenarios import _seeded_db
 from services.payments_service import PaymentsService
-from tests.test_payments_service import FakeConnection
+from tests.test_payments_service import joined, FakeConnection
 
 
 @pytest.fixture(autouse=True)
@@ -54,7 +54,7 @@ def _start(service, key):
 
 
 def _stored(db, started):
-    return db["payments"].find_one({"paymentId": started["paymentId"]})
+    return joined(db, db["payments"].find_one({"paymentId": started["paymentId"]}))
 
 
 def _release(service, started, **kwargs):

@@ -23,6 +23,7 @@ import pytest
 from pymongo.errors import DuplicateKeyError
 
 from contexts.fraud_evaluation.domain import fraud_rules
+from contexts.payment_order_initiation.domain import lifecycle_history
 from services.payments_service import PaymentsService
 
 
@@ -36,6 +37,7 @@ class FakeCollection:
         self.key = key
         self.unique_on = None          # set to a field name to emulate a unique index
         self.inserted = []
+        self.database = None           # set by FakeDb, like pymongo's `Collection.database`
 
     # -- reads
     def find_one(self, flt, *a, **kw):
@@ -56,6 +58,9 @@ class FakeCollection:
 
     # -- writes
     def insert_one(self, doc, *a, **kw):
+        # `_id` is always unique, as in Mongo. `paymentHistory._id` relies on it.
+        if doc.get("_id") is not None and any(d.get("_id") == doc["_id"] for d in self.docs):
+            raise DuplicateKeyError(f"dup _id={doc['_id']}")
         if self.unique_on:
             val = self._get(doc, self.unique_on)
             # SPARSE: a null carries no uniqueness, matching idx_idempotency_key_unique.
@@ -182,15 +187,25 @@ class FakeCollection:
 
 
 class FakeSession:
-    """`with_transaction` runs the callback inline.
+    """`with_transaction` runs the callback inline and rolls the fake database back if it raises.
 
-    NOTE: there is no rollback. These tests assert the guards that prevent the callback
-    being entered at all; they cannot prove atomicity of a partial failure inside it.
-    That needs a real replica set and belongs in an integration test.
+    The rollback is a snapshot of every collection's docs taken at entry. It is enough to
+    prove that two writes in one transaction land or vanish together (the `paymentHistory`
+    event insert vs the `payments` update); it does not model isolation between sessions.
     """
 
+    def __init__(self, db=None):
+        self._db = db
+
     def with_transaction(self, callback):
-        return callback(self)
+        snapshot = ({name: copy.deepcopy(c.docs) for name, c in self._db.items()}
+                    if self._db is not None else {})
+        try:
+            return callback(self)
+        except Exception:
+            for name, docs in snapshot.items():
+                self._db[name].docs = docs
+            raise
 
     # context-manager protocol, for `with client.start_session() as session:`
     def __enter__(self):
@@ -201,8 +216,11 @@ class FakeSession:
 
 
 class FakeClient:
+    def __init__(self, db=None):
+        self._db = db
+
     def start_session(self):
-        return FakeSession()
+        return FakeSession(self._db)
 
 
 class FakeDb(dict):
@@ -216,7 +234,13 @@ class FakeDb(dict):
 
     def __init__(self, mapping):
         super().__init__(mapping)
-        self.client = FakeClient()
+        self.client = FakeClient(self)
+        for collection in self.values():
+            collection.database = self
+
+    def __setitem__(self, name, collection):
+        super().__setitem__(name, collection)
+        collection.database = self
 
     def __missing__(self, name):
         collection = FakeCollection([])
@@ -230,6 +254,15 @@ class FakeConnection:
 
     def get_database(self, _name):
         return self._db
+
+
+def joined(db, payment):
+    """`payment` with `lifecycle.events[]` and `checks[]` joined back from `paymentHistory`.
+
+    Tests that assert on a payment's trail read it through this, the same join the read
+    service does, rather than expecting the arrays embedded on the stored document.
+    """
+    return lifecycle_history.attach(db["paymentHistory"], payment)
 
 
 # --- fixtures -----------------------------------------------------------------
@@ -381,7 +414,7 @@ def _assert_rejected(db, *, reason_match, at_state=None):
     it died. This is what Doina's Stage 9 exception queue and the trace view read.
     """
     assert len(db["payments"].inserted) == 1, "the instruction must be recorded"
-    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    payment = joined(db, db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]}))
 
     assert payment["lifecycle"]["currentState"] == "REJECTED"
     assert payment["status"] == "REJECTED", "top-level status mirrors currentState"
@@ -636,16 +669,16 @@ def test_happy_path_walks_the_full_state_machine(service, db):
     """
     payment = _initiate(service, instructed_amount=250.0)
 
-    assert [e["state"] for e in payment["lifecycle"]["events"]] == EXPECTED_TRAIL
+    assert [e["state"] for e in joined(db, payment)["lifecycle"]["events"]] == EXPECTED_TRAIL
     assert payment["lifecycle"]["currentState"] == "SETTLED"
     assert payment["status"] == "SETTLED", "top-level status mirrors currentState"
-    assert payment["lifecycle"]["stateEnteredAt"] == payment["lifecycle"]["events"][-1]["at"]
+    assert payment["lifecycle"]["stateEnteredAt"] == joined(db, payment)["lifecycle"]["events"][-1]["at"]
 
 
 def test_every_event_is_attributed_and_chronological(service, db):
     """Append-only, chronological, and every transition names who did it and why."""
     payment = _initiate(service, instructed_amount=250.0)
-    events = payment["lifecycle"]["events"]
+    events = joined(db, payment)["lifecycle"]["events"]
 
     for e in events:
         assert e["actor"], f"{e['state']} has no actor"
@@ -680,7 +713,7 @@ def test_fraud_block_is_written_with_the_authorised_transition(service, db):
     assert fraud["score"] == fraud_rules.MODEL_BASELINE_SCORE
     assert fraud["rulesFired"] == []
 
-    authorised = next(e for e in payment["lifecycle"]["events"] if e["state"] == "AUTHORISED")
+    authorised = next(e for e in joined(db, payment)["lifecycle"]["events"] if e["state"] == "AUTHORISED")
     assert f"Fraud score {fraud['score']}" in authorised["reason"]
     assert "sanctions CLEAR" in authorised["reason"]
     assert authorised["actor"] == "fraud-service"
@@ -763,7 +796,7 @@ def test_external_wire_stays_at_in_progress_but_moves_money_to_clearing(service,
 
     assert payment["lifecycle"]["currentState"] == "IN_PROGRESS"
     assert payment["status"] == "IN_PROGRESS"
-    assert "settlement pending" in payment["lifecycle"]["events"][-1]["reason"]
+    assert "settlement pending" in joined(db, payment)["lifecycle"]["events"][-1]["reason"]
     assert payment["clearing"]["settledAt"] is None, "SETTLED is deferred to settle.py"
 
     # Money moved: debtor debited, clearing account credited.
@@ -780,7 +813,7 @@ def test_external_wire_is_still_a_real_traceable_payment(service, db):
     payment = _initiate_external(service)
 
     assert len(db["payments"].inserted) == 1
-    states = [e["state"] for e in payment["lifecycle"]["events"]]
+    states = [e["state"] for e in joined(db, payment)["lifecycle"]["events"]]
     assert states[0] == "DRAFT" and states[-1] == "IN_PROGRESS"
     assert states[-2] == "SUBMITTED", "both of stage 5's transitions fired, in order"
     assert "REJECTED" not in states, "the bank did not refuse this payment"
@@ -817,7 +850,7 @@ def test_deferred_settlement_completion_flips_a_matched_wire_to_settled(service,
     completed = settle.complete_due(conn, "leafy_bank_bian", delay_seconds=0)
     assert completed == 1
 
-    settled = db["payments"].find_one({"paymentId": pid})
+    settled = joined(db, db["payments"].find_one({"paymentId": pid}))
     assert settled["lifecycle"]["currentState"] == "SETTLED"
     assert settled["status"] == "SETTLED", "top-level status mirrors currentState"
     assert settled["lifecycle"]["settlementStatus"] == "SETTLED"
@@ -836,12 +869,12 @@ def test_deferred_completion_does_not_auto_settle_a_delayed_wire(service, db):
 
     payment = _initiate_external(service, settlement_outcome="DELAYED")
     pid = payment["paymentId"]
-    assert db["payments"].find_one({"paymentId": pid})["lifecycle"]["settlementStatus"] == "PENDING"
+    assert joined(db, db["payments"].find_one({"paymentId": pid}))["lifecycle"]["settlementStatus"] == "PENDING"
 
     conn = FakeConnection(db)
     assert settle.complete_due(conn, "leafy_bank_bian", delay_seconds=0) == 0
 
-    still_pending = db["payments"].find_one({"paymentId": pid})
+    still_pending = joined(db, db["payments"].find_one({"paymentId": pid}))
     assert still_pending["lifecycle"]["currentState"] == "IN_PROGRESS"
     assert still_pending["lifecycle"]["settlementStatus"] == "PENDING"
 
@@ -900,7 +933,7 @@ def _checks(db, *, name=None, stage=None):
     consumer filters by `stage`, so a test that asserts an exact name list must say which
     stage it means or it breaks every time a later stage lands.
     """
-    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    payment = joined(db, db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]}))
     entries = payment.get("checks", [])
     return [
         c for c in entries
@@ -941,7 +974,7 @@ def test_stage_two_records_its_six_checks_in_order(service, db):
 def test_stage_two_adds_no_lifecycle_state(service, db):
     """B5. Its visibility comes from `checks[]`, not from the state machine."""
     _initiate(service)
-    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    payment = joined(db, db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]}))
     states = [e["state"] for e in payment["lifecycle"]["events"]]
     assert states[states.index("INITIATED") + 1] == "VALIDATED", "nothing in between"
 
@@ -963,7 +996,7 @@ def test_no_assertion_is_recorded_as_skip_never_pass(service, db):
     _initiate(service)
     check = _one(db, "customer_authenticated")
     assert check["result"] == "SKIP"
-    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    payment = joined(db, db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]}))
     assert payment["authentication"]["method"] == "NONE"
     assert payment["authentication"]["sufficient"] is False
 
@@ -971,8 +1004,8 @@ def test_no_assertion_is_recorded_as_skip_never_pass(service, db):
 def test_an_asserted_authentication_passes_and_is_recorded(service, db):
     _initiate(service, authentication=_ASSERTION)
     assert _one(db, "customer_authenticated")["result"] == "PASS"
-    assessment = db["payments"].find_one(
-        {"paymentId": db["payments"].inserted[0]["paymentId"]})["authentication"]
+    assessment = joined(db, db["payments"].find_one(
+        {"paymentId": db["payments"].inserted[0]["paymentId"]}))["authentication"]
     assert assessment["method"] == "OTP"
     assert assessment["factorCount"] == 2
     assert assessment["sessionRef"] == "SESS-7781"
@@ -1007,7 +1040,7 @@ def test_resuming_a_held_payment_completes_the_same_document(service, db):
     assert done["status"] == "SETTLED"
     assert len(db["payments"].inserted) == 1, "must not create a second document"
     # The one document ends SETTLED, not REJECTED, and never showed a REJECTED blip.
-    assert db["payments"].find_one({"paymentId": payment_id})["status"] == "SETTLED"
+    assert joined(db, db["payments"].find_one({"paymentId": payment_id}))["status"] == "SETTLED"
     assert db["transactions"].inserted, "the resumed payment moved money exactly once"
     assert len(db["transactions"].inserted) == 1
 
@@ -1142,7 +1175,7 @@ def test_the_flagship_corporate_payment_settles_with_a_labelled_simulated_approv
     assert check["actor"] == "SIMULATED-APPROVER-OPS"
     assert "SIMULATED" in check["detail"]
 
-    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    payment = joined(db, db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]}))
     assert payment["entitlement"]["dualApprovalRequired"] is True
     assert payment["entitlement"]["segment"] == "COMMERCIAL"
     assert payment["entitlement"]["signingRule"] == "JOINT"
@@ -1171,7 +1204,7 @@ def test_stage_four_reports_the_stage_two_decision_instead_of_a_hardcoded_string
     svc = _service_for(db, payment_limit_usd=1_000_000.0)
     _initiate(svc, instructed_amount=25_000.0)
 
-    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    payment = joined(db, db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]}))
     approved = [e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED"]
     assert len(approved) == 1
     assert "SIMULATED-APPROVER-OPS" in approved[0]["reason"]
@@ -1179,7 +1212,7 @@ def test_stage_four_reports_the_stage_two_decision_instead_of_a_hardcoded_string
 
 def test_a_sole_mandate_below_the_threshold_reports_it_as_such(service, db):
     _initiate(service)
-    payment = db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]})
+    payment = joined(db, db["payments"].find_one({"paymentId": db["payments"].inserted[0]["paymentId"]}))
     approved = [e for e in payment["lifecycle"]["events"] if e["state"] == "APPROVED"]
     assert "Below the RETAIL dual-approval threshold" in approved[0]["reason"]
 
@@ -1211,8 +1244,8 @@ def test_a_token_derived_assertion_reaches_the_payment(service, db):
     _initiate(service, **identity)
 
     assert _one(db, "customer_authenticated")["result"] == "PASS"
-    assessment = db["payments"].find_one(
-        {"paymentId": db["payments"].inserted[0]["paymentId"]})["authentication"]
+    assessment = joined(db, db["payments"].find_one(
+        {"paymentId": db["payments"].inserted[0]["paymentId"]}))["authentication"]
     assert assessment["method"] == "OTP"
     assert assessment["factorCount"] == 2
     assert assessment["sessionRef"] == "SESS-REAL01"

@@ -396,11 +396,9 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         # match (stage 2) and the sanctions outcome (stage 3). The inbound-only counterpart
         # of `fraud`; null outbound.
         "acceptanceDecision": None,
-        # Stage 2's two slots, present-but-empty for the same reason as every other block
-        # here: a later stage fills them without an `$exists`-branching read. `checks[]`
-        # is append-only and shared with stage 3 onward (`domain/checks.py`); both are
-        # additive and not `required` in the spec, pending Doina Q12.
-        "checks": [],
+        # Stage 2's slots, present-but-empty for the same reason as every other block here:
+        # a later stage fills them without an `$exists`-branching read. The per-check trail is
+        # not stored here: it lives in `paymentHistory` (`domain/lifecycle_history.py`).
         "authentication": None,
         "entitlement": None,
         # Stage 3's as-captured/diff record (doc 17 B1, Doina Q21). The SIXTH field written
@@ -464,12 +462,7 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         "schemaVersion": SCHEMA_VERSION,
         # The instruction is created at DRAFT and advanced from there (§11). Only
         # `lifecycle.advance` may change this block afterwards.
-        "lifecycle": lifecycle.initial_block(
-            actor="transactions-service",
-            actor_type="SERVICE",
-            reason="Payment instruction captured",
-            now=now,
-        ),
+        "lifecycle": lifecycle.initial_block(now=now),
     }
     doc.update(envelopes)
     # Only a demo-clock payment carries `demo`, so an untagged document is byte-for-byte

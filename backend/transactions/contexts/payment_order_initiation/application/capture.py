@@ -129,7 +129,7 @@ def run(ctx: PaymentContext) -> None:
     # rejection is traceable.
     ctx.payment_doc = payment_document.build(ctx)
     try:
-        c.payments.insert_one(ctx.payment_doc)
+        lifecycle.insert_payment(c.payments, ctx.payment_doc)
     except DuplicateKeyError:
         # Lost a race against a concurrent identical request. The find_one pre-check above
         # cannot serialise these — the unique index on endToEndId is what actually enforces

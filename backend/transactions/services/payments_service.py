@@ -59,7 +59,7 @@ from contexts.payment_order_initiation.adapters.mongo_reference_data import (
 from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_rail.adapters.simulated_wire_rail import SimulatedWireRail
 from contexts.payment_order_initiation.application import funds_reservation
-from contexts.payment_order_initiation.domain import checks, lifecycle
+from contexts.payment_order_initiation.domain import checks, lifecycle, lifecycle_history
 from process.payment_context import PaymentCollections, PaymentContext
 from contexts.payment_orchestration.domain import cutoff_policy
 from shared import business_clock, hold_queues, stage_events
@@ -1054,9 +1054,20 @@ class PaymentsService:
             currency=payment.get("currency") or payment.get("instructedCurrency"),
         )
 
+    def with_history(self, payment: dict) -> dict:
+        """`payment` with `lifecycle.events[]` and `checks[]` joined from `paymentHistory`.
+
+        The saga's own documents carry only the counters; a response that shows the payment to
+        a caller joins the trail back in, so its shape is unchanged from when both were embedded.
+        """
+        return lifecycle_history.attach(lifecycle_history.collection(self.payments), payment)
+
     def retrieve_payment(self, payment_ref: str) -> Optional[dict]:
         """Retrieve a payment plus its single transaction doc (v4_21)."""
-        payment = self.payments.find_one({"paymentId": payment_ref})
+        payment = lifecycle_history.attach(
+            lifecycle_history.collection(self.payments),
+            self.payments.find_one({"paymentId": payment_ref}),
+        )
         if not payment:
             return None
         payment["_txn"] = self.transactions.find_one({"paymentId": payment_ref})
@@ -1404,21 +1415,32 @@ class PaymentsService:
             # `status`) showed SETTLED while the lifecycle view showed RECONCILED.
             if category == CATEGORY_RECONCILIATION_DISCREPANCY:
                 # ACCEPT never books anything (A4): a DEBT wire is refused above.
-                self.payments.update_one(
-                    {"paymentId": exc["paymentId"],
-                     "lifecycle.currentState": {"$in": ["SETTLED", "POSTED"]}},
-                    {"$set": {
-                        "lifecycle.currentState": "RECONCILED",
-                        "lifecycle.stateEnteredAt": now,
-                        "lifecycle.reconciliationStatus": "RECONCILED",
-                        "status": "RECONCILED",
-                        "updatedAt": now,
-                    }, "$push": {"lifecycle.events": {
-                        "state": "RECONCILED", "at": now, "actor": "payments-operations",
-                        "actorType": "USER",
-                        "reason": f"Discrepancy accepted — {exc.get('exceptionId')}",
-                    }}},
-                )
+                def _flip_to_reconciled(session):
+                    flipped = self.payments.find_one_and_update(
+                        {"paymentId": exc["paymentId"],
+                         "lifecycle.currentState": {"$in": ["SETTLED", "POSTED"]}},
+                        {"$set": {
+                            "lifecycle.currentState": "RECONCILED",
+                            "lifecycle.stateEnteredAt": now,
+                            "lifecycle.reconciliationStatus": "RECONCILED",
+                            "status": "RECONCILED",
+                            "updatedAt": now,
+                        }, "$inc": {"lifecycle.eventCount": 1}},
+                        session=session, return_document=True,
+                    )
+                    if flipped is None:
+                        return
+                    lifecycle_history.collection(self.payments).insert_one(
+                        lifecycle_history.event_document(
+                            flipped, flipped["lifecycle"]["eventCount"], {
+                                "state": "RECONCILED", "at": now,
+                                "actor": "payments-operations", "actorType": "USER",
+                                "reason": f"Discrepancy accepted — {exc.get('exceptionId')}",
+                            }),
+                        session=session,
+                    )
+
+                lifecycle_history.run_in_transaction(self.payments, None, _flip_to_reconciled)
                 # Already past SETTLED/POSTED (e.g. the sweep got there first): axis only.
                 self.payments.update_one(
                     {"paymentId": exc["paymentId"],

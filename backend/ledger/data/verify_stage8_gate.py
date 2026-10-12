@@ -18,7 +18,7 @@ Gate invariants (doc 22 §3 step 8):
      the script reports which leg is still PENDING so you know whether to trigger another batch.
   2. refs.reconciliationItemId + refs.settlementPositionId are set.
   3. A reconciliationItems doc exists with the three legs recorded.
-  4. lifecycle.events grew by a RECONCILED entry from actor "ledger-service".
+  4. a RECONCILED lifecycle event (paymentHistory) from actor "ledger-service".
   5. A journalEntries doc still exists for the payment (the CDC path survived).
   6. For an external wire: the clearing account (settlementPositions.clearingAccountCode,
      usually 1131) nets to zero across the payment's ledgerEvents — the "holding account
@@ -107,6 +107,10 @@ def main() -> int:
     payment = _pick_payment(connection, db_name,
                             payment_id=args.paymentId, latest=args.latest, rail=args.rail)
     pid = payment["paymentId"]
+    # Events live in `paymentHistory`, not on the payment: join them back.
+    payment.setdefault("lifecycle", {})["events"] = list(
+        connection.get_collection(db_name, "paymentHistory")
+        .find({"paymentId": pid, "kind": "EVENT"}).sort("seq", 1))
 
     print(f"\n{_dim('Stage 8 gate — ' + db_name)}")
     print(f"payment: {_green(pid)}   rail: {payment.get('rail')}   "

@@ -19,9 +19,9 @@ def _utc(at: datetime) -> datetime:
     return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
 
 
-def append(coll, updated_payment: dict, *, at: datetime) -> None:
+def append(coll, updated_payment: dict, *, at: datetime, events: list) -> None:
+    """`events` is the payment's last two lifecycle events, oldest first (from `paymentHistory`)."""
     try:
-        events = (updated_payment.get("lifecycle") or {}).get("events") or []
         if len(events) < 2:
             return
         prev, current = events[-2], events[-1]

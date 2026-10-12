@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from contexts.payment_orchestration.domain import routing
 from shared import business_clock
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
+    joined,
     FakeCollection,
     _initiate,
     _initiate_external,
@@ -99,24 +100,24 @@ def test_tagged_payment_sees_offset_untagged_sees_real_time(service, db):
 
     assert tagged["demo"] == {"clockRunId": run_id}
     assert business_clock.minutes_since_midnight_et(tagged["createdAt"]) == 17 * 60 + 31
-    for event in tagged["lifecycle"]["events"]:
+    for event in joined(db, tagged)["lifecycle"]["events"]:
         assert business_clock.minutes_since_midnight_et(event["at"]) == 17 * 60 + 31
 
     real = datetime.now(timezone.utc)
     assert _within(untagged["createdAt"], real)
-    assert all(_within(e["at"], real) for e in untagged["lifecycle"]["events"])
+    assert all(_within(e["at"], real) for e in joined(db, untagged)["lifecycle"]["events"])
 
 
 def test_an_untagged_document_is_unchanged(service, db):
     payment = _initiate(service)
     assert "demo" not in payment
-    assert "demo" not in db["payments"].docs[-1]
+    assert "demo" not in joined(db, db["payments"].docs[-1])
 
 
 def test_context_from_doc_restores_the_clock_run(service, db):
     run_id = _run_at(db, 17 * 60 + 31)
     payment = _initiate(service, clock_run_id=run_id)
-    stored = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    stored = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
 
     ctx = service._context_from_doc(stored, customer_ref=stored["customerId"],
                                     authentication=None)

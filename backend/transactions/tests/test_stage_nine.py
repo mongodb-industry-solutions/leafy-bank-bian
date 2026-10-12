@@ -52,6 +52,7 @@ from process.exceptions import (
     severity_for,
 )
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
+    joined,
     FakeDb,
     _initiate,
     _initiate_external,
@@ -341,7 +342,7 @@ def test_an_unmatched_wire_settles_with_no_stage7_exception(service, db):
     assert _exceptions(db) == []
 
     assert settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0) == 1
-    settled = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    settled = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
     assert settled["lifecycle"]["currentState"] == lifecycle.SETTLED
     assert settled["lifecycle"]["settlementStatus"] == "SETTLED"
 
@@ -414,7 +415,7 @@ def test_a_same_key_replay_returns_the_winner_with_an_evidence_check_and_no_exce
     # no exception queued for a replay
     assert _exceptions(db) == []
     # the winner carries the evidence check
-    winner = db["payments"].docs[0]
+    winner = joined(db, db["payments"].docs[0])
     replay_checks = [c for c in winner.get("checks", []) if c.get("name") == "idempotent_replay_absorbed"]
     assert len(replay_checks) == 1
     assert replay_checks[0]["result"] == "PASS"
@@ -499,7 +500,7 @@ def test_return_of_funds_restores_the_debtor_and_clears_1131_with_a_compensating
     assert original_txn.get("reversalOf") is None
 
     # evidence on the payment; terminal state NOT changed (B4)
-    payment_after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    payment_after = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
     comp_checks = [c for c in payment_after.get("checks", []) if c.get("name") == "compensation_posted"]
     assert len(comp_checks) == 1
     assert comp_checks[0]["result"] == "PASS"
@@ -544,7 +545,7 @@ def test_resolve_retry_on_delayed_settles_and_auto_resolves(service, db):
     assert updated["resolution"]["action"] == ACTION_RETRY_SETTLEMENT
     assert updated["resolution"]["by"] == "payments-operations"
     # the retry landed MATCHED → payment SETTLED
-    payment_after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    payment_after = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
     assert payment_after["lifecycle"]["currentState"] == lifecycle.SETTLED
 
 
@@ -561,7 +562,7 @@ def _discrepant_wire(service, db, *, charge_bearer=None):
     if charge_bearer:
         extra["chargeBearer"] = charge_bearer
     db["payments"].update_one({"paymentId": pid}, {"$set": extra})
-    payment = db["payments"].find_one({"paymentId": pid})
+    payment = joined(db, db["payments"].find_one({"paymentId": pid}))
     record_exception(
         service._collections(), payment, CATEGORY_RECONCILIATION_DISCREPANCY,
         detail={"discrepancyAmount": 25.0, "discrepancyReason": "rail settled short",
@@ -585,7 +586,7 @@ def test_post_adjustment_on_a_debt_wire_stamps_the_correction_for_the_ledger(ser
 
     assert updated["status"] == STATUS_RESOLVED
     assert updated["resolution"]["action"] == ACTION_POST_ADJUSTMENT
-    after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    after = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
     adj = after["clearing"]["settlementAdjustment"]
     assert adj["amount"] == 25.0
     assert adj["chargeBearer"] == "DEBT"
@@ -609,7 +610,7 @@ def test_accept_on_a_debt_wire_is_refused(service, db):
     with pytest.raises(ExceptionActionNotLegal, match="POST_ADJUSTMENT"):
         service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)
     assert _exc(db)["status"] == STATUS_OPEN
-    after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    after = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
     assert "settlementAdjustment" not in (after.get("clearing") or {})
 
 
@@ -707,7 +708,7 @@ def test_accept_when_the_beneficiary_bears_charges_posts_nothing(service, db, be
     payment, exc = _discrepant_wire(service, db, charge_bearer=bearer)
     updated = service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)
     assert updated["status"] == STATUS_RESOLVED
-    after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    after = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
     assert "settlementAdjustment" not in (after.get("clearing") or {})
     assert after["lifecycle"]["reconciliationStatus"] == "RECONCILED"
 
@@ -737,7 +738,7 @@ def test_resolve_return_funds_restores_the_debtor(service, db):
     debtor_after = db["accounts"].find_one({"accountId": debtor_id})["balance"]["current"]
     assert debtor_after == 10_000.0
     # compensation evidence on the payment
-    payment_after = db["payments"].find_one({"paymentId": payment["paymentId"]})
+    payment_after = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
     assert any(c.get("name") == "compensation_posted" for c in payment_after.get("checks", []))
 
 
@@ -817,7 +818,7 @@ def test_b1_accept_discrepancy_on_reconciliation_discrepancy_flips_the_axis_to_r
     service.resolve_exception(exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY,
                               note="Correspondent fee — accepted.")
 
-    payment_after = db["payments"].find_one({"paymentId": pid})
+    payment_after = joined(db, db["payments"].find_one({"paymentId": pid}))
     assert payment_after["lifecycle"]["reconciliationStatus"] == "RECONCILED"
     # state advances too, so the payments list (reads `status`) agrees with the lifecycle view
     assert payment_after["lifecycle"]["currentState"] == "RECONCILED"
@@ -907,7 +908,7 @@ def test_b5_retry_on_delayed_with_delayed_again_writes_a_fresh_occurrence(servic
     assert len(open_delayed) == 1
     assert open_delayed[0]["exceptionId"] != first["exceptionId"]
     # the payment is still IN_PROGRESS (DELAYED), not stuck without a queue row
-    payment_after = db["payments"].find_one({"paymentId": first["paymentId"]})
+    payment_after = joined(db, db["payments"].find_one({"paymentId": first["paymentId"]}))
     assert payment_after["lifecycle"]["currentState"] == lifecycle.IN_PROGRESS
 
 
@@ -946,7 +947,7 @@ def test_b4_resume_restores_the_settlement_outcome_so_unmatched_survives_a_stepu
 
     service.resume_payment(pid, customer_ref=held["customerId"], authentication=_ASSERTION)
 
-    resumed = db["payments"].find_one({"paymentId": pid})
+    resumed = joined(db, db["payments"].find_one({"paymentId": pid}))
     # UNMATCHED survived the resume: the fee-deducted statement alias is persisted and the
     # position records the outcome (the bug reset to MATCHED, which carries neither).
     assert resumed["simulatedStatementOutcome"] == "FEE_DEDUCTED"

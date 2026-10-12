@@ -198,9 +198,9 @@ def _details(service, scenario: Scenario, payment: dict, now: datetime) -> dict:
             "approvalRequestId", "primaryApprover", "assignedTo", "requiredApprovers")}
     if scenario.synthetic_ahead_minutes:
         out["screening"] = hold_queues.screening_position(db, payment_id=payment_id, at=now)
-        events = (payment.get("lifecycle") or {}).get("events") or []
-        if events:
-            entered = events[-1]["at"]
+        # `stateEnteredAt` is the time of the latest lifecycle event (`advance` sets both).
+        entered = (payment.get("lifecycle") or {}).get("stateEnteredAt")
+        if entered:
             entered = entered if entered.tzinfo else entered.replace(tzinfo=timezone.utc)
             out["minutesInStage"] = round((now - entered).total_seconds() / 60, 1)
     if scenario.key == "C3":

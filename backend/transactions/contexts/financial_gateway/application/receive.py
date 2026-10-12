@@ -127,7 +127,7 @@ def run(ctx: PaymentContext) -> None:
     # --- 6. build and persist the canonical payment --------------------------
     ctx.payment_doc = payment_document.build_inbound(ctx)
     try:
-        c.payments.insert_one(ctx.payment_doc)
+        lifecycle.insert_payment(c.payments, ctx.payment_doc)
     except DuplicateKeyError:
         existing = (
             c.payments.find_one({"idempotency.idempotencyKey": ctx.idempotency_key})

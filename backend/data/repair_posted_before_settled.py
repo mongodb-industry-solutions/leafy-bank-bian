@@ -18,7 +18,7 @@ import sys
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 
 load_dotenv(".env")
 db = MongoClient(os.environ["MONGODB_URI"])[os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")]
@@ -34,14 +34,24 @@ for p in stuck:
     if not apply:
         continue
     now = datetime.now(timezone.utc)
-    db.payments.update_one(
-        {"_id": p["_id"], "lifecycle.currentState": "POSTED"},
-        {"$set": {"lifecycle.currentState": "IN_PROGRESS", "lifecycle.stateEnteredAt": now,
-                  "status": "IN_PROGRESS", "updatedAt": now},
-         "$push": {"lifecycle.events": {
-             "state": "IN_PROGRESS", "at": now, "actor": "repair-script", "actorType": "SERVICE",
-             "reason": "Repair: POSTED before settlement confirmed; returned to await settlement",
-         }}},
-    )
+    # One transaction: the state change and its `EVENT` in `paymentHistory` land together.
+    with db.client.start_session() as session:
+        with session.start_transaction():
+            updated = db.payments.find_one_and_update(
+                {"_id": p["_id"], "lifecycle.currentState": "POSTED"},
+                {"$set": {"lifecycle.currentState": "IN_PROGRESS", "lifecycle.stateEnteredAt": now,
+                          "status": "IN_PROGRESS", "updatedAt": now},
+                 "$inc": {"lifecycle.eventCount": 1}},
+                return_document=ReturnDocument.AFTER, session=session,
+            )
+            if updated is None:
+                continue
+            seq = updated["lifecycle"]["eventCount"]
+            db.paymentHistory.insert_one({
+                "_id": f"{updated['paymentId']}:EVENT:{seq}", "paymentId": updated["paymentId"],
+                "rail": updated.get("rail"), "kind": "EVENT", "seq": seq,
+                "state": "IN_PROGRESS", "at": now, "actor": "repair-script", "actorType": "SERVICE",
+                "reason": "Repair: POSTED before settlement confirmed; returned to await settlement",
+            }, session=session)
 if stuck and not apply:
     print("re-run with --apply")
