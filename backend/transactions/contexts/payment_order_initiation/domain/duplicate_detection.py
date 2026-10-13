@@ -40,7 +40,7 @@ predicate stays unit-testable without a database.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 # 15 minutes. Long enough to catch a double-submit or an impatient retry, short enough that a
@@ -113,6 +113,11 @@ def describe(match: dict, *, now: Optional[datetime] = None) -> str:
 
     when = ""
     if isinstance(created, datetime) and isinstance(now, datetime):
+        # PyMongo returns naive UTC unless the client is tz_aware; `now` may be either.
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         minutes = max(0, int((now - created).total_seconds() // 60))
         when = f" {minutes} minute(s) ago" if minutes else " less than a minute ago"
 
