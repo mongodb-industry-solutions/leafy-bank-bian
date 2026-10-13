@@ -1156,7 +1156,8 @@ scene + rail. One tone drives every accent. */
 .runLogBox {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: none;
+  height: 520px;
   gap: 8px;
   padding: 16px 24px;
   border: 1px solid #d5dedb;
@@ -1265,7 +1266,7 @@ scene + rail. One tone drives every accent. */
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 160px;
+  min-height: 0;
   overflow-y: auto;
 }
 
