@@ -99,7 +99,7 @@ export default function ProblemScene({ scenarioKey, paymentId, payment, trace, e
           </div>
         </div>
       )}
-      {!hasStatement && !waitingForLine && (
+      {!hasStatement && !waitingForLine && !exceptions.length && payment?.lifecycle?.reconciliationStatus !== "RECONCILED" && (
         <Body className={styles.muted}>Waiting for {bank}&apos;s statement.</Body>
       )}
       {scenarioKey === "TL" && !hasStatement && countdownLeft === 0 && (

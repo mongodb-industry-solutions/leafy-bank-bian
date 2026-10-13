@@ -6,12 +6,10 @@ import { Body, Overline } from "@leafygreen-ui/typography";
 import { gapOf, minor, railLegOf } from "./format";
 import styles from "../Showcase.module.css";
 
-/** Act 5: before and after, and the artefact written (or "nothing written, by design"). */
-export default function ResultScene({ paymentId, proposal, scenario, trace, payment, outcome, gapBefore, expectedOutcomes, waiting }) {
+/** The end of the run: the gap before and after, and the outcome. */
+export default function ResultScene({ paymentId, scenario, trace, payment, outcome, gapBefore, expectedOutcomes, waiting }) {
   const leg = railLegOf(trace);
   const gapNow = gapOf(leg);
-  // The correcting journal is the only artefact the trace exposes; absent means none was booked.
-  const adj = (trace?.allLedgerEvents || []).find((e) => String(e?.idempotencyKey || "").endsWith("-ADJ"));
   const reconciled = payment?.lifecycle?.reconciliationStatus === "RECONCILED";
 
   if (!outcome) {
@@ -30,18 +28,6 @@ export default function ResultScene({ paymentId, proposal, scenario, trace, paym
       </div>
     );
   }
-  const target = proposal?.params?.target;
-  const written = adj ? (
-    <Body>
-      Journal Dr {adj.debitLeg?.glAccountCode} / Cr {adj.creditLeg?.glAccountCode} ·{" "}
-      {minor(adj.debitLeg?.amount)} · {adj.postingStatus}
-    </Body>
-  ) : target ? (
-    <Body>Statement line {target.reference} linked to {paymentId}. Both exceptions closed; no journal.</Body>
-  ) : (
-    <Body>{scenario.key === "TL" ? "Nothing booked. The recheck found the line." : "No journal written, by design."}</Body>
-  );
-
   return (
     <div className={styles.section}>
       {gapBefore != null && (
@@ -56,10 +42,6 @@ export default function ResultScene({ paymentId, proposal, scenario, trace, paym
           </div>
         </div>
       )}
-      <div className={styles.findingCard}>
-        <Overline>Written</Overline>
-        {written}
-      </div>
       <div className={styles.chipRow}>
         <Badge variant={outcome === "ESCALATED" ? "yellow" : "green"}>
           {outcome === "ANSWERED" ? "CORRESPONDENT REPLIED" : outcome}

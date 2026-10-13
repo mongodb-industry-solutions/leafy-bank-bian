@@ -15,10 +15,10 @@ import styles from "./Showcase.module.css";
 
 const OP_VARIANT = { insert: "green", upsert: "green", update: "blue" };
 
-export function WriteRow({ write, sources }) {
+export function WriteRow({ write, sources, open = false }) {
   const docs = write.pick(sources);
   return (
-    <details className={styles.write}>
+    <details className={styles.write} open={open}>
       <summary className={styles.writeSummary}>
         <span className={styles.writeHead}>
           <Body as="span" className={styles.mono}>{write.collection}</Body>

@@ -73,3 +73,35 @@ export const BRIEFS = {
 };
 
 export const briefFor = (key) => BRIEFS[key] || null;
+
+// The MongoDB feature each reconciliation step demonstrates, and what the panel should point
+// at. Keyed by step key; a scenario may override one (MOMENT_OVERRIDES). Text names only what
+// stepWrites.js and the services already do.
+const moment = (feature, text) => ({ feature, text });
+
+const MOMENTS = {
+  initiate: [moment("ACID multi-document transaction", "The payment, the money movement and both account balances commit together or not at all.")],
+  settle: [moment("Change stream", "Nothing calls the ledger. It sees the payment flip to SETTLED and writes its settlement event.")],
+  glpost: [moment("ACID multi-document transaction", "The journal, the ledger event and the payment's posting flag commit in one transaction.")],
+  statement: [moment("Document model", "The camt.053 statement is stored as one document, one entry per line.")],
+  match: [moment("Aggregation and change stream", "The mismatch opens an exceptions document. Its insert wakes the agent.")],
+  overdue: [moment("Change stream", "The missing line opens an exceptions document, which wakes the agent.")],
+  window: [moment("Change stream", "The missing line opens an exceptions document, which wakes the agent.")],
+  investigate: [moment("Embedded subdocument", "The agent's cause, evidence and proposal fill in the exception's agent{} field, one write at a time.")],
+  approve: [moment("LangGraph checkpoint", "The paused run is saved in MongoDB, so it resumes after approval, even after a restart.")],
+  late: [moment("Scheduled recheck", "The agent's sweep finds the late statement on its own. Nobody touches the exception.")],
+  verify: [moment("Re-read from the database", "The agent reports success only after it re-reads the exception and finds it closed.")],
+};
+
+const MOMENT_OVERRIDES = {
+  R1: {
+    approve: [
+      moment("Idempotent write", "The adjustment's key is {paymentId}-ADJ, so a retry cannot post it twice."),
+      moment("LangGraph checkpoint", "The paused run is saved in MongoDB and resumes on approval."),
+    ],
+    verify: [moment("Change stream into the GL", "The adjustment flows through the ledger and the payment turns RECONCILED.")],
+  },
+};
+
+export const momentsFor = (scenarioKey, stepKey) =>
+  MOMENT_OVERRIDES[scenarioKey]?.[stepKey] || MOMENTS[stepKey] || [];

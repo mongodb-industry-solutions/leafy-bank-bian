@@ -32,6 +32,36 @@ const Fact = ({ title, children }) => (
   </div>
 );
 
+// The scenario panel above the walkthrough: the definition in plain language, the MongoDB
+// features it uses, and an (i) at the top right that opens the full brief on hover or focus.
+export function BriefStrip({ scenario }) {
+  const brief = briefFor(scenario.key);
+  if (!brief) return null;
+  return (
+    <div className={styles.briefStrip}>
+      <div className={styles.briefTop}>
+        <span className={styles.briefHead}>
+          <Icon glyph="Sparkle" size={14} className={styles.payFactIcon} />
+          <Overline>The scenario</Overline>
+        </span>
+        <ScenarioInfo scenario={scenario} />
+      </div>
+      <Body>{scenario.story}</Body>
+      <div className={styles.briefFeatures}>
+        <span className={styles.briefHead}>
+          <Icon glyph="Database" size={14} className={styles.payFactIcon} />
+          <Overline>MongoDB features</Overline>
+        </span>
+        <span className={styles.chipRow}>
+          {brief.mongo.map((m) => (
+            <Badge key={m} variant="green">{m}</Badge>
+          ))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function ScenarioInfo({ scenario, className = "" }) {
   const brief = briefFor(scenario.key);
   if (!brief) return null;

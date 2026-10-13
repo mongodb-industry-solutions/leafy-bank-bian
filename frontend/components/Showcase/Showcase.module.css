@@ -1042,3 +1042,477 @@ scene + rail. One tone drives every accent. */
 .cardWrap .cardTop {
   padding-right: 36px;
 }
+
+/* Phase 1: always-visible brief, Guided/Explore toggle and the always-open MongoDB panel. */
+.headerControls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.briefStrip {
+  background: #fff;
+  border: 1px solid #e8edeb;
+  border-radius: 16px;
+  padding: 16px 20px;
+}
+
+.briefSummary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.briefSummary::-webkit-details-marker {
+  display: none;
+}
+
+.briefToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.briefStrip[open] .briefCaret {
+  transform: rotate(180deg);
+}
+
+.briefBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.briefDefinition {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.briefGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.mongoPanel {
+  background: #fff;
+  border: 1px solid #e8edeb;
+  border-radius: 16px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.moment {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* Run console: the central panel. Next bar, one chronological log, the decision pinned below. */
+.runControl {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding: 20px 24px;
+  background: var(--tone-bg);
+  border: 1px solid #d5dedb;
+  border-left: 6px solid var(--tone);
+  border-radius: 12px;
+}
+
+.runRow {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+}
+
+.runRow > .runControl {
+  flex: 1;
+  min-width: 0;
+  height: 240px;
+  align-items: flex-start;
+  overflow-y: auto;
+}
+
+.runActions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 200px;
+}
+
+.runLogBox {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 8px;
+  padding: 16px 24px;
+  border: 1px solid #d5dedb;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.stepCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.stepCardNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepArrow {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid #c9d1cf;
+  border-radius: 999px;
+  background: #fff;
+  color: #3d4f58;
+  cursor: pointer;
+}
+
+.stepArrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.stepBack {
+  margin-left: 8px;
+  border: 0;
+  background: none;
+  color: #016bf8;
+  cursor: pointer;
+}
+
+.stepCols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.stepCol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stepBeat {
+  padding-left: 16px;
+  border-left: 3px solid #016bf8;
+}
+
+.runNext {
+  font-weight: 600;
+}
+
+.runLogHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e8edeb;
+}
+
+.runLogTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.runFilters {
+  display: flex;
+  gap: 4px;
+}
+
+.runFilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 12px;
+  border: 1px solid #c9d1cf;
+  border-radius: 999px;
+  background: #fff;
+  color: #3d4f58;
+  cursor: pointer;
+}
+
+.runFilterOn {
+  background: #001e2b;
+  border-color: #001e2b;
+  color: #fff;
+}
+
+.runLog {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 160px;
+  overflow-y: auto;
+}
+
+/* Reconciliation walkthrough: the console takes the whole page; scenario and payment sit in
+   a band across its top. */
+.stageFull {
+  display: flex;
+  flex-direction: column;
+}
+
+.stageFull > .scene {
+  min-height: calc(100vh - 140px);
+}
+
+.runTop {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.payCard {
+  gap: 6px;
+  padding: 16px 20px;
+}
+
+.payFact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.payFactIcon {
+  flex: none;
+  color: #5c6c75;
+}
+
+.briefTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.briefFeatures {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.runTop > .briefStrip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 20px;
+  background: var(--tone-bg);
+  border-color: var(--tone);
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.briefHead,
+.briefMongo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.runTop > .railCard {
+  height: 100%;
+}
+
+.runPhase {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 4px;
+}
+
+.runPhaseRule {
+  flex: 1;
+  height: 1px;
+  background: #e8edeb;
+}
+
+.runEvent {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 4px 0;
+  animation: runIn 0.35s ease-out;
+}
+
+/* The timeline: a thin rail running down through the lane nodes. */
+.runEvent::before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 36px;
+  bottom: -4px;
+  width: 2px;
+  background: #e3eae7;
+}
+
+.runLog > div:last-child .runEvent::before {
+  display: none;
+}
+
+.runNode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--lane);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--lane) 14%, #fff);
+  z-index: 1;
+}
+
+.runCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  background: #fff;
+  border: 1px solid #e3eae7;
+  border-left: 4px solid var(--lane);
+  border-radius: 10px;
+}
+
+.runCard_alert { background: #fef2f2; }
+.runCard_good { background: #f0faf4; }
+.runCard_wait { background: #fffbeb; }
+
+.runCardFeature {
+  padding: 14px 16px;
+  box-shadow: 0 2px 8px rgba(0, 30, 43, 0.08);
+}
+
+.featureList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.featureList li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.featureTick {
+  flex: none;
+  margin-top: 6px;
+  color: var(--lane);
+}
+
+.checkOk svg { flex: none; margin-top: 3px; color: #00a35c; }
+.checkBad svg { flex: none; margin-top: 3px; color: #db3030; }
+
+.thought {
+  color: #5c6c75;
+  font-style: italic;
+}
+
+.runMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.runLane {
+  color: var(--lane);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.runPhaseChip {
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: #001e2b;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.runCount {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(0, 30, 43, 0.08);
+  font-size: 11px;
+  text-align: center;
+}
+
+.runFilter svg {
+  color: var(--lane, currentColor);
+}
+
+.runFilterOn svg {
+  color: #fff;
+}
+
+.runFilterOn .runCount {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.runTitle {
+  cursor: default;
+}
+
+summary.runTitle {
+  cursor: pointer;
+}
+
+.runTag {
+  margin-left: 8px;
+}
+
+.reviewPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 20px;
+  border: 2px solid #ffc010;
+  border-radius: 12px;
+  background: #fffbeb;
+}
+
+@keyframes runIn {
+  from { opacity: 0; transform: translateX(12px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runEvent { animation: none; }
+}

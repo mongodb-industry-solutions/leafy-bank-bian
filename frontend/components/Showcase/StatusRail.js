@@ -1,13 +1,13 @@
 "use client";
 
-// Sticky right rail: who the payment is, where it stands, and (collapsed) what has been
-// written to MongoDB so far.
+// Sticky right rail: who the payment is, where it stands, the MongoDB panel for the current
+// step (reconciliation walkthrough), and the live event log.
 
 import Badge from "@leafygreen-ui/badge";
+import Icon from "@leafygreen-ui/icon";
 import { H3, Body } from "@leafygreen-ui/typography";
-import StepDocuments from "./StepDocuments";
+import { BriefStrip } from "./ScenarioBrief";
 import LiveLog from "./LiveLog";
-import ScenarioInfo from "./ScenarioBrief";
 import styles from "./Showcase.module.css";
 
 const chip = (label, ok) => <Badge key={label} variant={ok ? "green" : "lightgray"}>{label}</Badge>;
@@ -25,44 +25,81 @@ function exceptionChip(exceptions) {
 }
 
 // `chips` replaces the reconciliation chips and the documents panel (the cut-off walkthrough).
-export default function StatusRail({ scenario, init, payment, exceptions, docs, chips, events }) {
+const BEARER = {
+  DEBT: "Sender pays all fees",
+  SHAR: "Fees shared",
+  CRED: "Beneficiary pays fees",
+  SLEV: "Service-level fees",
+};
+
+const maskIban = (iban) => (iban && iban.length > 8 ? `${iban.slice(0, 4)} •••• ${iban.slice(-4)}` : iban);
+
+function Fact({ glyph, children, mono }) {
+  return (
+    <div className={styles.payFact}>
+      <Icon glyph={glyph} size={14} className={styles.payFactIcon} />
+      <Body as="span" className={mono ? styles.mono : undefined}>{children}</Body>
+    </div>
+  );
+}
+
+// Who we are paying and the terms that matter to reconciliation. Before the wire is sent the
+// facts come from the scenario; afterwards the stored payment takes over.
+export function PaymentCard({ scenario, init, payment, exceptions, chips }) {
   const amount = Number(init?.amount ?? payment?.amount ?? 0);
+  const wire = scenario.wire;
+  const creditor = payment?.creditor;
+  const name = creditor?.name || wire?.beneficiary;
+  const bankName = creditor?.bankName || wire?.bankName;
+  const bic = creditor?.bic || wire?.bic;
+  const country = creditor?.bankCountry || wire?.country;
+  const iban = creditor?.iban || creditor?.accountNo || wire?.iban;
+  const bearer = payment?.chargeBearer || init?.chargeBearer || wire?.chargeBearer;
+  return (
+    <div className={`${styles.railCard} ${styles.toneBorder} ${styles.payCard}`}>
+      <H3 as="p" className={styles.paneTitle}>
+        {init ? `${payment?.currency || "USD"} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : `USD ${scenario.amount}`}
+      </H3>
+      {wire ? (
+        <>
+          <Fact glyph="Person">
+            <strong>{name}</strong>
+            {iban && <span className={styles.muted}> · {maskIban(iban)}</span>}
+          </Fact>
+          <Fact glyph="Building">{[bankName, bic, country].filter(Boolean).join(" · ")}</Fact>
+          <Fact glyph="Coin">
+            {BEARER[bearer] || bearer} <span className={styles.muted}>({bearer})</span>
+          </Fact>
+          <Fact glyph="Note">{wire.purpose}</Fact>
+        </>
+      ) : (
+        <Body className={styles.muted}>{scenario.bank} · {scenario.title}</Body>
+      )}
+      {init ? (
+        <Fact glyph="Link" mono>{init.paymentId}</Fact>
+      ) : (
+        <Fact glyph="Clock">Not sent yet</Fact>
+      )}
+      {init && chips && <div className={styles.chipRow}>{chips}</div>}
+      {init && !chips && (
+        <div className={styles.chipRow}>
+          {chip("Settled", ["SETTLED", "COMPLETED"].includes(payment?.status))}
+          {chip("Booked", payment?.lifecycle?.postingStatus === "POSTED")}
+          {chip("Reconciled", payment?.lifecycle?.reconciliationStatus === "RECONCILED")}
+          {exceptionChip(exceptions)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function StatusRail({ scenario, init, payment, exceptions, docs, chips, events }) {
   return (
     <aside className={styles.rail}>
-      <div className={`${styles.railCard} ${styles.toneBorder}`}>
-        <H3 as="p" className={styles.paneTitle}>
-          {init ? `${payment?.currency || "USD"} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : `USD ${scenario.amount}`}
-        </H3>
-        <div className={styles.railTitleRow}>
-          <Body className={styles.muted}>
-            {scenario.bank} · {scenario.title}
-          </Body>
-          <ScenarioInfo scenario={scenario} />
-        </div>
-        {init ? (
-          <Body className={styles.mono}>{init.paymentId}</Body>
-        ) : (
-          <Body className={styles.muted}>Not sent yet.</Body>
-        )}
-        {init && chips && <div className={styles.chipRow}>{chips}</div>}
-        {init && !chips && (
-          <div className={styles.chipRow}>
-            {chip("Settled", ["SETTLED", "COMPLETED"].includes(payment?.status))}
-            {chip("Booked", payment?.lifecycle?.postingStatus === "POSTED")}
-            {chip("Reconciled", payment?.lifecycle?.reconciliationStatus === "RECONCILED")}
-            {exceptionChip(exceptions)}
-          </div>
-        )}
-      </div>
+      <BriefStrip scenario={scenario} />
+      <PaymentCard scenario={scenario} init={init} payment={payment} exceptions={exceptions} chips={chips} />
 
       {events && <LiveLog events={events} sources={docs?.sources} />}
-
-      {!chips && !events && (
-        <details className={styles.railDocs}>
-          <summary className={styles.railDocsSummary}>Written to MongoDB</summary>
-          <StepDocuments {...docs} />
-        </details>
-      )}
     </aside>
   );
 }

@@ -19,9 +19,18 @@ export const SCENARIOS = [
       action: { label: "Post a $25 adjustment", code: "POST_ADJUSTMENT" },
     },
     title: "Fee deducted, sender pays",
-    story: "The correspondent deducts a $25 fee from a wire where the sender agreed to bear all charges.",
+    story: "We send $4,850 through Barclays and agree that the sender pays all fees. Barclays still takes a $25 fee out of the payment, so its statement shows $25 less than our books.",
     talkingPoint: "The agent proposes a $25 adjustment; code checks it matches the discrepancy exactly.",
     bank: "Barclays",
+    wire: {
+      beneficiary: "Northwind Traders Ltd",
+      bankName: "Barclays Bank PLC",
+      bic: "BARCGB22",
+      country: "GB",
+      iban: "GB29NWBK60161331926819",
+      chargeBearer: "DEBT",
+      purpose: "Invoice settlement",
+    },
     amount: "4,850.00",
     expected: "Reconciled by adjustment",
     policyLine: "Discrepancy · cause FEE · bearer DEBT → only POST_ADJUSTMENT is allowed",
@@ -59,9 +68,18 @@ export const SCENARIOS = [
       action: { label: "Accept the gap", code: "ACCEPT_DISCREPANCY" },
     },
     title: "Fee deducted, shared charges",
-    story: "The same $25 deduction, but the charges are shared with the beneficiary.",
+    story: "Same $25 fee taken by the bank, but this time the sender and the recipient agreed to split the charges, so the fee is not our loss.",
     talkingPoint: "Same $25, different books: the charge terms decide the action.",
     bank: "Barclays",
+    wire: {
+      beneficiary: "Northwind Traders Ltd",
+      bankName: "Barclays Bank PLC",
+      bic: "BARCGB22",
+      country: "GB",
+      iban: "GB82WEST12345698765432",
+      chargeBearer: "SHAR",
+      purpose: "Supplier payment",
+    },
     amount: "3,275.00",
     expected: "Reconciled by accepting the discrepancy",
     policyLine: "Discrepancy · cause FEE · bearer SHAR → only ACCEPT_DISCREPANCY is allowed",
@@ -93,9 +111,18 @@ export const SCENARIOS = [
       action: { label: "Link the statement line", code: "LINK_STATEMENT_ENTRY" },
     },
     title: "Altered reference",
-    story: "The correspondent rewrites the payment reference, so the statement line matches nothing.",
+    story: "The bank changes our payment reference on the way through. Our payment looks missing and the statement line looks unknown, though they are the same payment.",
     talkingPoint: "Fuzzy matching is the agent's job, never automatic. One link closes both exceptions.",
     bank: "Deutsche Bank",
+    wire: {
+      beneficiary: "Fabrikam Logistics GmbH",
+      bankName: "Deutsche Bank AG",
+      bic: "DEUTDEFF",
+      country: "DE",
+      iban: "DE89370400440532013000",
+      chargeBearer: "SHAR",
+      purpose: "Freight and handling",
+    },
     amount: "6,120.00",
     expected: "Reconciled by linking the statement line",
     policyLine: "Missing ↔ orphaned · cause REFERENCE_MISMATCH → LINK_STATEMENT_ENTRY, with approval",
@@ -130,9 +157,18 @@ export const SCENARIOS = [
       action: { label: "Ask the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
     },
     title: "Transposed amount",
-    story: "The correspondent books 7,306.00 instead of 7,360.00.",
+    story: "The bank books 7,306.00 instead of the 7,360.00 we sent. The 54.00 shortfall is larger than any fee this bank charges, so it is unexplained.",
     talkingPoint: "A 54.00 gap is not a fee any correspondent charges, so the guard refuses FEE and the correspondent's answer settles it.",
     bank: "Royal Bank of Canada",
+    wire: {
+      beneficiary: "Adventure Works Supply Co",
+      bankName: "Royal Bank of Canada",
+      bic: "ROYCCAT2",
+      country: "CA",
+      iban: "003000012345678",
+      chargeBearer: "SHAR",
+      purpose: "Quarterly rent",
+    },
     amount: "7,360.00",
     expected: "Reconciled once the correspondent confirms the amount",
     policyLine: "Discrepancy · FEE refused (54.00 is not a levied charge) → ESCALATE_TO_CORRESPONDENT",
@@ -170,9 +206,18 @@ export const SCENARIOS = [
       action: { label: "Ask the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
     },
     title: "Unknown statement line",
-    story: "A clean wire, plus a line on the statement that belongs to no payment of ours.",
+    story: "Our wire matches the statement. The statement also lists one extra line that does not belong to any payment we made.",
     talkingPoint: "Not every line on the statement belongs to us.",
     bank: "Barclays",
+    wire: {
+      beneficiary: "Northwind Traders Ltd",
+      bankName: "Barclays Bank PLC",
+      bic: "BARCGB22",
+      country: "GB",
+      iban: "GB33BUKB20201555555555",
+      chargeBearer: "SHAR",
+      purpose: "Software licences",
+    },
     amount: "5,630.00",
     expected: "Orphan dismissed once the correspondent confirms a misposting",
     policyLine: "Orphaned · no candidate → ESCALATE_TO_CORRESPONDENT or DISMISS",
@@ -209,9 +254,18 @@ export const SCENARIOS = [
       action: { label: "Recheck on its own", code: "RECHECK" },
     },
     title: "Late statement",
-    story: "The wire is fine; the correspondent's statement just hasn't arrived yet.",
+    story: "Our wire settled normally, but the bank's statement has not arrived yet, so we cannot confirm it. Nothing is wrong so far.",
     talkingPoint: "RECHECK is the only action the agent may take on its own.",
     bank: "UBS",
+    wire: {
+      beneficiary: "Tailspin Aviation SA",
+      bankName: "UBS Switzerland AG",
+      bic: "UBSWCHZH",
+      country: "CH",
+      iban: "CH5604835012345678009",
+      chargeBearer: "SHAR",
+      purpose: "Advisory retainer",
+    },
     amount: "2,485.00",
     expected: "Reconciled once the statement arrives",
     policyLine: "Missing · cause TIMING → RECHECK runs autonomously; nothing else does",
@@ -268,6 +322,8 @@ const STEP = {
     key: "initiate",
     label: "Initiate",
     title: "A customer sends a wire",
+    summary:
+      "A branch operator sends an international wire. It passes the first five lifecycle stages in one call, debits the customer in an ACID transaction and leaves the bank as a pacs.008.",
     narration:
       "A branch operator sends an international wire for a customer. In one synchronous call " +
       "the payment passes the first five lifecycle stages: initiation, authentication and " +
@@ -284,6 +340,8 @@ const STEP = {
     key: "settle",
     label: "Settle",
     title: "The correspondent confirms settlement",
+    summary:
+      "Our correspondent bank has settled the funds. A change stream sees the status change and the ledger writes its settlement event.",
     narration:
       "Our correspondent bank confirms it has settled the funds (stage 7). The payment flips " +
       "to SETTLED. Nothing calls the ledger directly: a MongoDB change stream sees the status " +
@@ -294,6 +352,8 @@ const STEP = {
     key: "glpost",
     label: "GL post",
     title: "The books are written",
+    summary:
+      "The ledger journals the payment into balanced double-entry postings. As far as our books are concerned, the payment is done.",
     narration:
       "The general-ledger batch journals the payment's events into double-entry postings " +
       "(stage 6): customer account to clearing, clearing to our nostro account with the " +
@@ -305,6 +365,8 @@ const STEP = {
     key: "statement",
     label: "Statement",
     title: "The correspondent's statement arrives",
+    summary:
+      "The correspondent sends its own record of every movement on our nostro account (camt.053). Reconciliation checks our books against it.",
     narration:
       "Our books only record what we believe happened. The correspondent sends its own " +
       "record: a camt.053 statement of every movement on our nostro account. This is the " +
@@ -317,6 +379,8 @@ const STEP = {
     key: "match",
     label: "Match",
     title: "Reconciliation compares the two",
+    summary:
+      "Reconciliation matches each statement line to a payment and compares payment, ledger and statement. A mismatch opens an exception and wakes the agent.",
     narration:
       "The next batch matches each statement line to a payment and runs a three-way " +
       "reconciliation: payment, ledger, statement. When all three agree, the payment is " +
@@ -328,6 +392,8 @@ const STEP = {
     key: "overdue",
     label: "Overdue",
     title: "The payment's own line is overdue",
+    summary:
+      "A settled payment expects its statement line within a set window. If none arrives, a MISSING exception opens.",
     narration:
       "Every settled payment expects its line on a statement within a set window. When the " +
       "window passes with no matching line, the next batch raises a MISSING exception for " +
@@ -340,6 +406,8 @@ const STEP = {
     key: "window",
     label: "Window",
     title: "The statement doesn't come",
+    summary:
+      "A settled payment expects its statement line within a set window. If none arrives, a MISSING exception opens.",
     narration:
       "Every settled payment expects its line on a statement within a set window. When the " +
       "window passes with no matching line, the next batch raises a MISSING exception for " +
@@ -352,6 +420,8 @@ const STEP = {
     key: "investigate",
     label: "Investigate",
     title: "The agent investigates",
+    summary:
+      "The agent reads the trace, statement line, charge policy and precedents, records a cause with evidence, and proposes one action. Code checks it against policy first.",
     narration:
       "The agent works like an analyst: it reads the payment's full trace, the statement " +
       "line, the correspondent's charge policy and past precedents, records a cause with " +
@@ -365,6 +435,8 @@ const STEP = {
     key: "investigate",
     label: "Investigate",
     title: "The agent investigates",
+    summary:
+      "The agent records a cause. RECHECK moves no money, so policy lets it run on its own.",
     narration:
       "The agent reads the trace and the statement history the way an analyst would, and " +
       "records a cause. Most actions need a human's approval. One doesn't: RECHECK moves no " +
@@ -376,6 +448,8 @@ const STEP = {
     key: "approve",
     label: "Approve",
     title: "A human decides",
+    summary:
+      "A human reviews the proposal, evidence and policy rule, then approves or rejects. The decision and who made it are stored on the exception.",
     narration:
       "Human in the loop. The proposal, its evidence and the policy rule it satisfies are " +
       "on screen. Approve executes it through the same service routes an operator would " +
@@ -387,6 +461,8 @@ const STEP = {
     key: "late",
     label: "Late statement",
     title: "The statement finally arrives",
+    summary:
+      "The late statement arrives. Nobody touches the exception; the agent's scheduled recheck sweep picks it up.",
     narration:
       "The correspondent's statement turns up, late. Nobody touches the exception. The " +
       "agent's scheduled recheck sweep picks it up on its own.",
@@ -397,6 +473,8 @@ const STEP = {
     key: "verify",
     label: "Verify",
     title: "Check the result",
+    summary:
+      "The agent re-reads the system and reports success only once the exception has left the open queue.",
     narration:
       "The agent doesn't mark its own work as done. After acting, it re-reads the system and " +
       "only reports success once the exception has actually left the open queue. The " +

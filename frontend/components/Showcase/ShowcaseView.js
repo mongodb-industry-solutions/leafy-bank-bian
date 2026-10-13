@@ -74,25 +74,21 @@ export default function ShowcaseView() {
     <LeafyGreenProvider baseFontSize={16}>
       <div className={styles.page}>
         <div className={styles.root}>
-          <div className={scenarioKey ? styles.header : styles.hero}>
+          {!scenarioKey && <div className={styles.hero}>
             <div className={styles.heroText}>
-              {!scenarioKey && (
-                <span className={styles.eyebrow}>
-                  <Icon glyph="Sparkle" size={14} /> {copy.eyebrow}
-                </span>
-              )}
+              <span className={styles.eyebrow}>
+                <Icon glyph="Sparkle" size={14} /> {copy.eyebrow}
+              </span>
               <H2 className={styles.title}>Agent scenarios</H2>
-              <Body className={styles.muted}>
-                {scenarioKey
-                  ? "Click Next to run each step."
-                  : copy.blurb}
-              </Body>
+              <Body className={styles.muted}>{copy.blurb}</Body>
             </div>
+            <div className={styles.headerControls}>
             <span className={styles.health}>
               <span className={`${styles.dot} ${agentReady ? styles.dotUp : styles.dotDown}`} />
               <Body as="span">Agent {agentReady == null ? "checking…" : agentReady ? "ready" : "offline"}</Body>
             </span>
-          </div>
+            </div>
+          </div>}
 
         {agentReady === false && (
           <Banner variant="warning">{copy.offline}</Banner>

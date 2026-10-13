@@ -5,23 +5,20 @@
 // AgentThinking owns only its own steps poll.
 
 import { useEffect, useMemo, useState } from "react";
-import Button from "@leafygreen-ui/button";
-import { H2, Body, Overline } from "@leafygreen-ui/typography";
+import { Body, Overline } from "@leafygreen-ui/typography";
 import { agentApi, coreApi, pipelineApi } from "@/lib/api/client";
 import { usePaymentWorkflow, usePipelineTrace, useWorkflowExceptions } from "@/lib/api/hooks";
-import { ACTS, CATEGORY, OVERDUE_SECONDS, actOf, actsFor, scenarioByKey, stepsFor } from "./scenarios";
-import StoryBar from "./StoryBar";
-import StatusRail from "./StatusRail";
+import { CATEGORY, OVERDUE_SECONDS, actOf, scenarioByKey, stepsFor } from "./scenarios";
+import { PaymentCard } from "./StatusRail";
+import { BriefStrip } from "./ScenarioBrief";
+import RunConsole from "./RunConsole";
 import { useAgentSteps } from "./AgentThinking";
-import SetupScene from "./scenes/SetupScene";
 import ProblemScene from "./scenes/ProblemScene";
-import InvestigateScene from "./scenes/InvestigateScene";
 import DecisionScene from "./scenes/DecisionScene";
 import ResultScene from "./scenes/ResultScene";
+import AgentFailure from "./scenes/AgentFailure";
 import { gapOf, railLegOf } from "./scenes/format";
-import StepDocuments from "./StepDocuments";
-import { useLiveLog } from "./LiveLog";
-import { writesFor } from "./stepWrites";
+import { phaseOfStep, useRunLog } from "./runLog";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
@@ -197,12 +194,8 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   const outcome = reconciled ? "RECONCILED" : answered ? "ANSWERED" : escalated ? "ESCALATED" : null;
 
   const { steps: agentSteps, started: agentStarted } = useAgentSteps(followedId, !outcome);
-  const { events: liveEvents, push: pushEvent } = useLiveLog(
-    { payment, trace, steps: agentSteps, agent, bank: scenario.bank, quietWrites: true },
-    paymentId
-  );
 
-  // The first non-zero gap seen is the "before" of the result scene; reconciling zeroes the live one.
+  // The first non-zero gap seen is the "before" of the result card; reconciling zeroes the live one.
   const railLeg = railLegOf(trace);
   const liveGap = gapOf(railLeg);
   const [gapBefore, setGapBefore] = useState(null);
@@ -210,17 +203,12 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     if (liveGap) setGapBefore((prev) => prev ?? liveGap);
   }, [liveGap]);
 
-  // One expandable "Written to MongoDB" event per step that has run. A gated step
-  // (Investigate, Approve) writes while it is on screen, so the current one counts too.
-  useEffect(() => {
-    if (!paymentId) return;
-    const lastWritten = step.gate || step.final ? index : index - 1;
-    steps.slice(0, lastWritten + 1).forEach((s) => {
-      const writes = writesFor(s.key, scenarioKey);
-      if (writes.length) pushEvent({ key: `writes:${s.key}`, lane: "mongo", title: `Written to MongoDB · ${s.label}`, writes });
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, paymentId]);
+  // verify() clears proposedAction on the agent record; the remembered one keeps the proposal on screen.
+  const proposal = agent?.proposedAction || (followedId ? lastProposals[followedId] : null);
+  const { events, push: pushEvent } = useRunLog({
+    scenario, scenarioKey, steps, index, step, ctx, payment, trace, agentSteps, agentStarted, agent, proposal,
+    exceptions: trackedExceptions, gapMajor: liveGap == null ? null : liveGap / 100,
+  });
 
   const countdownLeft = step.countdown && ctx.settledAt
     ? Math.max(0, Math.ceil(OVERDUE_SECONDS - (now - ctx.settledAt) / 1000))
@@ -280,7 +268,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
         local = { ...local, ...patch };
         setCtx(local);
         setNote(n);
-        if (n) pushEvent({ lane: "human", title: n });
+        if (n) pushEvent({ key: `note:${steps[at].key}`, phase: phaseOfStep(steps[at].key), lane: "code", title: n, stepKey: steps[at].key });
         setIndex(Math.min(at + 1, steps.length - 1));
       }
       setTick((t) => t + 1);
@@ -293,58 +281,56 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
 
   function onDecided(decision) {
     setCtx((c) => ({ ...c, decision, followedId }));
-    pushEvent({ lane: "human", title: decision === "APPROVE" ? "You approved the proposal" : "You rejected the proposal", tone: decision === "APPROVE" ? "good" : "alert" });
     setNote(decision === "APPROVE" ? "Approved. The agent executed the action and verified it." : "Rejected. The run has ended.");
     setIndex((i) => Math.min(i + 1, steps.length - 1));
     setTick((t) => t + 1);
   }
 
-  const acts = actsFor(scenarioKey);
-  const currentAct = step.final && outcome ? ACTS.length + 1 : actOf(step.key);
-  const act = ACTS.find((a) => a.id === actOf(step.key)) || ACTS[0];
   const anyOpen = trackedExceptions.some((e) => e.status === "OPEN");
-  // One tone for the whole page, so the story bar, scene stripe and status card agree.
+  // One tone for the whole page, so the scene stripe and status card agree.
   const tone =
     outcome === "RECONCILED" || outcome === "ANSWERED" ? "resolved"
     : awaitingReply || outcome === "ESCALATED" ? "waiting"
     : anyOpen ? "alert"
     : "neutral";
-  const stepLabel = step.button || "Next";
-  const showButton = !step.final && step.key !== "approve";
+  const canDecide = (step.gate === "decided" && !ctx.decision) || revisedProposalPending;
+  const sources = { payment, trace, ownException, orphan, agent, followedException, scenarioKey };
+
+  const controller = {
+    title: step.final ? (outcome ? "Run complete" : "Verifying the result") : step.title,
+    label: step.button || "Next",
+    final: !!step.final,
+    showButton: !step.final && step.key !== "approve",
+    running,
+    waiting,
+    awaitingReply,
+    error,
+    onNext: next,
+    onReplyNow: replyNow,
+    onReset,
+  };
+
   return (
     <div className={`${styles.walkthrough} ${styles[`tone_${tone}`]}`}>
-      <StoryBar acts={acts} currentAct={currentAct} tone={tone} />
-
-      <div className={styles.stage}>
-        <section className={`${styles.scene} ${styles.toneStripe}`}>
-          <div className={styles.sceneHead}>
-            <div>
-              <H2 className={styles.narrationTitle}>{act.label}</H2>
-              <Body className={styles.muted}>{act.caption}</Body>
-            </div>
-            <div className={styles.narrationActions}>
-              {showButton && (
-                <Button variant="primary" size="large" disabled={running || !!waiting} onClick={next}>
-                  {running ? "Running…" : stepLabel}
-                </Button>
-              )}
-              {waiting && <Body className={styles.muted}>{waiting}</Body>}
-              {awaitingReply && (
-                <Button size="small" variant="default" disabled={running} onClick={replyNow}>
-                  Correspondent replies now
-                </Button>
-              )}
-              <Button size="small" variant="default" onClick={onReset}>
-                All scenarios
-              </Button>
-            </div>
-          </div>
-
-          {note && <Body className={styles.note}>{note}</Body>}
-          {error && <Body className={styles.error}>{error}</Body>}
-
-          {currentAct === 1 && <SetupScene init={ctx.init} payment={payment} />}
-          {currentAct === 2 && (
+      <div className={styles.stageFull}>
+        <RunConsole
+          stepIndex={index}
+          stepCards={steps.map((s) => ({
+            key: s.key,
+            title: s.final && !outcome ? "Verifying the result" : s.final ? "Run complete" : s.title,
+            summary: s.summary,
+            beat: scenario.beats?.[s.key],
+          }))}
+          top={(
+            <>
+              <BriefStrip scenario={scenario} />
+              <PaymentCard scenario={scenario} init={ctx.init} payment={payment} exceptions={trackedExceptions} />
+            </>
+          )}
+          controller={controller}
+          events={events}
+          sources={sources}
+          evidence={actOf(step.key) >= 2 && (
             <ProblemScene
               scenarioKey={scenarioKey}
               paymentId={paymentId}
@@ -356,59 +342,33 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
               countdownLeft={countdownLeft}
             />
           )}
-          {currentAct === 3 && (
-            <InvestigateScene
-              scenario={scenario}
-              exceptionId={followedId}
-              paymentId={followedException?.paymentId}
-              agent={agent}
-              steps={agentSteps}
-              started={agentStarted}
-              gapMajor={liveGap == null ? null : liveGap / 100}
-            />
+          failure={agent?.error && !agent?.verification && (
+            <AgentFailure error={agent.error} exceptionId={followedId} paymentId={followedException?.paymentId} />
           )}
-          {(currentAct === 4 || (currentAct === 5 && revisedProposalPending)) && (
-            <DecisionScene
-              scenario={scenario}
-              exceptionId={followedId}
-              proposal={agent?.proposedAction || (followedId ? lastProposals[followedId] : null)}
-              canDecide={(step.gate === "decided" && !ctx.decision) || revisedProposalPending}
-              onDecided={onDecided}
-            />
+          review={proposal && (canDecide || revisedProposalPending) && (
+            <div className={styles.reviewPanel}>
+              <Overline>Needs your decision</Overline>
+              <DecisionScene
+                scenario={scenario}
+                exceptionId={followedId}
+                proposal={proposal}
+                canDecide={canDecide}
+                onDecided={onDecided}
+              />
+            </div>
           )}
-          {currentAct >= 5 && !revisedProposalPending && (
+          result={step.final && !revisedProposalPending && (
             <ResultScene
               paymentId={ctx.paymentId}
-              proposal={agent?.proposedAction || (followedId ? lastProposals[followedId] : null)}
               scenario={scenario}
               trace={trace}
               payment={payment}
-              outcome={step.final ? outcome : null}
+              outcome={outcome}
               gapBefore={gapBefore}
               expectedOutcomes={EXPECTED_OUTCOMES[scenarioKey] || []}
-              waiting={waiting || (step.key === "late" ? "The statement has not arrived yet." : null)}
+              waiting={waiting}
             />
           )}
-
-          <details className={styles.notes}>
-            <summary className={styles.notesSummary}>Presenter notes</summary>
-            <Body>{step.narration}</Body>
-            {scenario.beats?.[step.key] && (
-              <div className={styles.beat}>
-                <Overline>This scenario</Overline>
-                <Body>{scenario.beats[step.key]}</Body>
-              </div>
-            )}
-          </details>
-        </section>
-
-        <StatusRail
-          scenario={scenario}
-          init={ctx.init}
-          payment={payment}
-          exceptions={trackedExceptions}
-          events={liveEvents}
-          docs={{ steps, index, scenarioKey, sources: { payment, trace, ownException, orphan, agent, followedException, scenarioKey } }}
         />
       </div>
     </div>
