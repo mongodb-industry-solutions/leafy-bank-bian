@@ -70,8 +70,8 @@ _LEDGER_STUB = (
     pathlib.Path(__file__).resolve().parents[2] / "ledger" / "data" / "exceptions_schema.json"
 )
 _WORKING_V35 = (
-    pathlib.Path(__file__).resolve().parents[4]
-    / "Consolidated_Banking_DataModel_BIAN_v35_Sep10_WORKING.json"
+    pathlib.Path(__file__).resolve().parents[6]
+    / "bian-data-model" / "Consolidated_Banking_DataModel_BIAN_v37_Oct12.json"
 )
 
 
@@ -186,7 +186,7 @@ def test_the_working_v35_validator_matches_the_authored_stub():
     stub's validator, verbatim — the spec-stub and the consolidated model must not drift."""
     v35 = json.loads(_WORKING_V35.read_text())
     assert "exceptions" in v35["collections"], "exceptions not yet in working v35"
-    assert v35["meta"]["collectionCount"] == 27
+    assert v35["meta"]["collectionCount"] == 29
     assert "exceptions" in v35["meta"]["collectionGroups"]["payments_platform"]
     assert v35["collections"]["exceptions"]["validator"] == json.loads(_TRANSACTIONS_STUB.read_text())["validator"]
 

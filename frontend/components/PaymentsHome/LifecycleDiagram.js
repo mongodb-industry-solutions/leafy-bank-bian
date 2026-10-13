@@ -7,9 +7,9 @@ import styles from "./LifecycleDiagram.module.css";
 // Grid columns are 1-based over the nine stages; `cols` is a CSS grid-column value.
 const PERSONAS = [
   { name: "Bank Customer", role: "Initiates and monitors the payment", cols: "1 / 3", tone: "green" },
-  { name: "Payments Operations", role: "Monitors lifecycle, exceptions and resolutions", cols: "3 / 6", tone: "green" },
-  { name: "Payments Analyst", role: "Monitors execution, settlement and reconciliation", cols: "6 / 8", tone: "blue" },
-  { name: "Finance Operator", role: "Reviews accounting records, batches and posting", cols: "8 / 10", tone: "purple" },
+  { name: "Payments Operations", role: "Monitors validation, approvals and holds, and payment execution", cols: "3 / 6", tone: "green" },
+  { name: "Finance Operator", role: "Reviews ledger events, GL posting and settlement positions", cols: "6 / 8", tone: "blue" },
+  { name: "Payments Analyst", role: "Investigates reconciliation breaks and resolves exceptions and returns", cols: "8 / 10", tone: "purple" },
 ];
 
 const STAGES = [
