@@ -51,7 +51,7 @@ const AGENTS = [
 const COLLECTIONS = [
   ["payments", "Canonical payment and lifecycle"],
   ["routingSnapshots", "Beneficiaries, banks, routing"],
-  ["ledgerEvents", "Append-only time series"],
+  ["ledgerEvents", "Append-only change-stream events"],
   ["subLedgerEntries", "Operational balances"],
   ["journalEntries", "General ledger"],
   ["settlementPositions", "External confirmations"],

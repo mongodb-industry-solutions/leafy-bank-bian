@@ -423,6 +423,8 @@ function Body({ data, loading }) {
 }
 
 function PaymentLink({ id }) {
+  // Orphan statement lines are keyed "<statementId>#<line>" and have no payment to open.
+  if (id?.includes("#")) return <span title="Statement line with no matching payment">{id}</span>;
   return (
     <Link href={`/payments-workflow?payment=${encodeURIComponent(id)}`} className={styles.link}>
       {id}

@@ -61,7 +61,7 @@ const NavBarContent = ({ bianModelUrl }) => {
     return (
         <header className={styles.navBar}>
             <div className={styles.left}>
-                <Link href="/" className={styles.logoLink} aria-label="Leafy Bank home">
+                <Link href={isWorkflowSurface ? "/payments" : "/"} className={styles.logoLink} aria-label="Leafy Bank home">
                     <Image src="/leafy_bank_logo.png" alt="Leafy Bank" width={200} height={36} />
                 </Link>
             </div>
