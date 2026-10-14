@@ -42,7 +42,7 @@ function useAgentHealth() {
       if (cancelled) return;
       setReady({
         reconciliation: !error && data?.reconciliationAgentReady === true,
-        cutoff: !error && data?.cutoffAgentReady === true,
+        cutoff: !error && data?.cutoffAgentReady === true && data?.cutoffAgentEnabled !== false,
       });
     });
     return () => {

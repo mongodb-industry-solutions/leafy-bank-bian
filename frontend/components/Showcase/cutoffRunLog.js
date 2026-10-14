@@ -3,7 +3,7 @@
 // a second line.
 
 import { ACTION_LABEL } from "./agentPhrases";
-import { agentStepEvents, DECISION, DETECTION, INVESTIGATION, RESOLUTION } from "./runLog";
+import { agentStepEvents, DECISION, DETECTION, INVESTIGATION, PAYMENT, RESOLUTION } from "./runLog";
 import { OUTCOME_LABEL } from "./scenes/CutoffScene";
 
 const label = (value) => String(value).replaceAll("_", " ").toLowerCase();

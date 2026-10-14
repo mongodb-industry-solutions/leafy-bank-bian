@@ -50,7 +50,11 @@ export async function findCase(paymentId) {
 export function cutoffError(err) {
   const s = String(err);
   if (s.startsWith("409")) return "Busy, try again in a moment.";
-  if (s.startsWith("503")) return "Cut-off agent not running.";
+  if (s.startsWith("503")) {
+    // The service is up in both cases; the backend detail says which one it is.
+    if (s.includes("disabled")) return "Cut-off agent is disabled. Set ENABLE_CUTOFF_AGENT=true on payment_agent and restart it.";
+    return "Cut-off agent failed to start. Check the payment_agent startup log (Mongo/Bedrock config).";
+  }
   if (s.startsWith("400") && s.includes("before the run's business time")) return "The clock is already past that time.";
   return s;
 }

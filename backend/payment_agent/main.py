@@ -89,6 +89,7 @@ def health() -> dict:
         "status": "ok",
         "reconciliationAgentReady": RECON_AGENT is not None,
         "cutoffAgentReady": CUTOFF_AGENT is not None,
+        "cutoffAgentEnabled": cutoff_worker.enabled(),
     }
 
 
