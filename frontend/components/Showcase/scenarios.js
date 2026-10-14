@@ -103,6 +103,7 @@ export const SCENARIOS = [
   },
   {
     key: "R2",
+    disabled: true,
     mode: "approval",
     recommended: false,
     decision: {
@@ -198,6 +199,7 @@ export const SCENARIOS = [
   },
   {
     key: "R5",
+    disabled: true,
     mode: "refuses",
     recommended: false,
     decision: {
@@ -309,7 +311,10 @@ export const GROUPS = [
   },
 ];
 
-export const scenarioByKey = (key) => SCENARIOS.find((s) => s.key === key) || null;
+// Disabled scenarios stay defined but are hidden from the picker and cannot be opened.
+export const ENABLED_SCENARIOS = SCENARIOS.filter((s) => !s.disabled);
+
+export const scenarioByKey = (key) => ENABLED_SCENARIOS.find((s) => s.key === key) || null;
 
 // Seconds after settlement before the ledger calls a statement line overdue (MISSING).
 export const OVERDUE_SECONDS = 60;

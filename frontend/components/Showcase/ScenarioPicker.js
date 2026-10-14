@@ -2,18 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Icon from "@leafygreen-ui/icon";
-import { SegmentedControl, SegmentedControlOption } from "@leafygreen-ui/segmented-control";
-import { H3, Body } from "@leafygreen-ui/typography";
+import { H2, H3, Body } from "@leafygreen-ui/typography";
 import ScenarioInfo from "./ScenarioBrief";
-import { SCENARIOS, GROUPS, stepsFor } from "./scenarios";
+import { ENABLED_SCENARIOS, GROUPS, stepsFor } from "./scenarios";
 import { CUTOFF_SCENARIOS, CUTOFF_GROUPS } from "./cutoffScenarios";
 import styles from "./Showcase.module.css";
-
-const MODE_LABEL = {
-  approval: "Needs approval",
-  refuses: "Refuses to guess",
-  autonomous: "No approval needed",
-};
 
 const MODE_ICON = {
   approval: "Person",
@@ -47,90 +40,89 @@ function DecisionFlow({ decision }) {
     ["Action", decision.action],
   ];
   return (
-    <ol className={styles.decision}>
+    <dl className={styles.decision}>
       {parts.map(([name, part]) => (
-        <li key={name} className={styles.decisionRow} title={part.code}>
-          <span className={styles.decisionName}>{name}</span>
-          <span className={styles.decisionLabel}>{part.label}</span>
-        </li>
+        <div key={name} className={styles.decisionRow} title={part.code}>
+          <dt className={styles.decisionName}>{name}</dt>
+          <dd className={`${styles.decisionLabel} ${name === "Action" ? styles.decisionAction : ""}`}>{part.label}</dd>
+        </div>
       ))}
-    </ol>
+    </dl>
   );
 }
 
 function ScenarioCard({ scenario, ran, onPick }) {
+  const meta = scenario.startEt
+    ? `${scenario.cardAmount || `USD ${scenario.amount}`} · ${scenario.startEt} ET`
+    : `${scenario.bank} · USD ${scenario.amount} · ${stepsFor(scenario.key).length} steps`;
   return (
-    <div className={styles.cardWrap}>
-    <button
-      type="button"
-      className={`${styles.scenarioCard} ${styles[`mode_${scenario.mode}`]}`}
-      onClick={() => onPick(scenario.key)}
-    >
-      <div className={styles.cardTop}>
-        <span className={styles.modeIcon}>
-          <Icon glyph={scenario.icon || MODE_ICON[scenario.mode]} size={16} />
+    <div className={`${styles.cardWrap} ${styles[`mode_${scenario.mode}`]}`}>
+      <button type="button" className={styles.scenarioCard} onClick={() => onPick(scenario.key)}>
+        <span className={styles.cardTitle}>{scenario.title}</span>
+        <span className={styles.cardStory}>{scenario.story}</span>
+        <DecisionFlow decision={scenario.decision} />
+        <span className={styles.cardFooter}>
+          <span className={styles.cardMeta}>{meta}</span>
+          <span className={styles.cardBadges}>
+            {ran && <span className={styles.ranMark}>Run</span>}
+          </span>
         </span>
-        <span className={styles.modeLabel}>{scenario.modeLabel || MODE_LABEL[scenario.mode]}</span>
-        <span className={styles.cardBadges}>
-          {scenario.recommended && <span className={styles.suggested}>Suggested</span>}
-          {ran && <span className={styles.ranMark}>Run</span>}
-        </span>
-      </div>
-      <H3 className={styles.cardTitle}>{scenario.title}</H3>
-      <Body className={styles.cardStory}>{scenario.story}</Body>
-      <DecisionFlow decision={scenario.decision} />
-      <div className={styles.cardFooter}>
-        <span className={styles.cardMeta}>
-          {scenario.startEt
-            ? `USD ${scenario.amount} · starts ${scenario.startEt} ET`
-            : `${scenario.bank} · USD ${scenario.amount} · ${stepsFor(scenario.key).length} steps`}
-        </span>
-        <span className={styles.startCue}>
-          Start <Icon glyph="ArrowRight" size={14} />
-        </span>
-      </div>
-    </button>
-    <ScenarioInfo scenario={scenario} className={styles.cardInfo} />
+      </button>
+      <ScenarioInfo scenario={scenario} className={styles.cardInfo} />
     </div>
   );
 }
 
-export default function ScenarioPicker({ agent, onAgentChange, onPick }) {
+// Every card is one column of the same four-column grid in both sections, so all cards share one size.
+// A group spans as many columns as it has cards.
+const CARD_COLUMNS = 4;
+
+function AgentSection({ id, title, groups, scenarios, ran, onPick }) {
+  const filled = groups
+    .map((group) => ({ group, items: scenarios.filter((s) => s.mode === group.mode) }))
+    .filter(({ items }) => items.length);
+  return (
+    <section className={styles.agentSection} aria-labelledby={id}>
+      <H2 id={id} className={styles.agentSectionTitle}>{title}</H2>
+      <div className={styles.groupRow} style={{ "--cols": CARD_COLUMNS }}>
+        {filled.map(({ group, items }) => (
+          <div key={group.mode} className={`${styles.group} ${styles[`mode_${group.mode}`]}`}
+            style={{ "--span": items.length }}>
+            <div className={styles.groupHead}>
+              <span className={styles.groupIcon}>
+                <Icon glyph={group.icon || MODE_ICON[group.mode]} size={14} />
+              </span>
+              <div>
+                <H3 className={styles.groupTitle}>{group.title}</H3>
+                <Body className={styles.muted}>{group.blurb}</Body>
+              </div>
+            </div>
+            <div className={styles.pickerGrid} style={{ "--cols": items.length }}>
+              {items.map((s) => (
+                <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={onPick} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// Both agents on one page, reconciliation first.
+export default function ScenarioPicker({ onPick }) {
   const [ran, markRan] = useRanScenarios();
   const pick = (key) => {
     markRan(key);
     onPick(key);
   };
-  const cutoff = agent === "cutoff";
-  const groups = cutoff ? CUTOFF_GROUPS : GROUPS;
-  const scenarios = cutoff ? CUTOFF_SCENARIOS : SCENARIOS;
 
   return (
     <div id="showcase-scenarios" className={styles.picker}>
-      <div className={styles.agentToggle}>
-        <SegmentedControl aria-label="Agent" aria-controls="showcase-scenarios" value={cutoff ? "cutoff" : "reconciliation"} onChange={onAgentChange}>
-          <SegmentedControlOption value="reconciliation">Reconciliation</SegmentedControlOption>
-          <SegmentedControlOption value="cutoff">Cut-off</SegmentedControlOption>
-        </SegmentedControl>
-      </div>
-      {groups.map((group) => (
-        <section key={group.mode} className={`${styles.group} ${styles[`mode_${group.mode}`]}`}>
-          <div className={styles.groupHead}>
-            <span className={styles.groupIcon}>
-              <Icon glyph={group.icon || MODE_ICON[group.mode]} size={16} />
-            </span>
-            <div>
-              <H3 className={styles.groupTitle}>{group.title}</H3>
-              <Body className={styles.muted}>{group.blurb}</Body>
-            </div>
-          </div>
-          <div className={styles.pickerGrid}>
-            {scenarios.filter((s) => s.mode === group.mode).map((s) => (
-              <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={pick} />
-            ))}
-          </div>
-        </section>
-      ))}
+      <AgentSection id="recon-scenarios" title="Reconciliation agent" groups={GROUPS}
+        scenarios={ENABLED_SCENARIOS} ran={ran} onPick={pick} />
+      <AgentSection id="cutoff-scenarios" title="Cut-off agent" groups={CUTOFF_GROUPS}
+        scenarios={CUTOFF_SCENARIOS} ran={ran} onPick={pick} />
     </div>
   );
 }

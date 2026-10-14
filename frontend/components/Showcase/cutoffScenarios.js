@@ -92,6 +92,8 @@ export const CUTOFF_SCENARIOS = [
         "day so it can settle.",
     },
     amount: "balance + 3,200.00",
+    // The wire amount is computed at run time; the card shows the gap instead.
+    cardAmount: "$3,200 over balance",
     startEt: "16:45",
     expected: "Held for the next value date",
     expectedOutcome: "HELD_NEXT_VALUE_DATE",

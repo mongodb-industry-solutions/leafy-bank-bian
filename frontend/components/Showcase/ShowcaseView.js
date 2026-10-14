@@ -7,9 +7,8 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Banner from "@leafygreen-ui/banner";
-import Icon from "@leafygreen-ui/icon";
 import LeafyGreenProvider from "@leafygreen-ui/leafygreen-provider";
-import { H2, Body } from "@leafygreen-ui/typography";
+import { Body } from "@leafygreen-ui/typography";
 import { agentApi } from "@/lib/api/client";
 import { scenarioByKey } from "./scenarios";
 import ScenarioPicker from "./ScenarioPicker";
@@ -20,15 +19,11 @@ import styles from "./Showcase.module.css";
 
 const AGENT_COPY = {
   reconciliation: {
-    eyebrow: "Reconciliation agent",
-    blurb:
-      "Watch an AI agent investigate a payment problem, propose a fix, and wait for a human to approve. Cards marked Suggested make a good short demo.",
+    name: "Reconciliation",
     offline: "The reconciliation agent is offline. Start payment_agent with ENABLE_RECONCILIATION_AGENT=true before running a scenario.",
   },
   cutoff: {
-    eyebrow: "Cut-off agent",
-    blurb:
-      "Watch an AI agent race a held wire against the day's cut-off: it clears what it can on its own, and asks a human before it expedites, holds or defers. Cards marked Suggested make a good short demo.",
+    name: "Cut-off",
     offline: "The cut-off agent is offline. Start payment_agent with ENABLE_CUTOFF_AGENT=true before running a scenario.",
   },
 };
@@ -60,13 +55,13 @@ export default function ShowcaseView() {
   const param = params.get("scenario");
   const isCutoffKey = !!cutoffByKey(param);
   const scenarioKey = isCutoffKey || scenarioByKey(param) ? param : null;
-  const agent = isCutoffKey || params.get("agent") === "cutoff" ? "cutoff" : "reconciliation";
-  const base = agent === "cutoff" ? "/showcase?agent=cutoff" : "/showcase";
   const setScenarioKey = (key) =>
-    router.push(key ? `${base}${agent === "cutoff" ? "&" : "?"}scenario=${encodeURIComponent(key)}` : base);
-  const setAgent = (next) => router.push(next === "cutoff" ? "/showcase?agent=cutoff" : "/showcase");
-  const agentReady = useAgentHealth()[agent];
-  const copy = AGENT_COPY[agent];
+    router.push(key ? `/showcase?scenario=${encodeURIComponent(key)}` : "/showcase");
+  const health = useAgentHealth();
+  const states = Object.values(health);
+  const checking = states.some((s) => s == null);
+  const allLive = states.every((s) => s === true);
+  const statusDot = checking ? "" : allLive ? styles.dotUp : styles.dotDown;
 
   // 16px base: the page is presented on a shared screen, and one base size keeps every
   // Body, Badge and Button on the same scale instead of per-class font sizes.
@@ -75,24 +70,14 @@ export default function ShowcaseView() {
       <div className={styles.page}>
         <div className={styles.root}>
           {!scenarioKey && <div className={styles.hero}>
-            <div className={styles.heroText}>
-              <span className={styles.eyebrow}>
-                <Icon glyph="Sparkle" size={14} /> {copy.eyebrow}
-              </span>
-              <H2 className={styles.title}>Agent scenarios</H2>
-              <Body className={styles.muted}>{copy.blurb}</Body>
-            </div>
-            <div className={styles.headerControls}>
-            <span className={styles.health}>
-              <span className={`${styles.dot} ${agentReady ? styles.dotUp : styles.dotDown}`} />
-              <Body as="span">Agent {agentReady == null ? "checking…" : agentReady ? "ready" : "offline"}</Body>
+            <span className={styles.health} title={Object.entries(AGENT_COPY).map(([key, c]) => `${c.name}: ${health[key] ? "ready" : "offline"}`).join(" · ")}>
+              <span className={`${styles.dot} ${statusDot}`} />
+              <Body as="span">Agents</Body>
             </span>
-            </div>
           </div>}
 
-        {agentReady === false && (
-          <Banner variant="warning">{copy.offline}</Banner>
-        )}
+        {!scenarioKey && Object.entries(AGENT_COPY).map(([key, c]) =>
+          health[key] === false && <Banner key={key} variant="warning">{c.offline}</Banner>)}
 
         {scenarioKey && isCutoffKey && (
           <CutoffStepper key={scenarioKey} scenarioKey={scenarioKey} onReset={() => setScenarioKey(null)} />
@@ -100,7 +85,7 @@ export default function ShowcaseView() {
         {scenarioKey && !isCutoffKey && (
           <ScenarioStepper key={scenarioKey} scenarioKey={scenarioKey} onReset={() => setScenarioKey(null)} />
         )}
-        {!scenarioKey && <ScenarioPicker agent={agent} onAgentChange={setAgent} onPick={setScenarioKey} />}
+        {!scenarioKey && <ScenarioPicker onPick={setScenarioKey} />}
         </div>
       </div>
     </LeafyGreenProvider>

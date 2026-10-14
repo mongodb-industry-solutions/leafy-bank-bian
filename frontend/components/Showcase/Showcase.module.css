@@ -24,23 +24,40 @@
 .health {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   white-space: nowrap;
-  padding: 4px 12px;
+  padding: 2px 10px;
+  font-size: 13px;
   border: 1px solid #c9d1cf;
   border-radius: 999px;
   background: #ffffff;
 }
 
+.health span {
+  font-size: 13px;
+  line-height: 18px;
+}
+
 .dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #b8c4c2;
 }
 
 .dotUp {
   background: #00a35c;
+  animation: dotPulse 1.8s ease-out infinite;
+}
+
+@keyframes dotPulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 163, 92, 0.55); opacity: 1; }
+  70% { box-shadow: 0 0 0 6px rgba(0, 163, 92, 0); opacity: 0.6; }
+  100% { box-shadow: 0 0 0 0 rgba(0, 163, 92, 0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dotUp { animation: none; }
 }
 
 .dotDown {
@@ -71,7 +88,7 @@
 .hero {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 24px;
   padding: 8px 0 8px;
 }
@@ -99,28 +116,55 @@
 .picker {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 40px;
+}
+
+.agentSection {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.agentSectionTitle {
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #dbe2e0;
 }
 
 .group {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
+}
+
+.group > .pickerGrid {
+  flex: 1;
 }
 
 .groupHead {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
+  min-height: 48px; /* room for a two-line blurb so every card row starts at the same height */
+}
+
+.group .groupHead h3 {
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.group .groupHead p {
+  font-size: 13px;
+  line-height: 18px;
 }
 
 .groupIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   background: var(--accent-bg, #e8edeb);
   color: var(--accent, #3d4f58);
   flex: none;
@@ -130,10 +174,37 @@
   margin: 0;
 }
 
+.groupRow {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  gap: 24px 16px;
+  align-items: stretch;
+}
+
+.groupRow > .group {
+  grid-column: span var(--span);
+}
+
 .pickerGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Narrow screens: one group per row, cards wrap at a readable width. */
+@media (max-width: 1100px) {
+  .groupRow {
+    grid-template-columns: 1fr;
+  }
+
+  .groupRow > .group {
+    grid-column: auto;
+  }
+
+  .pickerGrid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
 }
 
 /* Mode themes feed both the group header and its cards. */
@@ -156,32 +227,33 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 20px;
+  align-items: stretch;
+  gap: 8px;
+  padding: 16px 16px 12px 19px;
   overflow: hidden;
   text-align: left;
   font: inherit;
   color: #1c2d38;
   background: #ffffff;
   border: 1px solid #dbe2e0;
-  border-radius: 16px;
-  box-shadow: 0 1px 2px rgba(6, 22, 33, 0.04), 0 8px 24px rgba(6, 22, 33, 0.06);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(6, 22, 33, 0.04);
   cursor: pointer;
-  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+  transition: box-shadow 160ms ease, border-color 160ms ease;
 }
 
+/* The mode shows as a left accent; the group heading above already names it. */
 .scenarioCard::before {
   content: "";
   position: absolute;
-  inset: 0 0 auto 0;
-  height: 4px;
+  inset: 0 auto 0 0;
+  width: 3px;
   background: var(--accent, #889397);
 }
 
 .scenarioCard:hover {
   border-color: var(--accent, #889397);
-  box-shadow: 0 2px 4px rgba(6, 22, 33, 0.06), 0 16px 36px rgba(6, 22, 33, 0.12);
-  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(6, 22, 33, 0.1);
 }
 
 .scenarioCard:focus-visible {
@@ -189,69 +261,91 @@
   outline-offset: 2px;
 }
 
-.cardDisabled {
-  cursor: default;
-  background: rgba(255, 255, 255, 0.55);
-  border-style: dashed;
-  box-shadow: none;
+.cardTitle {
+  padding-right: 32px; /* clear the info button */
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.cardStory {
+  font-size: 13px;
+  line-height: 19px;
+  color: #3d4f58;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.decision {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #f6f8f7;
+  border-radius: 8px;
+}
+
+.decisionRow {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-items: baseline;
+  gap: 8px;
+  cursor: help;
+}
+
+.decisionName {
+  margin: 0;
+  color: #889397;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.decisionLabel {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: #3d4f58;
+}
+
+.decisionAction {
+  font-weight: 600;
+  color: var(--accent, #1c2d38);
+}
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.cardMeta {
+  font-size: 12px;
+  line-height: 16px;
   color: #5c6c75;
 }
 
-.cardDisabled::before {
-  display: none;
-}
-
-.cardDisabled:hover {
-  border-color: #dbe2e0;
-  box-shadow: none;
-  transform: none;
-}
-
-.cardTop {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.modeIcon {
+.cardBadges {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--accent-bg, #e8edeb);
-  color: var(--accent, #3d4f58);
+  gap: 6px;
   flex: none;
 }
 
-.modeLabel {
-  font-weight: 600;
-  white-space: nowrap;
-  color: var(--accent, #3d4f58);
-}
-
-.cardBadges {
-  margin-left: auto;
-  display: inline-flex;
-  gap: 8px;
-}
-
-.suggested,
 .ranMark {
-  padding: 2px 10px;
+  padding: 1px 8px;
   border-radius: 999px;
   white-space: nowrap;
+  font-size: 11px;
+  line-height: 16px;
   font-weight: 600;
-}
-
-.suggested {
-  background: #fff6d6;
-  color: #6f4c00;
-}
-
-.suggested::before {
-  content: "\2605\00a0";
 }
 
 .ranMark {
@@ -261,85 +355,6 @@
 
 .ranMark::before {
   content: "\2713\00a0";
-}
-
-.cardTitle {
-  margin: 0;
-}
-
-.cardStory {
-  color: #3d4f58;
-}
-
-/* Cause -> Rule -> Action as a vertical flow: wide enough that labels never wrap to one word per line. */
-.decision {
-  list-style: none;
-  margin: 0;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: #f6f8f7;
-  border-radius: 10px;
-}
-
-.decisionRow {
-  position: relative;
-  display: grid;
-  grid-template-columns: 78px 1fr;
-  align-items: baseline;
-  gap: 8px;
-  cursor: help;
-}
-
-.decisionRow + .decisionRow::before {
-  content: "";
-  position: absolute;
-  left: 39px;
-  top: -8px;
-  height: 8px;
-  border-left: 1px dashed #b8c4c2;
-}
-
-.decisionName {
-  color: #889397;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
-
-.decisionLabel {
-  font-weight: 600;
-}
-
-.cardFooter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: auto;
-  padding-top: 4px;
-}
-
-.cardMeta {
-  color: #5c6c75;
-}
-
-.startCue {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 600;
-  color: var(--accent, #00684a);
-  opacity: 0;
-  transform: translateX(-4px);
-  transition: opacity 160ms ease, transform 160ms ease;
-}
-
-.scenarioCard:hover .startCue,
-.scenarioCard:focus-visible .startCue {
-  opacity: 1;
-  transform: none;
 }
 
 /* Walkthrough */
@@ -1028,8 +1043,8 @@ scene + rail. One tone drives every accent. */
 
 .cardInfo {
   position: absolute;
-  top: 22px;
-  right: 20px;
+  top: 12px;
+  right: 12px;
 }
 
 .railTitleRow {
@@ -1037,10 +1052,6 @@ scene + rail. One tone drives every accent. */
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-.cardWrap .cardTop {
-  padding-right: 36px;
 }
 
 /* Phase 1: always-visible brief, Guided/Explore toggle and the always-open MongoDB panel. */
