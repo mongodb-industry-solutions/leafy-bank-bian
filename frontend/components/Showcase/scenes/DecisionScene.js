@@ -13,7 +13,7 @@ function effectOf(proposal, bank) {
     case "POST_ADJUSTMENT":
       return `A correcting journal: Dr 5214 correspondent charges / Cr 1111 Nostro/Central Bank Cash, ${major(proposal.params?.amount)}.`;
     case "ACCEPT_DISCREPANCY":
-      return "No journal. The exception closes and the payment reconciles with the gap accepted.";
+      return "No charge adjustment. The 25.00 shortfall is recorded as variance (\"SHAR charge deducted\") and marked explained and matched. The exception closes and the payment reconciles.";
     case "LINK_STATEMENT_ENTRY":
       return "The statement line is linked to the payment. One link closes both exceptions.";
     case "ESCALATE_TO_CORRESPONDENT":

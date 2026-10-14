@@ -68,8 +68,8 @@ export const SCENARIOS = [
       action: { label: "Accept the gap", code: "ACCEPT_DISCREPANCY" },
     },
     title: "Fee deducted, shared charges",
-    story: "Same $25 fee taken by the bank, but this time the sender and the recipient agreed to split the charges, so the fee is not our loss.",
-    talkingPoint: "Same $25, different books: the charge terms decide the action.",
+    story: "Same USD 25.00 fee, but the payment is SHAR: intermediary bank charges are borne by the beneficiary, so the deduction is expected and not a loss for the bank.",
+    talkingPoint: "Same USD 25.00 shortfall, different outcome: under DEBT it stays a real exception; under SHAR the charge bearer decides it is not an error.",
     bank: "Barclays",
     wire: {
       beneficiary: "Northwind Traders Ltd",
@@ -85,19 +85,19 @@ export const SCENARIOS = [
     policyLine: "Discrepancy · cause FEE · bearer SHAR → only ACCEPT_DISCREPANCY is allowed",
     beats: {
       initiate:
-        "We send USD 3,275.00 to Barclays with charge bearer SHAR: charges are shared, so the " +
-        "beneficiary may legitimately receive slightly less.",
+        "We send USD 3,275.00 to Barclays with charge bearer SHAR: the beneficiary bears the " +
+        "beneficiary bank's fee and any intermediary charges, so it may legitimately receive slightly less.",
       settle: "Barclays confirms settlement.",
       glpost: "Our books say 3,275.00 left our nostro account.",
       statement: "Barclays's statement shows 3,250.00: the same 25.00 fee as in the sender-pays scenario.",
       match: "A 25.00 RECONCILIATION_DISCREPANCY opens, the same as in the sender-pays scenario.",
       investigate:
-        "The agent reaches the same cause, FEE, but this time the bearer is SHAR. The " +
-        "beneficiary carries the fee, so there is nothing to book. Policy allows only " +
+        "The agent reaches the same cause, FEE, but this time the bearer is SHAR. Intermediary " +
+        "charges are borne by the beneficiary, so the deduction is expected and there is no charge adjustment to make. Policy allows only " +
         "ACCEPT_DISCREPANCY. Same symptom as the sender-pays case, different correct answer.",
-      approve: "Approving accepts the discrepancy. No ledger entry is written, by design.",
+      approve: "Approving records the variance as \"SHAR charge deducted\", explained and matched. No charge adjustment is posted, by design.",
       verify:
-        "The exception is closed and the payment is RECONCILED, with no correcting journal. " +
+        "The exception is closed and the payment is RECONCILED, with no charge adjustment. " +
         "The charge terms, not the agent's judgement, decided the books.",
     },
   },
