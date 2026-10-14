@@ -16,7 +16,7 @@ import { BriefStrip } from "./ScenarioBrief";
 import { PaymentCard } from "./StatusRail";
 import RunConsole from "./RunConsole";
 import { useAgentSteps } from "./AgentThinking";
-import { INVESTIGATION, PAYMENT, RESOLUTION, useRunLog } from "./runLog";
+import { INVESTIGATION, PAYMENT, RESOLUTION, usePacedEvents, useRunLog } from "./runLog";
 import { deriveCutoffEvents } from "./cutoffRunLog";
 import { ClockStrip, ClosingPanel, Outcome, Proposal, OUTCOME_LABEL, RISK_VARIANT } from "./scenes/CutoffScene";
 import styles from "./Showcase.module.css";
@@ -129,16 +129,24 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   const result = caseDoc?.outcome?.result || null;
   const done = rejected || !!result;
   const { steps: agentSteps, started } = useAgentSteps(caseDoc?.caseId || null, !done, "cutoff/cases");
-  const { events, push: pushEvent } = useRunLog(
+  const { events: allEvents, push: pushEvent } = useRunLog(
     { scenario, steps, ctx, payment, agentSteps, caseDoc },
     deriveCutoffEvents
   );
+
+  // Lines appear one at a time, so the presenter can read where the wire is and where it stops.
+  const { events, backlog } = usePacedEvents(allEvents);
 
   // A failed approved action sends the agent back once; its new proposal needs its own decision.
   const revisedProposal =
     step.final && ctx.decision === "APPROVE" && !!agent?.proposedAction && caseDoc?.status === "AWAITING_APPROVAL";
 
   const businessMs = now + (ctx.offsetSeconds || 0) * 1000;
+  // The clock stops where the run ended, so the strip keeps showing when the outcome landed.
+  const frozenMs = useRef(null);
+  if (!done) frozenMs.current = null;
+  else if (frozenMs.current == null) frozenMs.current = businessMs;
+  const displayMs = frozenMs.current ?? businessMs;
   const waiting = step.final
     ? revisedProposal ? "The agent revised its proposal. Approve or reject it" : done ? null : "Waiting for the outcome…"
     : gateWaiting(step.gate, { agent, caseDoc, ctx });
@@ -286,7 +294,8 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
           )}
           controller={controller}
           events={events}
-          evidence={ctx.init && <ClockStrip businessMs={businessMs} risk={caseDoc?.risk} init={ctx.init} />}
+          pending={backlog > 0 ? "Next event coming…" : waiting}
+          evidence={ctx.init && <ClockStrip businessMs={displayMs} risk={caseDoc?.risk} init={ctx.init} />}
           failure={agent?.error && !agent?.verification && (
             <div className={styles.section}>
               <Overline>Assessment failed</Overline>

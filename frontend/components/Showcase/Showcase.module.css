@@ -1517,3 +1517,31 @@ summary.runTitle {
 @media (prefers-reduced-motion: reduce) {
   .runEvent { animation: none; }
 }
+
+/* The stall card's bar sweeps while the log holds, so the pause reads as a wait, not a freeze. */
+.stallBar {
+  height: 4px;
+  margin-top: 10px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #e5b3b3 0%, #db3030 50%, #e5b3b3 100%);
+  background-size: 200% 100%;
+  animation: stallSweep 1.6s linear infinite;
+}
+
+@keyframes stallSweep {
+  from { background-position: 200% 0; }
+  to { background-position: 0 0; }
+}
+
+.runPending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 4px 40px;
+  color: #5c6c75;
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stallBar { animation: none; }
+}

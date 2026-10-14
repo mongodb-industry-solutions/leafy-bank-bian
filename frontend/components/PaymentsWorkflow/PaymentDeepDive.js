@@ -21,6 +21,7 @@ import { Body } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
+import { STAFF } from "../Showcase/cutoffScenarios";
 import LensToggle, { useLens } from "./LensToggle";
 import MongoRail from "./MongoRail";
 import KeyFacts from "./KeyFacts";
@@ -116,11 +117,13 @@ function stageAttention(stage) {
     openExceptions,
     stepUp: panels.some((p) => p.actionRequired),
     review: panels.some((p) => p.data?.reviewActionRequired),
+    approval: panels.some((p) => p.approvalActionRequired),
   };
 }
 
-function attentionLabel({ openExceptions, stepUp, review }) {
+function attentionLabel({ openExceptions, stepUp, review, approval }) {
   if (openExceptions) return `${openExceptions} open exception${openExceptions > 1 ? "s" : ""}`;
+  if (approval) return "Waiting for a second signature";
   if (stepUp) return "Waiting for step-up authentication";
   if (review) return "Waiting for manual review";
   return null;
@@ -193,10 +196,31 @@ function MiniStepper({ stages, states, selectedKey, onSelect }) {
  * Open exceptions keep their resolve buttons in the exceptions block, so they get a pointer,
  * not a second set of buttons.
  */
-function NextAction({ attention, onApprove, onResolve }) {
-  const { openExceptions, stepUp, review } = attention;
+function NextAction({ attention, onApprove, onResolve, onDecideApproval }) {
+  const { openExceptions, stepUp, review, approval } = attention;
   return (
     <>
+      {approval && onDecideApproval && (
+        <div className={styles.stepUpCallout}>
+          <div className={styles.stepUpCalloutTitle}>
+            <Icon glyph="Person" />
+            <span>Second signature required here</span>
+          </div>
+          <Body>
+            This wire needs a second signatory before it can continue. Approve it and the wire
+            re-enters validation, with the funds and the cut-off checked again. Reject to
+            stop it. No money has moved yet.
+          </Body>
+          <div className={styles.resolveActions}>
+            <Button variant="primary" onClick={() => onDecideApproval("APPROVED")}>
+              Approve
+            </Button>
+            <Button variant="danger" onClick={() => onDecideApproval("REJECTED")}>
+              Reject
+            </Button>
+          </div>
+        </div>
+      )}
       {stepUp && (
         <div className={styles.stepUpCallout}>
           <div className={styles.stepUpCalloutTitle}>
@@ -253,7 +277,7 @@ function NextAction({ attention, onApprove, onResolve }) {
  * group's exceptions render ONCE above the tabs, because the lifecycle model attaches them to
  * the first panel and a per-tab copy would put two live resolve buttons on one exception.
  */
-function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
+function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, onDecideApproval, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent, refreshKey = 0 }) {
   const [panelIdx, setPanelIdx] = useState(0);
   // A different stage (or a payment with fewer panels) must not keep a stale tab index.
   useEffect(() => setPanelIdx(0), [stage?.key]);
@@ -319,7 +343,7 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
         )}
         <div className={`${styles.paneLayout} ${styles[`lens_${lens}`]}`}>
           <div className={styles.paneMain}>
-          <NextAction attention={attention} onApprove={onApprove} onResolve={onResolve} />
+          <NextAction attention={attention} onApprove={onApprove} onResolve={onResolve} onDecideApproval={onDecideApproval} />
           <KeyFacts facts={facts} />
           {stage.key === "validation" && (
             <>
@@ -2248,6 +2272,24 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
     if (onDataChanged) onDataChanged();
   }
 
+  // A cut-off demo wire held for a second signature. The page has no signed-in user, so the
+  // approval is recorded as the backup signatory the Showcase uses (the backend refuses anyone
+  // who is not a signatory on the account).
+  async function decideApproval(decision) {
+    if (!paymentId) return;
+    setResolveError(null);
+    const { error: err } = await coreApi("PaymentOrderProcedure/Approve", {
+      method: "POST",
+      body: { paymentId, approverId: STAFF.RAJ, decision },
+    });
+    if (err) {
+      setResolveError(err);
+      return;
+    }
+    setNudge((n) => n + 1);
+    if (onDataChanged) onDataChanged();
+  }
+
   // Stage 9 — resolve a queued exception (doc 24 B4). The action + optional note + optional
   // settlement outcome POST to the one /workflow write route. `nudge` refreshes the lifecycle
   // so the resolution log + the compensation evidence (for RETURN_FUNDS) appear.
@@ -2417,7 +2459,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
         {error && <Banner variant="danger">Could not load payment — {error}</Banner>}
         {stepUpError && <Banner variant="danger">{stepUpError}</Banner>}
         {resolveError && (
-          <Banner variant="danger">Could not resolve review — {resolveError}</Banner>
+          <Banner variant="danger">Could not update the payment — {resolveError}</Banner>
         )}
         {loading && <div className={styles.emptyState}>Loading…</div>}
         {!loading && !error && !payment && (
@@ -2440,6 +2482,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
               lens={lens}
               onApprove={() => setStepUpOpen(true)}
               onResolve={resolveReview}
+              onDecideApproval={decideApproval}
               onResolveException={resolveException}
               onResolveUta={resolveUta}
               onLedgerAction={ledgerAction}

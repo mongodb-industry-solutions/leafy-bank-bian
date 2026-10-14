@@ -25,6 +25,7 @@ function FeatureBody({ event }) {
     <>
       <Body as="div" className={styles.runTitle}>{event.title}{tag}</Body>
       {event.detail && <Body as="div" className={styles.muted}>{event.detail}</Body>}
+      {event.stall && <div className={styles.stallBar} aria-hidden="true" />}
       {event.items?.length > 0 && (
         <ul className={styles.featureList}>
           {event.items.map((it) => (
@@ -126,7 +127,7 @@ function StepCards({ cards, current, final, waiting }) {
 }
 
 export default function RunConsole({
-  top, stepCards, stepIndex, controller, events, sources, evidence, review, failure, result,
+  top, stepCards, stepIndex, controller, events, pending, sources, evidence, review, failure, result,
 }) {
   const [filter, setFilter] = useState("all");
   const logRef = useRef(null);
@@ -135,7 +136,7 @@ export default function RunConsole({
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length]);
+  }, [events.length, pending]);
 
   let lastPhase = null;
   return (
@@ -228,6 +229,12 @@ export default function RunConsole({
             </div>
           );
         })}
+        {pending && (
+          <div className={styles.runPending} role="status">
+            <span className={styles.liveDot} aria-hidden="true" />
+            {pending}
+          </div>
+        )}
       </div>
       </div>
 

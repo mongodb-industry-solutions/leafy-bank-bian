@@ -256,6 +256,9 @@ export function buildLifecycleStages(payment, trace) {
       kind: inbound ? "beneficiaryResolution" : "checks",
       data: inbound ? payment?.beneficiaryResolution ?? null : stageTwoChecks,
       actionRequired: heldForStepUp,
+      // A cut-off demo wire waiting for its second signatory (`PENDING_APPROVAL`). The
+      // stage-2 panel offers the approve and reject buttons while it is held.
+      approvalActionRequired: !inbound && payment?.lifecycle?.currentState === "PENDING_APPROVAL",
       // A different question entirely for inbound (Doina L488): not "is this caller allowed
       // to send this amount?" but "is this a legitimate message, and does the account it
       // names actually belong to the person it claims to belong to?" There is no customer to

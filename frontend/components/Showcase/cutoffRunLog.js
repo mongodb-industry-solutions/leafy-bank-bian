@@ -27,6 +27,62 @@ const CLOSING = [
   { status: "RECONCILED", title: "Payment reconciled" },
 ];
 
+// Each lifecycle state in plain words: the stage the wire is in, and for the four holds why it
+// cannot go further. A state not listed falls back to its lowercased name.
+const STATE_INFO = {
+  INITIATED: { stage: "Initiation", title: "Wire received and recorded" },
+  VALIDATED: { stage: "Validation", title: "Validation passed" },
+  FINAL_VALIDATED: { stage: "Validation", title: "Final checks passed" },
+  ROUTED: { stage: "Orchestration", title: "Routed to Fedwire" },
+  AUTHORISED: { stage: "Orchestration", title: "Authorised to send" },
+  PENDING_APPROVAL: {
+    stage: "Authentication and authorization", title: "Waiting for a second signature",
+    why: "The wire needs a second signatory and the assigned approver is not available.",
+  },
+  PENDING_FUNDS: {
+    stage: "Validation", title: "Waiting for funds",
+    why: "The account holds less than the wire needs, so it cannot be reserved.",
+  },
+  CUTOFF_EXCEPTION: {
+    stage: "Orchestration", title: "Past the internal cut-off",
+    why: "The wire missed the bank's internal cut-off and needs a decision.",
+  },
+  PENDING_SCREENING: {
+    stage: "Orchestration", title: "Waiting in the screening queue",
+    why: "A possible sanctions match is waiting for an analyst.",
+  },
+};
+const HOLD_DWELL_MS = 4000;
+
+// The wire's own journey, from its lifecycle events: each move is a line, and the first hold
+// is a card of its own that says what blocks the wire. Moves after the hold belong to the
+// resolution. Submitted, settled and reconciled are covered by CLOSING.
+function paymentEvents(payment) {
+  const out = [];
+  const closing = new Set(CLOSING.map((c) => c.status));
+  let held = false;
+  (payment?.lifecycle?.events || []).forEach((e, i) => {
+    if (closing.has(e.state)) return;
+    const info = STATE_INFO[e.state] || { stage: label(e.state), title: `Moved to ${label(e.state)}` };
+    const hold = !!info.why;
+    const base = held ? { phase: RESOLUTION, ord: 640 + i / 100 } : { phase: PAYMENT, ord: 10 + i };
+    out.push({
+      key: `state:${i}:${e.state}`, ...base, lane: "code",
+      tone: hold ? "wait" : undefined, title: `${info.stage}: ${info.title}`, detail: e.reason,
+    });
+    if (hold && !held) {
+      out.push({
+        key: `stall:${i}`, phase: PAYMENT, lane: "code", ord: 10 + i + 0.5, card: true, tone: "alert", stall: true,
+        dwell: HOLD_DWELL_MS,
+        title: `Stalled at ${info.stage}`,
+        detail: `${info.why} Nothing moves it forward on its own. Code alone would leave it here until the cut-off passes.`,
+      });
+    }
+    if (hold) held = true;
+  });
+  return out;
+}
+
 const detailText = (detail) => {
   if (detail == null) return undefined;
   if (typeof detail === "string") return detail;
@@ -34,7 +90,7 @@ const detailText = (detail) => {
 };
 
 export function deriveCutoffEvents({ scenario, ctx, payment, agentSteps, caseDoc }) {
-  const out = [];
+  const out = [...paymentEvents(payment)];
   const agent = caseDoc?.agent;
   const risk = caseDoc?.risk;
 

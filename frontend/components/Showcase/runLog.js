@@ -9,7 +9,7 @@
 //   expand raw text revealed on click (a tool's result); items a short bullet list
 //   writes the step's documents (stepWrites), shown through WriteRow
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { momentsFor } from "./briefs";
 import { phraseFor } from "./agentPhrases";
 import { writesFor } from "./stepWrites";
@@ -244,4 +244,24 @@ export function useRunLog(sources, derive = deriveRunEvents) {
   const push = (event) =>
     setManual((prev) => (prev.some((e) => e.key === event.key) ? prev : [...prev, { ...event, at: Date.now() }]));
   return { events, push };
+}
+
+/**
+ * Releases the log one line at a time so a presenter can follow it. Lines already shown stay;
+ * a new line, wherever it sorts, waits its turn. A line with `dwell` (a stall) holds the queue
+ * that many ms before the next one appears. `backlog` counts lines still queued.
+ */
+export function usePacedEvents(events, gapMs = 1100) {
+  const [shown, setShown] = useState([]);
+  const next = events.find((e) => !shown.includes(e.key));
+  const lastDwell = shown.length ? events.find((e) => e.key === shown[shown.length - 1])?.dwell : undefined;
+
+  useEffect(() => {
+    if (!next) return undefined;
+    const id = setTimeout(() => setShown((prev) => [...prev, next.key]), shown.length ? lastDwell ?? gapMs : 0);
+    return () => clearTimeout(id);
+  }, [next?.key, shown.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visible = events.filter((e) => shown.includes(e.key));
+  return { events: visible, backlog: events.length - visible.length };
 }
