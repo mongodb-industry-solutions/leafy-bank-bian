@@ -16,7 +16,7 @@ import { writesFor } from "./stepWrites";
 import { gapOf, major, minor, railLegOf } from "./scenes/format";
 
 export const PHASES = ["The payment", "Detection", "Agent investigation", "Human decision", "Resolution"];
-const [PAYMENT, DETECTION, INVESTIGATION, DECISION, RESOLUTION] = PHASES;
+export const [PAYMENT, DETECTION, INVESTIGATION, DECISION, RESOLUTION] = PHASES;
 
 export const LANE_LABEL = { agent: "Agent", code: "Code", mongo: "MongoDB", human: "You" };
 
@@ -75,7 +75,7 @@ export function policyLines(agent, scenario, gapMajor) {
 }
 
 /** One event per tool call, its result attached once the matching tool_result arrives. */
-function agentStepEvents(agentSteps, bank) {
+export function agentStepEvents(agentSteps, bank) {
   const out = [];
   const open = [];
   // Reasoning is the agent explaining the call that follows, so it rides on that call.
@@ -222,10 +222,10 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
  * reports a step's result takes over the title of that step's MongoDB-writes line instead of
  * printing a second row.
  */
-export function useRunLog(sources) {
+export function useRunLog(sources, derive = deriveRunEvents) {
   const [manual, setManual] = useState([]);
 
-  const derived = deriveRunEvents(sources);
+  const derived = derive(sources);
   const merged = new Set();
   manual.forEach((m) => {
     const target = m.stepKey && derived.find((d) => d.key === `writes:${m.stepKey}`);

@@ -1,16 +1,13 @@
 "use client";
 
-// Part D — the cut-off walkthrough's one scene. It renders progressively by act: the business
-// clock against both cut-offs, the computed risk, what the agent did on its own, its
-// assessment, its proposal (the decision), and the verified outcome.
+// The cut-off walkthrough's panels around the run log: the business clock against both
+// cut-offs, the proposal to decide on, the verified outcome and the closing of the payment.
 
 import { useState } from "react";
 import Badge from "@leafygreen-ui/badge";
 import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 import { Body, Overline } from "@leafygreen-ui/typography";
-import AgentTrace from "../AgentThinking";
-import { ACTION_LABEL, evidenceItems, phraseFor } from "../agentPhrases";
 import { cutoffError, decideCutoff } from "../cutoffActions";
 import CountdownRing from "./CountdownRing";
 import { asUtc } from "./format";
@@ -24,7 +21,6 @@ const ET_SHORT = new Intl.DateTimeFormat("en-US", {
 });
 
 export const RISK_VARIANT = { ON_TRACK: "green", AT_RISK: "yellow", WILL_MISS: "red" };
-const RISK_LABEL = { ON_TRACK: "On track", AT_RISK: "At risk", WILL_MISS: "Will miss" };
 
 const PROPOSAL_LABEL = {
   EXPEDITE: "Expedite to Fedwire",
@@ -42,13 +38,6 @@ export const OUTCOME_LABEL = {
   SUPERSEDED: "Superseded by a newer run",
   CLOCK_EXPIRED: "The cut-off passed",
 };
-
-// Actions the agent may take without asking (backend `cutoff_rules.AUTO`).
-const AUTO_ACTIONS = new Set([
-  "SEND_APPROVAL_REMINDER", "ESCALATE_TO_BACKUP_APPROVER", "RAISE_SCREENING_PRIORITY", "NOTIFY_CUSTOMER_FUNDS",
-]);
-
-const RESULT_VARIANT = { DONE: "green", REFUSED: "yellow", ERROR: "red" };
 
 function countdownText(seconds) {
   if (seconds <= 0) return "passed";
@@ -72,7 +61,7 @@ function CutoffRing({ at, businessMs, label }) {
 }
 
 /** The business clock (client time plus the run's offset) against both cut-offs. */
-function ClockStrip({ businessMs, risk, init }) {
+export function ClockStrip({ businessMs, risk, init }) {
   return (
     <div className={styles.clockStrip}>
       <div className={styles.section}>
@@ -85,121 +74,8 @@ function ClockStrip({ businessMs, risk, init }) {
   );
 }
 
-function RiskCard({ risk }) {
-  if (!risk) return null;
-  return (
-    <div className={styles.findingCard}>
-      <Overline>Risk, computed by code</Overline>
-      <div className={styles.chipRow}>
-        <Badge variant={RISK_VARIANT[risk.riskLevel] || "lightgray"}>{RISK_LABEL[risk.riskLevel] || risk.riskLevel}</Badge>
-        {risk.phase && <Badge variant="lightgray">{risk.phase.replaceAll("_", " ").toLowerCase()}</Badge>}
-        {risk.blockerType && <Badge variant="lightgray">Blocker: {risk.blockerType.toLowerCase()}</Badge>}
-      </div>
-      {risk.remainingP90Min != null && (
-        <Body className={styles.muted}>
-          Typically clears in {risk.remainingP50Min ?? "—"} min (p50), {risk.remainingP90Min} min (p90).
-        </Body>
-      )}
-      {(risk.reasons || []).length > 0 && (
-        <Body as="ul" className={styles.evidence}>
-          {risk.reasons.map((r, i) => (
-            <li key={i}>{r}</li>
-          ))}
-        </Body>
-      )}
-    </div>
-  );
-}
-
-function detailText(detail) {
-  if (detail == null) return "";
-  if (typeof detail === "string") return detail;
-  return Object.entries(detail).map(([k, v]) => `${k} ${v}`).join(", ");
-}
-
-/** What the agent did on its own: the AUTO actions and refusals, newest last. */
-function ActionLog({ actions }) {
-  const own = (actions || []).filter((a) => AUTO_ACTIONS.has(a.action));
-  return (
-    <div className={styles.findingCard}>
-      <Overline>Acted on its own</Overline>
-      {own.length === 0 ? (
-        <Body className={styles.muted}>Nothing yet.</Body>
-      ) : (
-        <ul className={styles.actionLog}>
-          {own.map((a, i) => (
-            <li key={`${a.action}-${i}`} className={styles.checkRow}>
-              <Badge variant={RESULT_VARIANT[a.result] || "lightgray"}>{a.result}</Badge>
-              <Body as="span">{ACTION_LABEL[a.action] || a.action}</Body>
-              {a.detail != null && <Body as="span" className={`${styles.muted} ${styles.mono}`}>{detailText(a.detail)}</Body>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/** The live evidence checklist, the recorded assessment, and the raw trace. */
-function Assessment({ agent, steps, started, bank }) {
-  const [showTrace, setShowTrace] = useState(false);
-  const items = evidenceItems(steps, bank);
-  const current = items.find((i) => !i.done);
-  const rec = agent?.recommendation;
-  return (
-    <div className={styles.section}>
-      <ul className={styles.checklist}>
-        {!started && <Body className={styles.muted}>Waiting for the agent to start…</Body>}
-        {items.map((it, i) => (
-          <li key={`${it.tool}-${i}`} className={`${styles.checkRow} ${it.done ? styles.checkDone : ""}`}>
-            <Icon glyph={it.done ? "Checkmark" : "Ellipsis"} size={20} />
-            <Body as="span">{it.label}</Body>
-          </li>
-        ))}
-      </ul>
-      {current && !agent?.assessedAt && <Body className={styles.muted}>{phraseFor(current.tool, bank)}…</Body>}
-
-      {agent?.error && (
-        <div className={styles.section}>
-          <Overline>Assessment failed</Overline>
-          <Body className={styles.error}>{agent.error.message}</Body>
-          <Body className={styles.muted}>
-            Attempt {agent.error.attempts}. If this is an expired AWS SSO session, run{" "}
-            <span className={styles.mono}>aws sso login</span>, then use Sweep now.
-          </Body>
-        </div>
-      )}
-
-      {agent?.assessedAt && (
-        <div className={styles.findingCard}>
-          <Overline>Assessment</Overline>
-          <div className={styles.chipRow}>
-            {agent.blocker && <Badge variant="red">{agent.blocker}</Badge>}
-            {agent.confidence && <Badge variant="lightgray">Confidence {agent.confidence}</Badge>}
-            {rec?.kind && <Badge variant="blue">{rec.kind.replaceAll("_", " ").toLowerCase()}{rec.action ? `: ${rec.action}` : ""}</Badge>}
-          </div>
-          {agent.diagnosis && <Body>{agent.diagnosis}</Body>}
-          {(agent.evidence || []).length > 0 && (
-            <Body as="ul" className={styles.evidence}>
-              {agent.evidence.map((ev, i) => (
-                <li key={i}>{typeof ev === "string" ? ev : JSON.stringify(ev)}</li>
-              ))}
-            </Body>
-          )}
-          {agent.reasoning && <Body className={styles.muted}>{agent.reasoning}</Body>}
-        </div>
-      )}
-
-      <Button size="small" onClick={() => setShowTrace((v) => !v)}>
-        {showTrace ? "Hide agent trace" : "Show agent trace"}
-      </Button>
-      {showTrace && <AgentTrace steps={steps} started={started} />}
-    </div>
-  );
-}
-
-/** Act 4: the proposal, with Approve and Reject as the primary controls. */
-function Proposal({ caseId, proposal, canDecide, onDecided }) {
+/** The proposal, with Approve and Reject as the primary controls. */
+export function Proposal({ caseId, proposal, canDecide, onDecided }) {
   const [acting, setActing] = useState(null);
   const [error, setError] = useState(null);
 
@@ -257,31 +133,13 @@ function Proposal({ caseId, proposal, canDecide, onDecided }) {
   );
 }
 
-function Outcome({ scenario, caseDoc, init, rejected, waiting }) {
+export function Outcome({ scenario, caseDoc, rejected, waiting }) {
   const agent = caseDoc?.agent;
-  const risk = caseDoc?.risk;
   if (rejected) {
     return (
       <div className={styles.findingCard}>
         <Overline>Run ended</Overline>
         <Body>You rejected the proposal. The wire stays on its hold, and the decision is recorded on the case.</Body>
-      </div>
-    );
-  }
-  if (!scenario.expectedOutcome) {
-    // The on-track scenario: the result is the decision not to act.
-    return (
-      <div className={styles.section}>
-        <div className={styles.chipRow}>
-          <Badge variant="green">No action needed</Badge>
-        </div>
-        {agent?.reasoning && <Body>{agent.reasoning}</Body>}
-        {init?.minutesInStage != null && risk?.remainingP90Min != null && (
-          <Body className={styles.muted}>
-            In this stage for {init.minutesInStage} min; it typically clears within {risk.remainingP90Min} min (p90).
-          </Body>
-        )}
-        <RiskCard risk={risk} />
       </div>
     );
   }
@@ -313,7 +171,7 @@ const RELEASED = ["SUBMITTED", "SETTLED", "RECONCILED", "COMPLETED"];
 const SETTLED = ["SETTLED", "RECONCILED", "COMPLETED"];
 
 /** Held -> released -> settled -> reconciled, read from the payment itself. */
-function ClosingPanel({ closing }) {
+export function ClosingPanel({ closing }) {
   const { copy, mode, payment, release, busy, timedOut, onFastForward } = closing;
   const status = payment?.status;
   const released = RELEASED.includes(status) || (!!release && !release.error);
@@ -354,36 +212,6 @@ function ClosingPanel({ closing }) {
           Still not settled after 90 seconds. Check the Payments page for its current status.
         </Body>
       )}
-    </div>
-  );
-}
-
-export default function CutoffScene({
-  act, scenario, init, businessMs, caseDoc, steps, started, canDecide, onDecided, rejected, waiting, revisedProposal,
-  closing,
-}) {
-  const agent = caseDoc?.agent;
-  if (act === 1 && !init) return <Body>{scenario.story}</Body>;
-  return (
-    <div className={styles.section}>
-      {init && <ClockStrip businessMs={businessMs} risk={caseDoc?.risk} init={init} />}
-      {(act === 2 || act === 3) && (
-        <>
-          <RiskCard risk={caseDoc?.risk} />
-          <ActionLog actions={agent?.actionsTaken} />
-          <Assessment agent={agent} steps={steps} started={started} bank={scenario.bank} />
-        </>
-      )}
-      {(act === 4 || revisedProposal) && (
-        <>
-          <Proposal caseId={caseDoc?.caseId} proposal={agent?.proposedAction} canDecide={canDecide} onDecided={onDecided} />
-          <ActionLog actions={agent?.actionsTaken} />
-        </>
-      )}
-      {act === 5 && !revisedProposal && (
-        <Outcome scenario={scenario} caseDoc={caseDoc} init={init} rejected={rejected} waiting={waiting} />
-      )}
-      {act === 5 && !revisedProposal && closing && <ClosingPanel closing={closing} />}
     </div>
   );
 }

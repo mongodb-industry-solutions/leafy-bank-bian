@@ -1,6 +1,6 @@
 "use client";
 
-// The central panel of the reconciliation walkthrough. It starts every step (the Next bar),
+// The central panel of both agent walkthroughs. It starts every step (the Next bar),
 // shows the run as one log of events, and pins the human decision under the log. There are
 // no acts: progress is the log.
 
@@ -156,6 +156,11 @@ export default function RunConsole({
           {controller.awaitingReply && (
             <Button size="small" disabled={controller.running} onClick={controller.onReplyNow}>
               Correspondent replies now
+            </Button>
+          )}
+          {controller.onSweep && (
+            <Button size="small" disabled={controller.sweeping || controller.sweepDisabled} onClick={controller.onSweep}>
+              {controller.sweeping ? "Agent running…" : "Sweep now"}
             </Button>
           )}
           <Button size="small" onClick={controller.onReset}>All scenarios</Button>

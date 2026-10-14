@@ -26,6 +26,29 @@ export const CUTOFF_SCENARIOS = [
       "A $25,000 domestic wire waits for a second signature, and the approver is out of office. " +
       "The agent reminds her, escalates to her backup, then asks to expedite once the internal cut-off passes.",
     bank: "JPMorgan Chase",
+    // Mirrors `cutoff_scenarios._CREDITORS` and the scenario's purpose in the backend.
+    wire: {
+      beneficiary: "Midwest Steel Supply Co",
+      bankName: "JPMorgan Chase",
+      bic: "CHASUS33",
+      country: "US",
+      iban: "4410028871",
+      purpose: "Steel coil order PO-55120",
+    },
+    beats: {
+      start:
+        "A $25,000 domestic wire to Midwest Steel Supply waits for a second signature at 17:05 ET. " +
+        "Its approver, Maya, is out of office.",
+      watch:
+        "The agent reminds Maya, then escalates to her backup. Once the clock passes the internal " +
+        "cut-off, only Fedwire's 18:45 cut-off is left.",
+      unblock:
+        "Raj, Maya's backup signatory, supplies the missing signature. The agent cannot approve its own request.",
+      decide:
+        "The agent asks to expedite the wire to Fedwire. Approving runs the expedite, and the wire must " +
+        "still make the cut-off.",
+      final: "The wire is submitted to Fedwire before its cut-off, and the agent re-reads the payment to confirm it.",
+    },
     amount: "25,000.00",
     startEt: "17:05",
     expected: "Submitted to Fedwire before its cut-off",
@@ -49,6 +72,25 @@ export const CUTOFF_SCENARIOS = [
       "A domestic wire is $3,200 short and no incoming credit will cover it today. " +
       "The agent tells the customer, then asks to hold the wire for the next value date.",
     bank: "Bank of America",
+    wire: {
+      beneficiary: "Lakeside Components LLC",
+      bankName: "Bank of America",
+      bic: "BOFAUS3N",
+      country: "US",
+      iban: "3310045592",
+      purpose: "Component supply INV-3391",
+    },
+    beats: {
+      start: "A domestic wire to Lakeside Components is $3,200 more than the account holds, at 16:45 ET.",
+      watch:
+        "The agent checks the account's funds, finds no incoming credit that covers the gap, and tells the " +
+        "customer about the shortfall.",
+      decide:
+        "The agent asks to hold the wire for the next value date. Moving a wire to another day needs your approval.",
+      final:
+        "The wire is held for the next value date. Fast-forwarding moves the payment on to the next business " +
+        "day so it can settle.",
+    },
     amount: "balance + 3,200.00",
     startEt: "16:45",
     expected: "Held for the next value date",
@@ -89,20 +131,39 @@ export const closeOutFor = (key) => CLOSE_OUT[cutoffByKey(key)?.closeOut] || CLO
 
 export const cutoffByKey = (key) => CUTOFF_SCENARIOS.find((s) => s.key === key) || null;
 
-// The proposal each scenario waits for before the decision act.
-const PROPOSAL = { C1: "EXPEDITE", C3: "HOLD_NEXT_VALUE_DATE" };
-export const expectedProposal = (key) => PROPOSAL[key] || null;
-
-// Each step: `act` (story bar), `gate` (what must be true before its button), `run` (the
-// presenter action its button performs). `decide` and `final` steps have no button.
+// Each step: `gate` (what must be true before its button), `run` (the presenter action its
+// button performs), `title` and `summary` (the step card). `decide` and `final` steps have no
+// button. What the step means for each payment is `beats[key]` on the scenario.
 const STEP = {
-  start: { key: "start", act: 1, run: "start", button: "Send the wire" },
-  watchClock: { key: "watch", act: 2, gate: "assessed", run: "clock", button: null },
-  approveRaj: { key: "unblock", act: 3, run: "approveRaj", button: "Approve as Raj" },
-  watchProposal: { key: "watch", act: 2, gate: "proposal", button: "Review the proposal" },
-  decide: { key: "decide", act: 4, gate: "proposal", decide: true },
-  // The closing panel's button (if the scenario has one) lives in the scene, not the step bar.
-  final: { key: "final", act: 5, final: true },
+  start: {
+    key: "start", run: "start", button: "Send the wire", title: "A wire is held",
+    summary: "A branch operator sends a domestic wire. Late in the business day it stops on a hold, before it reaches Fedwire.",
+  },
+  watchClock: {
+    key: "watch", gate: "assessed", run: "clock", button: null, title: "The agent assesses, then the clock moves",
+    summary:
+      "The agent times the hold against the cut-off and acts on its own where policy allows. Then time passes " +
+      "and the cut-off gets closer.",
+  },
+  approveRaj: {
+    key: "unblock", run: "approveRaj", button: "Approve as Raj", title: "The blocker is cleared",
+    summary: "The missing approval arrives from the backup signatory, so the hold can lift.",
+  },
+  watchProposal: {
+    key: "watch", gate: "proposal", button: "Review the proposal", title: "The agent assesses the hold",
+    summary:
+      "The agent times the hold against the cut-off, acts on its own where policy allows, records its " +
+      "assessment and proposes a resolution.",
+  },
+  decide: {
+    key: "decide", gate: "proposal", decide: true, title: "You decide",
+    summary: "The agent's proposal moves the wire, so it waits for a human. Code has already checked it against policy.",
+  },
+  // The closing panel's button (if the scenario has one) lives in the result, not the step bar.
+  final: {
+    key: "final", final: true, title: "Verifying the result",
+    summary: "The agent re-reads the payment before it reports the result.",
+  },
 };
 
 /** The ordered step list for a scenario. */
@@ -114,18 +175,3 @@ export function cutoffStepsFor(key) {
   }
   return [STEP.start, STEP.watchProposal, STEP.decide, STEP.final];
 }
-
-export const CUTOFF_ACTS = [
-  { id: 1, label: "The wire is held", caption: "A wire is stuck on a hold late in the business day." },
-  { id: 2, label: "Agent assesses", caption: "The agent times the hold against the cut-off and acts where it may." },
-  { id: 3, label: "Clock moves", caption: "Time passes and the blocker is cleared." },
-  { id: 4, label: "You decide", caption: "Approve or reject. Code has already checked the proposal against policy." },
-  { id: 5, label: "Outcome", caption: "The agent re-reads the payment before reporting the result." },
-];
-
-/** The acts a scenario passes through. */
-export function cutoffActsFor(key) {
-  return key === "C1" ? CUTOFF_ACTS : CUTOFF_ACTS.filter((a) => a.id !== 3);
-}
-
-export const cutoffActOf = (step) => step?.act || 1;

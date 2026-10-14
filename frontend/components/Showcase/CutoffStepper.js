@@ -6,22 +6,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Badge from "@leafygreen-ui/badge";
-import Button from "@leafygreen-ui/button";
-import { H2, Body } from "@leafygreen-ui/typography";
+import { Body, Overline } from "@leafygreen-ui/typography";
 import { usePaymentWorkflow } from "@/lib/api/hooks";
-import { closeOutFor, cutoffActOf, cutoffActsFor, cutoffByKey, cutoffStepsFor } from "./cutoffScenarios";
+import { closeOutFor, cutoffByKey, cutoffStepsFor } from "./cutoffScenarios";
 import {
   approveAsRaj, cutoffError, fastForward, findCase, moveClock, startCutoffScenario, sweepNow,
 } from "./cutoffActions";
-import StoryBar from "./StoryBar";
-import StatusRail from "./StatusRail";
+import { BriefStrip } from "./ScenarioBrief";
+import { PaymentCard } from "./StatusRail";
+import RunConsole from "./RunConsole";
 import { useAgentSteps } from "./AgentThinking";
-import { useLiveLog } from "./LiveLog";
-import CutoffScene, { OUTCOME_LABEL, RISK_VARIANT } from "./scenes/CutoffScene";
+import { INVESTIGATION, PAYMENT, RESOLUTION, useRunLog } from "./runLog";
+import { deriveCutoffEvents } from "./cutoffRunLog";
+import { ClockStrip, ClosingPanel, Outcome, Proposal, OUTCOME_LABEL, RISK_VARIANT } from "./scenes/CutoffScene";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
-const FINAL_ACT = 6;
 const CLOSE_TIMEOUT_MS = 90000;
 const SETTLED_STATUSES = ["SETTLED", "RECONCILED", "COMPLETED"];
 
@@ -76,6 +76,18 @@ function useSweeper(onError, onDone) {
   return [sweep, sweeping];
 }
 
+// Where each presenter action lands in the run log. Actions taken mid-investigation sit just
+// after the agent steps seen so far.
+function logSlot(kind, stepsSeen) {
+  const after = 300 + stepsSeen;
+  return {
+    start: { key: "start", phase: PAYMENT, lane: "code", ord: 0 },
+    clock: { key: "clock", phase: INVESTIGATION, lane: "code", ord: after - 0.25 },
+    approveRaj: { key: "approveRaj", phase: INVESTIGATION, lane: "human", ord: after - 0.2 },
+    closeOut: { key: "closeOut", phase: RESOLUTION, lane: "human", ord: 715 },
+  }[kind];
+}
+
 function gateWaiting(gate, { agent, caseDoc, ctx }) {
   if (!gate) return null;
   if (!caseDoc) return "Waiting for the agent to open a case…";
@@ -91,7 +103,6 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   const [ctx, setCtx] = useState({});
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
-  const [note, setNote] = useState(null);
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(Date.now());
 
@@ -118,9 +129,9 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
   const result = caseDoc?.outcome?.result || null;
   const done = rejected || !!result;
   const { steps: agentSteps, started } = useAgentSteps(caseDoc?.caseId || null, !done, "cutoff/cases");
-  const { events: liveEvents, push: pushEvent } = useLiveLog(
-    { payment, steps: agentSteps, agent, bank: scenario.bank },
-    paymentId
+  const { events, push: pushEvent } = useRunLog(
+    { scenario, steps, ctx, payment, agentSteps, caseDoc },
+    deriveCutoffEvents
   );
 
   // A failed approved action sends the agent back once; its new proposal needs its own decision.
@@ -174,16 +185,13 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     return closing.note;
   }
 
-  async function guarded(fn) {
+  async function guarded(fn, kind) {
     if (running) return;
     setRunning(true);
     setError(null);
     try {
       const n = await fn();
-      if (n) {
-        setNote(n);
-        pushEvent({ lane: "human", title: n });
-      }
+      if (n) pushEvent({ ...logSlot(kind, agentSteps.length), title: n });
       setTick((t) => t + 1);
       return true;
     } catch (e) {
@@ -196,7 +204,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
 
   async function next() {
     if (running || waiting || step.final || step.decide) return;
-    const ok = await guarded(() => runAction(step.run));
+    const ok = await guarded(() => runAction(step.run), step.run);
     if (ok) setIndex((i) => Math.min(i + 1, steps.length - 1));
   }
 
@@ -208,22 +216,13 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
       closeStartedAt: decision === "APPROVE" && scenario.closeOut === "watch" ? Date.now() : c.closeStartedAt,
     }));
     if (updated) setCaseDoc(updated);
-    pushEvent({ lane: "human", title: decision === "APPROVE" ? "You approved the proposal" : "You rejected the proposal", tone: decision === "APPROVE" ? "good" : "alert" });
-    setNote(decision === "APPROVE" ? "Approved. The agent executed the action and is verifying it." : "Rejected. The run has ended.");
     setIndex(steps.length - 1);
     setTick((t) => t + 1);
   }
 
-  const acts = cutoffActsFor(scenarioKey);
-  // Until the proposal lands, the decision step still shows the agent working (act 3).
-  const currentAct = step.final && done && !revisedProposal ? FINAL_ACT
-    : step.decide && waiting ? 3
-    : cutoffActOf(step);
-  const sceneAct = Math.min(currentAct, 5);
-  const act = acts.find((a) => a.id === sceneAct) || acts[0];
   const riskLevel = caseDoc?.risk?.riskLevel;
   const expected = result === scenario.expectedOutcome;
-  // One tone for the whole page, so the story bar, scene stripe and status card agree.
+  // One tone for the whole page, so the scene stripe and status card agree.
   const tone = done
     ? expected ? "resolved" : "waiting"
     : riskLevel === "WILL_MISS" ? "alert"
@@ -239,10 +238,10 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     release: ctx.release,
     busy: running,
     timedOut: !!ctx.closeStartedAt && !settled && now - ctx.closeStartedAt > CLOSE_TIMEOUT_MS,
-    onFastForward: () => guarded(closeOut),
+    onFastForward: () => guarded(closeOut, "closeOut"),
   };
 
-  const showButton = !step.final && !step.decide && !!step.button;
+  const canDecide = (step.decide && !ctx.decision) || revisedProposal;
 
   const chips = [
     <Badge key="status" variant="lightgray">{payment?.status || ctx.init?.status || "—"}</Badge>,
@@ -254,59 +253,63 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     ),
   ].filter(Boolean);
 
+  const controller = {
+    label: step.button,
+    final: !!step.final,
+    showButton: !step.final && !step.decide && !!step.button,
+    running,
+    waiting,
+    error,
+    onNext: next,
+    onReset,
+    onSweep: paymentId ? () => sweep(paymentId) : null,
+    sweeping,
+    sweepDisabled: done,
+  };
+
   return (
     <div className={`${styles.walkthrough} ${styles[`tone_${tone}`]}`}>
-      <StoryBar acts={acts} currentAct={currentAct} tone={tone} />
-
-      <div className={styles.stage}>
-        <section className={`${styles.scene} ${styles.toneStripe}`}>
-          <div className={styles.sceneHead}>
-            <div>
-              <H2 className={styles.narrationTitle}>{act.label}</H2>
-              <Body className={styles.muted}>{act.caption}</Body>
-            </div>
-            <div className={styles.narrationActions}>
-              {showButton && (
-                <Button variant="primary" size="large" disabled={running || !!waiting} onClick={next}>
-                  {running ? "Running…" : step.button}
-                </Button>
-              )}
-              {waiting && <Body className={styles.muted}>{waiting}</Body>}
-              <Button size="small" variant="default" onClick={onReset}>
-                All scenarios
-              </Button>
-            </div>
-          </div>
-
-          {paymentId && (
-            <div className={styles.presenterBar}>
-              <Button size="small" disabled={sweeping || done} onClick={() => sweep(paymentId)}>
-                {sweeping ? "Agent running…" : "Sweep now"}
-              </Button>
+      <div className={styles.stageFull}>
+        <RunConsole
+          stepIndex={index}
+          stepCards={steps.map((s) => ({
+            key: s.key,
+            title: s.final ? (done ? "Run complete" : "Verifying the result") : s.title,
+            summary: s.summary,
+            beat: scenario.beats?.[s.key],
+          }))}
+          top={(
+            <>
+              <BriefStrip scenario={scenario} />
+              <PaymentCard scenario={scenario} init={ctx.init} payment={payment} exceptions={[]} chips={chips} />
+            </>
+          )}
+          controller={controller}
+          events={events}
+          evidence={ctx.init && <ClockStrip businessMs={businessMs} risk={caseDoc?.risk} init={ctx.init} />}
+          failure={agent?.error && !agent?.verification && (
+            <div className={styles.section}>
+              <Overline>Assessment failed</Overline>
+              <Body className={styles.error}>{agent.error.message}</Body>
+              <Body className={styles.muted}>
+                Attempt {agent.error.attempts}. If this is an expired AWS SSO session, run{" "}
+                <span className={styles.mono}>aws sso login</span>, then use Sweep now.
+              </Body>
             </div>
           )}
-
-          {note && <Body className={styles.note}>{note}</Body>}
-          {error && <Body className={styles.error}>{error}</Body>}
-
-          <CutoffScene
-            act={sceneAct}
-            scenario={scenario}
-            init={ctx.init}
-            businessMs={businessMs}
-            caseDoc={caseDoc}
-            steps={agentSteps}
-            started={started}
-            canDecide={(step.decide && !ctx.decision) || revisedProposal}
-            onDecided={onDecided}
-            rejected={rejected}
-            waiting={waiting}
-            revisedProposal={revisedProposal}
-            closing={closingProps || null}
-          />
-        </section>
-
-        <StatusRail scenario={scenario} init={ctx.init} payment={payment} exceptions={[]} chips={chips} events={liveEvents} />
+          review={agent?.proposedAction && canDecide && (
+            <div className={styles.reviewPanel}>
+              <Overline>Needs your decision</Overline>
+              <Proposal caseId={caseDoc?.caseId} proposal={agent.proposedAction} canDecide={canDecide} onDecided={onDecided} />
+            </div>
+          )}
+          result={step.final && !revisedProposal && (
+            <div className={styles.section}>
+              <Outcome scenario={scenario} caseDoc={caseDoc} rejected={rejected} waiting={waiting} />
+              {closingProps && <ClosingPanel closing={closingProps} />}
+            </div>
+          )}
+        />
       </div>
     </div>
   );

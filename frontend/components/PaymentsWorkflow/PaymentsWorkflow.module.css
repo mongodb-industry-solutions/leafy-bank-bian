@@ -1573,15 +1573,23 @@
    Warn-toned so it reads as the WHY the row is queued, distinct from the neutral axis subline. */
 /* ── Stage 9 Exceptions panel (doc 24 §3 step 8) ── */
 .exceptionsPanel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+/* Each exception is a white card like the stage cards; the agent's findings sit inside it as
+   a tinted block with the same green left edge the stage intro uses. */
+.exceptionRow {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-.exceptionRow {
-  border: 1px solid var(--pw-hairline);
-  border-radius: 6px;
-  padding: 10px 12px;
-  background: #fff;
+  border: 1px solid var(--pw-card-border);
+  border-radius: var(--pw-radius);
+  box-shadow: var(--pw-card-shadow);
+  padding: 16px 18px;
+  background: var(--pw-bg);
 }
 .exceptionRowHead {
   display: flex;
@@ -1591,7 +1599,7 @@
 }
 .exceptionSeverity,
 .exceptionStatus {
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 600;
@@ -1602,13 +1610,97 @@
 }
 .exceptionDetail {
   font-size: 13px;
-  color: var(--pw-ink);
-  margin-top: 6px;
+  line-height: 20px;
+  color: var(--pw-text);
+}
+.calloutText {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--pw-text);
+}
+.calloutMuted {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--pw-muted);
+}
+/* AI analysis on the left, the operator's resolve controls on the right: one screen, no scroll. */
+.excSplit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.excSplit > * {
+  min-width: 0;
+}
+.whyBox {
+  border: 1px solid var(--pw-card-border);
+  border-radius: var(--pw-radius);
+  background: var(--pw-bg);
+  padding: 8px 16px;
+}
+.whyBox summary,
+.agentEvidenceBox summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pw-muted);
+}
+.whyBox[open] summary {
+  margin-bottom: 6px;
+}
+.agentEvidenceBox[open] summary {
+  margin-bottom: 4px;
+}
+.agentBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--pw-border);
+  border-left: 3px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  background: var(--pw-accent-light);
+  padding: 14px 16px;
+}
+.agentBlockHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pw-accent);
+}
+.agentField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agentFieldLabel {
+  font-size: 12px;
+  line-height: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--pw-muted);
+}
+.agentAction {
+  align-self: flex-start;
+  font-family: var(--pw-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pw-accent);
+  background: var(--pw-bg);
+  border: 1px solid var(--pw-card-border);
+  border-radius: 4px;
+  padding: 2px 8px;
 }
 .agentEvidence {
-  font-size: 12px;
-  color: var(--pw-faint);
-  margin: 4px 0 0 18px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--pw-muted);
+  margin: 0 0 0 18px;
   padding: 0;
   list-style: disc;
 }
@@ -1616,33 +1708,33 @@
   margin: 2px 0;
 }
 .resolutionLog {
-  font-size: 12px;
-  color: var(--pw-faint);
-  margin-top: 6px;
+  font-size: 13px;
+  color: var(--pw-muted);
 }
 .resolutionLabel {
   font-weight: 600;
-  color: var(--pw-green-dark2);
+  color: var(--pw-accent);
 }
 .resolutionNote {
-  color: var(--pw-faint);
+  color: var(--pw-muted);
 }
 .resolveCallout {
-  border: 1px solid var(--pw-hairline);
-  border-radius: 6px;
-  padding: 12px;
-  background: var(--pw-accent-light, #c0fae6);
+  border: 1px solid var(--pw-border);
+  border-left: 3px solid var(--pw-accent);
+  border-radius: var(--pw-radius);
+  padding: 14px 16px;
+  background: var(--pw-surface);
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 4px;
 }
 .resolveCalloutTitle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--pw-green-dark2);
+  color: var(--pw-accent);
 }
 .resolveField {
   display: flex;

@@ -263,7 +263,7 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
   const grouped = stage.children?.length > 1;
   const attention = stageAttention(stage);
   const actions = { onApprove, onResolve, onResolveException, onResolveUta, onLedgerAction, onAcknowledgeAgent };
-  const claimer = grouped ? stage.children.find((c) => (c.exceptions || []).length) : null;
+  const panelSource = grouped ? stage.children.find((c) => (c.exceptions || []).length) : stage;
   const copy = stageCopy(stage, payment?.direction);
   const outcome = lens === "technical" ? copy?.technical : copy?.business;
   const writes = stageWrites(stage, payment?.direction);
@@ -301,6 +301,22 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
           <Body className={styles.muted}>{stage.label} — not reached yet.</Body>
         </>
       ) : (
+        <>
+        {/* Full width, straight under the stage header: the agent's analysis and the resolve
+            controls sit side by side instead of at the bottom of the narrow main column. */}
+        {panelSource && (panelSource.exceptions || []).length > 0 && (
+          <ExceptionsPanel
+            exceptions={panelSource.exceptions}
+            payment={payment}
+            onResolve={onResolveException}
+            onLedgerAction={onLedgerAction}
+            onResolveUta={onResolveUta}
+            onAcknowledgeAgent={onAcknowledgeAgent}
+            reversalEvent={panelSource.reversalEvent}
+            reversalLegs={panelSource.reversalLegs}
+            refreshKey={refreshKey}
+          />
+        )}
         <div className={`${styles.paneLayout} ${styles[`lens_${lens}`]}`}>
           <div className={styles.paneMain}>
           <NextAction attention={attention} onApprove={onApprove} onResolve={onResolve} />
@@ -332,19 +348,6 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
                   <div className={styles.stageIntroText}>{stage.intro}</div>
                 </div>
               )}
-              {claimer && (
-                <ExceptionsPanel
-                  exceptions={claimer.exceptions}
-                  payment={payment}
-                  onResolve={onResolveException}
-                  onLedgerAction={onLedgerAction}
-                  onResolveUta={onResolveUta}
-                  onAcknowledgeAgent={onAcknowledgeAgent}
-                  reversalEvent={claimer.reversalEvent}
-                  reversalLegs={claimer.reversalLegs}
-                  refreshKey={refreshKey}
-                />
-              )}
               <Tabs
                 aria-label={`${stage.label} panels`}
                 selected={panelIdx}
@@ -368,7 +371,7 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
               </Tabs>
             </>
           ) : (
-            <StageDetailBody stage={stage} payment={payment} {...actions} refreshKey={refreshKey} />
+            <StageDetailBody stage={{ ...stage, exceptions: [], reversalEvent: undefined, reversalLegs: undefined }} payment={payment} {...actions} refreshKey={refreshKey} />
           )}
           </div>
           <div className={styles.paneRail}>
@@ -380,6 +383,7 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
             />
           </div>
         </div>
+        </>
       )}
     </section>
   );
@@ -1834,7 +1838,7 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
   const linkCandidates = withUnclaimedStatementLines(twinCandidates, baseOpen, payment);
 
   if (!exceptions.length) {
-    return <Body className={styles.muted}>No exceptions recorded for this payment.</Body>;
+    return <div className={styles.calloutMuted}>No exceptions recorded for this payment.</div>;
   }
 
   // The rows the panel renders. The open exception carries the freshly-fetched `agent{}`
@@ -1902,138 +1906,19 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
     }
   }
 
-  return (
-    <div className={styles.exceptionsPanel}>
-      {/* The "why we stopped here" banner — the stage-level explanation of what happened.
-          The exception category names a failure mode; this line tells the operator what that
-          failure mode *means* in plain language, right at the stage where the payment halted. */}
-      {(open || exceptions[0]) && EXCEPTION_EXPLANATION[(open || exceptions[0]).category] && (
-        <div className={styles.resolveCallout}>
-          <div className={styles.resolveCalloutTitle}>
-            <Icon glyph="InfoWithCircle" />
-            <span>What happened here</span>
-          </div>
-          <Body>{EXCEPTION_EXPLANATION[(open || exceptions[0]).category]}</Body>
-        </div>
-      )}
-      {panelError && <Banner variant="danger">{panelError}</Banner>}
-      {open && !open.agent && agentLoading && (
-        <div className={styles.resolveCallout}>
-          <div className={styles.resolveCalloutTitle}>
-            <Icon glyph="Refresh" />
-            <span>AI investigation in progress…</span>
-          </div>
-          <Body className={styles.muted}>
-            The Reconciliation Agent is gathering the payment&apos;s records. Its findings
-            appear here when it finishes.
-          </Body>
-        </div>
-      )}
-      {rows.map((e) => (
-        <div key={e.exceptionId} className={styles.exceptionRow}>
-          <div className={styles.exceptionRowHead}>
-            <StatusPill status={e.category} />
-            <span className={styles.exceptionSeverity}>
-              {SEVERITY_LABEL[e.severity] || e.severity}
-            </span>
-            <span className={styles.exceptionStatus}>{e.status}</span>
-            {e.status === "OPEN" && e.awaitingCounterparty && (
-              <StatusPill family="yellow">Awaiting correspondent</StatusPill>
-            )}
-          </div>
-          <div className={styles.exceptionDetail}>{exceptionDetailText(e)}</div>
-          {e.agent && (
-            <div className={styles.resolveCallout}>
-              <div className={styles.resolveCalloutTitle}>
-                <Icon glyph="InfoWithCircle" />
-                <span>AI investigation</span>
-                <StatusPill
-                  family={
-                    e.agent.confidence === "HIGH"
-                      ? "green"
-                      : e.agent.confidence === "MEDIUM"
-                        ? "yellow"
-                        : "gray"
-                  }
-                >
-                  {e.agent.confidence}
-                </StatusPill>
-              </div>
-              <Body>{e.agent.rootCause}</Body>
-              {e.agent.error && (
-                <Body className={styles.muted}>
-                  The investigation failed ({e.agent.error.message}). It retries automatically
-                  every minute, up to {MAX_AGENT_ATTEMPTS} attempts.
-                </Body>
-              )}
-              {e.agent.recommendedResolution && (
-                <Body className={styles.muted}>
-                  Recommend: {e.agent.recommendedResolution}
-                </Body>
-              )}
-              {e.agent.evidence && e.agent.evidence.length > 0 && (
-                <ul className={styles.agentEvidence}>
-                  {e.agent.evidence.map((ev, i) => (
-                    <li key={i}>{ev}</li>
-                  ))}
-                </ul>
-              )}
-              {onAcknowledgeAgent && e.status === "OPEN" && e.agent.proposedAction && !acknowledged.has(e.exceptionId) && (
-                <div className={styles.resolveActions}>
-                  <Button
-                    size="xsmall"
-                    variant="primary"
-                    disabled={approving}
-                    onClick={async () => {
-                      setApproving(true);
-                      setPanelError(null);
-                      let err = null;
-                      try {
-                        err = await onAcknowledgeAgent(e.exceptionId);
-                      } finally {
-                        setApproving(false);
-                      }
-                      if (err) setPanelError(`Approve failed — ${err}`);
-                      else setAcknowledged((prev) => new Set(prev).add(e.exceptionId));
-                    }}
-                  >
-                    Approve AI proposal: {e.agent.proposedAction.action}
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-          {e.resolution && (
-            <div className={styles.resolutionLog}>
-              <span className={styles.resolutionLabel}>Resolved:</span>
-              <span>
-                {ACTION_LABELS[e.resolution.action] || e.resolution.action} by {e.resolution.by}
-              </span>
-              {e.resolution.note && (
-                <span className={styles.resolutionNote}> — {e.resolution.note}</span>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-
-      {open && (onResolve || onResolveUta || onLedgerAction) && actions.length > 0 && (
+  const canResolve = !!open && (onResolve || onResolveUta || onLedgerAction) && actions.length > 0;
+  const resolveBlock = canResolve ? (
         <div className={styles.resolveCallout}>
           <div className={styles.resolveCalloutTitle}>
             <Icon glyph="Diagram3" />
-            <span>{isUta ? "Unable to apply — resolve" : "Resolve this exception"}</span>
+            <span>{isUta ? "Unable to apply — resolve" : "Resolve manually"}</span>
           </div>
-          <Body>
-            {isUta
-              ? "Confirm the beneficiary to apply the funds, or return them to the sending " +
-                "bank with a pacs.004. A repair resumes the payment at validation and " +
-                "credits the customer; a return credits no one."
-              : "Select an action. The payment's terminal state is not changed — resolution " +
-                "is evidence alongside it. A return of funds posts a compensating movement " +
-                "that restores the debtor and clears the clearing account."}
-          </Body>
           {isUta && (
             <>
+              <div className={styles.calloutMuted}>
+                Confirm the beneficiary to apply the funds, or return them to the sending bank
+                with a pacs.004.
+              </div>
               <div className={styles.resolveField}>
                 <label className={styles.resolveFieldLabel} htmlFor="uta-account">
                   Beneficiary account to credit
@@ -2143,7 +2028,128 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
             ))}
           </div>
         </div>
+  ) : null;
+
+  return (
+    <div className={styles.exceptionsPanel}>
+      {/* The "why we stopped here" banner — the stage-level explanation of what happened.
+          The exception category names a failure mode; this line tells the operator what that
+          failure mode *means* in plain language, right at the stage where the payment halted. */}
+      {(open || exceptions[0]) && EXCEPTION_EXPLANATION[(open || exceptions[0]).category] && (
+        <details className={styles.whyBox}>
+          <summary>What happened here</summary>
+          <div className={styles.calloutText}>{EXCEPTION_EXPLANATION[(open || exceptions[0]).category]}</div>
+        </details>
       )}
+      {panelError && <Banner variant="danger">{panelError}</Banner>}
+      {open && !open.agent && agentLoading && (
+        <div className={styles.resolveCallout}>
+          <div className={styles.resolveCalloutTitle}>
+            <Icon glyph="Refresh" />
+            <span>AI investigation in progress…</span>
+          </div>
+          <div className={styles.calloutMuted}>
+            The Reconciliation Agent is gathering the payment&apos;s records. Its findings
+            appear here when it finishes.
+          </div>
+        </div>
+      )}
+      {rows.map((e) => (
+        <div key={e.exceptionId} className={styles.exceptionRow}>
+          <div className={styles.exceptionRowHead}>
+            <StatusPill status={e.category} />
+            <span className={styles.exceptionSeverity}>
+              {SEVERITY_LABEL[e.severity] || e.severity}
+            </span>
+            <span className={styles.exceptionStatus}>{e.status}</span>
+            {e.status === "OPEN" && e.awaitingCounterparty && (
+              <StatusPill family="yellow">Awaiting correspondent</StatusPill>
+            )}
+          </div>
+          <div className={styles.exceptionDetail}>{exceptionDetailText(e)}</div>
+          {(e.agent || (resolveBlock && e.exceptionId === open?.exceptionId)) && (
+            <div className={styles.excSplit}>
+          {e.agent && (
+            <div className={styles.agentBlock}>
+              <div className={styles.agentBlockHead}>
+                <Icon glyph="Sparkle" />
+                <span>AI investigation</span>
+                <StatusPill
+                  family={
+                    e.agent.confidence === "HIGH"
+                      ? "green"
+                      : e.agent.confidence === "MEDIUM"
+                        ? "yellow"
+                        : "gray"
+                  }
+                >
+                  {e.agent.confidence}
+                </StatusPill>
+              </div>
+              <div className={styles.calloutText}>{e.agent.rootCause}</div>
+              {e.agent.error && (
+                <div className={styles.calloutMuted}>
+                  The investigation failed ({e.agent.error.message}). It retries automatically
+                  every minute, up to {MAX_AGENT_ATTEMPTS} attempts.
+                </div>
+              )}
+              {e.agent.recommendedResolution && (
+                <div className={styles.agentField}>
+                  <span className={styles.agentFieldLabel}>Recommended action</span>
+                  <span className={styles.agentAction}>{e.agent.recommendedResolution}</span>
+                </div>
+              )}
+              {e.agent.evidence && e.agent.evidence.length > 0 && (
+                <details className={styles.agentEvidenceBox}>
+                  <summary>Evidence ({e.agent.evidence.length})</summary>
+                  <ul className={styles.agentEvidence}>
+                    {e.agent.evidence.map((ev, i) => (
+                      <li key={i}>{ev}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {onAcknowledgeAgent && e.status === "OPEN" && e.agent.proposedAction && !acknowledged.has(e.exceptionId) && (
+                <div className={styles.resolveActions}>
+                  <Button
+                    size="small"
+                    variant="primary"
+                    disabled={approving}
+                    onClick={async () => {
+                      setApproving(true);
+                      setPanelError(null);
+                      let err = null;
+                      try {
+                        err = await onAcknowledgeAgent(e.exceptionId);
+                      } finally {
+                        setApproving(false);
+                      }
+                      if (err) setPanelError(`Approve failed — ${err}`);
+                      else setAcknowledged((prev) => new Set(prev).add(e.exceptionId));
+                    }}
+                  >
+                    Approve AI proposal: {e.agent.proposedAction.action}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {resolveBlock && e.exceptionId === open?.exceptionId && resolveBlock}
+            </div>
+          )}
+          {e.resolution && (
+            <div className={styles.resolutionLog}>
+              <span className={styles.resolutionLabel}>Resolved:</span>
+              <span>
+                {ACTION_LABELS[e.resolution.action] || e.resolution.action} by {e.resolution.by}
+              </span>
+              {e.resolution.note && (
+                <span className={styles.resolutionNote}> — {e.resolution.note}</span>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
 
       {reversalEvent && (
         <div className={styles.exceptionRow}>

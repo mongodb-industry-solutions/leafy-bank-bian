@@ -1,13 +1,11 @@
 "use client";
 
-// Sticky right rail: who the payment is, where it stands, the MongoDB panel for the current
-// step (reconciliation walkthrough), and the live event log.
+// The payment card shared by both walkthroughs: who we are paying, the terms that matter, and
+// where the payment stands.
 
 import Badge from "@leafygreen-ui/badge";
 import Icon from "@leafygreen-ui/icon";
 import { H3, Body } from "@leafygreen-ui/typography";
-import { BriefStrip } from "./ScenarioBrief";
-import LiveLog from "./LiveLog";
 import styles from "./Showcase.module.css";
 
 const chip = (label, ok) => <Badge key={label} variant={ok ? "green" : "lightgray"}>{label}</Badge>;
@@ -24,7 +22,6 @@ function exceptionChip(exceptions) {
   );
 }
 
-// `chips` replaces the reconciliation chips and the documents panel (the cut-off walkthrough).
 const BEARER = {
   DEBT: "Sender pays all fees",
   SHAR: "Fees shared",
@@ -43,6 +40,7 @@ function Fact({ glyph, children, mono }) {
   );
 }
 
+// `chips` replaces the reconciliation chips (the cut-off walkthrough).
 // Who we are paying and the terms that matter to reconciliation. Before the wire is sent the
 // facts come from the scenario; afterwards the stored payment takes over.
 export function PaymentCard({ scenario, init, payment, exceptions, chips }) {
@@ -67,9 +65,11 @@ export function PaymentCard({ scenario, init, payment, exceptions, chips }) {
             {iban && <span className={styles.muted}> · {maskIban(iban)}</span>}
           </Fact>
           <Fact glyph="Building">{[bankName, bic, country].filter(Boolean).join(" · ")}</Fact>
-          <Fact glyph="Coin">
-            {BEARER[bearer] || bearer} <span className={styles.muted}>({bearer})</span>
-          </Fact>
+          {bearer && (
+            <Fact glyph="Coin">
+              {BEARER[bearer] || bearer} <span className={styles.muted}>({bearer})</span>
+            </Fact>
+          )}
           <Fact glyph="Note">{wire.purpose}</Fact>
         </>
       ) : (
@@ -90,16 +90,5 @@ export function PaymentCard({ scenario, init, payment, exceptions, chips }) {
         </div>
       )}
     </div>
-  );
-}
-
-export default function StatusRail({ scenario, init, payment, exceptions, docs, chips, events }) {
-  return (
-    <aside className={styles.rail}>
-      <BriefStrip scenario={scenario} />
-      <PaymentCard scenario={scenario} init={init} payment={payment} exceptions={exceptions} chips={chips} />
-
-      {events && <LiveLog events={events} sources={docs?.sources} />}
-    </aside>
   );
 }
