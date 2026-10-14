@@ -193,18 +193,6 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
     setMessages((prev) => [...prev, { id: Math.max(-1, ...prev.map((m) => m.id ?? 0)) + 1, ...msg }]);
   }
 
-  // The orchestrator is told to paste chart_svg verbatim as raw HTML (see
-  // system_message.py), but LLMs reliably default to fencing anything
-  // code-shaped in triple backticks regardless of instructions — when that
-  // happens, marked renders the fence as an escaped <pre><code> text block
-  // (a scrollable box showing literal "<svg..." text) instead of a real
-  // chart. Strip fences specifically around an <svg> block before parsing,
-  // so the chart renders either way; real code fences (without "<svg")
-  // are left alone.
-  function unfenceSvgBlocks(text) {
-    return text.replace(/```[^\n`]*\n([\s\S]*?)```/g, (match, inner) => (inner.includes("<svg") ? inner : match));
-  }
-
   // The agent emits visuals as ```chart fenced JSON blocks (see
   // system_message.py). Split them out so ChatChart can draw them; the
   // surrounding text stays markdown. A block that never closes (or whose
@@ -251,7 +239,7 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
   }
 
   function renderMarkdown(text) {
-    return { __html: marked.parse(unfenceSvgBlocks(text ?? "")) };
+    return { __html: marked.parse(text ?? "") };
   }
 
   async function handleSend(overrideText) {
