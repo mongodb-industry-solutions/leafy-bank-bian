@@ -36,9 +36,11 @@ import { H2 } from "@leafygreen-ui/typography";
 
 import { customer360ChatApi } from "@/lib/api/client";
 import { chatHistoryKey, chatSessionIdKey } from "@/lib/const/magentaBackofficeBridge";
+import { connectAllAccounts, CONNECT_INSTITUTIONS, CONSENT_DURATION_DAYS } from "@/lib/api/openFinance";
 import { useUser } from "@/lib/context/UserContext";
 import { USER_LIST } from "@/lib/constants";
 import styles from "./LeafyBankChatAssistant.module.css";
+import ChatChart from "./ChatChart";
 
 // The same persona backing the mock back-office review page — see
 // USER_MAP in lib/constants.js ("Noah", Section: "backoffice", Url: "/back-office").
@@ -97,6 +99,15 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
   const appliedGreetingRef = useRef(false);
   const [thinking, setThinking] = useState(false);
   const [inputValue, setInputValue] = useState("");
+  // "Connect my other accounts" — a plain deterministic button, not
+  // something the orchestrator asks about or drives (Magenta cannot call
+  // any leafy-bank-bian/open-finance-next-gen endpoint — see
+  // lib/api/openFinance.js). Runs entirely client-side, headless, then
+  // just tells the chat what happened.
+  const [connecting, setConnecting] = useState(false);
+  const [consentPending, setConsentPending] = useState(false);
+  // Derived from the (persisted) chat history, so it survives reloads.
+  const accountsConnected = messages.some((m) => m.kind === "bot" && m.text?.startsWith("✅ Connected!"));
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -176,12 +187,71 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
   }, [isOpen]);
 
   function appendMessage(msg) {
-    nextIdRef.current += 1;
-    setMessages((prev) => [...prev, { id: nextIdRef.current, ...msg }]);
+    // Derive the id from the current list (not a separate counter): the list can
+    // be replaced wholesale (history load, greeting, restart), which left a
+    // counter behind and produced duplicate React keys.
+    setMessages((prev) => [...prev, { id: Math.max(-1, ...prev.map((m) => m.id ?? 0)) + 1, ...msg }]);
+  }
+
+  // The orchestrator is told to paste chart_svg verbatim as raw HTML (see
+  // system_message.py), but LLMs reliably default to fencing anything
+  // code-shaped in triple backticks regardless of instructions — when that
+  // happens, marked renders the fence as an escaped <pre><code> text block
+  // (a scrollable box showing literal "<svg..." text) instead of a real
+  // chart. Strip fences specifically around an <svg> block before parsing,
+  // so the chart renders either way; real code fences (without "<svg")
+  // are left alone.
+  function unfenceSvgBlocks(text) {
+    return text.replace(/```[^\n`]*\n([\s\S]*?)```/g, (match, inner) => (inner.includes("<svg") ? inner : match));
+  }
+
+  // The agent emits visuals as ```chart fenced JSON blocks (see
+  // system_message.py). Split them out so ChatChart can draw them; the
+  // surrounding text stays markdown. A block that never closes (or whose
+  // JSON is invalid) is not matched/rendered by ChatChart, so a bad block
+  // can't break the rest of the reply.
+  function splitChartBlocks(text) {
+    const segments = [];
+    const re = /```(chart|action)[^\n]*\n([\s\S]*?)```/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(text ?? "")) !== null) {
+      if (m.index > last) segments.push({ kind: "text", body: text.slice(last, m.index) });
+      segments.push({ kind: m[1], body: m[2] });
+      last = re.lastIndex;
+    }
+    if (last < (text ?? "").length) segments.push({ kind: "text", body: text.slice(last) });
+    return segments.filter((s) => s.kind !== "text" || s.body.trim());
+  }
+
+  // ```action blocks (e.g. {"type":"connect_accounts","label":"..."}) become a
+  // real button. Only known action types are rendered; the label is plain
+  // text from the model, so it is shown as-is, never as HTML.
+  function renderAction(body, key) {
+    let action;
+    try {
+      action = JSON.parse(body);
+    } catch {
+      return null;
+    }
+    if (action?.type !== "connect_accounts") return null;
+    // Only offered when the agent proposes it, and gone for good once accepted.
+    if (accountsConnected) return null;
+    return (
+      <button
+        key={key}
+        type="button"
+        className={styles.connectButton}
+        onClick={requestConnectConsent}
+        disabled={connecting || consentPending}
+      >
+        {connecting ? "Connecting…" : `🔗 ${String(action.label || "Connect my other accounts")}`}
+      </button>
+    );
   }
 
   function renderMarkdown(text) {
-    return { __html: marked.parse(text ?? "") };
+    return { __html: marked.parse(unfenceSvgBlocks(text ?? "")) };
   }
 
   async function handleSend(overrideText) {
@@ -246,6 +316,68 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
   // unconditionally on mount, so the new tab opens already "signed in" as
   // the reviewer — no separate login step, and the customer's own chat tab
   // and session are left untouched.
+  // Step 1: the agent's button only asks for consent — nothing is connected
+  // until the customer explicitly allows it in the consent card.
+  function requestConnectConsent() {
+    if (connecting || consentPending || !backendUserId) return;
+    setConsentPending(true);
+  }
+
+  function declineConnect() {
+    setConsentPending(false);
+    appendMessage({ kind: "user", text: "Not now" });
+    appendMessage({
+      kind: "bot",
+      text: "No problem — I haven't connected anything. If you change your mind, just ask and I'll offer it again.",
+    });
+  }
+
+  // Step 2: explicit consent given — only now are consents created/approved
+  // and the external data fetched.
+  async function confirmConnect() {
+    if (connecting || !backendUserId) return;
+    setConsentPending(false);
+    setConnecting(true);
+    appendMessage({ kind: "user", text: "Yes, I allow Leafy Bank to connect my other accounts" });
+
+    const { institutions, errors } = await connectAllAccounts(backendUserId);
+    setConnecting(false);
+
+    if (institutions.length === 0) {
+      appendMessage({
+        kind: "bot",
+        text: `⚠️ I couldn't connect any accounts right now. ${errors.join("; ") || ""}`.trim(),
+      });
+      return;
+    }
+
+    const summary = institutions
+      .map((inst) => {
+        const accountCount = inst.accounts.length;
+        const productCount = inst.products.length;
+        const txnCount = inst.transactions.length;
+        return (
+          `**${inst.institution}**: ${accountCount} account${accountCount === 1 ? "" : "s"}, ` +
+          `${productCount} product${productCount === 1 ? "" : "s"}, ${txnCount} transaction${txnCount === 1 ? "" : "s"}`
+        );
+      })
+      .join("\n");
+    const errorNote = errors.length > 0 ? `\n\n(Some institutions couldn't be connected: ${errors.join("; ")})` : "";
+
+    appendMessage({
+      kind: "bot",
+      text: `✅ Connected! Here's what I found:\n\n${summary}${errorNote}\n\nUpdating your financial analysis to include these accounts…`,
+    });
+
+    // Don't make the customer ask: hand the agent the new data right away so
+    // it re-runs the analysis (financial_wellness is always delegated fresh)
+    // and reports the combined picture.
+    handleSend(
+      "I just connected my other bank accounts. Please update my financial analysis to include them — " +
+        "give me the overall picture across all my accounts, then each bank separately.",
+    );
+  }
+
   function openBackOffice() {
     if (BACKOFFICE_REVIEWER) selectUser(BACKOFFICE_REVIEWER);
     window.open("/back-office", "_blank", "noopener,noreferrer");
@@ -306,11 +438,18 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
                     <div className={styles.messageText}>{msg.text}</div>
                   ) : (
                     <div className={styles.assistantContent}>
-                      {msg.text && (
-                        <div
-                          className={styles.messageText}
-                          dangerouslySetInnerHTML={renderMarkdown(msg.text)}
-                        />
+                      {splitChartBlocks(msg.text).map((seg, i) =>
+                        seg.kind === "chart" ? (
+                          <ChatChart key={i} spec={seg.body} />
+                        ) : seg.kind === "action" ? (
+                          renderAction(seg.body, i)
+                        ) : (
+                          <div
+                            key={i}
+                            className={styles.messageText}
+                            dangerouslySetInnerHTML={renderMarkdown(seg.body)}
+                          />
+                        ),
                       )}
                     </div>
                   )}
@@ -331,6 +470,32 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
                   <div className={styles.stepHeader}>
                     <div className={styles.spinner} />
                     <span>Thinking…</span>
+                  </div>
+                </div>
+              )}
+
+              {consentPending && (
+                <div className={styles.consentCard} role="dialog" aria-label="Connect your other accounts">
+                  <div className={styles.consentTitle}>Allow Leafy Bank to connect your other accounts?</div>
+                  <p className={styles.consentText}>
+                    I'll read data from {CONNECT_INSTITUTIONS.join(" and ")} to include them in your financial
+                    analysis:
+                  </p>
+                  <ul className={styles.consentList}>
+                    <li>Accounts and balances</li>
+                    <li>Transactions</li>
+                    <li>Loans and products</li>
+                  </ul>
+                  <p className={styles.consentText}>
+                    Read-only — I can't move money. Access expires after {CONSENT_DURATION_DAYS} days.
+                  </p>
+                  <div className={styles.consentActions}>
+                    <button type="button" className={styles.connectButton} onClick={confirmConnect}>
+                      Allow access
+                    </button>
+                    <button type="button" className={styles.declineButton} onClick={declineConnect}>
+                      Not now
+                    </button>
                   </div>
                 </div>
               )}

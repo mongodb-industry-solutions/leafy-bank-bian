@@ -518,3 +518,95 @@
   .agentImage { width: 48px; height: 28px; }
   .chatTitle { font-size: 16px; }
 }
+
+/* Primary call-to-action: MongoDB Spring Green on Evergreen ink. Used for the
+   inline "Connect my other accounts" button the agent suggests and the
+   persistent one below the chat. */
+.connectButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 9px 16px;
+  background: #00ed64;
+  color: #001e2b;
+  border: 1px solid #00ed64;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 30, 43, 0.2);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.connectButton:hover:not(:disabled) {
+  background: #71f6ba;
+  border-color: #71f6ba;
+  box-shadow: 0 2px 6px rgba(0, 30, 43, 0.25);
+}
+
+.connectButton:focus-visible {
+  outline: 2px solid #016bf8;
+  outline-offset: 2px;
+}
+
+.connectButton:disabled {
+  background: #e8edeb;
+  border-color: #e8edeb;
+  color: #5c6c75;
+  cursor: default;
+  box-shadow: none;
+}
+
+/* Consent card shown before any external account is connected. */
+.consentCard {
+  margin: 10px 0;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #00a35c;
+  border-left: 4px solid #00ed64;
+  border-radius: 10px;
+  color: #1c2d38;
+  font-size: 13px;
+}
+
+.consentTitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #001e2b;
+}
+
+.consentText {
+  margin: 6px 0;
+  color: #3d4f58;
+}
+
+.consentList {
+  margin: 4px 0 4px 18px;
+  padding: 0;
+  color: #1c2d38;
+}
+
+.consentActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.declineButton {
+  padding: 9px 16px;
+  background: transparent;
+  color: #3d4f58;
+  border: 1px solid #c1c7c6;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.declineButton:hover {
+  background: #f9fbfa;
+  border-color: #889397;
+}

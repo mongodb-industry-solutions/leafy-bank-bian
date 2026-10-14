@@ -1,0 +1,150 @@
+/* Chat chart card. Colors are Via primitives (neutral/green); chart marks are
+   set inline in ChatChart.js. */
+.card {
+  margin: 10px 0;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1px solid #e8edeb; /* neutral-200 */
+  border-radius: 10px;
+  color: #1c2d38; /* neutral-700 */
+  font-size: 12px;
+  max-width: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.toggle {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  color: #5c6c75; /* neutral-500 */
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.toggle:hover {
+  color: #00684a;
+}
+
+/* Bars: thin, rounded data-end, label left / value right, no gridlines. */
+.bars,
+.legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: minmax(70px, 30%) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px;
+  border-radius: 6px;
+}
+
+.barRowActive {
+  background: #f9fbfa; /* neutral-100 */
+}
+
+.barLabel,
+.legendLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.barTrack {
+  height: 8px;
+  background: #f1f4f3;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.barFill {
+  display: block;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+}
+
+.barValue,
+.legendValue,
+.num {
+  font-variant-numeric: tabular-nums;
+  color: #3d4f58; /* neutral-600 */
+  white-space: nowrap;
+}
+
+.donutWrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.donut {
+  width: 120px;
+  height: 120px;
+  flex: none;
+}
+
+.donut circle {
+  transition: stroke-width 0.12s ease;
+}
+
+.donutTotalLabel {
+  font-size: 9px;
+  fill: #5c6c75;
+}
+
+.donutTotal {
+  font-size: 13px;
+  font-weight: 600;
+  fill: #1c2d38;
+}
+
+.legend {
+  flex: 1;
+  min-width: 160px;
+}
+
+.legendRow {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px;
+  border-radius: 6px;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table td {
+  padding: 4px 4px;
+  border-top: 1px solid #e8edeb;
+}
+
+.num {
+  text-align: right;
+}
