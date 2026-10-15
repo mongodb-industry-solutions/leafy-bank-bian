@@ -21,7 +21,9 @@ never as literals here: no simulator source may carry them (pinned by a test), a
 includes this one.
 
 Re-running a scenario first supersedes its earlier holds (Q3): the payment is rejected and
-its open records closed as CANCELLED, so one story never shows two copies of itself.
+its open records closed as CANCELLED, so one story never shows two copies of itself. Only the
+same presenter session's holds are superseded (`sessionId` on the clock run), so two people
+running the same scenario never reject each other's payment.
 """
 
 from __future__ import annotations
@@ -124,20 +126,26 @@ def _clock_view(run_id: str, offset_seconds: int, *, real_now: Optional[datetime
     }
 
 
-def _supersede(service, key: str, *, at: datetime) -> list[str]:
-    """Reject this scenario's earlier holds and cancel their open records (Q3)."""
+def _supersede(service, key: str, *, at: datetime, session_id: Optional[str] = None) -> list[str]:
+    """Reject this session's earlier holds of the scenario and cancel their open records (Q3).
+
+    A hold belongs to a session through its clock run. Runs started without a session id
+    (scripts, curl) share the `None` session, which keeps the old behaviour for them."""
     db = service.db
     superseded = []
     for payment in service.payments.find({"clientReference": f"{CLIENT_REF_PREFIX}{key}",
                                           "status": {"$in": list(HOLDS)}}):
         payment_id = payment["paymentId"]
+        run_id = (payment.get("demo") or {}).get("clockRunId")
+        run = _clocks(db).find_one({"_id": run_id}) if run_id else None
+        if (run or {}).get("sessionId") != session_id:
+            continue
         lifecycle.reject(service.payments, payment["_id"], reason=SUPERSEDED_REASON, actor=ACTOR)
         funds_reservation.release_for_payment(db, payment_id, reason=SUPERSEDED_REASON)
         hold_queues.close_approval_request(db, payment_id=payment_id,
                                            status=hold_queues.CANCELLED, by=ACTOR, at=at)
         hold_queues.close_screening_item(db, payment_id=payment_id,
                                          status=hold_queues.CANCELLED, by=ACTOR, at=at)
-        run_id = (payment.get("demo") or {}).get("clockRunId")
         if run_id:
             # The old run's synthetic backlog dies with it; the TTL would get there in a day.
             db[hold_queues.SCREENING_QUEUE].update_many(
@@ -217,14 +225,15 @@ def _details(service, scenario: Scenario, payment: dict, now: datetime) -> dict:
     return out
 
 
-def run_one(service, key: str, *, real_now: Optional[datetime] = None) -> dict:
+def run_one(service, key: str, *, real_now: Optional[datetime] = None,
+            session_id: Optional[str] = None) -> dict:
     """Start one scenario on a fresh clock run. Raises KeyError for an unknown key and
     ValueError when the seeded world cannot produce it (C3 over its ceiling)."""
     scenario = SCENARIOS[key]
     real_now = real_now or datetime.now(timezone.utc)
     db = service.db
 
-    superseded = _supersede(service, key, at=real_now)
+    superseded = _supersede(service, key, at=real_now, session_id=session_id)
 
     business_date = cutoff_seed.business_date_for(real_now)
     offset = business_clock.anchor_offset(scenario.anchor_et_minutes, real_now=real_now,
@@ -232,6 +241,7 @@ def run_one(service, key: str, *, real_now: Optional[datetime] = None) -> dict:
     run_id = business_clock.create_run(
         _clocks(db), offset_seconds=offset, real_now=real_now, scenario=key,
         anchor_et_minutes=scenario.anchor_et_minutes, business_date=business_date,
+        session_id=session_id,
     )
     business_now = business_clock.now(run_id, clocks=_clocks(db))
 

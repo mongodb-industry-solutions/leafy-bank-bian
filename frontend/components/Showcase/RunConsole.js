@@ -162,7 +162,7 @@ function ActivityBanner({ activity }) {
 }
 
 export default function RunConsole({
-  top, stepCards, stepIndex, controller, events, pending, sources, evidence, review, failure, result, activity,
+  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, review, failure, result, activity,
 }) {
   const [filter, setFilter] = useState("all");
   const logRef = useRef(null);
@@ -177,6 +177,7 @@ export default function RunConsole({
   return (
     <section className={`${styles.scene} ${styles.toneStripe}`}>
       {top && <div className={styles.runTop}>{top}</div>}
+      {pipeline}
 
       <div className={styles.runRow}>
         <div className={styles.runControl}>

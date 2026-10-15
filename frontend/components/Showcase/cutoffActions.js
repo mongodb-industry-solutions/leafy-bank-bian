@@ -4,8 +4,19 @@ import { STAFF } from "./cutoffScenarios";
 // Every call returns { data, error } (the client helpers' shape); the stepper decides what
 // an error means. 409 is never retried automatically: the presenter tries again.
 
+// One id per browser tab. The backend supersedes only this session's earlier holds of a
+// scenario, so two people running the same scenario never reject each other's payment.
+function sessionId() {
+  let id = window.sessionStorage.getItem("cutoffSessionId");
+  if (!id) {
+    id = window.crypto.randomUUID();
+    window.sessionStorage.setItem("cutoffSessionId", id);
+  }
+  return id;
+}
+
 export const startCutoffScenario = (scenario) =>
-  coreApi("workflow/demo/cutoff-scenario", { method: "POST", body: { scenario } });
+  coreApi("workflow/demo/cutoff-scenario", { method: "POST", body: { scenario, sessionId: sessionId() } });
 
 /** Anchor the run's business clock to HH:MM ET. Forward only; the backend 400s on backwards. */
 export const moveClock = (runId, anchor) =>

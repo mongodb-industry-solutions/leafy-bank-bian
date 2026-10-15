@@ -1595,3 +1595,142 @@ summary.runTitle {
 @media (prefers-reduced-motion: reduce) {
   .activityIcon { animation: none; }
 }
+
+/* Payment lifecycle pipeline (cut-off walkthrough) */
+.pipeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e8edeb;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.pipelineHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.pipelineNow {
+  font-weight: 600;
+}
+
+.pipelineState {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f1f5f4;
+  font-family: "Source Code Pro", monospace;
+  font-size: 12px;
+}
+
+.pipelineTrack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(96px, 1fr));
+  overflow-x: auto;
+}
+
+.pipeStage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  text-align: center;
+}
+
+/* The connector runs from this node to the next; it is solid once the stage is done. */
+.pipeStage:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 15px;
+  left: calc(50% + 18px);
+  right: calc(-50% + 18px);
+  height: 2px;
+  background: #d6dedb;
+}
+
+.pipe_done:not(:last-child)::after {
+  background: #00a35c;
+}
+
+.pipeNode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid #c9d1cf;
+  background: #ffffff;
+  color: #5c6c75;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pipeLabel {
+  font-size: 12px;
+  line-height: 16px;
+  color: #5c6c75;
+}
+
+.pipe_done .pipeNode {
+  border-color: #00a35c;
+  background: #00a35c;
+  color: #ffffff;
+}
+
+.pipe_now .pipeNode {
+  border-color: #016bf8;
+  background: #e1f0ff;
+  color: #016bf8;
+  box-shadow: 0 0 0 4px rgba(1, 107, 248, 0.15);
+}
+
+.pipe_held .pipeNode {
+  border-color: #ffc010;
+  background: #fffbea;
+  color: #944f01;
+  box-shadow: 0 0 0 4px rgba(255, 192, 16, 0.3);
+}
+
+.pipe_failed .pipeNode {
+  border-color: #db3030;
+  background: #fef2f2;
+  color: #db3030;
+}
+
+.pipe_now .pipeLabel,
+.pipe_held .pipeLabel,
+.pipe_failed .pipeLabel {
+  color: #001e2b;
+  font-weight: 600;
+}
+
+.pipeAgent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f1ecff;
+  color: #5e0c9e;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pipelineNote {
+  margin: 0;
+}
+
+.pipelineNoteHeld {
+  padding: 8px 12px;
+  border-left: 3px solid #ffc010;
+  background: #fffbea;
+}

@@ -70,7 +70,8 @@ def anchor_offset(target_et_minutes: int, *, real_now: datetime,
 
 def create_run(clocks, *, offset_seconds: int, real_now: Optional[datetime] = None,
                scenario: Optional[str] = None, anchor_et_minutes: Optional[int] = None,
-               business_date: Optional[date] = None) -> str:
+               business_date: Optional[date] = None,
+               session_id: Optional[str] = None) -> str:
     """Persist a clock run and return its id. `createdAt` feeds the 24h TTL index.
 
     The optional fields record what the run was anchored to, so a clock `reset` can return
@@ -88,6 +89,9 @@ def create_run(clocks, *, offset_seconds: int, real_now: Optional[datetime] = No
         doc["anchorEtMinutes"] = int(anchor_et_minutes)
     if business_date is not None:
         doc["businessDate"] = business_date.isoformat()
+    if session_id is not None:
+        # The presenter's browser session: a re-run supersedes only that session's own holds.
+        doc["sessionId"] = session_id
     clocks.insert_one(doc)
     return run_id
 

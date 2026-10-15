@@ -400,3 +400,15 @@ def test_demo_clock_request_accepts_one_action(body):
     import api_models
 
     api_models.DemoClockRequest(**body)
+
+
+def test_a_rerun_supersedes_only_its_own_sessions_holds(service, db):
+    mine = cutoff_scenarios.run_one(service, "C1", session_id="session-a")
+    theirs = cutoff_scenarios.run_one(service, "C1", session_id="session-b")
+    assert theirs["superseded"] == []
+    assert _stored(db, mine)["status"] == "PENDING_APPROVAL"
+
+    again = cutoff_scenarios.run_one(service, "C1", session_id="session-a")
+    assert again["superseded"] == [mine["paymentId"]]
+    assert _stored(db, mine)["status"] == "REJECTED"
+    assert _stored(db, theirs)["status"] == "PENDING_APPROVAL"

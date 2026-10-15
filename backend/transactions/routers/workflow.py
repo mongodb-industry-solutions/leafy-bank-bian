@@ -255,7 +255,8 @@ def initiate_cutoff_scenario(body: CutoffScenarioRequest, request: Request) -> J
 
     try:
         return to_json_response(cutoff_scenarios.run_one(request.app.state.payments_service,
-                                                         body.scenario))
+                                                         body.scenario,
+                                                         session_id=body.sessionId))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

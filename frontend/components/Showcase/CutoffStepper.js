@@ -14,6 +14,7 @@ import {
 } from "./cutoffActions";
 import { BriefStrip } from "./ScenarioBrief";
 import { PaymentCard } from "./StatusRail";
+import PaymentPipeline from "./PaymentPipeline";
 import RunConsole from "./RunConsole";
 import { deriveActivity } from "./activity";
 import { useAgentSteps } from "./AgentThinking";
@@ -308,6 +309,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
               <PaymentCard scenario={scenario} init={ctx.init} payment={payment} exceptions={[]} chips={chips} />
             </>
           )}
+          pipeline={<PaymentPipeline payment={payment} status={ctx.init?.status} />}
           controller={controller}
           events={events}
           pending={backlog > 0 ? "Next event coming…" : null}

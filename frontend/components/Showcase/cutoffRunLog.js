@@ -29,7 +29,7 @@ const CLOSING = [
 
 // Each lifecycle state in plain words: the stage the wire is in, and for the four holds why it
 // cannot go further. A state not listed falls back to its lowercased name.
-const STATE_INFO = {
+export const STATE_INFO = {
   INITIATED: { stage: "Initiation", title: "Wire received and recorded" },
   VALIDATED: { stage: "Validation", title: "Validation passed" },
   FINAL_VALIDATED: { stage: "Validation", title: "Final checks passed" },

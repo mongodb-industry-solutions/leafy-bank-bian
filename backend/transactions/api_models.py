@@ -430,6 +430,8 @@ class CutoffScenarioRequest(BaseModel):
     """`POST /workflow/demo/cutoff-scenario` — start one cutoff scenario on a fresh clock run."""
 
     scenario: Literal["C1", "C2", "C3", "C4", "C5"]
+    # The presenter's browser session; a re-run supersedes only holds from the same session.
+    sessionId: Optional[str] = Field(default=None, max_length=64)
     model_config = ConfigDict(extra="forbid")
 
 
