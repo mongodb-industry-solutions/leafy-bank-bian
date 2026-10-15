@@ -6,9 +6,11 @@
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
 ![BIAN](https://img.shields.io/badge/BIAN-v14-orange?style=for-the-badge)
 
-**Leafy Bank is a BIAN v14-aligned core-banking reference**, showcasing the integration of MongoDB's powerful features tailored specifically for [Financial Services](https://www.mongodb.com/solutions/industries/financial-services). It's built as three FastAPI microservices over a single MongoDB Atlas database (`leafy_bank_bian`), fronted by a Next.js + LeafyGreen UI. Every backend endpoint follows BIAN Service Domain naming and a verb-in-URL contract; the UI talks to them through a path-segment-routed proxy.
+**Leafy Bank is a BIAN v14-aligned core-banking reference**, showcasing the integration of MongoDB's powerful features tailored specifically for [Financial Services](https://www.mongodb.com/solutions/industries/financial-services). It's built as four FastAPI services (accounts, transactions, ledger, and a payment agent) over a single MongoDB Atlas database (`leafy_bank_bian`), fronted by a Next.js + LeafyGreen UI. Every backend endpoint follows BIAN Service Domain naming and a verb-in-URL contract; the UI talks to them through a path-segment-routed proxy.
 
 The defining story is the **two-phase money flow**: a payment executes synchronously as one MongoDB ACID transaction, then an asynchronous, change-stream-driven pipeline posts it through the general ledger — no polling, debits always equal credits.
+
+On top of that sits the **Payments Lifecycle**: a nine-stage, ISO 20022-aligned workflow for outgoing and incoming payments, from initiation to reconciliation and exceptions, with two LangGraph agents (cut-off risk and reconciliation investigation). See [Payments Lifecycle](#payments-lifecycle).
 
 Where MongoDB shines: **flexible schema** for evolving account/customer data (accounts), **multi-document ACID transactions** for consistent execution (transactions), and **change streams + aggregation pipelines** for real-time, event-driven double-entry accounting (ledger) — all in one database, no separate message bus.
 
@@ -31,12 +33,110 @@ Legacy cores lock accounting behind COBOL batch cycles: the general ledger recon
 | **accounts** (8001)     | `PartyReferenceDataDirectoryEntry`, `CurrentAccount` | Customers + KYC, account lifecycle, source-of-truth balances |
 | **transactions** (8002) | `PaymentOrderInitiation`                             | Payments/transfers as one multi-doc ACID execution          |
 | **ledger** (8003)       | `FinancialAccounting` / `FinancialBookingLog`        | Async double-entry general-ledger pipeline                   |
+| **payment_agent** (8004) | Agents operating over the domains above             | Reconciliation and Cut-off agents (LangGraph over Bedrock)   |
 
 ### The two-phase money flow
 
 1. **Synchronous execution** — a payment is one MongoDB **ACID transaction**: `$inc` debtor down, `$inc` creditor up, insert the transaction, flip the payment to SETTLED, write the sender notification. Idempotent via an `Idempotency-Key` header.
-2. **Asynchronous general ledger** — **change-stream** wor
-3. kers react to executed transactions with no polling: `transactions → ledgerEvents → subLedgerEntries`, then a periodic batch rolls them into balanced `journalEntries` (debits == credits enforced at the DB level). The UI traces a payment through all stages live via `/pipeline/trace/{paymentId}`.
+2. **Asynchronous general ledger** — **change-stream** workers react to executed transactions with no polling: `transactions → ledgerEvents → subLedgerEntries`, then a periodic batch rolls them into balanced `journalEntries` (debits == credits enforced at the DB level). The UI traces a payment through all stages live via `/pipeline/trace/{paymentId}`.
+
+## Payments Lifecycle
+
+The payments workflow extends the money flow into a full payment lifecycle: domestic and cross-border, outgoing and incoming, aligned to ISO 20022 messaging and organized by BIAN v14 service domains. **It covers wires and internal transfers.** Rail submission, correspondent responses and external settlement run against built-in simulators, so the full lifecycle runs end to end in a demo environment.
+
+**Design in one line:** one canonical `payments` document per payment (a single `paymentId`, with a typed `wireDetails` / `internalDetails` branch, not one collection per rail) + rail adapters (the ISO 20022 message is built only at the rail boundary) + an append-only lifecycle history in `paymentHistory`.
+
+*Internal transfers are book transfers: they settle at the money move (stage 5), post at stage 6, and reconcile with a single Payment-to-GL comparison. External wires settle at stage 7. Stage 9 is modelled as a state and action on the originating payment, with the queue in the `exceptions` collection.*
+
+### What happens at each stage
+
+**Outgoing payment**
+
+| Stage | What happens |
+| --- | --- |
+| 1. Initiation | A customer, back-office user or API submits a payment instruction. The system records it as a canonical payment with a unique `paymentId`. Malformed requests are refused before a payment exists. |
+| 2. Authentication & Authorization | The system confirms who is paying and that they may make this payment: account ownership and entitlement limits, with step-up authentication where the amount requires it. |
+| 3. Validation & Enrichment | The instruction is checked for completeness, duplicates (idempotency) and sufficient funds. The system adds supporting data such as FX and payment type, and reserves the funds so they cannot be spent elsewhere. |
+| 4. Orchestration & Approval | The system chooses the route (rail and cut-off window) and records it as an immutable routing snapshot. Fraud and sanctions checks run, and the payment is authorised and approved. Suspicious payments pause for manual review. |
+| 5. Execution | The money moves. The customer is debited and the payment is sent on its rail as an ISO 20022 `pacs.008` message. Internal transfers complete at this point. |
+| 6. Accounting / Posting | The ledger records the payment as balanced double-entry postings: ledger event, sub-ledger entries, then journal entries. |
+| 7. Clearing & Settlement | For wires, the correspondent or network confirms settlement and the payment moves to settled. A settlement position records expected against actual, including delays and returns. |
+| 8. Reconciliation | The payment, the rail record and the general ledger are matched three ways. A clean match marks the payment reconciled. A mismatch goes to Exceptions. |
+| 9. Exceptions & Returns | Any problem found along the way becomes an exception on the payment (settlement problems, reconciliation differences, duplicates). Operators, or the Reconciliation agent with human approval, resolve it or return the funds. |
+
+**Incoming payment**
+
+| Stage | What happens |
+| --- | --- |
+| 1. Receipt | A `pacs.008` arrives from another bank. The raw message is stored first, then a canonical payment is created. Duplicates are caught before a payment exists. |
+| 2. Authentication & Beneficiary match | The message is checked for legitimacy, and the beneficiary is matched to a Leafy Bank account as matched, partial or no match. A no match goes to the Unable-to-Apply queue. |
+| 3. Validation | Originator sanctions and AML screening run, FX is applied where currencies differ, and the payment is classified as domestic or cross-border. |
+| 4. Acceptance decision | The match and screening results roll up into a single decision: accept or reject. |
+| 5. Status response | A `pacs.002` status goes back to the sending bank, accepted or rejected with a reason code. |
+| 6. Posting | The customer is credited. The ledger debits Wire Clearing and credits Customer Deposit Liability. |
+| 7. Settlement | Settlement is confirmed. The ledger debits Nostro and credits Wire Clearing. |
+| 8. Reconciliation | The same three-way match as outgoing, with the debit and credit legs mirrored. |
+| 9. Unable to Apply | Payments that cannot be applied wait for an operator. **Repair** corrects the beneficiary and resumes at stage 3. **Return** sends the funds back with a `pacs.004` and closes the payment as returned. |
+
+### Lifecycle states
+
+- **`lifecycle.state`**: `DRAFT` → `INITIATED` → `VALIDATED` → `ENRICHED` → `FINAL_VALIDATED` → (`MANUAL_FRAUD_REVIEW` on a fraud REVIEW hold) → `ROUTED` → `AUTHORISED` → `APPROVED` → `SUBMITTED` → `IN_PROGRESS` → `SETTLED` → `RECONCILED`.
+- **Independent axes**: `postingStatus` (PENDING / POSTED / FAILED), `settlementStatus` (PENDING / SETTLED / FAILED / RETURNED), `reconciliationStatus` (RECONCILED / DISCREPANT / PENDING).
+- **Terminal outcomes**: `REJECTED`, `FAILED`, `RETURNED`, `CANCELLED`, `REVERSED`, `REFUNDED`.
+- **Inbound adds to the same enum** (no parallel one): `RECEIVED` (parsed into a canonical payment), `ACCEPTED` (positive pacs.002 sent), and `RETURNED` meaning an accepted payment later returned via pacs.004. `REJECTED` means never accepted.
+- Every transition records the new state, reason, actor and timestamp.
+
+### BIAN v14 mapping
+
+BIAN supplies business-capability and service-domain semantics; ISO 20022 supplies message semantics (`pain.001` for the wire initiation envelope, `pacs.008` interbank instruction, `pacs.002` status, `pacs.004` return). BIAN does not dictate the collection names below.
+
+| Stage | BIAN service domain(s) | Collections written |
+| --- | --- | --- |
+| 1 Initiation | `PaymentOrderInitiation` (42933) | `payments`, `paymentHistory` |
+| 2 Authentication & Authorization | `PartyAuthentication` (38917), `CustomerAccessEntitlement` (43057) | check results on `payments` |
+| 3 Validation & Enrichment | `PaymentOrderInitiation` | `payments` (validation, `idempotency`, `fx`, enrichment) |
+| 4 Orchestration & Approval | `PaymentOrchestration` (48782), `FraudEvaluation` (44625), `TransactionAuthorization` (43343) | `routingSnapshots` (immutable), `payments.fraud` |
+| 5 Execution | `PaymentRail` (47741), `FinancialGateway` (30542) | `paymentExecutions`, `canonicalJsonStorage` (pacs.008), `transactions` |
+| 6 Accounting / Posting | `FinancialAccounting` (39161), `PositionKeeping`, `CurrentAccount` | `ledgerEvents`, `subLedgerEntries`, `journalEntries` |
+| 7 Clearing & Settlement | `PaymentSettlement` (40033), `InternalBankAccount` (29306), `CorrespondentBankDirectory` | `settlementPositions`, second ledger event |
+| 8 Reconciliation | `AccountReconciliation` (35449), `PaymentRail` | `reconciliationItems` |
+| 9 Exceptions & Returns | State and action on the originating payment | `exceptions`, `canonicalJsonStorage` (pacs.004) |
+
+Stage 4 authorization uses the BIAN v14 `TransactionAuthorization` domain (43343).
+
+**Incoming differs at stages 1 to 5** (BIAN domains and stored fields); stages 6 to 8 reuse the outgoing machinery with the debit and credit legs mirrored:
+
+| Stage | Incoming (wire) |
+| --- | --- |
+| 1 | `FinancialGateway` + `PaymentOrderInitiation`: the raw pacs.008 is stored in `canonicalJsonStorage` first, then the `payments` doc is created (`direction: INBOUND`, `RECEIVED`). Duplicates are caught before a payment exists |
+| 2 | Message authentication and beneficiary resolution (`beneficiaryResolution`: MATCHED / PARTIAL / NO_MATCH). NO_MATCH goes to the Unable-to-Apply queue |
+| 3 | Originator sanctions/AML screening, simulated FX, domestic vs cross-border classification |
+| 4 | `PaymentConfirmation`: roll up match and sanctions into ACCEPT / REJECT (`acceptanceDecision`) |
+| 5 | Simulated pacs.002 sent to the sending bank (ACCP, or RJCT with reason code) |
+
+### Agentic AI
+
+Two agents run in the `payment_agent` service (LangGraph over Amazon Bedrock, graph state persisted with `MongoDBSaver`). They do not replace the deterministic workflow: validation, posting and settlement stay with the payment services, and each agent has a fixed, code-enforced action list.
+
+| Agent | Where it acts | What it does |
+| --- | --- | --- |
+| **Cutoff Risk & Exception Management** | Held wires before and after the internal cut-off (stage 4) | Compares the payment to the internal and external cut-offs (ET: domestic 17:30 / 18:45, international USD 18:15 / 18:45), investigates the blocker, and acts on its own only for reminders, backup-approver escalation, screening priority and a customer funds notice. Hold to next value date, EXPEDITE and defer to next business day wait for human approval |
+| **Reconciliation Mismatch Investigation** | Stage 8 exceptions (`RECONCILIATION_DISCREPANCY`, `RECONCILIATION_MISSING`, `ORPHANED_SETTLEMENT`) | The reconciliation engine decides whether records match; the agent classifies the cause (timing lag, fee, reference or amount mismatch, orphan), rechecks on its own, and proposes an action that a Payments Operations user approves. It writes only `exceptions.agent{}` and never edits ledger or journal records; corrections go through the owning service |
+
+Walk both in the browser at `/showcase`: six reconciliation scenarios and two cut-off scenarios.
+
+### Payment collections
+
+`payments` is the authoritative business payment; `canonicalJsonStorage` holds the rail message and conversion audit. Accounting begins at `ledgerEvents`; debit and credit legs are created by the ledger service.
+
+```
+outbound:  payments -> routingSnapshots -> paymentExecutions (+ canonicalJsonStorage) -> transactions -> ledgerEvents -> ...
+inbound:   canonicalJsonStorage -> payments -> ... -> transactions -> ledgerEvents -> ...
+```
+
+### Scope
+
+In scope: wire and internal-transfer payments, outbound and inbound, with simulated rails and screening. Rail access goes through an adapter (`simulated_wire_rail`), and ISO 20022 messages are built only at that boundary.
 
 ## Where Does MongoDB Shine?
 
@@ -120,14 +220,22 @@ Put together, the three services form one high-level flow around a single MongoD
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------ |
 | `customers`        | PartyReferenceDataDirectoryEntry | Customer master + nested KYC                                                       |
 | `accounts`         | CurrentAccountFacility           | Source-of-truth balances                                                           |
-| `payments`         | PaymentOrderInitiation           | Payment orders, status PENDING → SETTLED                                          |
+| `payments`         | PaymentOrderInitiation           | Canonical payment (outbound and inbound), lifecycle state plus posting, settlement and reconciliation axes |
+| `paymentHistory`   | PaymentOrderInitiation           | Insert-only lifecycle events and checks, one doc each, written with the `payments` update |
+| `routingSnapshots` | PaymentOrchestration             | Immutable route chosen at stage 4                                                  |
+| `paymentExecutions`| PaymentRail                      | One doc per outbound execution attempt                                             |
+| `canonicalJsonStorage` | FinancialGateway / PaymentRail   | pacs.008 / pacs.002 / pacs.004 and simulated settlement or statement messages     |
+| `settlementPositions` | PaymentSettlement             | Expected vs actual settlement, outcome matched / unmatched / delayed / exception   |
+| `reconciliationItems` | AccountReconciliation         | One doc per comparison leg, written by the ledger service                          |
+| `exceptions`       | Originating payment's domain     | Exception queue (settlement, reconciliation, duplicate, UTA); agents annotate `agent{}` |
+| `cutoffCases`      | Cut-off agent                    | Cutoff agent cases (owned by `payment_agent`)                                      |
 | `transactions`     | CurrentAccountFacility           | Executed payment legs; listed via`CurrentAccountTransaction/Request` (accounts svc) |
 | `glAccounts`       | FinancialAccounting              | Chart of accounts, consulted by every GL stage below                               |
 | `ledgerEvents`     | FinancialBookingLog              | Stage ①: debit + credit legs, postingStatus PENDING → POSTED                     |
 | `subLedgerEntries` | FinancialAccounting              | Stage ②: two entries per event (DR + CR)                                          |
 | `journalEntries`   | FinancialAccounting              | Stage ③: batched, balanced (Pacioli enforced)                                     |
 
-**How the collections chain together** — no `$lookup`-style foreign keys, just a carried-forward identifier at each stage: `payments.paymentId` → `transactions.paymentId` → `ledgerEvents.sourceReference.sourceId` → `subLedgerEntries.sourceReference.sourceId` → `journalEntries.journalId`, which then gets stamped back onto `subLedgerEntries.journalEntryId` and `ledgerEvents.postingResult.journalEntryId`. Every hop is a single indexed lookup — that's what lets `/pipeline/trace/{paymentId}` assemble the full trace without an aggregation-pipeline join.
+**How the collections chain together** — no `$lookup`-style foreign keys, just a carried-forward identifier at each stage: `payments.paymentId` → (`routingSnapshots`, `paymentExecutions`, `paymentHistory`, `settlementPositions`, `reconciliationItems`, all keyed by `paymentId`) → `transactions.paymentId` → `ledgerEvents.sourceReference.sourceId` → `subLedgerEntries.sourceReference.sourceId` → `journalEntries.journalId`, which then gets stamped back onto `subLedgerEntries.journalEntryId` and `ledgerEvents.postingResult.journalEntryId`. Every hop is a single indexed lookup — that's what lets `/pipeline/trace/{paymentId}` assemble the full trace without an aggregation-pipeline join.
 
 ### Indexing and validators (ledger service)
 
@@ -148,7 +256,8 @@ This approach reflects a **modern and practical way to develop software**, suppo
 ## Tech Stack
 
 - **[MongoDB Atlas](https://www.mongodb.com/atlas)** — operational data layer. Uses ACID multi-document transactions, change streams, JSON Schema validators, and aggregation pipelines. **A replica set is required** (change streams and multi-doc transactions do not work on a standalone server).
-- **[FastAPI](https://fastapi.tiangolo.com/)** (Python `>=3.10,<3.11`, [Poetry](https://python-poetry.org/)-managed) — the three backend microservices.
+- **[FastAPI](https://fastapi.tiangolo.com/)** (Python `>=3.10,<3.11`, [Poetry](https://python-poetry.org/)-managed) — the four backend services.
+- **[LangGraph](https://langchain-ai.github.io/langgraph/)** over **Amazon Bedrock** (default model `us.anthropic.claude-haiku-4-5-20251001-v1:0`, override with `BEDROCK_MODEL_ID`) — the payment agents, with `MongoDBSaver` checkpointing in Atlas.
 - **[PyMongo](https://pymongo.readthedocs.io/)** — synchronous MongoDB driver.
 - **[Next.js 15](https://nextjs.org/)** App Router + **[React 19](https://react.dev/)** — the frontend (JavaScript, not TypeScript).
 - **[LeafyGreen UI](https://github.com/mongodb/leafygreen-ui)** (MongoDB's design system) + **[CSS Modules](https://github.com/css-modules/css-modules)** — component-scoped styling.
@@ -171,15 +280,16 @@ make setup
 
 # 2. Create a .env per backend service and frontend/.env.local — see Environment variables below
 
-# 3. Create the GL collections' indexes and validators (ledger service only — see
-#    "Indexing and validators" above)
+# 3. Create indexes and validators: the GL collections (ledger) and the payment
+#    collections (transactions, e.g. paymentHistory) — see "Indexing and validators"
 cd backend/ledger && poetry run python -m data.ensure_indexes && cd ../..
+cd backend/transactions && poetry run python -m data.ensure_indexes && cd ../..
 
 # 4. Start everything
 make dev
 ```
 
-`make dev` frees the dev ports, then starts the accounts, transactions, and ledger backends plus the frontend together. Open [http://localhost:3000](http://localhost:3000).
+`make dev` frees the dev ports, then starts the accounts, transactions, ledger and payment_agent backends plus the frontend together. Open [http://localhost:3000](http://localhost:3000).
 
 You can also run pieces individually:
 
@@ -187,7 +297,7 @@ You can also run pieces individually:
 make dev-accounts      # accounts backend (8001)
 make dev-transactions  # transactions backend (8002)
 make dev-ledger        # ledger backend (8003)
-make dev-bian-model    # BIAN data-model explorer (8004)
+make dev-agent         # payment agent (8004)
 make dev-frontend      # frontend (3000)
 make kill-ports        # free the dev ports if they are stuck
 ```
@@ -256,12 +366,29 @@ GL_BATCH_INTERVAL_SECONDS=600      # optional, GL batch cadence (default 600)
 ENABLE_CHANGE_STREAMS=true         # optional (default true)
 ```
 
+**`backend/payment_agent/.env`** (see `.env.example`):
+
+```bash
+MONGODB_URI=                       # required
+LEAFYBANK_DB_NAME=leafy_bank_bian  # optional, this is the default
+TRANSACTIONS_BASE_URL=http://localhost:8002   # agents act through the owning services
+LEDGER_BASE_URL=http://localhost:8003
+ENABLE_RECONCILIATION_AGENT=false  # optional (default false); true starts the reconciliation worker
+ENABLE_CUTOFF_AGENT=false          # optional (default false); acts only on showcase payments tagged
+                                   # demo.clockRunId. Keep it on in ONE instance per database.
+AWS_REGION=us-east-1               # Bedrock region; credentials come from the standard AWS chain
+BEDROCK_MODEL_ID=                  # optional override of the default Haiku 4.5 profile
+```
+
+Optional simulation workers (all default as shown): `ENABLE_SETTLEMENT_COMPLETION=true`, `ENABLE_STATEMENT_SIM=true`, `ENABLE_INBOUND_SIM=false`, `ENABLE_CUTOFF_RELEASE_JANITOR=false` (transactions), and `ENABLE_CORRESPONDENT_REPLY_SIM=true` (ledger).
+
 **Frontend** — create `frontend/.env.local`. The UI proxies BIAN requests to each service by path segment, so it needs the backend URLs:
 
 ```bash
 ACCOUNTS_BACKEND_URL="http://localhost:8001"
 TRANSACTIONS_BACKEND_URL="http://localhost:8002"
 LEDGER_BACKEND_URL="http://localhost:8003"
+AGENTS_BACKEND_URL="http://localhost:8004"   # payment_agent (this is also the default)
 # Optional: external open-finance aggregation (out of scope for the BIAN flow)
 CORE_BACKEND_URL="http://localhost:8000"
 ```
@@ -274,7 +401,7 @@ CORE_BACKEND_URL="http://localhost:8000"
 | accounts     | 8001 | BIAN`PartyReferenceDataDirectoryEntry` + `CurrentAccount`  |
 | transactions | 8002 | BIAN`PaymentOrderInitiation` (synchronous ACID execution) |
 | ledger       | 8003 | BIAN`FinancialAccounting` + `/pipeline` monitor routes     |
-| bian-model   | 8004 | BIAN data-model explorer (Next.js), linked from the NavBar |
+| payment_agent | 8004 | Reconciliation and Cut-off agents (`/reconciliation/*`, `/cutoff/*`) |
 | frontend     | 3000 | Next.js UI                                                 |
 
 > The optional [Open Finance Service](https://github.com/mongodb-industry-solutions/leafy-bank-backend-openfinance) (external-bank aggregation) is out of scope for the BIAN flow; the proxy falls back to `CORE_BACKEND_URL` for its routes.
@@ -287,6 +414,10 @@ Once `make dev` is running and you've seeded data, open [http://localhost:3000](
 - **Credit Cards / Loans / Portfolio** (`/credit-cards`, `/loans`, `/portfolio`) — other product surfaces backed by the same accounts service.
 - **Send a payment** — from the home or accounts view, send money between two Leafy Bank accounts. Each payment click drives the two-phase flow end to end.
 - **Pipeline trace** — in the transactions table, click an executed payment to watch it move live through `transaction → ledgerEvent → subLedgerEntries → journalEntry` (polled every 2s via `/pipeline/trace/{paymentId}`).
+- **Payments** (`/payments`) — the lifecycle overview diagram for the payments workflow.
+- **Payments Workflow** (`/payments-workflow`) — payment history list (filter by Domestic / International), a New payment wizard, a Generate incoming wire action, and a per-payment lifecycle deep dive across the nine stages with the MongoDB documents each stage writes. Exceptions, including the Unable-to-Apply queue, are handled here.
+- **Operations dashboard** (`/payments-dashboard`) — throughput, lifecycle-stage counts, exceptions, settlement and reconciliation status.
+- **Agent scenarios** (`/showcase`) — guided walkthroughs of the Reconciliation agent (six scenarios) and the Cut-off agent (two scenarios), including the human approval step.
 - **GL Pipeline Monitor** (`/gl-pipeline-monitor`) — batch cadence, last-run time, and posting-status counts across the ledger pipeline.
 - **Leafy Bank Assistant** — the floating chat bubble (bottom-right) answers questions about your accounts and transactions via the chatbot backend.
 
