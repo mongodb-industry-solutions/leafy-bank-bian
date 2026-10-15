@@ -126,8 +126,43 @@ function StepCards({ cards, current, final, waiting }) {
   );
 }
 
+const SLOW_AFTER_S = 20;
+const ACTIVITY_ICON = { agent: "Sparkle", code: "CurlyBraces", human: "Person", external: "Clock" };
+
+// One line saying what the run is doing or waiting on. The timer restarts when the state
+// changes; after SLOW_AFTER_S it reassures the audience the app is still working.
+function ActivityBanner({ activity }) {
+  const key = activity ? `${activity.kind}:${activity.text}` : null;
+  const [since, setSince] = useState(Date.now());
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    setSince(Date.now());
+    setNow(Date.now());
+  }, [key]);
+  useEffect(() => {
+    if (!key) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [key]);
+  if (!activity) return null;
+  const seconds = Math.max(0, Math.floor((now - since) / 1000));
+  const waitsOnYou = activity.kind === "human";
+  return (
+    <div className={`${styles.activity} ${styles[`lane_${activity.kind === "external" ? "code" : activity.kind}`]}`} role="status" aria-live="polite">
+      <span className={styles.activityIcon} aria-hidden="true">
+        <Icon glyph={ACTIVITY_ICON[activity.kind]} size={14} />
+      </span>
+      <span className={styles.activityText}>{activity.text}{waitsOnYou ? "" : "…"}</span>
+      {!waitsOnYou && <span className={styles.activityTime}>{seconds}s</span>}
+      {!waitsOnYou && seconds >= SLOW_AFTER_S && (
+        <span className={styles.activityHint}>Still working. This can take up to a minute.</span>
+      )}
+    </div>
+  );
+}
+
 export default function RunConsole({
-  top, stepCards, stepIndex, controller, events, pending, sources, evidence, review, failure, result,
+  top, stepCards, stepIndex, controller, events, pending, sources, evidence, review, failure, result, activity,
 }) {
   const [filter, setFilter] = useState("all");
   const logRef = useRef(null);
@@ -169,6 +204,7 @@ export default function RunConsole({
       </div>
 
       {controller.error && <Body className={styles.error}>{controller.error}</Body>}
+      <ActivityBanner activity={activity} />
       {evidence}
       {failure}
 

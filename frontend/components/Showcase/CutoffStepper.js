@@ -15,6 +15,7 @@ import {
 import { BriefStrip } from "./ScenarioBrief";
 import { PaymentCard } from "./StatusRail";
 import RunConsole from "./RunConsole";
+import { deriveActivity } from "./activity";
 import { useAgentSteps } from "./AgentThinking";
 import { INVESTIGATION, PAYMENT, RESOLUTION, usePacedEvents, useRunLog } from "./runLog";
 import { deriveCutoffEvents } from "./cutoffRunLog";
@@ -251,6 +252,21 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
 
   const canDecide = (step.decide && !ctx.decision) || revisedProposal;
 
+  const gate = step.gate;
+  const agentBusy =
+    !!caseDoc && !done && !agent?.error && !revisedProposal &&
+    ((gate === "assessed" && !agent?.assessedAt) || (gate === "proposal" && !agent?.proposedAction) ||
+      (step.final && !closingProps));
+  const activity = deriveActivity({
+    humanWait: canDecide && agent?.proposedAction ? "Waiting for your decision" : null,
+    running: running ? "Applying this step" : sweeping ? "Waking the agent" : null,
+    externalWait: step.final && closingProps && ctx.closeStartedAt && !settled ? "Waiting for the wire to settle" : null,
+    systemWait: gate && !caseDoc ? "Waiting for the agent to open a case" : null,
+    agentBusy,
+    agentSteps,
+    bank: scenario.bank,
+  });
+
   const chips = [
     <Badge key="status" variant="lightgray">{payment?.status || ctx.init?.status || "—"}</Badge>,
     riskLevel && <Badge key="risk" variant={RISK_VARIANT[riskLevel] || "lightgray"}>{riskLevel.replaceAll("_", " ")}</Badge>,
@@ -294,7 +310,8 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
           )}
           controller={controller}
           events={events}
-          pending={backlog > 0 ? "Next event coming…" : waiting}
+          pending={backlog > 0 ? "Next event coming…" : null}
+          activity={activity}
           evidence={ctx.init && <ClockStrip businessMs={displayMs} risk={caseDoc?.risk} init={ctx.init} />}
           failure={agent?.error && !agent?.verification && (
             <div className={styles.section}>

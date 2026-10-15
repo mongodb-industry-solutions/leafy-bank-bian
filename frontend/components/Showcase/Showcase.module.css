@@ -1556,3 +1556,42 @@ summary.runTitle {
 @media (prefers-reduced-motion: reduce) {
   .stallBar { animation: none; }
 }
+
+/* Activity banner: what the run is doing or waiting on right now */
+.activity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--lane, #5c6c75);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+}
+
+.activityIcon {
+  display: inline-flex;
+  color: var(--lane, #5c6c75);
+  animation: livePulse 1.6s infinite;
+}
+
+.activityText {
+  font-weight: 600;
+}
+
+.activityTime {
+  color: #5c6c75;
+  font-variant-numeric: tabular-nums;
+}
+
+.activityHint {
+  color: #5c6c75;
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activityIcon { animation: none; }
+}

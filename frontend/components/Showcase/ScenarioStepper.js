@@ -12,6 +12,7 @@ import { CATEGORY, OVERDUE_SECONDS, actOf, scenarioByKey, stepsFor } from "./sce
 import { PaymentCard } from "./StatusRail";
 import { BriefStrip } from "./ScenarioBrief";
 import RunConsole from "./RunConsole";
+import { deriveActivity } from "./activity";
 import { useAgentSteps } from "./AgentThinking";
 import ProblemScene from "./scenes/ProblemScene";
 import DecisionScene from "./scenes/DecisionScene";
@@ -296,6 +297,25 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   const canDecide = (step.gate === "decided" && !ctx.decision) || revisedProposalPending;
   const sources = { payment, trace, ownException, orphan, agent, followedException, scenarioKey };
 
+  const agentGate = step.gate === "proposal" || step.gate === "recheck";
+  const agentWorking =
+    (step.gate === "proposal" && !agent?.proposedAction && !agent?.verification) ||
+    (step.gate === "recheck" && !agent?.nextCheckAt && !agent?.recheckCount && !agent?.verification) ||
+    step.final;
+  const activity = deriveActivity({
+    humanWait: canDecide ? "Waiting for your decision" : null,
+    running: running ? "Applying this step" : null,
+    externalWait:
+      step.countdown && countdownLeft > 0 ? `Statement window closes in ${countdownLeft}s`
+      : awaitingReply ? "Waiting for the correspondent bank's reply"
+      : step.final && !outcome && scenarioKey === "TL" ? "Waiting for the agent's next sweep"
+      : null,
+    systemWait: agentGate && !followedId ? "Waiting for the exception to appear" : null,
+    agentBusy: !!followedId && !outcome && !agent?.error && agentWorking && !revisedProposalPending,
+    agentSteps,
+    bank: scenario.bank,
+  });
+
   const controller = {
     title: step.final ? (outcome ? "Run complete" : "Verifying the result") : step.title,
     label: step.button || "Next",
@@ -328,6 +348,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
             </>
           )}
           controller={controller}
+          activity={activity}
           events={events}
           sources={sources}
           evidence={actOf(step.key) >= 2 && (
