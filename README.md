@@ -50,6 +50,28 @@ The payments workflow extends the money flow into a full payment lifecycle: dome
 
 ### What happens at each stage
 
+Stage names, order and colours follow the payment lifecycle screens in the UI (green: customer-facing stages, blue: ledger and settlement, purple: reconciliation and exceptions). Stages marked *Agentic AI* have an agent attached.
+
+**Outgoing payment** (`/payments` overview)
+
+```mermaid
+flowchart LR
+  A1["1<br/><b>Payment Initiation</b><br/>Create the payment instruction"]:::green --> A2["2<br/><b>Authentication &<br/>Authorization</b><br/>Verify customer and permissions"]:::green --> A3["3<br/><b>Validate & Enrich</b><br/>Validate the instruction and enrich data"]:::green --> A4["4<br/><b>Orchestration &<br/>Approval</b><br/>Score fraud, pick the rail,<br/>prepare ISO 20022<br/><i>Agentic AI</i>"]:::green --> A5["5<br/><b>Payment Execution</b><br/>Send and receive confirmations"]:::green --> A6["6<br/><b>Accounting & Posting</b><br/>Ledger events, sub-ledger, GL"]:::blue --> A7["7<br/><b>Clearing &<br/>Settlement</b><br/>Settlement and position updates"]:::blue --> A8["8<br/><b>Reconciliation</b><br/>Match across systems and<br/>find discrepancies<br/><i>Agentic AI</i>"]:::purple --> A9["9<br/><b>Exceptions / Returns</b><br/>Investigate, resolve and complete"]:::purple
+  classDef green fill:#E3FCF7,stroke:#00A35C,color:#001E2B
+  classDef blue fill:#E1F7FF,stroke:#016BF8,color:#001E2B
+  classDef purple fill:#F9EBFF,stroke:#7C3AED,color:#001E2B
+```
+
+**Incoming payment** (`/payments-workflow` deep dive)
+
+```mermaid
+flowchart LR
+  B1["1<br/><b>Payment Received</b>"]:::green --> B2["2<br/><b>Message Authentication &<br/>Beneficiary Resolution</b>"]:::green --> B3["3<br/><b>Validation & Enrichment</b>"]:::green --> B4["4<br/><b>Acceptance Decision &<br/>Compliance Authorization</b>"]:::green --> B5["5<br/><b>Execution<br/>(Status Response)</b>"]:::green --> B6["6<br/><b>Accounting & Posting</b>"]:::blue --> B7["7<br/><b>Clearing & Settlement</b>"]:::blue --> B8["8<br/><b>Reconciliation</b><br/><i>Agentic AI</i>"]:::purple --> B9["9<br/><b>Exceptions / Returns</b>"]:::purple
+  classDef green fill:#E3FCF7,stroke:#00A35C,color:#001E2B
+  classDef blue fill:#E1F7FF,stroke:#016BF8,color:#001E2B
+  classDef purple fill:#F9EBFF,stroke:#7C3AED,color:#001E2B
+```
+
 **Outgoing payment**
 
 | Stage | What happens |
