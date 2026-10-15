@@ -45,9 +45,9 @@ export const CUTOFF_SCENARIOS = [
       unblock:
         "Raj, Maya's backup signatory, supplies the missing signature. The agent cannot approve its own request.",
       decide:
-        "The agent asks to expedite the wire to Fedwire. Approving runs the expedite, and the wire must " +
-        "still make the cut-off.",
-      final: "The wire is submitted to Fedwire before its cut-off, and the agent re-reads the payment to confirm it.",
+        "The agent asks to expedite the wire to Fedwire. Approval triggers expedited processing, but the " +
+        "wire must still be submitted before the cut-off.",
+      final: "The wire is submitted to Fedwire before its cut-off, and the agent verifies the payment to confirm it.",
     },
     amount: "25,000.00",
     startEt: "17:05",
@@ -144,7 +144,7 @@ const STEP = {
   watchClock: {
     key: "watch", gate: "assessed", run: "clock", button: null, title: "The agent assesses, then the clock moves",
     summary:
-      "The agent times the hold against the cut-off and acts on its own where policy allows. Then time passes " +
+      "On hold, the agent tracks the cut-off, acts within policy, and escalates decisions needing approval. Then time passes " +
       "and the cut-off gets closer.",
   },
   approveRaj: {
@@ -154,17 +154,17 @@ const STEP = {
   watchProposal: {
     key: "watch", gate: "proposal", button: "Review the proposal", title: "The agent assesses the hold",
     summary:
-      "The agent times the hold against the cut-off, acts on its own where policy allows, records its " +
-      "assessment and proposes a resolution.",
+      "On hold, the agent tracks the cut-off, acts within policy, records its assessment, and proposes a " +
+      "resolution.",
   },
   decide: {
     key: "decide", gate: "proposal", decide: true, title: "You decide",
-    summary: "The agent's proposal moves the wire, so it waits for a human. Code has already checked it against policy.",
+    summary: "The agent prepares the wire transfer and waits for a human to review and approve it before execution. Code has already checked it against policy.",
   },
   // The closing panel's button (if the scenario has one) lives in the result, not the step bar.
   final: {
     key: "final", final: true, title: "Verifying the result",
-    summary: "The agent re-reads the payment before it reports the result.",
+    summary: "The agent verifies the payment before reporting the outcome.",
   },
 };
 
