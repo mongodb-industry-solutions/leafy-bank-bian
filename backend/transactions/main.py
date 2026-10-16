@@ -748,7 +748,7 @@ def payment_rail_outbound_transaction_retrieve(
     """One execution attempt: the pacs.008 as sent, plus the stored message record.
 
     This is what the demo's ISO VIEW reads — the business half comes from
-    `paymentMessages.payload`, the ISO half from `paymentExecutions.message`.
+    `canonicalJsonStorage.payload`, the ISO half from `paymentExecutions.message`.
     """
     try:
         execution = payments_service.get_payment_execution(outboundtransactionid)

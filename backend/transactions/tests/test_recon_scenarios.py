@@ -39,7 +39,7 @@ def test_every_scenario_wire_settles_on_the_correspondent_nostro(service, db):
 def test_the_statement_carries_each_lever_and_holds_the_late_line(service, db):
     _fund(db)
     out = _run(service, db)
-    stmt = db["paymentMessages"].find_one({"paymentMessageId": out["statement"]["paymentMessageId"]})
+    stmt = db["canonicalJsonStorage"].find_one({"paymentMessageId": out["statement"]["paymentMessageId"]})
     by_pid = {e["simulatedPaymentId"]: e for e in stmt["entries"]}
     p = {k: v["paymentId"] for k, v in out["payments"].items()}
 

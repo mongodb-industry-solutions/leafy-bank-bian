@@ -119,7 +119,7 @@ def link(connection: MongoDBConnection, db_name: str, exception_id: str, *,
     then reads leg 2 MISMATCH and raises a DISCREPANCY (a re-keyed fee line), as intended.
     """
     exc_coll = connection.get_collection(db_name, "exceptions")
-    messages = connection.get_collection(db_name, "paymentMessages")
+    messages = connection.get_collection(db_name, "canonicalJsonStorage")
     positions = connection.get_collection(db_name, "settlementPositions")
     payments = connection.get_collection(db_name, "payments")
 

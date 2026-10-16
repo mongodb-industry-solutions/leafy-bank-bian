@@ -69,7 +69,7 @@ def test_the_reply_supplies_a_missing_line():
 def test_the_reply_dismisses_an_orphan_line():
     c = FakeConnection()
     _missing_wire(c)
-    c.seed("paymentMessages", [_statement([_line(1, "NOT-A-PAYMENT", 500.0)])])
+    c.seed("canonicalJsonStorage", [_statement([_line(1, "NOT-A-PAYMENT", 500.0)])])
     match_statements(c, "db", now=_LATE)
     raise_orphans(c, "db")
     (orphan,) = _excs(c, CATEGORY_ORPHANED_SETTLEMENT)

@@ -45,9 +45,8 @@ class PaymentCollections:
     routing_snapshots: Any = None
     # Stage 5's two new collections (doc 19 B2, B3). Optional for the same reason as stage
     # 4's: a context built before this stage existed, or a test that never reaches a rail,
-    # still constructs. `paymentMessages` is Doina's own rename of the row her target-model
-    # table calls `canonicalJsonStorage/paymentMessages (renamed)` (L780) —
-    # ⚠️ NOT the live `canonicalJsonStorage`, which is another demo's (doc 19 B2).
+    # still constructs. `payment_messages` is the `canonicalJsonStorage` collection, which
+    # fsi-payments-processing also writes to (conversion-run records with no `paymentMessageId`).
     payment_executions: Any = None
     payment_messages: Any = None
 
@@ -91,7 +90,7 @@ class PaymentContext:
     # received pacs.008). Defaults OUTBOUND so every existing caller, test fixture and
     # hand-built context keeps its current meaning without naming the field.
     #
-    # ⚠️ Orthogonal to `paymentMessages.direction`, which describes a MESSAGE's travel: an
+    # ⚠️ Orthogonal to `canonicalJsonStorage.direction`, which describes a MESSAGE's travel: an
     # INBOUND payment emits an OUTBOUND pacs.002 (FR-5.IN2). Never derive one from the other.
     direction: str = "OUTBOUND"
     # Demo clock run (`shared.business_clock`). None = untagged: real time, today's behaviour.
@@ -168,7 +167,7 @@ class PaymentContext:
     cutoff_decision: Optional[str] = None
     value_date_override: Optional[str] = None
     # --- inbound (incoming wire) ---------------------------------------------
-    # The parsed pacs.008 the payment was built from, and the `paymentMessages` doc that
+    # The parsed pacs.008 the payment was built from, and the `canonicalJsonStorage` doc that
     # stored it. Set by `receive.run` (inbound stage 1) and read by stage 2's beneficiary
     # resolution and stage 8's leg-1 comparison. None on every outbound payment.
     inbound_message: Optional[dict] = None

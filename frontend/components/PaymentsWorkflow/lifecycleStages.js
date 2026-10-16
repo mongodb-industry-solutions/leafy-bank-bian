@@ -412,7 +412,7 @@ export function buildLifecycleStages(payment, trace) {
     },
     {
       // Stage 5 owns two states (SUBMITTED -> IN_PROGRESS) and two artifacts: the pacs.008
-      // on `paymentExecutions` and the canonical payload on `paymentMessages`.
+      // on `paymentExecutions` and the canonical payload on `canonicalJsonStorage`.
       // `kind: "railExecution"` renders her L548-565 BUSINESS VIEW / ISO VIEW pair — doc 16
       // §5 calls it the highest-value screen in the demo.
       //
@@ -441,7 +441,7 @@ export function buildLifecycleStages(payment, trace) {
       // transmitting the status response back to the SENDING bank: a simulated pacs.002
       // confirming the payment will be applied. No `paymentExecutions` record is created
       // for inbound (that collection is outbound-only, L944) — the pacs.002 lives in
-      // `paymentMessages` alongside outbound's pacs.008, distinguished by `direction`.
+      // `canonicalJsonStorage` alongside outbound's pacs.008, distinguished by `direction`.
       intro: inbound
         ? "The money already arrived, so there's nothing left to submit to a network — " +
           "\"execution\" here means telling the sending bank what happened. A confirmation " +

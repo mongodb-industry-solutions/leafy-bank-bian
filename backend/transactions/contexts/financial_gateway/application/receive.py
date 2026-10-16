@@ -10,11 +10,11 @@ both the same way.
 Her L363 gives the sequence exactly:
 
     external pacs.008
-      -> paymentMessages (direction: INBOUND, paymentId: null)   <- FIRST
+      -> canonicalJsonStorage (direction: INBOUND, paymentId: null)   <- FIRST
       -> parse and validate
       -> generate paymentId
       -> payments (direction: INBOUND, rail: WIRE, status: RECEIVED)
-      -> back-link paymentMessages.paymentId
+      -> back-link canonicalJsonStorage.paymentId
 
 and L368-372 gives five reasons the message is persisted first: the original is not lost if
 parsing fails, duplicates are detectable before a duplicate payment exists, the message can
@@ -159,7 +159,7 @@ def run(ctx: PaymentContext) -> None:
 
 
 def _messages(ctx: PaymentContext):
-    """The `paymentMessages` handle, falling back to `db[name]`.
+    """The `canonicalJsonStorage` handle, falling back to `db[name]`.
 
     Same tolerance as `execute._collection`: a context built before this stage existed
     reaches the collection through `db` rather than raising an AttributeError mid-stage.
@@ -177,7 +177,7 @@ def _messages(ctx: PaymentContext):
 def _link_message(messages, message_oid: ObjectId, payment_id: str) -> None:
     """Step 4 of her sequence: stamp the payment back onto the stored message.
 
-    The ONE permitted update on an inbound message document. `paymentMessages` is otherwise
+    The ONE permitted update on an inbound message document. `canonicalJsonStorage` is otherwise
     insert-only (execution_documents' "append-only" contract), and this is the forward
     reference that contract explicitly anticipates: the message is written before the
     payment exists, so its `paymentId` cannot be known at insert.

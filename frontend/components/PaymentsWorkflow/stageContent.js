@@ -65,12 +65,12 @@ const COPY = {
   execution: {
     [OUT]: {
       business: "The payment is converted to the network's message format and sent.",
-      technical: "A paymentExecutions document per attempt and a pacs.008 in paymentMessages, built from the canonical payment.",
+      technical: "A paymentExecutions document per attempt and a pacs.008 in canonicalJsonStorage, built from the canonical payment.",
       why: "The canonical payment and the ISO 20022 message are separate documents linked by id, and each attempt gets its own paymentExecutions document, so a new rail adds a mapping and a retry never overwrites history.",
     },
     [IN]: {
       business: "A confirmation goes back to the sending bank saying the payment was accepted or rejected.",
-      technical: "A pacs.002 is written to paymentMessages; there is no paymentExecutions document for inbound.",
+      technical: "A pacs.002 is written to canonicalJsonStorage; there is no paymentExecutions document for inbound.",
       why: "Inbound and outbound messages share one collection, told apart by direction.",
     },
   },
@@ -145,7 +145,7 @@ const WRITES = {
   ],
   execution: [
     W("paymentExecutions", "insert", "The rail submission attempt", ({ payment }) => nonEmpty(payment?.executions)),
-    W("paymentMessages", "insert", "The ISO 20022 message sent and the status received", executionMessages),
+    W("canonicalJsonStorage", "insert", "The ISO 20022 message sent and the status received", executionMessages),
     history({ states: ["SUBMITTED", "IN_PROGRESS"], stages: ["5"] }),
   ],
   ledgerEvent: [
@@ -174,7 +174,7 @@ const WRITES = {
       ledgerEvents(["SETTLEMENT"]), "Ledger service, change stream on payments"),
   ],
   reconciliation: [
-    W("paymentMessages", "update", "camt.053 statement lines matched to this payment", statements),
+    W("canonicalJsonStorage", "update", "camt.053 statement lines matched to this payment", statements),
     W("reconciliationItems", "upsert", "The three-way check: legs[] and overallResult",
       ({ trace }) => nonEmpty(trace?.reconciliationItem)),
     history({ states: ["RECONCILED"], stages: ["8"] }, "The RECONCILED event, written by the ledger service"),
@@ -183,7 +183,7 @@ const WRITES = {
 
 // Inbound has no rail submission, so stage 5 swaps the outbound rows: paymentExecutions
 // becomes an explicit "not applicable" card (shown rather than hidden, so the absence is
-// visible) and paymentMessages describes the pacs.002 status response.
+// visible) and canonicalJsonStorage describes the pacs.002 status response.
 const INBOUND_WRITES = {
   // Funds are reserved against a customer debit; inbound has none.
   validation: [
@@ -194,10 +194,10 @@ const INBOUND_WRITES = {
     {
       collection: "paymentExecutions",
       notApplicable: true,
-      fields: "Not applicable to inbound payments: no rail submission. The status response is stored in paymentMessages.",
+      fields: "Not applicable to inbound payments: no rail submission. The status response is stored in canonicalJsonStorage.",
       pick: () => null,
     },
-    W("paymentMessages", "insert", "The pacs.002 status response sent to the sending bank", executionMessages),
+    W("canonicalJsonStorage", "insert", "The pacs.002 status response sent to the sending bank", executionMessages),
   ],
 };
 

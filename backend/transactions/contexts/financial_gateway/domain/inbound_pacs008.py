@@ -1,6 +1,6 @@
 """Inbound pacs.008 -> canonical payment fields. Pure, and the exact inverse of `pacs008.py`.
 
-Doina's inbound stage 1 (L363): *"external pacs.008 -> paymentMessages (direction: INBOUND)
+Doina's inbound stage 1 (L363): *"external pacs.008 -> canonicalJsonStorage (direction: INBOUND)
 -> Parse and validate the message -> Generate paymentId -> create `payments` document."*
 This module is the "parse and validate" half; `application/receive.py` does the I/O.
 

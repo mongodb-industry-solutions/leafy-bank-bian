@@ -125,7 +125,7 @@ def test_history_written_to_the_db_does_not_disturb_live_generation(service, db)
 
     pid = _settled_wire(service, db)
     statements, _ = build_history(now=_later(0), account_code=SETTLEMENT_ACCOUNT)
-    db["paymentMessages"].insert_many(statements)
+    db["canonicalJsonStorage"].insert_many(statements)
 
     live = generate_statement(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False, now=_later(1))
     assert live["statement"]["sequence"] == 1

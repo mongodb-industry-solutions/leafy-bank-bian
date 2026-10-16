@@ -96,7 +96,7 @@ def build(
     # what they will match on — quoting our own here would make the report unmatchable.
     # No `OrgnlTxRef`: Doina's Oct 6 review wants it inside this block without `MsgRef`, which
     # was its only content, so an empty element is omitted. Our own link to the stored
-    # pacs.008 lives on the paymentMessages document (`originalMessageRef`), not in the message.
+    # pacs.008 lives on the canonicalJsonStorage document (`originalMessageRef`), not in the message.
     original_group = {
         "OrgnlMsgId": sender.get("msgId"),
         "OrgnlMsgNmId": pacs008.MESSAGE_FORMAT,

@@ -65,7 +65,7 @@
         },
         "subjectRef": {
           "bsonType": ["object", "null"],
-          "description": "Set when the exception's subject is not a payment. ORPHANED_SETTLEMENT: the camt.053 statement line (paymentMessages, purpose ACCOUNT_STATEMENT) no internal record claims.",
+          "description": "Set when the exception's subject is not a payment. ORPHANED_SETTLEMENT: the camt.053 statement line (canonicalJsonStorage, purpose ACCOUNT_STATEMENT) no internal record claims.",
           "properties": {
             "kind": {"bsonType": "string", "enum": ["STATEMENT_LINE"]},
             "paymentMessageId": {"bsonType": "string"},
@@ -93,7 +93,7 @@
         },
         "escalation": {
           "bsonType": ["object", "null"],
-          "description": "Plan A4 — the investigation request sent to the correspondent (paymentMessages, purpose INVESTIGATION_REQUEST, camt.029-style).",
+          "description": "Plan A4 — the investigation request sent to the correspondent (canonicalJsonStorage, purpose INVESTIGATION_REQUEST, camt.029-style).",
           "properties": {
             "paymentMessageId": {"bsonType": "string"},
             "by": {"bsonType": "string"},

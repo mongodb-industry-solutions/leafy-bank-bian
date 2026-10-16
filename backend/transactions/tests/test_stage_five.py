@@ -4,7 +4,7 @@ Four kinds of test, per the playbook's Phase H:
 
 * **pure domain** — the pacs.008 mapper and the two document builders, no database
 * **behaviour** — one per R-row that changes runtime behaviour, driven through the saga
-* **the seams** — the mapper invents nothing, and `paymentMessages` is not a second
+* **the seams** — the mapper invents nothing, and `canonicalJsonStorage` is not a second
   canonical payment (her L887 prohibition)
 * **immutability + isolation** — AST walks, because a docstring saying "append-only" or
   "we never touch that other demo's collection" guarantees nothing
@@ -244,7 +244,7 @@ def test_a_book_transfer_writes_no_execution_artifacts(service, db):  # noqa: F8
 
     assert payment["status"] == "SETTLED"
     assert db["paymentExecutions"].docs == []
-    assert db["paymentMessages"].docs == []
+    assert db["canonicalJsonStorage"].docs == []
     assert payment["refs"]["paymentExecutionIds"] == []
     assert payment["refs"]["canonicalJsonId"] is None
 
@@ -282,10 +282,10 @@ def test_an_external_wire_reaches_in_progress_with_both_artifacts(wire_payment, 
     assert len(db["paymentExecutions"].docs) == 1
     # Two messages: the OUTBOUND pacs.008 request (docs[0]) + the INBOUND status response
     # (DR-8.2, docs[1]).
-    assert len(db["paymentMessages"].docs) == 2
+    assert len(db["canonicalJsonStorage"].docs) == 2
 
     execution = db["paymentExecutions"].docs[0]
-    message = db["paymentMessages"].docs[0]
+    message = db["canonicalJsonStorage"].docs[0]
     assert message["direction"] == execution_documents.OUTBOUND
     assert wire_payment["refs"]["paymentExecutionIds"] == [execution["paymentExecutionId"]]
     assert wire_payment["refs"]["canonicalJsonId"] == message["paymentMessageId"]
@@ -411,12 +411,12 @@ def test_the_acknowledgement_updates_only_three_named_fields():
     assert set(fields) == {"status", "railStatus", "acknowledgedAt"}
 
 
-# --- B2: `paymentMessages` is hers, and is not a second canonical payment ------
+# --- B2: `canonicalJsonStorage` is hers, and is not a second canonical payment ------
 
 def test_the_payment_message_is_not_a_second_canonical_payment(wire_payment, db):  # noqa: F811
     """Her L887: *"Do not allow both `payments` and [this collection] to be authoritative
     canonical payment collections."* So it carries no status, no balance, no lifecycle."""
-    message = db["paymentMessages"].docs[0]
+    message = db["canonicalJsonStorage"].docs[0]
     for forbidden in ("status", "lifecycle", "balance", "checks", "fraud", "entitlement"):
         assert forbidden not in message, f"{forbidden} would make this a second payment record"
     assert message["paymentId"] == wire_payment["paymentId"]
@@ -424,7 +424,7 @@ def test_the_payment_message_is_not_a_second_canonical_payment(wire_payment, db)
 
 def test_the_message_records_the_mapping_version_and_the_audit(wire_payment, db):  # noqa: F811
     """Her L892 names four uses; `mappingVersion` and `transformationAudit` are two of them."""
-    message = db["paymentMessages"].docs[0]
+    message = db["canonicalJsonStorage"].docs[0]
     assert message["mappingVersion"] == pacs008.MAPPING_VERSION
     assert message["direction"] == execution_documents.OUTBOUND
     audit = message["transformationAudit"]
@@ -438,7 +438,7 @@ def test_the_message_and_execution_reference_each_other_at_insert(wire_payment, 
     """B2 — both oids are minted before either document is built, so neither collection needs
     a forward-reference update."""
     execution = db["paymentExecutions"].docs[0]
-    message = db["paymentMessages"].docs[0]
+    message = db["canonicalJsonStorage"].docs[0]
     assert execution["paymentMessageId"] == message["paymentMessageId"]
     assert message["paymentExecutionId"] == execution["paymentExecutionId"]
 
@@ -448,11 +448,11 @@ def test_the_confirmation_is_stored_as_an_inbound_message(wire_payment, db):  # 
     INBOUND doc, additive to `paymentExecutions.railStatus` (reconciliation FR-8.1 still
     reads that). The OUTBOUND request stays docs[0]; the status response is the INBOUND one,
     linked back by `originalMessageRef`."""
-    inbound = [m for m in db["paymentMessages"].docs
+    inbound = [m for m in db["canonicalJsonStorage"].docs
                if m["direction"] == execution_documents.INBOUND]
     assert len(inbound) == 1
     status = inbound[0]
-    request = db["paymentMessages"].docs[0]
+    request = db["canonicalJsonStorage"].docs[0]
 
     assert status["direction"] == execution_documents.INBOUND
     assert status["messageFormat"] == execution_documents.STATUS_MESSAGE_FORMAT
@@ -468,34 +468,23 @@ def test_the_confirmation_is_stored_as_an_inbound_message(wire_payment, db):  # 
         assert forbidden not in status, f"{forbidden} would make this a second payment record"
 
 
-def test_nothing_in_the_backend_touches_canonical_json_storage():
-    """B2 — `canonicalJsonStorage` is fsi-payments-processing's, live with 33-34 documents on
-    `ist-shared.leafy_bank_bian`. Doina's own target-model table renames the row to
-    `paymentMessages` (L780), so we build ours and leave theirs alone. This test is what keeps
-    a future convenience from quietly reaching into another demo's data.
-
-    ⚠️ It checks **code**, not prose: several modules mention the collection in a comment
-    saying exactly why they do not use it, and a grep-based version of this test failed on
-    its own warnings. So the AST is walked and only string literals and attribute names
-    count — which is also the only form that could actually reach the collection.
+def test_nothing_still_references_the_old_payment_messages_collection():
+    """The collection was renamed `paymentMessages` -> `canonicalJsonStorage` (one collection
+    shared with fsi-payments-processing). A stale literal would silently write to a collection
+    nothing reads. Only code is checked (string literals), not prose or field names such as
+    `paymentMessageId`.
     """
     hits = []
     for path in _TRANSACTIONS.rglob("*.py"):
-        if ".venv" in path.parts or path.name == "test_stage_five.py":
+        # The one-time copy script names the old collection on purpose.
+        if ".venv" in path.parts or path.name in ("test_stage_five.py", "merge_payment_messages.py"):
             continue
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
-            literal = (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and "canonicalJsonStorage" in node.value
-                # A module or function docstring is prose, not a reference.
-                and node.value.strip().count(" ") < 3
-            )
-            attribute = isinstance(node, ast.Attribute) and "canonical_json_storage" in node.attr
-            if literal or attribute:
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and node.value.strip() == "paymentMessages"):
                 hits.append(str(path.relative_to(_TRANSACTIONS)))
-    assert not hits, f"canonicalJsonStorage belongs to another demo; referenced in {hits}"
+    assert not hits, f"stale collection name `paymentMessages` referenced in {hits}"
 
 
 # --- R13: the simulated rail ---------------------------------------------------

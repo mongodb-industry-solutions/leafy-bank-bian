@@ -1,6 +1,6 @@
 """Reconciliation plan A2 — match camt.053 statement lines to settlement positions.
 
-The correspondent's statement (`paymentMessages`, `purpose: ACCOUNT_STATEMENT`, written by
+The correspondent's statement (`canonicalJsonStorage`, `purpose: ACCOUNT_STATEMENT`, written by
 the transactions service's gateway) is the only source of `settlementPositions.actualAmount`
 for an outbound wire. Leg 2 of reconciliation then compares our settlement posting against
 an external record instead of a figure we wrote ourselves (plan Decision 1).
@@ -70,7 +70,7 @@ def match_statements(connection: MongoDBConnection, db_name: str,
     """Match every UNMATCHED line on every statement. Idempotent: a matched line and a
     position that already holds an actual amount are both skipped on the next run."""
     now = now or datetime.now(timezone.utc)
-    messages = connection.get_collection(db_name, "paymentMessages")
+    messages = connection.get_collection(db_name, "canonicalJsonStorage")
     positions = connection.get_collection(db_name, "settlementPositions")
 
     result = {"lines": 0, "matched": 0, "unmatched": 0}
@@ -132,7 +132,7 @@ def raise_orphans(connection: MongoDBConnection, db_name: str) -> dict:
     A4's LINK_STATEMENT_ENTRY closes. The line is stamped `recon.exceptionId`, so the next
     pass skips it without touching `exceptions`.
     """
-    messages = connection.get_collection(db_name, "paymentMessages")
+    messages = connection.get_collection(db_name, "canonicalJsonStorage")
     exc_coll = connection.get_collection(db_name, "exceptions")
 
     raised = 0

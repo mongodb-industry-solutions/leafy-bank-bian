@@ -243,7 +243,7 @@ def build_return(service, payment: dict, *, return_reason_code: str) -> dict:
         original_message_ref=original_ref,
         now=now,
     )
-    service.db["paymentMessages"].insert_one(message)
+    service.db["canonicalJsonStorage"].insert_one(message)
 
     _close_returned(service, payment, message, return_reason_code, now)
     return message

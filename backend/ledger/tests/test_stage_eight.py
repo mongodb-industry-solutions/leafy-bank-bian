@@ -285,7 +285,7 @@ def _inbound_wire_fixture(c: FakeConnection, amount: float = 25000.0, pacs002_st
     pay = _payment(rail="WIRE", amount=amount, state="SETTLED")
     pay["direction"] = "INBOUND"
     c.seed("payments", [pay])
-    c.seed("paymentMessages", [
+    c.seed("canonicalJsonStorage", [
         {"paymentId": _PAY, "direction": "INBOUND", "purpose": "CREDIT_TRANSFER"},
         *([_pacs002(pacs002_status)] if pacs002_status else []),
     ])
@@ -768,7 +768,7 @@ def _inbound_settlement_event(amount_minors: int = _MIN) -> dict:
 
 
 def _inbound_messages(*, status_code: str = "ACCP") -> list[dict]:
-    """The two `paymentMessages` docs an inbound payment carries: the received pacs.008
+    """The two `canonicalJsonStorage` docs an inbound payment carries: the received pacs.008
     (direction INBOUND, purpose CREDIT_TRANSFER) and the transmitted pacs.002 (direction
     OUTBOUND on an INBOUND payment — the two axes are orthogonal)."""
     return [
@@ -797,7 +797,7 @@ def test_inbound_leg1_matches_without_any_execution_record():
     c = FakeConnection()
     c.seed("payments", [_inbound_payment()])
     # ⚠️ No paymentExecutions — deliberate, that is the inbound condition.
-    c.seed("paymentMessages", _inbound_messages())
+    c.seed("canonicalJsonStorage", _inbound_messages())
     c.seed("settlementPositions", [_position()])
     c.seed("ledgerEvents", [_inbound_principal_event(), _inbound_settlement_event()])
     c.seed("subLedgerEntries", [_subledger(_EVT_SET)])
@@ -813,7 +813,7 @@ def test_inbound_leg1_is_pending_until_the_pacs002_is_transmitted():
     no exception (a quiet state, not operator work)."""
     c = FakeConnection()
     c.seed("payments", [_inbound_payment()])
-    c.seed("paymentMessages", [_inbound_messages()[0]])  # the pacs.008 only
+    c.seed("canonicalJsonStorage", [_inbound_messages()[0]])  # the pacs.008 only
     c.seed("settlementPositions", [_position()])
     c.seed("ledgerEvents", [_inbound_principal_event(), _inbound_settlement_event()])
 
@@ -830,7 +830,7 @@ def test_inbound_leg1_mismatches_when_the_posted_credit_differs():
     discrepancy — the exception the operator needs."""
     c = FakeConnection()
     c.seed("payments", [_inbound_payment()])
-    c.seed("paymentMessages", _inbound_messages())
+    c.seed("canonicalJsonStorage", _inbound_messages())
     c.seed("settlementPositions", [_position()])
     c.seed("ledgerEvents", [
         _inbound_principal_event(amount_minors=_MIN - 2500),

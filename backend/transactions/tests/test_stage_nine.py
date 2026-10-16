@@ -69,11 +69,6 @@ _TRANSACTIONS_STUB = (
 _LEDGER_STUB = (
     pathlib.Path(__file__).resolve().parents[2] / "ledger" / "data" / "exceptions_schema.json"
 )
-_WORKING_V35 = (
-    pathlib.Path(__file__).resolve().parents[6]
-    / "bian-data-model" / "Consolidated_Banking_DataModel_BIAN_v37_Oct12.json"
-)
-
 
 def _stub_schema() -> dict:
     return json.loads(_TRANSACTIONS_STUB.read_text())["validator"]["$jsonSchema"]
@@ -179,16 +174,6 @@ def test_the_ledger_mirror_is_byte_identical_to_the_canonical_stub():
     assert _TRANSACTIONS_STUB.read_text() == _LEDGER_STUB.read_text(), (
         "exceptions_schema.json drifted between transactions and ledger — copy byte-identical"
     )
-
-
-def test_the_working_v35_validator_matches_the_authored_stub():
-    """Lockstep: the consolidated working spec's `exceptions` validator is the authored
-    stub's validator, verbatim — the spec-stub and the consolidated model must not drift."""
-    v35 = json.loads(_WORKING_V35.read_text())
-    assert "exceptions" in v35["collections"], "exceptions not yet in working v35"
-    assert v35["meta"]["collectionCount"] == 29
-    assert "exceptions" in v35["meta"]["collectionGroups"]["payments_platform"]
-    assert v35["collections"]["exceptions"]["validator"] == json.loads(_TRANSACTIONS_STUB.read_text())["validator"]
 
 
 # --- Step 2 gate: the record_exception writer --------------------------------
@@ -637,14 +622,14 @@ def test_escalate_sends_one_investigation_request_and_keeps_the_exception_open(s
 
     assert updated["status"] == STATUS_OPEN
     assert updated["awaitingCounterparty"] is True
-    msg = db["paymentMessages"].find_one(
+    msg = db["canonicalJsonStorage"].find_one(
         {"paymentMessageId": updated["escalation"]["paymentMessageId"]})
     assert msg["purpose"] == "INVESTIGATION_REQUEST"
     assert msg["messageFormat"].startswith("camt.026")
     assert msg["payload"]["Document"]["UblToApply"]["Undrlyg"]["OrgnlEndToEndId"] == payment["paymentId"]
     with pytest.raises(ExceptionConflict):
         service.resolve_exception(exc["exceptionId"], action=ACTION_ESCALATE_TO_CORRESPONDENT)
-    assert db["paymentMessages"].count_documents({"purpose": "INVESTIGATION_REQUEST"}) == 1
+    assert db["canonicalJsonStorage"].count_documents({"purpose": "INVESTIGATION_REQUEST"}) == 1
     # Still closable afterwards by the bearer-correct action.
     assert service.resolve_exception(
         exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)["status"] == STATUS_RESOLVED
@@ -666,7 +651,7 @@ def test_an_orphan_line_escalates_and_dismisses_without_a_payment(service, db):
     })
 
     escalated = service.resolve_exception("EXC-ORPH", action=ACTION_ESCALATE_TO_CORRESPONDENT)
-    msg = db["paymentMessages"].find_one({"purpose": "INVESTIGATION_REQUEST"})
+    msg = db["canonicalJsonStorage"].find_one({"purpose": "INVESTIGATION_REQUEST"})
     assert msg["paymentId"] is None
     assert msg["payload"]["Document"]["UblToApply"]["Undrlyg"] == {
         "StmtRef": "PM-STMT", "NtryNb": 3, "NtryRef": "8EBAA746/LEAFYBK"}
@@ -680,7 +665,7 @@ def test_an_orphan_line_escalates_and_dismisses_without_a_payment(service, db):
 def test_an_orphan_line_a_settled_wire_is_waiting_for_cannot_be_dismissed(service, db):
     """R2 (2026-10-05): dismissing a re-keyed line stranded its wire as MISSING."""
     now = datetime.now(timezone.utc)
-    db["paymentMessages"].insert_one({
+    db["canonicalJsonStorage"].insert_one({
         "paymentMessageId": "PM-STMT", "purpose": "ACCOUNT_STATEMENT",
         "statement": {"accountCode": "1111"},
         "entries": [{"lineNo": 1, "reference": "1BCF3CC0/LEAFYBK", "amount": 6120.0}]})

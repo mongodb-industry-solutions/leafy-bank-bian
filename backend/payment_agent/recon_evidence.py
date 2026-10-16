@@ -123,13 +123,13 @@ def _lines_for_payment(db: Any, payment_id: str) -> list[dict]:
                       "reference": "$entries.reference", "amount": "$entries.amount",
                       "charges": "$entries.charges", "bookingDate": "$statement.window.to"}},
     ]
-    rows = list(db["paymentMessages"].aggregate(pipeline))
+    rows = list(db["canonicalJsonStorage"].aggregate(pipeline))
     return [{**r, "paymentId": payment_id, "expectedAmount": expected} for r in rows]
 
 
 def _payments_for_line(db: Any, exc: dict) -> list[dict]:
     subject = exc.get("subjectRef") or {}
-    stmt = db["paymentMessages"].find_one(
+    stmt = db["canonicalJsonStorage"].find_one(
         {"paymentMessageId": subject.get("paymentMessageId"), "purpose": STATEMENT_PURPOSE},
         {"_id": 0, "statement": 1, "entries": 1})
     if stmt is None:

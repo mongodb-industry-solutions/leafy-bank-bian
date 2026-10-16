@@ -1624,7 +1624,7 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
             <Card
               label={inbound ? "Business view and pacs.002" : "Canonical payment to ISO 20022"}
               note={inbound
-                ? "The payment has not settled on Leafy Bank's books yet, and will only do so if it is ACCEPTED. A simulated pacs.002 is created in the paymentMessages collection, confirming or rejecting the payment."
+                ? "The payment has not settled on Leafy Bank's books yet, and will only do so if it is ACCEPTED. A simulated pacs.002 is created in the canonicalJsonStorage collection, confirming or rejecting the payment."
                 : "The ISO message is built only at the rail boundary, never earlier in the lifecycle."}
             >
               <RailViews data={stage.data} inbound={inbound} />

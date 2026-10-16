@@ -74,7 +74,7 @@ const INITIATE = [
   W("routingSnapshots", "insert", "The routing decision: network, correspondent, cut-off, rationale",
     ({ payment }) => nonEmpty(payment?.routingSnapshot)),
   W("paymentExecutions", "insert", "The rail submission attempt", ({ payment }) => nonEmpty(payment?.executions)),
-  W("paymentMessages", "insert", "The ISO 20022 pacs.008 sent, and the pacs.002 status received", pacsMessages),
+  W("canonicalJsonStorage", "insert", "The ISO 20022 pacs.008 sent, and the pacs.002 status received", pacsMessages),
   W("settlementPositions", "insert", "The expected settlement: expectedAmount, actualAmount null until the statement says otherwise", position),
   W("ledgerEvents", "insert", "Principal and fee events, idempotencyKey {paymentId} and {paymentId}-FEE",
     ledgerEvents(["", "FEE"]), "Ledger service, change stream on transactions"),
@@ -101,12 +101,12 @@ const GL_POST = [
 ];
 
 const STATEMENT = [
-  W("paymentMessages", "insert", "camt.053 statement: purpose ACCOUNT_STATEMENT, statement.window, opening and closing balance, entries[] (one per line)",
+  W("canonicalJsonStorage", "insert", "camt.053 statement: purpose ACCOUNT_STATEMENT, statement.window, opening and closing balance, entries[] (one per line)",
     statements),
 ];
 
 const MATCH = [
-  W("paymentMessages", "update", "entries[].recon on the statement: AUTO_MATCHED with matchedPaymentId, or an exceptionId for an unmatched line",
+  W("canonicalJsonStorage", "update", "entries[].recon on the statement: AUTO_MATCHED with matchedPaymentId, or an exceptionId for an unmatched line",
     statements),
   W("settlementPositions", "update", "actualAmount, actualBookedAt, sourceMessageRef: what the correspondent actually booked", position),
   W("reconciliationItems", "upsert", "The three-way check: legs[] (payment, ledger, statement) and overallResult",
@@ -142,14 +142,14 @@ const APPROVE_BY_SCENARIO = {
       ({ payment }) => nonEmpty(paymentDoc(payment))),
   ],
   R2: [
-    W("paymentMessages", "update", "entries[].recon MANUAL_MATCHED on the altered line", statements),
+    W("canonicalJsonStorage", "update", "entries[].recon MANUAL_MATCHED on the altered line", statements),
     W("settlementPositions", "update", "actualAmount, sourceMessageRef from the linked line", position),
   ],
   R4: [
-    W("paymentMessages", "insert", "camt.026 query to the correspondent: purpose INVESTIGATION_REQUEST", camt026),
+    W("canonicalJsonStorage", "insert", "camt.026 query to the correspondent: purpose INVESTIGATION_REQUEST", camt026),
   ],
   R5: [
-    W("paymentMessages", "insert", "camt.026 query to the correspondent about the unknown line (escalation.paymentMessageId on the exception)",
+    W("canonicalJsonStorage", "insert", "camt.026 query to the correspondent about the unknown line (escalation.paymentMessageId on the exception)",
       () => null),
   ],
 };

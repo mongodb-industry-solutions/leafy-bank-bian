@@ -267,7 +267,7 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         # which way to post: her L1036 is explicit that the inbound difference is "only the
         # direction of the debit/credit legs ... driven entirely by the `direction` field".
         #
-        # ⚠️ Not the same axis as `paymentMessages.direction`, which describes a MESSAGE's
+        # ⚠️ Not the same axis as `canonicalJsonStorage.direction`, which describes a MESSAGE's
         # travel. An INBOUND payment emits an OUTBOUND pacs.002 (FR-5.IN2) — the two fields
         # disagree on purpose and neither may be derived from the other.
         # Not in the canonical spec — see `test_payment_document_spec._KNOWN_EXTRAS`.

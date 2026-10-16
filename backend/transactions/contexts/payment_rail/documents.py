@@ -55,7 +55,7 @@ def transaction_doc(
         "rail": payment_rail,
         "paymentType": "CREDIT_TRANSFER",
         # D-IN2 (2026-09-28): `OUTBOUND`/`INBOUND`, matching `payments.direction` and
-        # `paymentMessages.direction`. Was the literal `"OUTGOING"` — one collection using a
+        # `canonicalJsonStorage.direction`. Was the literal `"OUTGOING"` — one collection using a
         # third vocabulary for the same axis, which the incoming flow would have made a
         # standing trap. Readers that compare against the old value are updated in the same
         # pass: `accounts_service` (`viewerDirection`) and the frontend's `CdtDbtInd`.

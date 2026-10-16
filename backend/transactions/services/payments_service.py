@@ -121,10 +121,10 @@ class PaymentsService:
         # `payments.refs` declares its FK target. Stage 4b's commitment was folded into
         # `payments.order` per Doina's Aug 27 target model (L427-429) — no collection.
         self.routing_snapshots = self.db["routingSnapshots"]
-        # Stage 5's two (doc 19 B2, B3). `paymentMessages` is Doina's rename (L780); the live
-        # `canonicalJsonStorage` belongs to fsi-payments-processing and is never touched here.
+        # Stage 5's two (doc 19 B2, B3). `canonicalJsonStorage` is shared with
+        # fsi-payments-processing; every query here filters on a field only our documents carry.
         self.payment_executions = self.db["paymentExecutions"]
-        self.payment_messages = self.db["paymentMessages"]
+        self.payment_messages = self.db["canonicalJsonStorage"]
         self.payment_limit_usd = payment_limit_usd
         # Stage 3's reference-data store (doc 17 §3 step 1). Read-only: seeding is
         # `backend/data/load_reference_seed.py`, run by hand, never by the service.
@@ -1523,7 +1523,7 @@ class PaymentsService:
         """A statement line some settled wire is still waiting for is linked or escalated,
         never dismissed — dismissing it strands the wire as MISSING (defect 2026-10-05, R2)."""
         subject = exc.get("subjectRef") or {}
-        stmt = self.db["paymentMessages"].find_one(
+        stmt = self.db["canonicalJsonStorage"].find_one(
             {"paymentMessageId": subject.get("paymentMessageId"), "purpose": "ACCOUNT_STATEMENT"},
             {"_id": 0, "statement.accountCode": 1, "entries": 1})
         line = next((e for e in (stmt or {}).get("entries") or []

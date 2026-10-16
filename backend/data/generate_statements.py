@@ -40,7 +40,7 @@ _EXCEPTIONS = {"historical": {"$exists": True}}
 
 
 def report(db) -> None:
-    stmts = list(db.paymentMessages.find(_STATEMENTS, {"entries": 1, "statement": 1}))
+    stmts = list(db.canonicalJsonStorage.find(_STATEMENTS, {"entries": 1, "statement": 1}))
     print(f"statements: {len(stmts)} historical")
     lines = [e for s in stmts for e in s.get("entries", [])]
     print("  lines by outcome:", dict(Counter(e.get("simulatedOutcome") for e in lines)))
@@ -79,7 +79,7 @@ def main() -> int:
 
     statements, exceptions = build_history(now=datetime.now(timezone.utc),
                                            days=args.backfill_days, seed=args.seed)
-    old_s = db.paymentMessages.count_documents(_STATEMENTS)
+    old_s = db.canonicalJsonStorage.count_documents(_STATEMENTS)
     old_e = db.exceptions.count_documents(_EXCEPTIONS)
     print(f"would replace {old_s} statement(s) + {old_e} exception(s) "
           f"with {len(statements)} + {len(exceptions)}")
@@ -87,9 +87,9 @@ def main() -> int:
         print("dry-run — re-run with --apply")
         return 0
 
-    db.paymentMessages.delete_many(_STATEMENTS)
+    db.canonicalJsonStorage.delete_many(_STATEMENTS)
     db.exceptions.delete_many(_EXCEPTIONS)
-    db.paymentMessages.insert_many(statements)
+    db.canonicalJsonStorage.insert_many(statements)
     db.exceptions.insert_many(exceptions)
     report(db)
     return 0

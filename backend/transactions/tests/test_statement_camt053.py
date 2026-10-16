@@ -152,7 +152,7 @@ def test_a_historical_statement_never_moves_the_live_chain(service, db):
     later window and a higher sequence must not become the live `previous`, and a payment it
     names must still be booked live."""
     pid = _settled_wire(service, db)
-    db["paymentMessages"].insert_one({
+    db["canonicalJsonStorage"].insert_one({
         "paymentMessageId": "PM-HIST0001", "purpose": "ACCOUNT_STATEMENT",
         "statement": {"accountCode": SETTLEMENT_ACCOUNT, "currency": "USD", "sequence": 99,
                       "historical": True,

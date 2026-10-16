@@ -1,4 +1,4 @@
-"""`paymentExecutions` and `paymentMessages` — the two documents stage 5 produces. Pure.
+"""`paymentExecutions` and `canonicalJsonStorage` — the two documents stage 5 produces. Pure.
 
 ## Both collections are ours to author
 
@@ -8,13 +8,11 @@
 two (doc 18 B1): the relationship was authored and the collection never was. Doina ratifies
 both shapes — Q35, Q38.
 
-`paymentMessages` is **her rename**, not our invention. Her target-model table reads
-*"`canonicalJsonStorage/paymentMessages (renamed)`"* (L780) and her *Existing collections*
-list carries *"`canonicalJsonStorage?`"* with her own question mark (L734).
-⚠️ **`canonicalJsonStorage` is a different demo's live collection** — 33-34 documents on
-`ist-shared.leafy_bank_bian`, owned by fsi-payments-processing, holding a flat
-`MT103_to_JSON` conversion-run shape. Nothing in this backend reads, writes or indexes it,
-and `test_nothing_in_the_backend_touches_canonical_json_storage` keeps it that way (doc 19 B2).
+`canonicalJsonStorage` is the BIAN model's name for this collection (Doina's Sep 17 draft uses
+it throughout; her Aug 24 Tab 1 table first wrote *"`canonicalJsonStorage/paymentMessages
+(renamed)`"*, L780). ⚠️ It is **shared** with fsi-payments-processing, which writes flat
+`MT103_to_JSON` conversion-run records (no `paymentMessageId`). Our reads filter on fields only
+our documents carry, and our unique indexes are partial for the same reason.
 
 ## The split, and why the two are separate documents
 
@@ -25,7 +23,7 @@ message conversion, mapping versions, raw-message references, and transformation
 or execution path"*.
 
 The distinction earns its keep on the **inbound** side. Her L899-906 sequence is
-`external message -> [paymentMessages] -> payments -> ... -> paymentExecutions`, so an
+`external message -> [canonicalJsonStorage] -> payments -> ... -> paymentExecutions`, so an
 inbound message exists *before* any payment and has no execution attempt at all. Collapsing
 the payload onto the execution document would leave it nowhere to live. `direction` is
 therefore named now and only `OUTBOUND` is reachable in Phase 1 (doc 19 §6).
@@ -45,7 +43,7 @@ trusting this paragraph.
 `derive_ref` is deterministic from the ObjectId, so the caller mints both oids up front and
 each document carries the other's ref **at insert**. Her L892 asks for `paymentExecutionId` on
 the message; doing it this way means no forward-reference `$set` and no update path on
-`paymentMessages` at all.
+`canonicalJsonStorage` at all.
 """
 
 from __future__ import annotations
@@ -59,7 +57,7 @@ from contexts.payment_rail.domain import pacs008
 from shared.refs import derive_ref
 
 PAYMENT_EXECUTIONS = "paymentExecutions"
-PAYMENT_MESSAGES = "paymentMessages"
+PAYMENT_MESSAGES = "canonicalJsonStorage"
 
 SOURCE_SYSTEM = "leafy-bank-payments-service"
 

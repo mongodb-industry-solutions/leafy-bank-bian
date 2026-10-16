@@ -1,10 +1,9 @@
-"""`paymentMessages` documents for the inbound flow. Pure — no I/O, no clock.
+"""`canonicalJsonStorage` documents for the inbound flow. Pure — no I/O, no clock.
 
 Three message documents the incoming wire produces, all in the collection stage 5 already
 owns (`execution_documents.PAYMENT_MESSAGES`). No new collection: her L944 is explicit that
 inbound *"uses the existing canonicalJsonStorage collection ... consistent with how it's
-already used for outbound pacs.008 storage"* — and that collection is `paymentMessages`
-under her own rename (L780, D-IN1).
+already used for outbound pacs.008 storage"*.
 
 | document        | direction | purpose           | requirement |
 |-----------------|-----------|-------------------|-------------|

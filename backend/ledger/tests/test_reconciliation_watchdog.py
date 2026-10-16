@@ -30,7 +30,7 @@ def _missing_wire(c, *, line_amount=25000.0, window=True):
     """A settled outbound wire whose statement has NOT arrived: A2's wire fixture with the
     statement removed and the position's `expectedWindow` stamped."""
     _wire_fixture(c, line_amount)
-    line = c.get_collection("db", "paymentMessages").docs.pop()["entries"][0]
+    line = c.get_collection("db", "canonicalJsonStorage").docs.pop()["entries"][0]
     if window:
         c.get_collection("db", "settlementPositions").update_one(
             {"paymentId": "PAY-A"}, {"$set": {"expectedWindow": {"from": _NOW, "by": _BY}}})
@@ -38,7 +38,7 @@ def _missing_wire(c, *, line_amount=25000.0, window=True):
 
 
 def _arrive(c, line):
-    c.seed("paymentMessages", [_statement([line])])
+    c.seed("canonicalJsonStorage", [_statement([line])])
 
 
 def _excs(c, category=None):
@@ -172,7 +172,7 @@ def _orphans(c):
 
 def test_an_orphan_line_raises_one_exception_keyed_by_the_line():
     c = FakeConnection()
-    c.seed("paymentMessages", [_statement([_line(1, "ORPH-1A2B3C4D", 3400.0, simulated_outcome="ORPHAN")])])
+    c.seed("canonicalJsonStorage", [_statement([_line(1, "ORPH-1A2B3C4D", 3400.0, simulated_outcome="ORPHAN")])])
 
     raise_orphans(c, "db")
     raise_orphans(c, "db")
@@ -182,7 +182,7 @@ def test_an_orphan_line_raises_one_exception_keyed_by_the_line():
     assert exc["subjectRef"] == {"kind": "STATEMENT_LINE", "paymentMessageId": "PM-STMT0001", "lineNo": 1}
     assert exc["detail"]["actualAmount"] == 3400.0
     assert exc["detail"]["reference"] == "ORPH-1A2B3C4D"
-    stmt = c.get_collection("db", "paymentMessages").docs[0]
+    stmt = c.get_collection("db", "canonicalJsonStorage").docs[0]
     assert stmt["entries"][0]["recon"]["exceptionId"] == exc["exceptionId"]
     assert stmt["entries"][0]["recon"]["status"] == "UNMATCHED"   # still unmatched — A4 links it
 
@@ -190,7 +190,7 @@ def test_an_orphan_line_raises_one_exception_keyed_by_the_line():
 def test_two_orphans_on_one_statement_raise_two_exceptions():
     """D1a — per-line keys, so the OPEN-unique index cannot collide two orphans."""
     c = FakeConnection()
-    c.seed("paymentMessages", [_statement([_line(1, "ORPH-A", 1250.0), _line(2, "ORPH-B", 7800.0)])])
+    c.seed("canonicalJsonStorage", [_statement([_line(1, "ORPH-A", 1250.0), _line(2, "ORPH-B", 7800.0)])])
 
     assert raise_orphans(c, "db") == {"orphansRaised": 2}
     assert {e["paymentId"] for e in _orphans(c)} == {"PM-STMT0001#1", "PM-STMT0001#2"}

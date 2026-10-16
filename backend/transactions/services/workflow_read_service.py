@@ -193,7 +193,7 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
     per stage.
 
     **Stage 5 is the first stage whose output is not on the payment document.** Its pacs.008
-    lives on `paymentExecutions` and its canonical payload on `paymentMessages`, so the two
+    lives on `paymentExecutions` and its canonical payload on `canonicalJsonStorage`, so the two
     are attached here as `executions[]` and `messages[]`. Doc 16 §5 rule 2 — *extend the
     existing route, do not add a new one per stage* — is why this is a join rather than a
     second endpoint the UI would have to fetch and correlate. Stage 4 got away with exposing
@@ -219,7 +219,7 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
         .sort("attempt", 1)
     ]
     payment["messages"] = list(
-        connection.get_collection(db_name, "paymentMessages")
+        connection.get_collection(db_name, "canonicalJsonStorage")
         .find({"paymentId": payment_id}, {"_id": 0})
         .sort("createdAt", 1)
     )
@@ -252,7 +252,7 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
     # Keyed on `simulatedPaymentId`, not `reference`: an altered reference (R2) still
     # belongs to this payment.
     payment["statements"] = list(
-        connection.get_collection(db_name, "paymentMessages")
+        connection.get_collection(db_name, "canonicalJsonStorage")
         .find({"purpose": "ACCOUNT_STATEMENT", "entries.simulatedPaymentId": payment_id},
               {"_id": 0})
         .sort("createdAt", 1)

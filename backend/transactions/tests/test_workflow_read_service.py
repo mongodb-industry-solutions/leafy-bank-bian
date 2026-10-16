@@ -112,7 +112,7 @@ class FakePayments:
 
 
 class FakeArtifacts:
-    """Stands in for `paymentExecutions` / `paymentMessages` / `exceptions` — the
+    """Stands in for `paymentExecutions` / `canonicalJsonStorage` / `exceptions` — the
     collections `get_payment` / `list_exceptions` join onto a payment.
 
     Empty by default: every test in this module predates stage 5/9, and the point of the
@@ -198,7 +198,7 @@ class FakeConnection:
         self.coll = coll
         self.artifacts = {
             "paymentExecutions": FakeArtifacts(executions),
-            "paymentMessages": FakeArtifacts(messages),
+            "canonicalJsonStorage": FakeArtifacts(messages),
             "settlementPositions": FakeArtifacts(None),  # stage 7 — empty by default
             "notifications": FakeArtifacts(notifications),
             "routingSnapshots": FakeArtifacts(  # stage 4 — one doc, or none pre-stage-4

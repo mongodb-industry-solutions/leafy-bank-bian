@@ -93,7 +93,7 @@ def test_link_closes_both_twins_and_reconciles(from_side):
     for exc in _excs(c):
         assert exc["status"] == "RESOLVED"
         assert exc["resolution"]["action"] == "LINK_STATEMENT_ENTRY"
-    stmt = c.get_collection("db", "paymentMessages").find_one({"purpose": "ACCOUNT_STATEMENT"})
+    stmt = c.get_collection("db", "canonicalJsonStorage").find_one({"purpose": "ACCOUNT_STATEMENT"})
     assert stmt["entries"][0]["recon"]["status"] == "MANUAL_MATCHED"
     assert stmt["entries"][0]["recon"]["matchedPaymentId"] == "PAY-A"
     # A later matching pass must not re-raise the line.
@@ -131,7 +131,7 @@ def test_link_refuses_a_payment_that_already_has_an_actual():
 
 
 def test_a_failed_link_rolls_back_both_claims():
-    c = FakeConnection(raise_on="paymentMessages")
+    c = FakeConnection(raise_on="canonicalJsonStorage")
     missing, orphan = _twins_without_raising(c)
     with pytest.raises(Exception):
         resolution_service.link(c, "db", orphan["exceptionId"], payment_id="PAY-A")

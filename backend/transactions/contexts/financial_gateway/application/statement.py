@@ -2,7 +2,7 @@
 
 The simulator side of the external bank: it books every outbound wire that **settled** on
 the nostro since the previous statement, applies each payment's `simulatedStatementOutcome`,
-optionally adds one orphan line, and stores the result in `paymentMessages`.
+optionally adds one orphan line, and stores the result in `canonicalJsonStorage`.
 
 ## What goes on a statement
 
@@ -116,7 +116,7 @@ def generate_statement(
 ) -> Optional[dict]:
     """Write the next statement for `account_code`. Returns it, or None when nothing is due."""
     now = now or datetime.now(timezone.utc)
-    messages = db["paymentMessages"]
+    messages = db["canonicalJsonStorage"]
     previous = _previous_statement(messages, account_code)
     booked = _booked_payment_ids(messages, account_code)
 

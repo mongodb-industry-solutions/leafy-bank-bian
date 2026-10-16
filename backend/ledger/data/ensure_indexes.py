@@ -309,7 +309,7 @@ def ensure_ledger_indexes(connection: MongoDBConnection, db_name: str) -> dict[s
         "journalEntries": _ensure(connection, db_name, "journalEntries", JOURNAL_ENTRIES_INDEXES),
         "changeStreamTokens": _ensure(connection, db_name, "changeStreamTokens", STREAM_TOKENS_INDEXES),
         "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
-        "paymentMessages": _ensure(connection, db_name, "paymentMessages", PAYMENT_MESSAGES_INDEXES),
+        "canonicalJsonStorage": _ensure(connection, db_name, "canonicalJsonStorage", PAYMENT_MESSAGES_INDEXES),
         "reconciliationItems": _ensure(connection, db_name, "reconciliationItems", RECONCILIATION_ITEMS_INDEXES),
         "validators": ensure_validators(connection, db_name),
     }

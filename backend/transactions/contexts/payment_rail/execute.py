@@ -70,7 +70,7 @@ by luck of ordering holds by test instead.
 Reads  ctx: everything resolved and produced by stages 1-4; rail_gateway
 Writes ctx: current_state -> SUBMITTED -> IN_PROGRESS [-> SETTLED]; result,
             payment_execution_id, payment_message_id; `paymentExecutions`,
-            `paymentMessages`; `payments.clearing.*`, `payments.refs.canonicalJsonId`,
+            `canonicalJsonStorage`; `payments.clearing.*`, `payments.refs.canonicalJsonId`,
             `payments.refs.paymentExecutionIds[]`; five `payments.checks[]` entries
 
 TODO (Phase 2, and unreachable until then — `rail_viability.PHASE_1_RAILS`):
@@ -318,7 +318,7 @@ def _execute_rail_bound(ctx: PaymentContext, record, recorded: list,
     _acknowledge(ctx, execution_oid, ack, now)
 
     # DR-8.2 — the rail's status response is a message too: stored as an INBOUND
-    # paymentMessages doc, additive to `paymentExecutions.railStatus` (which reconciliation
+    # canonicalJsonStorage doc, additive to `paymentExecutions.railStatus` (which reconciliation
     # FR-8.1 still reads). Written before the refusal check so a rejection (RJCT) is recorded
     # as a status response as well. `execution` carries the request id it answers.
     _insert(

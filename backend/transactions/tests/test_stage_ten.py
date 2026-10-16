@@ -201,7 +201,7 @@ def test_the_raw_message_is_stored_before_the_payment_exists(service, db):
     back-linked after. This ordering is the requirement, not an implementation detail."""
     service.receive_inbound(_message())
 
-    messages = list(db["paymentMessages"].find({}))
+    messages = list(db["canonicalJsonStorage"].find({}))
     inbound = [m for m in messages if m["direction"] == "INBOUND"]
     assert len(inbound) == 1
     stored = inbound[0]
@@ -219,7 +219,7 @@ def test_a_message_that_fails_to_parse_is_still_stored(service, db):
     with pytest.raises(inbound_pacs008.MessageRejected):
         service.receive_inbound({"Document": {"NotAPacs008": {}}})
 
-    stored = list(db["paymentMessages"].find({}))
+    stored = list(db["canonicalJsonStorage"].find({}))
     assert len(stored) == 1
     # Never linked, because no payment was ever created.
     assert stored[0]["paymentId"] is None
@@ -234,7 +234,7 @@ def test_no_inbound_message_is_a_second_canonical_payment(service, db):
     """
     service.receive_inbound(_message())
 
-    for message in db["paymentMessages"].find({}):
+    for message in db["canonicalJsonStorage"].find({}):
         for forbidden in ("status", "balance", "lifecycle", "debtor", "creditor"):
             assert forbidden not in message, (
                 f"{message['paymentMessageId']} carries {forbidden!r} — a message must "
@@ -352,7 +352,7 @@ def test_the_status_response_is_an_outbound_message_on_an_inbound_payment(servic
     service.receive_inbound(_message())
 
     responses = [
-        m for m in db["paymentMessages"].find({})
+        m for m in db["canonicalJsonStorage"].find({})
         if m["purpose"] == inbound_documents.PURPOSE_STATUS_RESPONSE
     ]
     assert len(responses) == 1
@@ -474,14 +474,14 @@ def test_a_sanctioned_originator_is_refused_despite_a_matched_beneficiary(servic
 
 def _status_responses(db):
     return [
-        m for m in db["paymentMessages"].find({})
+        m for m in db["canonicalJsonStorage"].find({})
         if m["purpose"] == inbound_documents.PURPOSE_STATUS_RESPONSE
     ]
 
 
 def test_a_rejected_inbound_stores_a_pacs002_rjct_with_the_sanctions_reason(service, db):
     """P6 / D1 / D8 — stage 5 prepares the NEGATIVE status report: TxSts RJCT, reason RR04,
-    and the plain-English AddtlInf, stored in paymentMessages and linked from the payment."""
+    and the plain-English AddtlInf, stored in canonicalJsonStorage and linked from the payment."""
     service.receive_inbound(_message(debtor_name="Vostok Heavy Industries"))
 
     responses = _status_responses(db)
@@ -661,7 +661,7 @@ def test_return_generates_a_pacs004_and_closes_the_payment(service, db):
     uta.build_return(service, payment, return_reason_code=pacs004.REASON_ACCOUNT_INCORRECT)
 
     returns = [
-        m for m in db["paymentMessages"].find({})
+        m for m in db["canonicalJsonStorage"].find({})
         if m["purpose"] == inbound_documents.PURPOSE_RETURN
     ]
     assert len(returns) == 1
@@ -1179,7 +1179,7 @@ def test_the_duplicate_scenario_is_one_payment_not_two(service, db):
     assert after == before + first["amount"], "the replay credited the customer twice"
     # Both messages are stored (audit), but exactly one payment exists.
     inbound_messages = [
-        m for m in db["paymentMessages"].find({})
+        m for m in db["canonicalJsonStorage"].find({})
         if m["direction"] == "INBOUND"
     ]
     assert len(inbound_messages) == 2

@@ -149,19 +149,27 @@ PAYMENT_EXECUTIONS_INDEXES = [
     },
 ]
 
-# `paymentMessages` — Doina's rename (L780). Insert-only: nothing updates a message record,
-# because a re-mapping is a new attempt with a new message.
+# `canonicalJsonStorage` — the one collection for both demos. Insert-only on our side:
+# nothing updates a message record, because a re-mapping is a new attempt with a new message.
 #
-# ⚠️ **No index is declared for `canonicalJsonStorage`** and none must be. That collection is
-# fsi-payments-processing's, live with 33-34 documents on `ist-shared.leafy_bank_bian`, and its
-# spec-declared indexes (unique `id`, unique sparse `jsonData.transactionRef`) have never been
-# applied there — creating one could fail on their rows or start rejecting their inserts. Doc
-# 19 B7.
+# ⚠️ fsi-payments-processing also writes here (flat `MT103_to_JSON` conversion records with
+# `_id` = run UUID or SHA-256, `conversionId`, `jsonData`, `metadata`). Every unique index
+# below must therefore be partial on a field only our documents carry. The spec's old
+# `id` / `jsonData.transactionRef` unique indexes were never applied and must stay out.
 PAYMENT_MESSAGES_INDEXES = [
+    # Partial on `paymentMessageId` existing so the same collection can also hold
+    # payments-processing conversion records, which carry no `paymentMessageId`: a plain
+    # unique index would index each of them as null and reject the second (E11000). Every
+    # leaf-bank-bian message has one, and every lookup by it is an equality, which implies
+    # the filter, so the index still serves the read path (defect 2026-09-28 A6).
+    # `recreate_if_changed`: the index first shipped without the filter, and `create_index`
+    # cannot change options on an existing name.
     {
         "name": "idx_payment_message_id_unique",
         "keys": [("paymentMessageId", ASCENDING)],
         "unique": True,
+        "partialFilterExpression": {"paymentMessageId": {"$exists": True}},
+        "recreate_if_changed": True,
     },
     {"name": "idx_payment_messages_payment_id", "keys": [("paymentId", ASCENDING)]},
     # The incoming flow makes one payment carry up to three messages (the received
@@ -341,11 +349,30 @@ def _ensure_time_series(db, name: str, *, timeseries: dict, expire_after_seconds
         )
 
 
+def _drop_if_filter_changed(coll, spec: dict) -> None:
+    """Drop an existing index whose partial filter differs from the spec's.
+
+    `create_index` raises IndexOptionsConflict when a same-named index has different
+    options, so a changed filter needs a drop first. Uniqueness is unenforced between the
+    drop and the recreate, which is acceptable only for keys that cannot collide meanwhile.
+    """
+    existing = {i["name"]: i for i in coll.list_indexes()}.get(spec["name"])
+    if existing is None:
+        return
+    if existing.get("partialFilterExpression") == spec.get("partialFilterExpression"):
+        return
+    logger.warning("Recreating index %s: partial filter changed", spec["name"])
+    coll.drop_index(spec["name"])
+
+
 def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs: list[dict]) -> list[str]:
     coll = connection.get_collection(db_name, collection)
     ensured = []
     for spec in specs:
-        opts = {k: v for k, v in spec.items() if k not in ("name", "keys")}
+        opts = {k: v for k, v in spec.items()
+                if k not in ("name", "keys", "recreate_if_changed")}
+        if spec.get("recreate_if_changed"):
+            _drop_if_filter_changed(coll, spec)
         coll.create_index(spec["keys"], name=spec["name"], **opts)
         ensured.append(spec["name"])
     return ensured
@@ -370,8 +397,8 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
         "paymentExecutions": _ensure(
             connection, db_name, "paymentExecutions", PAYMENT_EXECUTIONS_INDEXES
         ),
-        "paymentMessages": _ensure(
-            connection, db_name, "paymentMessages", PAYMENT_MESSAGES_INDEXES
+        "canonicalJsonStorage": _ensure(
+            connection, db_name, "canonicalJsonStorage", PAYMENT_MESSAGES_INDEXES
         ),
         "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
         "demoClocks": _ensure(connection, db_name, "demoClocks", DEMO_CLOCKS_INDEXES),

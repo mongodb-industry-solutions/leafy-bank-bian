@@ -348,7 +348,7 @@ def _delta(left, right) -> Optional[int]:
 def _correspondent_bic(db: Any, exc: dict, payment_id: str) -> Optional[str]:
     if _is_statement_line(exc):
         subject = exc.get("subjectRef") or {}
-        stmt = db["paymentMessages"].find_one({"paymentMessageId": subject.get("paymentMessageId")},
+        stmt = db["canonicalJsonStorage"].find_one({"paymentMessageId": subject.get("paymentMessageId")},
                                               {"_id": 0, "entries": 1}) or {}
         line = next((e for e in stmt.get("entries") or [] if e.get("lineNo") == subject.get("lineNo")), {})
         return line.get("counterpartyBic")

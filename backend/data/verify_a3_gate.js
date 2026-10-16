@@ -57,7 +57,7 @@ ok("[2] payment refs the current verdict item",
 
 // --- [3] orphans: every unmatched statement line is queued exactly once -------
 let lines = 0, queued = 0, dupes = 0;
-dbc.paymentMessages.find({ purpose: "ACCOUNT_STATEMENT", "entries.recon.status": "UNMATCHED" }).forEach((s) => {
+dbc.canonicalJsonStorage.find({ purpose: "ACCOUNT_STATEMENT", "entries.recon.status": "UNMATCHED" }).forEach((s) => {
   s.entries.filter((e) => e.recon?.status === "UNMATCHED").forEach((e) => {
     lines++;
     const n = dbc.exceptions.countDocuments({ paymentId: `${s.paymentMessageId}#${e.lineNo}`, category: "ORPHANED_SETTLEMENT" });

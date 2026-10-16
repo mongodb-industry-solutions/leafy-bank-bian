@@ -23,12 +23,12 @@ The envelope's spec description says *"add the corresponding pacs.008.001.08 fie
 same envelope"*, but `wireDetails.messageDefinitionIdentifier`'s enum is
 `["pain.001.001.09", null]` — the envelope cannot even name this message. Her stage-5 prose
 ("only at the rail boundary") breaks the tie: an adapter output is not envelope state. The
-message lands on `paymentExecutions`; the normalised payload on `paymentMessages`. Doc 19 B5,
+message lands on `paymentExecutions`; the normalised payload on `canonicalJsonStorage`. Doc 19 B5,
 Q36.
 
 ## Bump `MAPPING_VERSION` on every mapping change
 
-Stamped on every `paymentMessages` document (her *"mapping versions"*, L892), so a stored
+Stamped on every `canonicalJsonStorage` document (her *"mapping versions"*, L892), so a stored
 message can always be explained by the rules that produced it. Same device as
 `posting_rules.MAPPING_VERSION` in the ledger.
 
@@ -428,7 +428,7 @@ def elements(message: dict) -> list:
     that is the part a reader is checking against the canonical payment; repeating
     `Document/FIToFICstmrCdtTrf/` on every row would be noise.
 
-    Feeds `paymentMessages.transformationAudit[]` and the UI's ISO VIEW, so the demo can say
+    Feeds `canonicalJsonStorage.transformationAudit[]` and the UI's ISO VIEW, so the demo can say
     which elements were produced without the reader parsing the message.
     """
     out = []

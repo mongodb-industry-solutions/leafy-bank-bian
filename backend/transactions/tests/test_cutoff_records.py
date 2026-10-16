@@ -361,3 +361,55 @@ def test_time_series_refuses_a_regular_collection():
                                        expire_after_seconds=1)
     assert ok.created == []
 
+
+
+# --- canonicalJsonStorage unique index ---------------------------------------------
+
+class _IndexColl:
+    def __init__(self, existing):
+        self.existing, self.dropped, self.created = existing, [], []
+
+    def list_indexes(self):
+        return iter(self.existing)
+
+    def drop_index(self, name):
+        self.dropped.append(name)
+
+    def create_index(self, keys, name, **opts):
+        self.created.append((name, opts))
+
+
+class _IndexConn:
+    def __init__(self, coll):
+        self.coll = coll
+
+    def get_collection(self, db_name, name):
+        return self.coll
+
+
+_PM_SPEC = ensure_indexes.PAYMENT_MESSAGES_INDEXES[0]
+
+
+def test_payment_message_id_index_is_partial_so_conversion_records_do_not_collide():
+    assert _PM_SPEC["name"] == "idx_payment_message_id_unique"
+    assert _PM_SPEC["unique"] is True
+    assert _PM_SPEC["partialFilterExpression"] == {"paymentMessageId": {"$exists": True}}
+
+
+def test_old_unfiltered_index_is_dropped_then_recreated_with_the_filter():
+    coll = _IndexColl([{"name": "idx_payment_message_id_unique", "unique": True}])
+    ensure_indexes._ensure(_IndexConn(coll), "db", "canonicalJsonStorage", [_PM_SPEC])
+    assert coll.dropped == ["idx_payment_message_id_unique"]
+    [(name, opts)] = coll.created
+    assert opts["partialFilterExpression"] == {"paymentMessageId": {"$exists": True}}
+    assert "recreate_if_changed" not in opts
+
+
+def test_up_to_date_index_is_left_alone_and_a_missing_one_is_just_created():
+    current = _IndexColl([{"name": "idx_payment_message_id_unique",
+                           "partialFilterExpression": {"paymentMessageId": {"$exists": True}}}])
+    ensure_indexes._ensure(_IndexConn(current), "db", "canonicalJsonStorage", [_PM_SPEC])
+    assert current.dropped == []
+    absent = _IndexColl([])
+    ensure_indexes._ensure(_IndexConn(absent), "db", "canonicalJsonStorage", [_PM_SPEC])
+    assert absent.dropped == [] and len(absent.created) == 1

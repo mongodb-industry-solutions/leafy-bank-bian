@@ -190,7 +190,7 @@ def _rail_confirmation(payment: dict, connection: MongoDBConnection, db_name: st
     """
     payment_id = payment.get("paymentId")
     if payment.get("direction") == "INBOUND":
-        response = connection.get_collection(db_name, "paymentMessages").find_one(
+        response = connection.get_collection(db_name, "canonicalJsonStorage").find_one(
             {"paymentId": payment_id, "purpose": "STATUS_RESPONSE"})
         if response is None or not response.get("statusCode"):
             return None
@@ -264,7 +264,7 @@ def compute_reconciliation(
         # The message-side constants are mirrored from the transactions service's
         # `inbound_documents` / `pacs002` (no cross-service import; same discipline as
         # the exceptions stub's twin).
-        pm_coll = connection.get_collection(db_name, "paymentMessages")
+        pm_coll = connection.get_collection(db_name, "canonicalJsonStorage")
         received = pm_coll.find_one({
             "paymentId": payment_id, "direction": "INBOUND",
             "purpose": "CREDIT_TRANSFER",

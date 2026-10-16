@@ -107,7 +107,7 @@ def _acknowledge(ctx: PaymentContext, now: datetime, decision: dict) -> None:
     ⚠️ **No `paymentExecutions` document.** Her L944 is explicit: that collection exists
     specifically for tracking OUTBOUND rail-message generation attempts and stays
     outbound-only by design. An inbound payment has no execution attempt — nothing was
-    submitted anywhere. The status response lands in `paymentMessages` instead, tagged
+    submitted anywhere. The status response lands in `canonicalJsonStorage` instead, tagged
     `direction: OUTBOUND, purpose: STATUS_RESPONSE`.
     """
     accepted = decision["decision"] == screen_and_accept.ACCEPT
@@ -408,4 +408,4 @@ def _messages(ctx: PaymentContext):
     handle = getattr(collections, "payment_messages", None)
     if handle is not None:
         return handle
-    return collections.db["paymentMessages"]
+    return collections.db["canonicalJsonStorage"]
