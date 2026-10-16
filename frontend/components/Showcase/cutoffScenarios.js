@@ -69,8 +69,8 @@ export const CUTOFF_SCENARIOS = [
     },
     title: "Short of funds",
     story:
-      "A domestic wire is $3,200 short and no incoming credit will cover it today. " +
-      "The agent tells the customer, then asks to hold the wire for the next value date.",
+      "A domestic wire is USD 3,200 short of funds, and no incoming credit will cover it today. " +
+      "The agent informs the customer, then asks the operator to hold the wire for the next value date.",
     bank: "Bank of America",
     wire: {
       beneficiary: "Lakeside Components LLC",
@@ -80,16 +80,34 @@ export const CUTOFF_SCENARIOS = [
       iban: "3310045592",
       purpose: "Component supply INV-3391",
     },
-    beats: {
-      start: "A domestic wire to Lakeside Components is $3,200 more than the account holds, at 16:45 ET.",
+    // Step-card text for this scenario, by step key; the generic `STEP` summaries cover C1.
+    stepSummaries: {
+      start:
+        "A branch operator submits a domestic wire for a customer. The available balance doesn't cover it, so the wire " +
+        "waits on a hold and is not sent to Fedwire. As the internal cut-off approaches, it is still waiting for a " +
+        "credit that hasn't arrived.",
       watch:
-        "The agent checks the account's funds, finds no incoming credit that covers the gap, and tells the " +
-        "customer about the shortfall.",
+        "While the wire is on hold, the agent tracks the cut-off, checks the options against policy, informs the " +
+        "customer of the shortfall, records its assessment and prepares a proposed resolution.",
+      decide:
+        "The agent prepares the proposal to hold the wire for the next value date and waits for the operator's " +
+        "review and approval. Nothing is executed until then, and a policy check has already run on the proposal.",
+      final:
+        "After the operator approves, the agent checks that the wire is now held for the next value date, and only " +
+        "then reports the outcome to the operator.",
+    },
+    beats: {
+      start:
+        "At 16:45 ET, the domestic wire to Lakeside Components is still USD 3,200 short of funds and on hold, with " +
+        "45 minutes left before the 17:30 ET internal cut-off.",
+      watch:
+        "At 16:50 ET, the agent sees that no incoming credit will arrive in time and informs the customer about the " +
+        "USD 3,200 shortfall.",
       decide:
         "The agent asks to hold the wire for the next value date. Moving a wire to another day needs your approval.",
       final:
-        "The wire is held for the next value date. Fast-forwarding moves the payment on to the next business " +
-        "day so it can settle.",
+        "The wire is held for the next value date. Fast-forward moves the demo to the next business day, when the " +
+        "wire can be released and settled once funded.",
     },
     amount: "balance + 3,200.00",
     // The wire amount is computed at run time; the card shows the gap instead.
@@ -122,8 +140,8 @@ export const CLOSE_OUT = {
   fastForward: {
     button: "Fast-forward to next business day",
     copy:
-      "The case keeps the agent's decision. Fast-forwarding moves the payment on to the next business day " +
-      "so it can settle.",
+      "The case keeps the agent's decision. Fast-forward moves the demo to the next business day, when the wire can " +
+      "be released and settled once funded.",
     note: "Fast-forwarded to the next business day.",
   },
   watch: { button: null, copy: "The wire is already on its way. Watching it settle.", note: null },

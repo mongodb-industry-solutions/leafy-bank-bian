@@ -300,7 +300,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
           stepCards={steps.map((s) => ({
             key: s.key,
             title: s.final ? (done ? "Run complete" : "Verifying the result") : s.title,
-            summary: s.summary,
+            summary: scenario.stepSummaries?.[s.key] ?? s.summary,
             beat: scenario.beats?.[s.key],
           }))}
           top={(
