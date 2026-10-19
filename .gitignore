@@ -206,3 +206,6 @@ GL_Design_Jun23, Tested.md
 PAYMENT-FLOW-TRACE.md
 AI-AGENTS-IMPLEMENTATION.md
 AGENTIC-PAYMENTS-RESEARCH.md
+payment-limits-report.txt
+backend/data/analyze_payment_limits.js
+backend/data/analyze_payment_limits.sh

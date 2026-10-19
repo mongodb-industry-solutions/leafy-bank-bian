@@ -197,7 +197,7 @@ export default function RunConsole({
           )}
           {controller.onSweep && (
             <Button size="small" disabled={controller.sweeping || controller.sweepDisabled} onClick={controller.onSweep}>
-              {controller.sweeping ? "Agent running…" : "Sweep now"}
+              {controller.sweeping ? "Agent running…" : "Run now"}
             </Button>
           )}
           <Button size="small" onClick={controller.onReset}>All scenarios</Button>

@@ -321,7 +321,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
               <Body className={styles.error}>{agent.error.message}</Body>
               <Body className={styles.muted}>
                 Attempt {agent.error.attempts}. If this is an expired AWS SSO session, run{" "}
-                <span className={styles.mono}>aws sso login</span>, then use Sweep now.
+                <span className={styles.mono}>aws sso login</span>, then use Run now.
               </Body>
             </div>
           )}
