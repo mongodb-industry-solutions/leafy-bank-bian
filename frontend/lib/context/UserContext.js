@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { coreApi, customer360ChatApi } from "@/lib/api/client";
-import { chatHistoryKey, chatSessionIdKey } from "@/lib/const/magentaBackofficeBridge";
+import { chatHistoryKey, chatSessionIdKey } from "@/lib/const/agentEngineBackofficeBridge";
 import { USER_MAP } from "@/lib/constants";
 
 const UserContext = createContext(null);
@@ -33,7 +33,7 @@ export function UserProvider({ children }) {
 
   // customer360-agent chat session — created fresh on every real login (see
   // selectUser below), persisted across navigation/refresh via localStorage
-  // (same keys LeafyBankChatAssistant itself reads — see magentaBackofficeBridge.js).
+  // (same keys LeafyBankChatAssistant itself reads — see agentEngineBackofficeBridge.js).
   const [chatSessionId, setChatSessionId] = useState(null);
   // The proactive, already-evaluated greeting from the customer360-agent
   // orchestrator's Session Start turn (see system_message.py) — fired
@@ -88,7 +88,11 @@ export function UserProvider({ children }) {
     // personas (Marc/Ana/Noah) have no bankUsername and are skipped entirely
     // — this is a customer-facing concept only.
     setChatGreeting(null);
-    if (!user?.bankUsername) {
+    // Only customers have a chat. `bankUsername` can't tell them apart: it
+    // falls back to the display name for back-office personas (Noah, Marc, ...),
+    // so they used to start a customer session (a "__SESSION_START__" call as
+    // user "Noah") on every selection.
+    if (!USER_MAP[user?.id]?.BankUserName) {
       setChatSessionId(null);
       return;
     }

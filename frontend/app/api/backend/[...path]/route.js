@@ -69,7 +69,17 @@ async function proxy(request, { params }) {
     fetchOptions.body = await request.text();
   }
 
-  const backendRes = await fetch(backendUrl, fetchOptions);
+  let backendRes;
+  try {
+    backendRes = await fetch(backendUrl, fetchOptions);
+  } catch (err) {
+    // Upstream unreachable (e.g. service not running): without this Next
+    // returns a bare 500 with an empty body, which hides the real cause.
+    return Response.json(
+      { detail: `Backend unreachable at ${backend} (${err?.cause?.code || err?.message || "fetch failed"})` },
+      { status: 502 },
+    );
+  }
 
   return new Response(backendRes.body, {
     status: backendRes.status,

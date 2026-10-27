@@ -1,5 +1,5 @@
 /**
- * Proxy to the customer360-agent Magenta app's orchestration-engine
+ * Proxy to the customer360-agent Agent Engine app's orchestration-engine
  * endpoint (POST /invoke) — synchronous, single JSON response, no
  * streaming. See magenta-customer360-agents/agents/customer360-agent.
  */

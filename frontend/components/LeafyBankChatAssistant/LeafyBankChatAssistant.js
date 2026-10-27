@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Real Magenta-powered assistant — calls the customer360-agent's
+ * Real Agent Engine-powered assistant — calls the customer360-agent's
  * POST /invoke (proxied via app/api/customer360-chat/route.js) instead of
  * walking the old scripted CONVERSATION mock (see git history for that
- * version). UI shell (bubbles, header, input) kept as-is; the mock's
+ * version). UI built with the Via design system (@via-ds/components);
+ * the mock's
  * insights/decision-button/backoffice-hint rendering was mock-script-only
  * and is dropped since the real orchestrator drives everything through
  * plain response text.
@@ -30,22 +31,19 @@
  * no prior login, or storage unavailable).
  */
 
-import { marked } from "marked";
+import "@via-ds/components/index.css";
+import { Avatar, Button, Callout, Card, Markdown, TextArea, ViaProvider } from "@via-ds/components";
 import { useEffect, useRef, useState } from "react";
-import { H2 } from "@leafygreen-ui/typography";
 
 import { customer360ChatApi } from "@/lib/api/client";
-import { chatHistoryKey, chatSessionIdKey } from "@/lib/const/magentaBackofficeBridge";
+import { chatHistoryKey, chatSessionIdKey } from "@/lib/const/agentEngineBackofficeBridge";
 import { connectAllAccounts, CONNECT_INSTITUTIONS, CONSENT_DURATION_DAYS } from "@/lib/api/openFinance";
 import { useUser } from "@/lib/context/UserContext";
-import { USER_LIST } from "@/lib/constants";
 import styles from "./LeafyBankChatAssistant.module.css";
 import ChatChart from "./ChatChart";
 
 // The same persona backing the mock back-office review page — see
 // USER_MAP in lib/constants.js ("Noah", Section: "backoffice", Url: "/back-office").
-const BACKOFFICE_REVIEWER = USER_LIST.find((u) => u.url === "/back-office");
-
 const WELCOME_MESSAGE =
   "Hi! I'm the Leafy Bank Assistant. Ask me about insurance, or anything else I can help with.";
 
@@ -56,6 +54,47 @@ const WELCOME_MESSAGE =
 const GATHERING_MESSAGE =
   "Hi! I have some financial wellness advice for you based on your transaction history for the " +
   "last 6 months. Give me just a sec and I'll show it to you…";
+
+const GATHERING_PHRASES = [
+  "Analyzing your accounts…",
+  "Reviewing your last 6 months of transactions…",
+  "Preparing your summary…",
+];
+const THINKING_PHRASES = ["Thinking…", "Checking the details…", "Putting your answer together…"];
+
+// Tappable openers shown while the conversation is still just the greeting.
+const STARTER_PROMPTS = [
+  "Where is my money going?",
+  "Do I qualify for a personal loan?",
+  "Get me a car insurance quote",
+];
+
+// Quick answers offered under an assistant message that ends in a question
+// (the assistant is instructed to end every turn with a yes/no suggestion).
+const QUICK_REPLIES = [
+  { label: "Yes, please", text: "Yes, please" },
+  { label: "Not now", text: "No thanks, not now" },
+];
+
+function ThinkingIndicator({ phrases }) {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setIndex((i) => (i + 1) % phrases.length), 3500);
+    return () => clearInterval(timer);
+  }, [phrases.length]);
+  return (
+    <div className={styles.thinking} role="status" aria-live="polite">
+      <span className={styles.dots} aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span key={index} className={styles.thinkingText}>
+        {phrases[index]}
+      </span>
+    </div>
+  );
+}
 
 function loadHistory(userId) {
   if (typeof window === "undefined") return [];
@@ -68,10 +107,8 @@ function loadHistory(userId) {
   }
 }
 
-marked.setOptions({ breaks: true, gfm: true });
-
 export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolution, onResolutionConsumed }) {
-  const { selectUser, selectedUser, chatSessionId, chatGreeting, chatGreetingLoading } = useUser();
+  const { selectedUser, chatSessionId, chatGreeting, chatGreetingLoading } = useUser();
   const userId = selectedUser?.id;
   // bankUsername (e.g. "gracehop") is the identifier already used for
   // backend-facing calls elsewhere (openfinance) — reused here as the
@@ -100,7 +137,7 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
   const [thinking, setThinking] = useState(false);
   const [inputValue, setInputValue] = useState("");
   // "Connect my other accounts" — a plain deterministic button, not
-  // something the orchestrator asks about or drives (Magenta cannot call
+  // something the orchestrator asks about or drives (Agent Engine cannot call
   // any leafy-bank-bian/open-finance-next-gen endpoint — see
   // lib/api/openFinance.js). Runs entirely client-side, headless, then
   // just tells the chat what happened.
@@ -110,9 +147,11 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
   const accountsConnected = messages.some((m) => m.kind === "bot" && m.text?.startsWith("✅ Connected!"));
 
   const messagesEndRef = useRef(null);
-  const inputRef = useRef(null);
+  const composerRef = useRef(null);
   const nextIdRef = useRef(Math.max(0, ...messages.map((m) => m.id ?? 0)));
-  const resolutionAppliedRef = useRef(false);
+  // Outcomes already appended, by execution id: a customer can get several
+  // over time, so this can't be a single once-only flag.
+  const appliedResolutionsRef = useRef(new Set());
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -163,11 +202,13 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
   //
   // This does NOT push a live update to an already-open customer tab that's
   // never reloaded — a deliberate scope cut (see
-  // lib/const/magentaBackofficeBridge.js's module docstring), not a full
+  // lib/const/agentEngineBackofficeBridge.js's module docstring), not a full
   // pub/sub.
   useEffect(() => {
-    if (!pendingResolution || resolutionAppliedRef.current) return;
-    resolutionAppliedRef.current = true;
+    if (!pendingResolution) return;
+    const resolutionKey = pendingResolution.executionId ?? "unkeyed";
+    if (appliedResolutionsRef.current.has(resolutionKey)) return;
+    appliedResolutionsRef.current.add(resolutionKey);
     const { response, decision } = pendingResolution;
     appendMessage({
       kind: "bot",
@@ -180,11 +221,13 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
     onResolutionConsumed?.();
   }, [pendingResolution, onResolutionConsumed]);
 
+  // Focus the composer when the chat opens and again once a reply has arrived
+  // (the field is disabled while the assistant is thinking, which drops focus).
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+    if (isOpen && !thinking) {
+      setTimeout(() => composerRef.current?.querySelector("textarea")?.focus(), 100);
     }
-  }, [isOpen]);
+  }, [isOpen, thinking]);
 
   function appendMessage(msg) {
     // Derive the id from the current list (not a separate counter): the list can
@@ -226,20 +269,16 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
     // Only offered when the agent proposes it, and gone for good once accepted.
     if (accountsConnected) return null;
     return (
-      <button
+      <Button
         key={key}
-        type="button"
-        className={styles.connectButton}
-        onClick={requestConnectConsent}
-        disabled={connecting || consentPending}
+        variant="ai"
+        onPress={requestConnectConsent}
+        isDisabled={connecting || consentPending}
+        className={styles.actionButton}
       >
-        {connecting ? "Connecting…" : `🔗 ${String(action.label || "Connect my other accounts")}`}
-      </button>
+        {connecting ? "Connecting…" : String(action.label || "Connect my other accounts")}
+      </Button>
     );
-  }
-
-  function renderMarkdown(text) {
-    return { __html: marked.parse(text ?? "") };
   }
 
   async function handleSend(overrideText) {
@@ -297,13 +336,6 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
     }
   }
 
-  // Same mechanism the app already uses to switch to a backoffice persona
-  // (see UserInfo.handleSelectUser for Marc -> /gl-pipeline-monitor), just
-  // triggered automatically instead of via the manual switch-user dropdown.
-  // selectUser() persists to localStorage, which a freshly opened tab reads
-  // unconditionally on mount, so the new tab opens already "signed in" as
-  // the reviewer — no separate login step, and the customer's own chat tab
-  // and session are left untouched.
   // Step 1: the agent's button only asks for consent — nothing is connected
   // until the customer explicitly allows it in the consent card.
   function requestConnectConsent() {
@@ -313,11 +345,9 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
 
   function declineConnect() {
     setConsentPending(false);
-    appendMessage({ kind: "user", text: "Not now" });
-    appendMessage({
-      kind: "bot",
-      text: "No problem — I haven't connected anything. If you change your mind, just ask and I'll offer it again.",
-    });
+    // Tell the agent, so it acknowledges, records the preference and doesn't
+    // offer the same thing again (nothing was connected).
+    handleSend("No thanks, I don't want to connect my other accounts right now.");
   }
 
   // Step 2: explicit consent given — only now are consents created/approved
@@ -366,8 +396,11 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
     );
   }
 
+  // The back-office page presents itself as the reviewer on its own, so this
+  // tab's login is left alone. (It used to switch the browser's saved login to
+  // the reviewer, which every tab shares - that flipped this customer tab and
+  // made the reviewer/customer identities swap depending on which tab wrote last.)
   function openBackOffice() {
-    if (BACKOFFICE_REVIEWER) selectUser(BACKOFFICE_REVIEWER);
     window.open("/back-office", "_blank", "noopener,noreferrer");
   }
 
@@ -381,7 +414,7 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
         : `${userId ?? "anon"}-${Date.now()}`;
     setManualSessionId(newSessionId);
     appliedGreetingRef.current = true; // don't reapply a stale greeting from the abandoned session
-    resolutionAppliedRef.current = false;
+    appliedResolutionsRef.current = new Set();
     try {
       localStorage.removeItem(chatHistoryKey(userId));
       localStorage.setItem(chatSessionIdKey(userId), newSessionId);
@@ -392,140 +425,167 @@ export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolut
 
   if (!isOpen) return null;
 
-  return (
-    <div className={styles.customModalBackdrop} onClick={onClose}>
-      <div className={styles.customModalContainer} onClick={(e) => e.stopPropagation()}>
-        <button className={styles.closeButton} onClick={onClose}>
-          ×
-        </button>
+  const lastMessage = messages[messages.length - 1];
+  const lastSegments = lastMessage?.kind === "bot" ? splitChartBlocks(lastMessage.text) : [];
+  const lastText = lastSegments
+    .filter((seg) => seg.kind === "text")
+    .map((seg) => seg.body)
+    .join("\n")
+    .trim();
+  const isGathering = messages.length === 1 && messages[0].text === GATHERING_MESSAGE;
+  const showStarters = messages.length === 1 && !isGathering && !thinking && lastMessage?.kind === "bot";
+  const showQuickReplies =
+    !showStarters &&
+    !thinking &&
+    !consentPending &&
+    !isGathering &&
+    lastMessage?.kind === "bot" &&
+    !lastSegments.some((seg) => seg.kind === "action") &&
+    lastText.endsWith("?");
 
-        <div className={styles.chatContainer}>
-          <div className={styles.chatHeader}>
-            <div className={styles.chatHeaderContent}>
-              <img src="/agent.png" alt="Agent" className={styles.agentImage} />
-              <div className={styles.headerTitleWrapper}>
-                <H2 className={styles.chatTitle}>Leafy Bank Assistant</H2>
+  return (
+    <ViaProvider>
+      <div className={styles.backdrop} onClick={onClose}>
+        <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+          <header className={styles.header}>
+            <div className={styles.headerMain}>
+              <Avatar src="/agent.png" alt="" size={40} />
+              <div className={styles.headerText}>
+                <div className={styles.title}>Leafy Bank Assistant</div>
                 <div className={styles.status}>
                   <span className={styles.pulseDot} />
                   Available
                 </div>
               </div>
             </div>
+            <div className={styles.headerActions}>
+              <Button variant="tertiary" size="small" onPress={restart}>
+                Restart
+              </Button>
+              <Button variant="tertiary" size="small" onPress={openBackOffice}>
+                Back-office view
+              </Button>
+              <button className={styles.closeButton} onClick={onClose} aria-label="Close chat">
+                ×
+              </button>
+            </div>
+          </header>
+
+          <div className={styles.messages}>
+            {messages.map((msg) =>
+              msg.kind === "user" ? (
+                <div key={msg.id} className={`${styles.row} ${styles.userRow}`}>
+                  <div className={styles.userBubble}>{msg.text}</div>
+                </div>
+              ) : (
+                <div key={msg.id} className={`${styles.row} ${styles.assistantRow}`}>
+                  <Avatar src="/agent.png" alt="" size={32} className={styles.rowAvatar} />
+                  <div className={styles.assistantBubble}>
+                    {splitChartBlocks(msg.text).map((seg, i) =>
+                      seg.kind === "chart" ? (
+                        <ChatChart key={i} spec={seg.body} />
+                      ) : seg.kind === "action" ? (
+                        renderAction(seg.body, i)
+                      ) : (
+                        <Markdown key={i} className={styles.markdown}>
+                          {seg.body}
+                        </Markdown>
+                      ),
+                    )}
+                  </div>
+                </div>
+              ),
+            )}
+
+            {(isGathering || thinking) && (
+              <div className={`${styles.row} ${styles.assistantRow}`}>
+                <Avatar src="/agent.png" alt="" size={32} className={styles.rowAvatar} />
+                <div className={styles.assistantBubble}>
+                  <ThinkingIndicator phrases={isGathering ? GATHERING_PHRASES : THINKING_PHRASES} />
+                </div>
+              </div>
+            )}
+
+            {showStarters && (
+              <div className={styles.suggestions} aria-label="Suggested questions">
+                {STARTER_PROMPTS.map((prompt) => (
+                  <Button key={prompt} variant="primaryOutline" size="small" onPress={() => handleSend(prompt)}>
+                    {prompt}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {showQuickReplies && (
+              <div className={styles.suggestions} aria-label="Quick replies">
+                {QUICK_REPLIES.map((reply, i) => (
+                  <Button
+                    key={reply.label}
+                    variant={i === 0 ? "primaryOutline" : "tertiary"}
+                    size="small"
+                    onPress={() => handleSend(reply.text)}
+                  >
+                    {reply.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {consentPending && (
+              <Card className={styles.consentCard} role="dialog" aria-label="Connect your other accounts">
+                <div className={styles.consentTitle}>Allow Leafy Bank to connect your other accounts?</div>
+                <p className={styles.consentText}>
+                  I'll read data from {CONNECT_INSTITUTIONS.join(" and ")} to include them in your financial
+                  analysis:
+                </p>
+                <ul className={styles.consentList}>
+                  <li>Accounts and balances</li>
+                  <li>Transactions</li>
+                  <li>Loans and products</li>
+                </ul>
+                <Callout variant="note">
+                  Read-only — I can't move money. Access expires after {CONSENT_DURATION_DAYS} days.
+                </Callout>
+                <div className={styles.consentActions}>
+                  <Button variant="primary" onPress={confirmConnect}>
+                    Allow access
+                  </Button>
+                  <Button variant="tertiary" onPress={declineConnect}>
+                    Not now
+                  </Button>
+                </div>
+              </Card>
+            )}
+
+            <div ref={messagesEndRef} />
           </div>
 
-          <div className={styles.chatTabContent}>
-            <div className={styles.chatMessages}>
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`${styles.message} ${
-                    msg.kind === "user" ? styles.userMessage : styles.assistantMessage
-                  }`}
-                >
-                  {msg.kind === "user" ? (
-                    <div className={styles.messageText}>{msg.text}</div>
-                  ) : (
-                    <div className={styles.assistantContent}>
-                      {splitChartBlocks(msg.text).map((seg, i) =>
-                        seg.kind === "chart" ? (
-                          <ChatChart key={i} spec={seg.body} />
-                        ) : seg.kind === "action" ? (
-                          renderAction(seg.body, i)
-                        ) : (
-                          <div
-                            key={i}
-                            className={styles.messageText}
-                            dangerouslySetInnerHTML={renderMarkdown(seg.body)}
-                          />
-                        ),
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {messages.length === 1 && messages[0].text === GATHERING_MESSAGE && (
-                <div className={styles.stepIndicator}>
-                  <div className={styles.stepHeader}>
-                    <div className={styles.spinner} />
-                    <span>Analyzing your accounts…</span>
-                  </div>
-                </div>
-              )}
-
-              {thinking && (
-                <div className={styles.stepIndicator}>
-                  <div className={styles.stepHeader}>
-                    <div className={styles.spinner} />
-                    <span>Thinking…</span>
-                  </div>
-                </div>
-              )}
-
-              {consentPending && (
-                <div className={styles.consentCard} role="dialog" aria-label="Connect your other accounts">
-                  <div className={styles.consentTitle}>Allow Leafy Bank to connect your other accounts?</div>
-                  <p className={styles.consentText}>
-                    I'll read data from {CONNECT_INSTITUTIONS.join(" and ")} to include them in your financial
-                    analysis:
-                  </p>
-                  <ul className={styles.consentList}>
-                    <li>Accounts and balances</li>
-                    <li>Transactions</li>
-                    <li>Loans and products</li>
-                  </ul>
-                  <p className={styles.consentText}>
-                    Read-only — I can't move money. Access expires after {CONSENT_DURATION_DAYS} days.
-                  </p>
-                  <div className={styles.consentActions}>
-                    <button type="button" className={styles.connectButton} onClick={confirmConnect}>
-                      Allow access
-                    </button>
-                    <button type="button" className={styles.declineButton} onClick={declineConnect}>
-                      Not now
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className={styles.resetRow}>
-                <button className={styles.resetButton} onClick={restart}>
-                  ↺ Restart conversation
-                </button>
-                <button
-                  type="button"
-                  className={styles.resetButton}
-                  onClick={openBackOffice}
-                >
-                  Open Back-Office View
-                </button>
-              </div>
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            <div className={styles.chatInputContainer}>
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder={thinking ? "Thinking…" : "Type a message…"}
+          <div className={styles.composerWrap}>
+            <div className={styles.composer} ref={composerRef}>
+              <TextArea
+                aria-label="Message the assistant"
+                placeholder={thinking ? "Thinking…" : "Ask about your finances, loans or insurance…"}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={setInputValue}
                 onKeyDown={handleKeyDown}
-                className={styles.chatInput}
-                disabled={thinking}
+                isDisabled={thinking}
+                className={styles.composerInput}
               />
-              <button
+              <Button
+                variant="ai"
+                onPress={() => handleSend()}
+                isDisabled={thinking || !inputValue.trim()}
                 className={styles.sendButton}
-                onClick={() => handleSend()}
-                disabled={thinking || !inputValue.trim()}
               >
                 Send
-              </button>
+              </Button>
+            </div>
+            <div className={styles.disclaimer}>
+              AI assistant — it can make mistakes. Loan and insurance decisions are made by Leafy Bank.
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </ViaProvider>
   );
 }

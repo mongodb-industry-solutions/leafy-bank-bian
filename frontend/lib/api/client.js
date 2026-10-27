@@ -179,7 +179,7 @@ export async function openFinanceChatApi(path, { body = null } = {}) {
 }
 
 /**
- * customer360-agent (Magenta) client — synchronous, single JSON response.
+ * customer360-agent (Agent Engine) client — synchronous, single JSON response.
  * Body shape: { message, session_id, user_id }. Response shape (confirmed
  * against a live local `agentic dev up` call — the hosted-platform docs'
  * { success, response, ... } shape does NOT apply locally):
@@ -275,4 +275,43 @@ export async function listCustomer360SuspendedReviews() {
   } catch (e) {
     return { data: null, error: e.message };
   }
+}
+
+/**
+ * The customer's finished back-office review outcomes (resumed + completed
+ * runs), each with the assistant's own message about the decision — see
+ * app/api/customer360-review/outcomes/route.js.
+ * @param {string} userId - the customer360-agent user_id (bank username)
+ * @returns {Promise<{data: {outcomes: Array<{execution_id: string, decision: string|null, result: string, updated_at: string}>}|null, error: string|null}>}
+ */
+export async function getCustomer360ReviewOutcomes(userId) {
+  try {
+    const res = await fetch(`/api/customer360-review/outcomes?user_id=${encodeURIComponent(userId)}`);
+    if (!res.ok) {
+      const errText = await res.text();
+      return { data: null, error: `${res.status}: ${errText}` };
+    }
+    return { data: await res.json(), error: null };
+  } catch (e) {
+    return { data: null, error: e.message };
+  }
+}
+
+/**
+ * Decided personal-loan reviews (approved / denied) for the back-office
+ * history, read from the loan records via the open-finance backend
+ * (proxied: leafybank/backoffice/loan-reviews).
+ * @returns {Promise<{data: {reviews: any[]}|null, error: string|null}>}
+ */
+export async function listLoanReviewHistory() {
+  return coreApi("leafybank/backoffice/loan-reviews", { params: { limit: "200" } });
+}
+
+/**
+ * Decided insurance-purchase reviews (approved / denied) for the back-office
+ * history, via the open-finance backend (leafybank/backoffice/insurance-reviews).
+ * @returns {Promise<{data: {reviews: any[]}|null, error: string|null}>}
+ */
+export async function listInsuranceReviewHistory() {
+  return coreApi("leafybank/backoffice/insurance-reviews", { params: { limit: "200" } });
 }

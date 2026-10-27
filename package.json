@@ -1,0 +1,5 @@
+{
+	"dependencies": {
+		"@via-ds/components": "^0.13.0"
+	}
+}

@@ -1,12 +1,11 @@
 /**
- * Polls a resumed execution's status/result via the local `agentic dev up`
- * UI proxy — resume is asynchronous ("status": "resuming"), so the
- * back-office UI polls this after calling /api/customer360-review/resume
- * until the run reaches a terminal status. Same local base as resume/
- * list — no credentials needed for a local dev stack.
+ * Polls an execution's status/result straight from the orchestration engine —
+ * resume is asynchronous ("status": "resuming"), so the back-office UI polls
+ * this after /api/customer360-review/resume until the run is terminal.
+ * See lib/customer360Oe.js.
  */
 
-const CUSTOMER360_LOCAL_UI_BASE = process.env.CUSTOMER360_LOCAL_UI_BASE || "http://localhost:3000";
+import { oeUrl, unreachable } from "@/lib/customer360Oe";
 
 export async function GET(request) {
   const executionId = new URL(request.url).searchParams.get("execution_id");
@@ -14,13 +13,17 @@ export async function GET(request) {
     return Response.json({ success: false, error: "execution_id query param is required" }, { status: 400 });
   }
 
-  const backendRes = await fetch(
-    `${CUSTOMER360_LOCAL_UI_BASE}/api/v1/executions/${encodeURIComponent(executionId)}`,
-  );
-
-  const text = await backendRes.text();
-  return new Response(text, {
-    status: backendRes.status,
-    headers: { "Content-Type": backendRes.headers.get("Content-Type") || "application/json" },
-  });
+  try {
+    const res = await fetch(oeUrl(`/query/executions/${encodeURIComponent(executionId)}`));
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return Response.json({ success: false, error: body?.error || `HTTP ${res.status}` }, { status: res.status });
+    }
+    const execution = body?.execution || null;
+    // status/result are also surfaced at the top level: the back-office page
+    // polls `data.status` until it leaves "resuming".
+    return Response.json({ success: true, execution, status: execution?.status, result: execution?.result });
+  } catch (err) {
+    return unreachable(err);
+  }
 }

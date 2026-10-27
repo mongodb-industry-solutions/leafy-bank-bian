@@ -1,37 +1,37 @@
 /**
- * Resumes a suspended legacy human-review execution via the local
- * `agentic dev up` UI proxy (http://localhost:3000/api/v1/executions/
- * {execution_id}/resume) — NOT the hosted API Gateway. For a local dev
- * stack there's no project/workspace/API-key: the local UI adds the local
- * synthetic org/project scope itself, so this route needs no credentials
- * (unlike a real deployment, which would use the Gateway contract with
- * Authorization/project_id/workspace_id instead).
- *
- * Only for legacy human-review/guardrail suspensions (human_review.py uses
- * app.suspend(), not langgraph.types.interrupt) — native interrupt
- * suspensions resume through /invoke's resume_map instead.
+ * Resumes a suspended human-review execution with the reviewer's decision,
+ * straight against the orchestration engine's /resume/{id} — see
+ * lib/customer360Oe.js. Only for app.suspend() reviews (loans/insurance); the
+ * engine feeds the decision back to the agent as the suspended tool's result.
+ * Resume is asynchronous: it returns {status: "resuming"} immediately.
  */
 
-const CUSTOMER360_LOCAL_UI_BASE = process.env.CUSTOMER360_LOCAL_UI_BASE || "http://localhost:3000";
+import { oeUrl, unreachable } from "@/lib/customer360Oe";
 
 export async function POST(request) {
   const { execution_id, decision, reviewer_notes } = await request.json();
   if (!execution_id || !decision) {
     return Response.json({ success: false, error: "execution_id and decision are required" }, { status: 400 });
   }
+  if (!["approved", "denied"].includes(decision)) {
+    return Response.json({ success: false, error: "decision must be 'approved' or 'denied'" }, { status: 400 });
+  }
 
-  const backendRes = await fetch(
-    `${CUSTOMER360_LOCAL_UI_BASE}/api/v1/executions/${encodeURIComponent(execution_id)}/resume`,
-    {
+  try {
+    const res = await fetch(oeUrl(`/resume/${encodeURIComponent(execution_id)}`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision, reviewer_notes: reviewer_notes || "" }),
-    },
-  );
-
-  const text = await backendRes.text();
-  return new Response(text, {
-    status: backendRes.status,
-    headers: { "Content-Type": backendRes.headers.get("Content-Type") || "application/json" },
-  });
+      body: JSON.stringify({ human_review: { decision, reviewer_notes: reviewer_notes || "" } }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return Response.json(
+        { success: false, execution_id, status: "error", error: body?.error || `HTTP ${res.status}` },
+        { status: res.status },
+      );
+    }
+    return Response.json({ success: true, execution_id: body?.execution_id || execution_id, status: body?.status || "resuming" });
+  } catch (err) {
+    return unreachable(err);
+  }
 }

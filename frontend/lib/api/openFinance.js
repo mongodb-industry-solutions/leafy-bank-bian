@@ -5,11 +5,11 @@
  * API calls (get-authorization -> create consent -> approve -> fetch-and-cache),
  * driven directly by the customer's own "yes, connect" click in the UI.
  *
- * Magenta never calls any of this. It doesn't need to be told about it
+ * Agent Engine never calls any of this. It doesn't need to be told about it
  * either: fetch-and-cache persists into `cachedExternalData` in
- * leafy_bank_bian_magenta — the same database/cluster Magenta's
+ * leafy_bank_bian_magenta — the same database/cluster Agent Engine's
  * financial_wellness domain already reads directly (see
- * insights_service.py) — so Magenta just picks it up next time it computes,
+ * insights_service.py) — so Agent Engine just picks it up next time it computes,
  * the same read-only pattern already used for loans/portfolioAllocation.
  * No separate write-back route needed on our side at all.
  *
