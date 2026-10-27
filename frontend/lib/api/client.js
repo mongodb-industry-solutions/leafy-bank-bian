@@ -308,6 +308,16 @@ export async function listLoanReviewHistory() {
 }
 
 /**
+ * Pay out an approved, not-yet-funded loan from the back office
+ * (leafybank/backoffice/loan-reviews/{loan}/disburse).
+ * @param {string} loanNumber
+ * @returns {Promise<{data: any, error: string|null}>}
+ */
+export async function disburseLoan(loanNumber) {
+  return coreApi(`leafybank/backoffice/loan-reviews/${encodeURIComponent(loanNumber)}/disburse`, { method: "POST" });
+}
+
+/**
  * Decided insurance-purchase reviews (approved / denied) for the back-office
  * history, via the open-finance backend (leafybank/backoffice/insurance-reviews).
  * @returns {Promise<{data: {reviews: any[]}|null, error: string|null}>}

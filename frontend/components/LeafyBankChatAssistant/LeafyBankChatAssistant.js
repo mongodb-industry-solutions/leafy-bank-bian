@@ -107,7 +107,17 @@ function loadHistory(userId) {
   }
 }
 
-export default function LeafyBankChatAssistant({ isOpen, onClose, pendingResolution, onResolutionConsumed }) {
+// The conversation lives in this component's state and is only read from
+// storage on mount, so switching customers must remount it: otherwise the
+// previous customer's messages (and session) stay on screen and would even be
+// saved under the new customer's history key. A new login session for the
+// same customer also starts a fresh chat.
+export default function LeafyBankChatAssistant(props) {
+  const { selectedUser, chatSessionId } = useUser();
+  return <LeafyBankChat key={`${selectedUser?.id ?? "none"}:${chatSessionId ?? ""}`} {...props} />;
+}
+
+function LeafyBankChat({ isOpen, onClose, pendingResolution, onResolutionConsumed }) {
   const { selectedUser, chatSessionId, chatGreeting, chatGreetingLoading } = useUser();
   const userId = selectedUser?.id;
   // bankUsername (e.g. "gracehop") is the identifier already used for

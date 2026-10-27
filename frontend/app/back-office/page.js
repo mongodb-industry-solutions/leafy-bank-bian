@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
+  disburseLoan,
   getCustomer360ExecutionStatus,
   listCustomer360SuspendedReviews,
   listInsuranceReviewHistory,
@@ -103,6 +104,8 @@ export default function BackOfficePage() {
   // The review leaves the pending list once it's no longer suspended, so the
   // outcome of the last decision is shown here instead.
   const [notice, setNotice] = useState(null);
+  const [payingOutLoan, setPayingOutLoan] = useState(null);
+  const [payOutErrors, setPayOutErrors] = useState({});
 
   const refresh = useCallback(async () => {
     const { data, error } = await listCustomer360SuspendedReviews();
@@ -243,6 +246,22 @@ export default function BackOfficePage() {
     }
 
     setResolvingId(null);
+  }
+
+  async function handlePayOut(loanNumber) {
+    setPayingOutLoan(loanNumber);
+    setPayOutErrors((prev) => ({ ...prev, [loanNumber]: undefined }));
+    const { data, error } = await disburseLoan(loanNumber);
+    if (error || !data?.success) {
+      setPayOutErrors((prev) => ({ ...prev, [loanNumber]: error || "Payout failed." }));
+    } else {
+      setNotice({
+        kind: "success",
+        text: `Loan ${loanNumber} paid out: ${data.amount.toLocaleString()} ${data.currency} credited to ${data.account_id}.`,
+      });
+      await refresh();
+    }
+    setPayingOutLoan(null);
   }
 
   // markIntentionalNavigation() is required here: this tab has never visited
@@ -410,6 +429,9 @@ export default function BackOfficePage() {
                 isResolving={resolvingId === selected.review?.executionId}
                 error={resolvedById[selected.review?.executionId]?.error}
                 onDecide={handleDecision}
+                onPayOut={handlePayOut}
+                isPayingOut={payingOutLoan === selected.h?.loan_number}
+                payOutError={payOutErrors[selected.h?.loan_number]}
               />
             ) : (
               <div className={styles.detailEmpty}>

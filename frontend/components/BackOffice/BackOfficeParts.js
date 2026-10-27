@@ -458,10 +458,35 @@ function Timeline({ item }) {
   );
 }
 
+// Approved but unfunded loan: the money goes to the Leafy Bank account the
+// customer chose in the chat; the reviewer only triggers the payout.
+function PayOutBar({ item, onPayOut, isPayingOut, error }) {
+  const account = item.h.payout_account || item.h.payout_account_id;
+  return (
+    <section className={styles.decisionBar}>
+      {error && (
+        <Callout variant="warning" className={styles.decisionError}>
+          {error}
+        </Callout>
+      )}
+      <div className={styles.decisionActions}>
+        <Button variant="primary" isDisabled={isPayingOut} onPress={() => onPayOut(item.h.loan_number)}>
+          {isPayingOut ? "Paying out…" : "Pay out loan"}
+        </Button>
+        <span className={styles.resuming}>
+          Credits {formatMoney(item.h.amount, item.h.currency)} to{" "}
+          {account ? `the account the customer chose: ${account}` : "the customer's Leafy Bank current account"}.
+        </span>
+      </div>
+    </section>
+  );
+}
+
 // ── the selected request ─────────────────────────────────────────────
 
-export function DetailPanel({ item, notes, onNotes, isResolving, error, onDecide }) {
+export function DetailPanel({ item, notes, onNotes, isResolving, error, onDecide, onPayOut, isPayingOut, payOutError }) {
   const isPending = item.status === "pending";
+  const canPayOut = item.kind === "loan" && item.status === "approved" && !item.h.funded;
   const presentation = item.p || {};
   const tiles = tilesFor(item);
   const extraFields = isPending
@@ -534,6 +559,8 @@ export function DetailPanel({ item, notes, onNotes, isResolving, error, onDecide
           </div>
         </section>
       )}
+
+      {canPayOut && <PayOutBar item={item} onPayOut={onPayOut} isPayingOut={isPayingOut} error={payOutError} />}
 
       {isPending && (
         <section className={styles.decisionBar}>

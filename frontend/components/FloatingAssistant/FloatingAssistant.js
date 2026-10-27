@@ -4,7 +4,7 @@ import { useUser } from "@/lib/context/UserContext";
 import { BACKOFFICE_DECISION_KEY, seenOutcomesKey } from "@/lib/const/agentEngineBackofficeBridge";
 import { getCustomer360ReviewOutcomes } from "@/lib/api/client";
 import { Body } from "@leafygreen-ui/typography";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import LeafyBankChatAssistant from "../LeafyBankChatAssistant/LeafyBankChatAssistant";
 import styles from "./FloatingAssistant.module.css";
 
@@ -66,6 +66,21 @@ export default function FloatingAssistant() {
   // with the unread badge. Outcomes that already existed on first load are
   // marked seen rather than replayed.
   const backendUserId = selectedUser?.bankUsername;
+
+  // Another customer logged in: nothing queued or open for the previous one
+  // may carry over (the chat itself remounts per customer).
+  const previousUserIdRef = useRef(selectedUser?.id);
+  useEffect(() => {
+    const previous = previousUserIdRef.current;
+    previousUserIdRef.current = selectedUser?.id;
+    // Only a real change of customer: the first login after mount (null →
+    // user) and the initial render must keep the back-office hand-off above.
+    if (!previous || previous === selectedUser?.id) return;
+    setPendingResolution(null);
+    setModalOpen(false);
+    setHasUnread(true);
+  }, [selectedUser?.id]);
+
   useEffect(() => {
     if (!backendUserId) return undefined; // back-office personas have no customer chat
     const key = seenOutcomesKey(backendUserId);
