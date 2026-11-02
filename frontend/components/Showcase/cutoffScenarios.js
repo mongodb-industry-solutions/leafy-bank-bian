@@ -69,7 +69,7 @@ export const CUTOFF_SCENARIOS = [
     },
     title: "Short of funds",
     story:
-      "A domestic wire is USD 3,200 short of funds, and the incoming credit that would cover it isn't due until after Fedwire closes. " +
+      "A domestic wire for USD 9,500 is held because the account has only USD 6,300 available, USD 3,200 short. The incoming credit that would cover it isn't due until after Fedwire closes. " +
       "The agent informs the customer, then asks the operator to hold the wire for the next value date.",
     bank: "Bank of America",
     wire: {
@@ -98,20 +98,20 @@ export const CUTOFF_SCENARIOS = [
     },
     beats: {
       start:
-        "At 16:45 ET, the domestic wire to Lakeside Components is still USD 3,200 short of funds and on hold, with " +
-        "45 minutes left before the 17:30 ET internal cut-off.",
+        "At 16:45 ET, the USD 9,500 domestic wire to Lakeside Components is on hold: only USD 6,300 is available, USD 3,200 short. " +
+        "There are 45 minutes left before the 17:30 ET internal cut-off.",
       watch:
         "At 16:45 ET, the agent sees that the expected credit lands after Fedwire's 18:45 ET close, too late to send today, and informs the customer about the " +
-        "USD 3,200 shortfall.",
+        "USD 3,200 shortfall on the USD 9,500 wire (USD 6,300 available).",
       decide:
         "The agent asks to hold the wire for the next value date. Moving a wire to another day needs your approval.",
       final:
         "The wire is held for the next value date. Fast-forward moves the demo to the next business day, when the " +
         "wire can be released and settled once funded.",
     },
-    amount: "balance + 3,200.00",
-    // The wire amount is computed at run time; the card shows the gap instead.
-    cardAmount: "$3,200 over balance",
+    // Run time sizes the wire as the seed account's available balance (6,300) + 3,200 short.
+    amount: "9,500.00",
+    cardAmount: "$9,500 · $6,300 available",
     startEt: "16:45",
     expected: "Held for the next value date",
     expectedOutcome: "HELD_NEXT_VALUE_DATE",

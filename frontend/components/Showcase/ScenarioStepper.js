@@ -11,6 +11,7 @@ import { usePaymentWorkflow, usePipelineTrace, useWorkflowExceptions } from "@/l
 import { CATEGORY, OVERDUE_SECONDS, actOf, scenarioByKey, stepsFor } from "./scenarios";
 import { PaymentCard } from "./StatusRail";
 import { BriefStrip } from "./ScenarioBrief";
+import PaymentPipeline from "./PaymentPipeline";
 import RunConsole from "./RunConsole";
 import { deriveActivity } from "./activity";
 import { useAgentSteps } from "./AgentThinking";
@@ -346,6 +347,16 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
               <BriefStrip scenario={scenario} />
               <PaymentCard scenario={scenario} init={ctx.init} payment={payment} exceptions={trackedExceptions} />
             </>
+          )}
+          pipeline={(
+            <PaymentPipeline
+              mode="reconciliation"
+              payment={payment}
+              status={ctx.init?.status}
+              paymentId={ctx.init?.paymentId}
+              reconciled={payment?.lifecycle?.reconciliationStatus === "RECONCILED"}
+              exceptionsOpen={anyOpen}
+            />
           )}
           controller={controller}
           activity={activity}
