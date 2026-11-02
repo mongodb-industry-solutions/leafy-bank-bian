@@ -13,6 +13,7 @@ import { PaymentCard } from "./StatusRail";
 import { BriefStrip } from "./ScenarioBrief";
 import PaymentPipeline from "./PaymentPipeline";
 import RunConsole from "./RunConsole";
+import AgentPanel from "./AgentPanel";
 import { deriveActivity } from "./activity";
 import { useAgentSteps } from "./AgentThinking";
 import ProblemScene from "./scenes/ProblemScene";
@@ -32,6 +33,7 @@ const EXPECTED_OUTCOMES = {
 };
 const BATCH_KICK_GAP_MS = 12000;
 const BATCH_KICK_LIMIT = 5;
+const AUTO_DELAY_MS = 1500;
 const OWN_CATEGORIES = new Set([CATEGORY.DISCREPANCY, CATEGORY.MISSING]);
 
 const generateStatement = (includeOrphan) =>
@@ -85,6 +87,7 @@ async function runAction(kind, scenarioKey, paymentId) {
     return {
       patch,
       note: `Statement ${data.paymentMessageId} received: ${data.entryCount} line${data.entryCount === 1 ? "" : "s"}${orphans}.`,
+      received: { id: data.paymentMessageId, lines: data.entryCount, orphans: data.orphanCount || 0, late: kind === "statementLate" },
     };
   }
   return { patch: {}, note: null };
@@ -273,6 +276,20 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     }
   }
 
+  // Steps marked `auto` run on their own once reached. Each tries once; a failure leaves the
+  // button for a manual retry instead of looping.
+  const nextRef = useRef(next);
+  nextRef.current = next;
+  const autoTried = useRef(new Set());
+  useEffect(() => {
+    if (!step.auto || running || waiting || autoTried.current.has(step.key)) return undefined;
+    const id = setTimeout(() => {
+      autoTried.current.add(step.key);
+      nextRef.current();
+    }, AUTO_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [step.key, step.auto, running, waiting]);
+
   async function next() {
     if (running || waiting || step.final) return;
     setRunning(true);
@@ -285,11 +302,22 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     try {
       for (; at <= last; at += 1) {
         const run = steps[at].run;
-        const { patch, note: n } = run ? await runAction(run, scenarioKey, local.paymentId) : { patch: {}, note: null };
+        const { patch, note: n, received } = run ? await runAction(run, scenarioKey, local.paymentId) : { patch: {}, note: null };
         local = { ...local, ...patch };
         setCtx(local);
         setNote(n);
-        if (n) pushEvent({ key: `note:${steps[at].key}`, phase: phaseOfStep(steps[at].key), lane: "code", title: n, stepKey: steps[at].key });
+        if (received) {
+          // Its own line, ahead of the step's MongoDB writes, so the arrival reads as an event.
+          pushEvent({
+            key: `statement-received:${received.id}`,
+            phase: phaseOfStep(steps[at].key),
+            lane: "code",
+            ord: at - 0.5,
+            tone: "good",
+            title: `${received.late ? "Late statement" : "Statement"} received from ${scenario.bank}`,
+            detail: `${received.id}: ${received.lines} line${received.lines === 1 ? "" : "s"}${received.orphans ? `, ${received.orphans} not ours` : ""}`,
+          });
+        } else if (n) pushEvent({ key: `note:${steps[at].key}`, phase: phaseOfStep(steps[at].key), lane: "code", title: n, stepKey: steps[at].key });
         setIndex(Math.min(at + 1, steps.length - 1));
       }
       setTick((t) => t + 1);
@@ -303,7 +331,8 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   function onDecided(decision) {
     setCtx((c) => ({ ...c, decision, followedId }));
     setNote(decision === "APPROVE" ? "Approved. The agent executed the action and verified it." : "Rejected. The run has ended.");
-    setIndex((i) => Math.min(i + 1, steps.length - 1));
+    // Deciding early skips the approve step, which has no button of its own.
+    setIndex(steps.length - 1);
     setTick((t) => t + 1);
   }
 
@@ -314,7 +343,10 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     : awaitingReply || outcome === "ESCALATED" ? "waiting"
     : anyOpen ? "alert"
     : "neutral";
-  const canDecide = (step.gate === "decided" && !ctx.decision) || revisedProposalPending;
+  // The proposal is decidable as soon as the agent has made one; waiting for the next step's
+  // button would leave it hidden behind "Review the proposal".
+  const proposalReady = step.gate === "proposal" && !!agent?.proposedAction && !ctx.decision;
+  const canDecide = (step.gate === "decided" && !ctx.decision) || proposalReady || revisedProposalPending;
   const sources = { payment, trace, ownException, orphan, agent, followedException, scenarioKey };
 
   const agentGate = step.gate === "proposal" || step.gate === "recheck";
@@ -324,7 +356,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     step.final;
   const activity = deriveActivity({
     humanWait: canDecide ? "Waiting for your decision" : null,
-    running: running ? "Applying this step" : null,
+    running: running ? step.auto || "Applying this step" : null,
     externalWait:
       step.countdown && countdownLeft > 0 ? `Statement window closes in ${countdownLeft}s`
       : awaitingReply ? "Waiting for the correspondent bank's reply"
@@ -341,7 +373,8 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     title: step.final ? (outcome ? "Run complete" : "Verifying the result") : step.title,
     label: step.button || "Next",
     final: !!step.final,
-    showButton: !step.final && step.key !== "approve",
+    // An automatic step shows its button only after it failed, so it can be retried.
+    showButton: !step.final && step.key !== "approve" && !(step.auto && !error),
     running,
     waiting,
     awaitingReply,
@@ -398,17 +431,28 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
           failure={agent?.error && !agent?.verification && (
             <AgentFailure error={agent.error} exceptionId={followedId} paymentId={followedException?.paymentId} />
           )}
-          review={proposal && (canDecide || revisedProposalPending) && (
-            <div className={styles.reviewPanel}>
-              <Overline>Needs your decision</Overline>
-              <DecisionScene
-                scenario={scenario}
-                exceptionId={followedId}
-                proposal={proposal}
-                canDecide={canDecide}
-                onDecided={onDecided}
-              />
-            </div>
+          aside={(
+            <AgentPanel
+              agent={agent}
+              steps={agentSteps}
+              started={agentStarted}
+              activity={activity}
+              activation={followedId ? { text: "Woken by an insert on exceptions (change stream)", at: agent?.startedAt } : null}
+              bank={scenario.bank}
+            >
+              {proposal && (canDecide || revisedProposalPending) && (
+                <div className={styles.reviewPanel}>
+                  <Overline>Needs your decision</Overline>
+                  <DecisionScene
+                    scenario={scenario}
+                    exceptionId={followedId}
+                    proposal={proposal}
+                    canDecide={canDecide}
+                    onDecided={onDecided}
+                  />
+                </div>
+              )}
+            </AgentPanel>
           )}
           result={step.final && !revisedProposalPending && (
             <ResultScene

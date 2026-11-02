@@ -378,6 +378,8 @@ const STEP = {
       "external evidence reconciliation checks our books against.",
     run: "statement",
     chain: 1,
+    // The correspondent sends this on its own; nobody presses anything.
+    auto: "Receiving the correspondent's statement",
     button: "Receive the statement",
   },
   match: {
@@ -472,6 +474,7 @@ const STEP = {
       "The correspondent's statement turns up, late. Nobody touches the exception. The " +
       "agent's scheduled recheck sweep picks it up on its own.",
     run: "statementLate",
+    auto: "The late statement arrives",
     button: "Deliver the late statement",
   },
   verify: {

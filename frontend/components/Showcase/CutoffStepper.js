@@ -16,6 +16,7 @@ import { BriefStrip } from "./ScenarioBrief";
 import { PaymentCard } from "./StatusRail";
 import PaymentPipeline from "./PaymentPipeline";
 import RunConsole from "./RunConsole";
+import AgentPanel from "./AgentPanel";
 import { deriveActivity } from "./activity";
 import { useAgentSteps } from "./AgentThinking";
 import { INVESTIGATION, PAYMENT, RESOLUTION, usePacedEvents, useRunLog } from "./runLog";
@@ -108,6 +109,8 @@ function alreadyApproved(err, payment) {
   return String(err).startsWith("400") && String(err).includes("not PENDING_APPROVAL") &&
     !!payment?.status && !NOT_CLEARED.includes(payment.status);
 }
+
+const TRIGGER_LABEL = { STREAM: "a payments change stream", SWEEP: "the periodic sweep", MANUAL: "Run now" };
 
 export default function CutoffStepper({ scenarioKey, onReset }) {
   const scenario = cutoffByKey(scenarioKey);
@@ -264,7 +267,8 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     onFastForward: () => guarded(closeOut, "closeOut"),
   };
 
-  const canDecide = (step.decide && !ctx.decision) || revisedProposal;
+  const proposalReady = step.gate === "proposal" && !step.decide && !!agent?.proposedAction && !ctx.decision;
+  const canDecide = ((step.decide || proposalReady) && !ctx.decision) || revisedProposal;
 
   const gate = step.gate;
   const agentBusy =
@@ -338,11 +342,21 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
               </Body>
             </div>
           )}
-          review={agent?.proposedAction && canDecide && (
-            <div className={styles.reviewPanel}>
-              <Overline>Needs your decision</Overline>
-              <Proposal caseId={caseDoc?.caseId} proposal={agent.proposedAction} canDecide={canDecide} onDecided={onDecided} />
-            </div>
+          aside={(
+            <AgentPanel
+              agent={agent}
+              steps={agentSteps}
+              started={started}
+              activity={activity}
+              activation={caseDoc?.trigger ? { text: `Triggered by ${TRIGGER_LABEL[caseDoc.trigger.source] || caseDoc.trigger.source}`, at: caseDoc.openedAt } : null}
+            >
+              {agent?.proposedAction && canDecide && (
+                <div className={styles.reviewPanel}>
+                  <Overline>Needs your decision</Overline>
+                  <Proposal caseId={caseDoc?.caseId} proposal={agent.proposedAction} canDecide={canDecide} onDecided={onDecided} />
+                </div>
+              )}
+            </AgentPanel>
           )}
           result={step.final && !revisedProposal && (
             <div className={styles.section}>

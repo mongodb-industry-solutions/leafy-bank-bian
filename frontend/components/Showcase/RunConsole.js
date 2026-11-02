@@ -1,7 +1,7 @@
 "use client";
 
 // The central panel of both agent walkthroughs. It starts every step (the Next bar),
-// shows the run as one log of events, and pins the human decision under the log. There are
+// shows the run as one log of events, and puts the human decision in the AI panel beside it. There are
 // no acts: progress is the log.
 
 import { useEffect, useRef, useState } from "react";
@@ -162,7 +162,7 @@ function ActivityBanner({ activity }) {
 }
 
 export default function RunConsole({
-  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, review, failure, result, activity,
+  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, aside, failure, result, activity,
 }) {
   const [filter, setFilter] = useState("all");
   const logRef = useRef(null);
@@ -173,8 +173,29 @@ export default function RunConsole({
     if (el) el.scrollTop = el.scrollHeight;
   }, [events.length, pending]);
 
+  const actions = (
+      <div className={styles.runActions}>
+        {controller.showButton && (
+          <Button variant="primary" size="large" disabled={controller.running || !!controller.waiting} onClick={controller.onNext}>
+            {controller.running ? "Running…" : controller.label}
+          </Button>
+        )}
+        {controller.awaitingReply && (
+          <Button size="small" disabled={controller.running} onClick={controller.onReplyNow}>
+            Correspondent replies now
+          </Button>
+        )}
+        {controller.onSweep && (
+          <Button size="small" disabled={controller.sweeping || controller.sweepDisabled} onClick={controller.onSweep}>
+            {controller.sweeping ? "Agent running…" : "Run now"}
+          </Button>
+        )}
+        <Button size="small" onClick={controller.onReset}>All scenarios</Button>
+      </div>
+  );
   let lastPhase = null;
   return (
+    <div className={aside ? styles.consoleGrid : undefined}>
     <section className={`${styles.scene} ${styles.toneStripe}`}>
       {top && <div className={styles.runTop}>{top}</div>}
       {pipeline}
@@ -182,25 +203,6 @@ export default function RunConsole({
       <div className={styles.runRow}>
         <div className={styles.runControl}>
           <StepCards cards={stepCards} current={stepIndex} final={controller.final} waiting={controller.waiting} />
-        </div>
-
-        <div className={styles.runActions}>
-          {controller.showButton && (
-            <Button variant="primary" size="large" disabled={controller.running || !!controller.waiting} onClick={controller.onNext}>
-              {controller.running ? "Running…" : controller.label}
-            </Button>
-          )}
-          {controller.awaitingReply && (
-            <Button size="small" disabled={controller.running} onClick={controller.onReplyNow}>
-              Correspondent replies now
-            </Button>
-          )}
-          {controller.onSweep && (
-            <Button size="small" disabled={controller.sweeping || controller.sweepDisabled} onClick={controller.onSweep}>
-              {controller.sweeping ? "Agent running…" : "Run now"}
-            </Button>
-          )}
-          <Button size="small" onClick={controller.onReset}>All scenarios</Button>
         </div>
       </div>
 
@@ -275,8 +277,12 @@ export default function RunConsole({
       </div>
       </div>
 
-      {review}
       {result}
     </section>
+    <div className={styles.rightCol}>
+      {actions}
+      {aside}
+    </div>
+    </div>
   );
 }
