@@ -322,7 +322,7 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
               <PaymentCard scenario={scenario} init={ctx.init} payment={payment} exceptions={[]} chips={chips} />
             </>
           )}
-          pipeline={<PaymentPipeline payment={payment} status={ctx.init?.status} />}
+          pipeline={<PaymentPipeline payment={payment} status={ctx.init?.status} paymentId={ctx.init?.paymentId} />}
           controller={controller}
           events={events}
           pending={backlog > 0 ? "Next event coming…" : null}

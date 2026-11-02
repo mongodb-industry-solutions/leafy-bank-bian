@@ -1616,6 +1616,18 @@ summary.runTitle {
 
 .pipelineNow {
   font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Nothing sent yet: read as a quiet hint, not a status. */
+.pipelineIdle {
+  font-weight: 400;
+  color: #5c6c75;
+}
+
+.pipelineTrackIdle {
+  opacity: 0.6;
 }
 
 .pipelineState {
@@ -1733,4 +1745,50 @@ summary.runTitle {
   padding: 8px 12px;
   border-left: 3px solid #ffc010;
   background: #fffbea;
+}
+
+/* Stage 8 is a hand-off, not a step the scenario waits on. */
+.pipe_next .pipeNode {
+  border-style: dashed;
+  border-color: #016bf8;
+  background: #ffffff;
+  color: #016bf8;
+}
+
+.pipe_next .pipeLabel {
+  color: #016bf8;
+  font-weight: 600;
+}
+
+.pipelineHandoff {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #c3e7ca;
+  border-radius: 8px;
+  background: #f0faf3;
+  color: #00684a;
+}
+
+.pipelineHandoffText {
+  flex: 1 1 240px;
+  color: #001e2b;
+}
+
+.pipelineHandoffLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: #016bf8;
+  color: #ffffff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pipelineHandoffLink:hover {
+  background: #0059d6;
 }

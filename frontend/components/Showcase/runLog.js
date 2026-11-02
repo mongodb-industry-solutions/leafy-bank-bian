@@ -247,21 +247,29 @@ export function useRunLog(sources, derive = deriveRunEvents) {
 }
 
 /**
- * Releases the log one line at a time so a presenter can follow it. Lines already shown stay;
- * a new line, wherever it sorts, waits its turn. A line with `dwell` (a stall) holds the queue
- * that many ms before the next one appears. `backlog` counts lines still queued.
+ * Releases the log one line at a time so a presenter can follow it. The log is append-only: a
+ * line keeps the slot it was released into, and a line that turns up late (a poll that sees an
+ * earlier event after later ones are on screen) goes to the end instead of being sorted back in
+ * among lines already read. A line with `dwell` (a stall) holds the queue that many ms before
+ * the next one appears. `backlog` counts lines still queued.
+ *
+ * Each released line keeps its last snapshot, so one whose key later disappears from the derived
+ * events (a risk reading replaced by a newer one) stays as history rather than vanishing.
  */
 export function usePacedEvents(events, gapMs = 1100) {
   const [shown, setShown] = useState([]);
-  const next = events.find((e) => !shown.includes(e.key));
-  const lastDwell = shown.length ? events.find((e) => e.key === shown[shown.length - 1])?.dwell : undefined;
+  const shownKeys = new Set(shown.map((s) => s.key));
+  const next = events.find((e) => !shownKeys.has(e.key));
+  const lastKey = shown.length ? shown[shown.length - 1].key : undefined;
+  const lastDwell = lastKey ? events.find((e) => e.key === lastKey)?.dwell ?? shown[shown.length - 1].event.dwell : undefined;
 
   useEffect(() => {
     if (!next) return undefined;
-    const id = setTimeout(() => setShown((prev) => [...prev, next.key]), shown.length ? lastDwell ?? gapMs : 0);
+    const id = setTimeout(() => setShown((prev) => [...prev, { key: next.key, event: next }]), shown.length ? lastDwell ?? gapMs : 0);
     return () => clearTimeout(id);
   }, [next?.key, shown.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const visible = events.filter((e) => shown.includes(e.key));
-  return { events: visible, backlog: events.length - visible.length };
+  const latest = new Map(events.map((e) => [e.key, e]));
+  const visible = shown.map((s) => latest.get(s.key) ?? s.event);
+  return { events: visible, backlog: events.filter((e) => !shownKeys.has(e.key)).length };
 }

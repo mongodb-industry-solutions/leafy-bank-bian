@@ -104,7 +104,7 @@ export function deriveCutoffEvents({ scenario, ctx, payment, agentSteps, caseDoc
     out.push({
       key: `risk:${risk.riskLevel}:${risk.phase}`, phase: DETECTION, lane: "code", ord: 110, card: true,
       tone: risk.riskLevel === "ON_TRACK" ? "good" : risk.riskLevel === "WILL_MISS" ? "alert" : "wait",
-      tag: "$percentile",
+      tag: "Stage estimate",
       title: `Risk computed by code: ${label(risk.riskLevel)}`,
       detail: risk.remainingP90Min != null
         ? `The current stage typically clears in ${risk.remainingP50Min ?? "—"} min (p50), ${risk.remainingP90Min} min (p90).`

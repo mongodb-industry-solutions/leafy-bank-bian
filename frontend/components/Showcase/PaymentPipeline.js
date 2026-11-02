@@ -4,6 +4,7 @@
 // cut-off scenarios hold a wire at stages 2 to 4, so the presenter can see which stage it is
 // stuck in and when it moves on. Position comes from `lifecycle.currentState`.
 
+import Link from "next/link";
 import Icon from "@leafygreen-ui/icon";
 import { Body, Overline } from "@leafygreen-ui/typography";
 import { STATE_INFO } from "./cutoffRunLog";
@@ -52,37 +53,46 @@ function locate(payment, status) {
   };
 }
 
+// From SETTLED on, the showcase has nothing left to show: the money moved. Reconciliation (stage 8)
+// plays out over minutes on the statement cycle, so it is handed to the Payments page.
+function handedOff(where) {
+  return where.state === "SETTLED" || where.state === "RECONCILED";
+}
+
 function nodeStatus(n, where) {
+  if (handedOff(where) && n === 8) return "next";
   if (where.complete) return "done";
   if (n < where.stage) return "done";
   if (n === where.stage) return where.held ? "held" : "now";
   return "idle";
 }
 
-export default function PaymentPipeline({ payment, status }) {
+export default function PaymentPipeline({ payment, status, paymentId }) {
   const where = locate(payment, status);
   const current = STAGES.find((s) => s.n === where.stage);
   return (
     <div className={styles.pipeline}>
       <div className={styles.pipelineHead}>
         <Overline>Payment lifecycle</Overline>
-        <Body as="span" className={styles.pipelineNow}>
+        <Body as="span" className={`${styles.pipelineNow} ${!where.state ? styles.pipelineIdle : ""}`}>
           {where.failed
             ? "Stopped before completing"
-            : current
-              ? `${where.complete ? "Done" : `Stage ${current.n}`} · ${where.complete ? "Reconciled" : current.label}`
-              : "Waiting for the wire"}
+            : handedOff(where)
+              ? "Stages 1 to 7 complete"
+              : current
+                ? `Stage ${current.n} · ${current.label}`
+                : "Starts when the wire is sent"}
         </Body>
-        {where.state && <span className={styles.pipelineState}>{where.state}</span>}
+        {where.state && !handedOff(where) && <span className={styles.pipelineState}>{where.state}</span>}
       </div>
 
-      <ol className={styles.pipelineTrack} aria-label="Payment lifecycle stages">
+      <ol className={`${styles.pipelineTrack} ${!where.state ? styles.pipelineTrackIdle : ""}`} aria-label="Payment lifecycle stages">
         {STAGES.map((s) => {
           const st = nodeStatus(s.n, where);
           return (
             <li key={s.n} className={`${styles.pipeStage} ${styles[`pipe_${st}`]}`} aria-current={st === "now" || st === "held" ? "step" : undefined}>
               <span className={styles.pipeNode}>
-                {st === "done" ? <Icon glyph="Checkmark" size={14} /> : st === "held" ? <Icon glyph="Clock" size={14} /> : s.n}
+                {st === "done" ? <Icon glyph="Checkmark" size={14} /> : st === "next" ? <Icon glyph="ArrowRight" size={14} /> : st === "held" ? <Icon glyph="Clock" size={14} /> : s.n}
               </span>
               <span className={styles.pipeLabel}>{s.label}</span>
               {st === "held" && <span className={styles.pipeAgent}><Icon glyph="Sparkle" size={10} /> Cut-off agent</span>}
@@ -91,7 +101,21 @@ export default function PaymentPipeline({ payment, status }) {
         })}
       </ol>
 
-      {where.state && !where.complete && (
+      {handedOff(where) && (
+        <div className={styles.pipelineHandoff}>
+          <Icon glyph="CheckmarkWithCircle" size={16} />
+          <Body as="span" className={styles.pipelineHandoffText}>
+            <strong>Funds settled.</strong> Reconciliation against the correspondent statement runs next, outside this scenario.
+          </Body>
+          {paymentId && (
+            <Link href={`/payments-workflow?payment=${encodeURIComponent(paymentId)}`} className={styles.pipelineHandoffLink}>
+              Follow reconciliation in Payments <Icon glyph="ArrowRight" size={12} />
+            </Link>
+          )}
+        </div>
+      )}
+
+      {where.state && !handedOff(where) && (
         <Body className={`${styles.pipelineNote} ${where.held ? styles.pipelineNoteHeld : ""}`}>
           {where.held ? `Held at stage ${where.stage}. ${where.note}` : where.failed ? `Payment ended as ${where.note}.` : where.note}
         </Body>

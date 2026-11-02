@@ -11,7 +11,7 @@ export const AUTONOMY_LEVELS = [
 ];
 
 const MONGO_RECON = ["ACID transactions", "Change streams", "Embedded agent record", "LangGraph checkpoints"];
-const MONGO_CUTOFF = ["Change streams", "Time series stage events", "$percentile timing", "LangGraph checkpoints"];
+const MONGO_CUTOFF = ["Change streams", "TTL index", "Partial unique indexes", "LangGraph checkpoints"];
 
 export const BRIEFS = {
   R1: {
