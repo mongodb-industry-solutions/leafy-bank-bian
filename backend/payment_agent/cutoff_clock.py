@@ -1,6 +1,6 @@
 """Business time for a demo clock run, read uncached.
 
-The transactions clock caches a run's offset for 5 s (R5). The agent reads `demoClocks` on
+The transactions clock caches a run's offset for 5 s (R5). The agent reads the `cutoffWorkflow` collection (kind CLOCK) on
 every call instead, so a presenter's `move_clock` is visible on the agent's next look. A run
 that is gone (24 h TTL, or deleted) yields None: the case built on it has expired.
 """
@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from cutoff_window import to_et
 
-CLOCKS = "demoClocks"
+CLOCKS = "cutoffWorkflow"
 
 
 def run(db: Any, run_id: Optional[str]) -> Optional[dict]:

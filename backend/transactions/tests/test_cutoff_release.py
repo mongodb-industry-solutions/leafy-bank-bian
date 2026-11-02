@@ -67,7 +67,7 @@ def _only(result):
 
 
 def _business_date(db, started):
-    run = db["demoClocks"].find_one({"_id": started["runId"]})
+    run = db["cutoffWorkflow"].find_one({"_id": started["runId"]})
     return run["businessDate"]
 
 
@@ -187,11 +187,11 @@ def test_undecided_release_after_fast_forward_gets_the_next_business_day_value_d
 def test_in_time_screening_clears_the_same_day_without_moving_the_clock(service, db):
     started = _start(service, "C4")
     assert started["status"] == "PENDING_SCREENING"
-    offset_before = db["demoClocks"].find_one({"_id": started["runId"]})["offsetSeconds"]
+    offset_before = db["cutoffWorkflow"].find_one({"_id": started["runId"]})["offsetSeconds"]
 
     row = _only(_release(service, started))
 
-    run = db["demoClocks"].find_one({"_id": started["runId"]})
+    run = db["cutoffWorkflow"].find_one({"_id": started["runId"]})
     assert row["action"] == "CLEAR_SCREENING" and row["after"] in ("IN_PROGRESS", "SETTLED")
     assert run["offsetSeconds"] == offset_before
     assert cutoff_scenarios.FAST_FORWARDED_TO not in run
@@ -210,7 +210,7 @@ def test_late_screening_clears_after_the_clock_moves(service, db):
     # Past the internal cut-off today, in time at the next open, so one clear is enough.
     assert row["action"] == "CLEAR_SCREENING"
     assert row["after"] in ("IN_PROGRESS", "SETTLED")
-    assert db["demoClocks"].find_one({"_id": started["runId"]})[
+    assert db["cutoffWorkflow"].find_one({"_id": started["runId"]})[
         cutoff_scenarios.FAST_FORWARDED_TO] == next_day
     assert f"{next_day}T09:00:00" in result["clock"]["businessNowEt"]
 
@@ -364,7 +364,7 @@ def test_credit_refuses_an_account_the_seed_does_not_own(service, db):
 # --- the janitor's sweep ---------------------------------------------------------
 
 def _age(db, started, seconds):
-    db["demoClocks"].update_one(
+    db["cutoffWorkflow"].update_one(
         {"_id": started["runId"]},
         {"$set": {"createdAt": datetime.now(timezone.utc) - timedelta(seconds=seconds)}})
 
@@ -400,8 +400,8 @@ def test_sweep_skips_a_payment_without_the_demo_reference(service, db):
 def test_sweep_recovers_a_run_the_ttl_deleted(service, db):
     started = _start(service, "C3")
     service.hold_next_value_date(started["paymentId"], decided_by="OPS-1", reason="Funds late")
-    db["demoClocks"].docs[:] = [d for d in db["demoClocks"].docs
-                                if d["_id"] != started["runId"]]
+    db["cutoffWorkflow"].docs[:] = [d for d in db["cutoffWorkflow"].docs
+                                if d.get("_id") != started["runId"]]
 
     results = cutoff_release.sweep_stale(service, older_than_seconds=1200)
 
@@ -498,7 +498,7 @@ def test_janitor_cycle_releases_an_old_run(service, db):
 # --- the cleanup script ----------------------------------------------------------
 
 def _expire(db, started):
-    db["demoClocks"].docs[:] = [d for d in db["demoClocks"].docs if d["_id"] != started["runId"]]
+    db["cutoffWorkflow"].docs[:] = [d for d in db["cutoffWorkflow"].docs if d.get("_id") != started["runId"]]
 
 
 def test_cleanup_discovers_open_demo_payments_and_skips_the_rest(service, db):

@@ -148,8 +148,8 @@ def _supersede(service, key: str, *, at: datetime, session_id: Optional[str] = N
                                          status=hold_queues.CANCELLED, by=ACTOR, at=at)
         if run_id:
             # The old run's synthetic backlog dies with it; the TTL would get there in a day.
-            db[hold_queues.SCREENING_QUEUE].update_many(
-                {"demo.clockRunId": run_id, "status": hold_queues.OPEN, "synthetic": True},
+            db[hold_queues.WORKFLOW].update_many(
+                {"kind": hold_queues.SCREENING_ITEM, "demo.clockRunId": run_id, "status": hold_queues.OPEN, "synthetic": True},
                 {"$set": {"status": hold_queues.CANCELLED, "resolvedBy": ACTOR,
                           "resolvedAt": at}},
             )
@@ -200,8 +200,9 @@ def _details(service, scenario: Scenario, payment: dict, now: datetime) -> dict:
     payment_id = payment["paymentId"]
     out: dict = {}
     if scenario.key == "C1":
-        request = db[hold_queues.APPROVAL_REQUESTS].find_one(
-            {"paymentId": payment_id, "status": hold_queues.OPEN}) or {}
+        request = db[hold_queues.WORKFLOW].find_one(
+            {"kind": hold_queues.APPROVAL_REQUEST, "paymentId": payment_id,
+             "status": hold_queues.OPEN}) or {}
         out["approvalRequest"] = {k: request.get(k) for k in (
             "approvalRequestId", "primaryApprover", "assignedTo", "requiredApprovers")}
     if scenario.synthetic_ahead_minutes:

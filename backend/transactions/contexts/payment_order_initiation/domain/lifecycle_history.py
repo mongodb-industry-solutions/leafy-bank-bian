@@ -96,18 +96,6 @@ def entries(history, payment_id: str, kind: str, *, upto: Optional[int] = None) 
     return [{k: v for k, v in d.items() if k not in _ENVELOPE} for d in docs]
 
 
-def previous_and_current_event(history, payment_id: str, event_count: int) -> list:
-    """The last two events, oldest first. Shorter than two when the payment has fewer."""
-    if event_count < 2:
-        return []
-    docs = history.find({
-        "paymentId": payment_id, "kind": EVENT,
-        "seq": {"$in": [event_count - 1, event_count]},
-    })
-    docs = sorted(docs, key=lambda d: d["seq"])
-    return [{k: v for k, v in d.items() if k not in _ENVELOPE} for d in docs]
-
-
 def attach(history, payment: Optional[dict]) -> Optional[dict]:
     """A copy of `payment` with `lifecycle.events[]` and `checks[]` joined back in.
 

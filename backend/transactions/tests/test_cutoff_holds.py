@@ -1,6 +1,6 @@
 """Cutoff plan A2: the four demo-clock holds and their five decisions.
 
-Every test drives the real `initiate_payment` with a `clock_run_id` seeded in `demoClocks`.
+Every test drives the real `initiate_payment` with a `clock_run_id` seeded in `cutoffWorkflow`.
 Business time comes from the run's `offsetSeconds` — moved by rewriting the run and clearing
 the clock cache, never by patching the value a stage decides on.
 
@@ -66,7 +66,7 @@ def _db(*, available=10_000_000.0):
         "payments": FakeCollection(key="paymentId"),
         "transactions": FakeCollection(key="transactionId"),
         "notifications": FakeCollection(key="notificationId"),
-        "demoClocks": FakeCollection(key="_id"),
+        "cutoffWorkflow": FakeCollection(key="_id"),
     })
 
 
@@ -88,12 +88,12 @@ def _offset_for(target_et: datetime) -> int:
 
 def _run_at(db, hh: int, mm: int) -> str:
     offset = business_clock.anchor_offset(hh * 60 + mm, real_now=datetime.now(timezone.utc))
-    return business_clock.create_run(db["demoClocks"], offset_seconds=offset)
+    return business_clock.create_run(db["cutoffWorkflow"], offset_seconds=offset)
 
 
 def _move_run(db, run_id: str, hh: int, mm: int) -> None:
     offset = business_clock.anchor_offset(hh * 60 + mm, real_now=datetime.now(timezone.utc))
-    db["demoClocks"].update_one({"_id": run_id}, {"$set": {"offsetSeconds": offset}})
+    db["cutoffWorkflow"].update_one({"_id": run_id}, {"$set": {"offsetSeconds": offset}})
     business_clock._clear_cache()
 
 
@@ -474,7 +474,7 @@ def test_expedite_refused_with_an_open_exception(service, db):
 
 def test_next_value_date_warehouses_at_routed_with_next_business_day(service, db):
     friday = _next_friday_et(18, 20)
-    run_id = business_clock.create_run(db["demoClocks"], offset_seconds=_offset_for(friday))
+    run_id = business_clock.create_run(db["cutoffWorkflow"], offset_seconds=_offset_for(friday))
     held = _domestic(service, run_id)
     assert held["status"] == "CUTOFF_EXCEPTION"
 

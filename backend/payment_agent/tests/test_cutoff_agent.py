@@ -29,7 +29,7 @@ import cutoff_risk as cr
 import cutoff_rules as rules
 import cutoff_window as cw
 import transactions_client
-from tests._fakes import FakeColl, FakeDB
+from tests._fakes import FakeColl, FakeDB, seed_workflow
 
 RUN = "RUN-C"
 PID = "PAY-cut1"
@@ -57,8 +57,8 @@ def pinned_timing(monkeypatch):
 def set_clock(db, at):
     """A run whose business time is `at` now (a second ahead, so a minute boundary holds)."""
     offset = math.ceil((at - datetime.now(timezone.utc)).total_seconds()) + 1
-    db["demoClocks"] = FakeColl([{"_id": RUN, "offsetSeconds": offset,
-                                  "businessDate": VALUE_DATE}])
+    seed_workflow(db, "CLOCK", [{"_id": RUN, "offsetSeconds": offset,
+                                 "businessDate": VALUE_DATE}])
 
 
 def _staff():
@@ -91,14 +91,15 @@ def _world(status, wire_type, at, *, entered=None, amount=10_000.0, tagged=True)
 
 
 def _approval_request(db, at):
-    db["approvalRequests"] = FakeColl([{
+    seed_workflow(db, "APPROVAL_REQUEST", [{
         "approvalRequestId": "APR-1", "paymentId": PID, "status": "OPEN",
         "primaryApprover": "STF-maya", "assignedTo": "STF-maya", "requestedAt": at,
         "reminders": [], "escalatedTo": None}])
 
 
 def _screening_queue(db, at, *, ahead):
-    db["screeningQueue"] = FakeColl(
+    seed_workflow(
+        db, "SCREENING_ITEM",
         [{"screeningItemId": f"SQ-syn{i}", "paymentId": f"SYN-{i}", "status": "OPEN",
           "priority": 0, "demo": {"clockRunId": RUN},
           "queuedAt": at - timedelta(minutes=30 - i)} for i in range(ahead)]
@@ -201,7 +202,7 @@ def test_c1_p1_reminds_escalates_and_hold_is_refused(routes):
                    _done())
     ca.investigate(agent, db, case_id, PID)
 
-    req = db["approvalRequests"].find_one({"paymentId": PID})
+    req = db["cutoffWorkflow"].find_one({"kind": "APPROVAL_REQUEST", "paymentId": PID})
     assert len(req["reminders"]) == 1 and req["reminders"][0]["to"] == "STF-maya"
     assert req["escalatedTo"] == "STF-raj" and req["assignedTo"] == "STF-raj"
     case = _case(db, case_id)
@@ -257,7 +258,7 @@ def test_c2_p1_priority_must_be_raised_before_a_hold(routes):
     ca.investigate(agent, db, case_id, PID)
 
     assert "RAISE_SCREENING_PRIORITY" in _tool_replies(agent, case_id, "propose_resolution")[0]
-    assert db["screeningQueue"].find_one({"paymentId": PID})["priority"] == 1
+    assert db["cutoffWorkflow"].find_one({"kind": "SCREENING_ITEM", "paymentId": PID})["priority"] == 1
     assert "position 1" in _tool_replies(agent, case_id, "raise_screening_priority")[0]
     levels = [r["riskLevel"] for r in _case(db, case_id)["riskHistory"]]
     assert levels[-2:] == [cr.WILL_MISS, cr.AT_RISK]
@@ -297,7 +298,7 @@ def test_c2_p2_resolve_blocker_then_expedite_after_clear(routes):
 def _funds_world():
     db = _world(cr.PENDING_FUNDS, "DOMESTIC", et(16, 45), amount=8_200.0)
     db["accounts"] = FakeColl([{"accountId": "ACC-1", "balance": {"available": 5_000.0},
-                                "expectedCredits": [{"amount": 3_200.0, "expectedAtEt": "17:45",
+                                "expectedCredits": [{"amount": 3_200.0, "expectedAtEt": "19:30",
                                                      "status": "EXPECTED"}]}])
     return db
 
@@ -312,7 +313,7 @@ def test_c3_notifies_then_holds_for_next_value_date(routes):
                    _call("propose_resolution", action="HOLD_NEXT_VALUE_DATE", rationale="x"),
                    _call("notify_customer_funds"),
                    _call("propose_resolution", action="HOLD_NEXT_VALUE_DATE",
-                         rationale="credit lands 17:45, after the 17:30 cut-off"),
+                         rationale="credit lands 19:30, after Fedwire closes at 18:45"),
                    _done())
     ca.investigate(agent, db, case_id, PID)
 
@@ -357,7 +358,7 @@ def test_c4_on_track_records_an_assessment_and_nothing_else(routes):
     case = _case(db, case_id)
     assert case["agent"]["recommendation"]["kind"] == "NONE"
     assert case["status"] == cases.OPEN and case["active"] is True
-    assert db["screeningQueue"].find_one({"paymentId": PID})["priority"] == 0
+    assert db["cutoffWorkflow"].find_one({"kind": "SCREENING_ITEM", "paymentId": PID})["priority"] == 0
     assert not routes and not ca.is_awaiting_approval(agent, case_id)
 
 
@@ -531,7 +532,7 @@ def test_escalation_needs_the_backup_on_shift(routes):
     agent = _agent(db, _call("escalate_to_backup_approver"), _done())
     ca.investigate(agent, db, case_id, PID)
     assert "not permitted" in _tool_replies(agent, case_id, "escalate_to_backup_approver")[0]
-    assert db["approvalRequests"].find_one({"paymentId": PID})["escalatedTo"] is None
+    assert db["cutoffWorkflow"].find_one({"kind": "APPROVAL_REQUEST", "paymentId": PID})["escalatedTo"] is None
 
 
 def test_reminders_stop_at_the_cap(routes):
@@ -544,7 +545,7 @@ def test_reminders_stop_at_the_cap(routes):
     ca.investigate(agent, db, case_id, PID)
     replies = _tool_replies(agent, case_id, "send_approval_reminder")
     assert [r.startswith("Reminder sent") for r in replies] == [True, True, False]
-    assert len(db["approvalRequests"].find_one({"paymentId": PID})["reminders"]) == 2
+    assert len(db["cutoffWorkflow"].find_one({"kind": "APPROVAL_REQUEST", "paymentId": PID})["reminders"]) == 2
 
 
 # --- never-raise, pause detection, prompt -----------------------------------------------------
@@ -763,7 +764,7 @@ def test_parallel_reminders_in_one_turn_stop_at_the_cap(routes, monkeypatch):
     case_id = _open_case(db, et(17, 5))
     agent = _agent(db, _parallel("send_approval_reminder", 3), _done())
     ca.investigate(agent, db, case_id, PID)
-    assert len(db["approvalRequests"].find_one({"paymentId": PID})["reminders"]) == 2
+    assert len(db["cutoffWorkflow"].find_one({"kind": "APPROVAL_REQUEST", "paymentId": PID})["reminders"]) == 2
 
 
 def test_an_escalation_that_matches_nothing_is_refused_not_done(routes, monkeypatch):
@@ -771,7 +772,7 @@ def test_an_escalation_that_matches_nothing_is_refused_not_done(routes, monkeypa
     _approval_request(db, et(16, 50))
     case_id = _open_case(db, et(17, 5))
     # The request closes between the policy check and the write.
-    monkeypatch.setattr(db["approvalRequests"], "update_one",
+    monkeypatch.setattr(db["cutoffWorkflow"], "update_one",
                         lambda *a, **k: SimpleNamespace(matched_count=0))
     agent = _agent(db, _call("escalate_to_backup_approver"), _done())
     ca.investigate(agent, db, case_id, PID)

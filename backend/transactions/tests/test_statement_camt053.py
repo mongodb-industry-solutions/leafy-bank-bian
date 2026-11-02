@@ -185,3 +185,18 @@ def test_the_simulator_leaves_scenario_wires_for_the_presenter_to_book(service, 
     manual = generate_statement(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False,
                                 now=_later(2))
     assert {e["simulatedPaymentId"] for e in manual["entries"]} == {scenario}
+
+
+def test_the_simulator_leaves_cutoff_demo_wires_unbooked(service, db):
+    """A C3 wire settles on the nostro but has no statement story; booking it would open a
+    reconciliation exception during a cut-off walkthrough."""
+    ambient = _settled_wire(service, db)
+    cutoff = _initiate_external(service, instructed_amount=300.0,
+                                client_reference="CUTOFF-DEMO-C3")["paymentId"]
+    settle.complete_due(FakeConnection(db), "leafy_bank_bian", delay_seconds=0)
+
+    sim = generate_statement(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False,
+                             now=_later(1), skip_presenter_driven=True)
+
+    assert {e["simulatedPaymentId"] for e in sim["entries"]} == {ambient}
+    assert cutoff not in {e["simulatedPaymentId"] for e in sim["entries"]}

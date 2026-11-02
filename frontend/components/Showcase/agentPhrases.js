@@ -14,7 +14,7 @@ const PHRASES = {
   // Cutoff agent (backend `cutoff_agent._build_tools`).
   get_payment_context: () => "Reading the held wire",
   get_cutoff_window: () => "Checking the cut-off window",
-  get_stage_timing: () => "Timing the current stage against history",
+  get_stage_timing: () => "Estimating how long the rest of the journey takes",
   get_approval_status: () => "Checking the open approval request",
   get_screening_queue: () => "Checking the screening queue",
   get_funds_position: () => "Checking the account's funds",

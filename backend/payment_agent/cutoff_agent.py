@@ -21,8 +21,8 @@ propose a gated action only when one is permitted.
 ## Write surface
 
 The agent writes its own case (`cutoffCases`) and, for the autonomous remedies, only named
-fields of transactions-owned views (approved Q5): `approvalRequests.reminders`,
-`approvalRequests.escalatedTo/assignedTo`, `screeningQueue.priority`, and a new
+fields of transactions-owned views in `cutoffWorkflow` (approved Q5): approval-request
+`reminders` and `escalatedTo/assignedTo`, screening-item `priority`, and a new
 `notifications` row. It never writes `payments`. Case and payment ids reach the tools through
 `InjectedState`, never from the model's arguments. `thread_id = caseId`.
 """
@@ -294,8 +294,8 @@ autonomous and gated actions permitted right now."""
 
     @tool
     def get_stage_timing(state: Annotated[dict, InjectedState]) -> str:
-        """Historical p50/p90 minutes for the current stage and the rest of the journey \
-(same rail, last 14 days, same time of day), with sample counts and the SEED/LIVE mix."""
+        """Estimated p50/p90 minutes for the current stage and the rest of the journey, \
+adjusted for the time of day. These are static estimates, not measured history."""
         _, payment_id = _ids(state)
         return json.dumps(_snapshot(db, payment_id)["timing"] or "No timing: not in a hold.",
                           default=str)
@@ -349,8 +349,8 @@ capped per case."""
             if refusal:
                 return f"Refused: {refusal}"
             to = (snap["approval"] or {}).get("assignedTo")
-            result = db[ev.APPROVAL_REQUESTS].update_one(
-                {"paymentId": payment_id, "status": ev.OPEN},
+            result = db[ev.WORKFLOW].update_one(
+                {"kind": ev.APPROVAL_REQUEST, "paymentId": payment_id, "status": ev.OPEN},
                 {"$push": {"reminders": {"at": snap["at"], "by": ACTOR, "caseId": case_id,
                                          "to": to}}})
             if not _record_auto(db, case_id, action, result, {"to": to}):
@@ -368,8 +368,8 @@ the backup is on shift; once per case."""
             if refusal:
                 return f"Refused: {refusal}"
             backup = ((snap["approval"] or {}).get("backup") or {}).get("staffId")
-            result = db[ev.APPROVAL_REQUESTS].update_one(
-                {"paymentId": payment_id, "status": ev.OPEN},
+            result = db[ev.WORKFLOW].update_one(
+                {"kind": ev.APPROVAL_REQUEST, "paymentId": payment_id, "status": ev.OPEN},
                 {"$set": {"escalatedTo": backup, "assignedTo": backup}})
             if not _record_auto(db, case_id, action, result, {"to": backup}):
                 return "Refused: no OPEN approval request."
@@ -386,8 +386,9 @@ priority + 1). Once per case."""
             if refusal:
                 return f"Refused: {refusal}"
             priority = int((snap["screening"] or {}).get("runMaxPriority") or 0) + 1
-            result = db[ev.SCREENING_QUEUE].update_one(
-                {"paymentId": payment_id, "status": ev.OPEN}, {"$set": {"priority": priority}})
+            result = db[ev.WORKFLOW].update_one(
+                {"kind": ev.SCREENING_ITEM, "paymentId": payment_id, "status": ev.OPEN},
+                {"$set": {"priority": priority}})
             if not _record_auto(db, case_id, action, result, {"priority": priority}):
                 return "Refused: no OPEN screening item."
         after = ev.screening_status(db, payment_id=payment_id, at=snap["at"]) or {}

@@ -98,6 +98,17 @@ function gateWaiting(gate, { agent, caseDoc, ctx }) {
   return null;
 }
 
+// An approval that landed on the server but whose reply never reached the page (the approve call
+// runs the saga and can outlast the proxy) leaves the stepper on this step. A retry then gets
+// "is at X, not PENDING_APPROVAL". When the wire has moved on and was not rejected, the blocker
+// is cleared, so the step is done.
+const NOT_CLEARED = ["PENDING_APPROVAL", "REJECTED", "CANCELLED", "FAILED"];
+
+function alreadyApproved(err, payment) {
+  return String(err).startsWith("400") && String(err).includes("not PENDING_APPROVAL") &&
+    !!payment?.status && !NOT_CLEARED.includes(payment.status);
+}
+
 export default function CutoffStepper({ scenarioKey, onReset }) {
   const scenario = cutoffByKey(scenarioKey);
   const steps = useMemo(() => cutoffStepsFor(scenarioKey), [scenarioKey]);
@@ -164,9 +175,11 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     if (kind === "clock") return advanceClock(scenario.presenter.clock);
     if (kind === "approveRaj") {
       const { error: err } = await approveAsRaj(paymentId);
-      if (err) throw new Error(cutoffError(err));
+      if (err && !alreadyApproved(err, payment)) throw new Error(cutoffError(err));
       sweep(paymentId);
-      return "Raj approved the wire as the backup signatory.";
+      return err
+        ? "The hold had already lifted: Raj's approval had gone through."
+        : "Raj approved the wire as the backup signatory.";
     }
     return null;
   }

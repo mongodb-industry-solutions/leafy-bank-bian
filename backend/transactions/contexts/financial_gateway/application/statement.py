@@ -49,6 +49,11 @@ NOSTRO_USD = "1111"
 # their statement by hand, so the background simulator must leave them alone — otherwise any
 # instance sharing the DB (e.g. a deployed one with the sim on) books them mid-walkthrough.
 PRESENTER_DRIVEN_REF_PREFIX = "RECON-DEMO-"
+# Cut-off demo wires settle against a seeded account with no statement story. Booking them
+# would turn a cut-off walkthrough into a reconciliation exception, so the simulator skips
+# them too (the ledger's sweep skips the same prefix).
+CUTOFF_DEMO_REF_PREFIX = "CUTOFF-DEMO-"
+_SIMULATOR_SKIPPED_PREFIXES = (PRESENTER_DRIVEN_REF_PREFIX, CUTOFF_DEMO_REF_PREFIX)
 
 
 def _as_datetime(value) -> Optional[datetime]:
@@ -91,7 +96,7 @@ def _settled_wires(payments, account_code: str, *, skip_presenter_driven: bool =
     if not skip_presenter_driven:
         return list(wires)
     return [w for w in wires
-            if not (w.get("clientReference") or "").startswith(PRESENTER_DRIVEN_REF_PREFIX)]
+            if not (w.get("clientReference") or "").startswith(_SIMULATOR_SKIPPED_PREFIXES)]
 
 
 def _booked_payment_ids(messages, account_code: str) -> set[str]:

@@ -90,7 +90,7 @@ def test_anchor_offset_lands_on_the_target_minute():
 
 def _run_at(db, et_minutes: int) -> str:
     offset = business_clock.anchor_offset(et_minutes, real_now=datetime.now(timezone.utc))
-    return business_clock.create_run(db["demoClocks"], offset_seconds=offset)
+    return business_clock.create_run(db["cutoffWorkflow"], offset_seconds=offset)
 
 
 def test_tagged_payment_sees_offset_untagged_sees_real_time(service, db):

@@ -1,8 +1,8 @@
 """C1d: the walkthrough's risk levels against the real seeded history (cutoff plan, scenario
-arithmetic). Runs transactions `build_history` and the real staff directory; inputs match what
-each scenario sets up (`cutoff_scenarios.SCENARIOS`).
+arithmetic). Runs the agent's static stage estimates and the real staff directory; inputs
+match what each scenario sets up (`cutoff_scenarios.SCENARIOS`).
 
-C1 and C2 have thin margins after the internal cut-off. If a seed change flips one to
+C1 and C2 have thin margins after the internal cut-off. If an estimate change flips one to
 WILL_MISS here, shift the walkthrough's clock anchors (approved Q4) — do not loosen the rules.
 """
 
@@ -16,7 +16,7 @@ import cutoff_evidence as ev
 import cutoff_risk as cr
 import cutoff_window as cw
 from tests import _transactions
-from tests._fakes import FakeColl, FakeDB
+from tests._fakes import FakeColl, FakeDB, seed_workflow
 
 SEED = _transactions.load("contexts/payment_orchestration/application/cutoff_seed.py",
                           "cutoff_seed")
@@ -30,7 +30,6 @@ def et(h, m):
 @pytest.fixture(scope="module")
 def db():
     d = FakeDB()
-    d["paymentStageEvents"] = FakeColl(SEED.build_history(end_date=DAY))
     d["staffDirectory"] = FakeColl(SEED.staff_docs(DAY))
     d["accounts"] = FakeColl([SEED.funds_short_account_doc()])
     return d
@@ -38,7 +37,8 @@ def db():
 
 def _screening(db, at, ahead):
     """The run's queue as the scenario builds it: `ahead` synthetic items, then the payment."""
-    db["screeningQueue"] = FakeColl(
+    seed_workflow(
+        db, "SCREENING_ITEM",
         [{"paymentId": f"SYN-{i}", "status": "OPEN", "priority": 0, "demo": {"clockRunId": "R"},
           "queuedAt": at - timedelta(minutes=5 * (ahead - i + 1))} for i in range(ahead)]
         + [{"paymentId": "PAY", "status": "OPEN", "priority": 0, "demo": {"clockRunId": "R"},

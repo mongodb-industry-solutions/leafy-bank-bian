@@ -1,6 +1,7 @@
 """Operational records for the demo-clock holds (cutoff plan A3).
 
-`approvalRequests` and `screeningQueue` are views the cutoff agent reads. The hold state on
+Approval requests and screening items (kinds in the `cutoffWorkflow` collection) are views
+the cutoff agent reads. The hold state on
 `payments` is the source of truth, so every write here is best-effort: a failure is logged and
 never breaks the money path (the same rule as `business_clock`).
 
@@ -16,12 +17,13 @@ from typing import Optional
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
-from shared import business_clock
+from shared import business_clock, cutoff_workflow
 
 logger = logging.getLogger(__name__)
 
-APPROVAL_REQUESTS = "approvalRequests"
-SCREENING_QUEUE = "screeningQueue"
+WORKFLOW = cutoff_workflow.COLLECTION
+APPROVAL_REQUEST = cutoff_workflow.APPROVAL_REQUEST
+SCREENING_ITEM = cutoff_workflow.SCREENING_ITEM
 STAFF_DIRECTORY = "staffDirectory"
 
 OPEN = "OPEN"
@@ -66,7 +68,8 @@ def _insert_open(coll, doc: dict) -> dict:
         coll.insert_one(doc)
         return doc
     except DuplicateKeyError:
-        return coll.find_one({"paymentId": doc["paymentId"], "status": OPEN})
+        return coll.find_one({"kind": doc["kind"], "paymentId": doc["paymentId"],
+                              "status": OPEN})
 
 
 def open_approval_request(db, *, payment: dict, at: datetime) -> Optional[dict]:
@@ -80,6 +83,7 @@ def open_approval_request(db, *, payment: dict, at: datetime) -> Optional[dict]:
         primary = next((s.get("staffId") for s in db[STAFF_DIRECTORY].find({"role": "APPROVER"})
                         if account_id in (s.get("primaryFor") or [])), None)
         doc = {
+            "kind": APPROVAL_REQUEST,
             "approvalRequestId": f"APR-{ObjectId()}",
             "paymentId": payment.get("paymentId"),
             "accountId": account_id,
@@ -97,24 +101,24 @@ def open_approval_request(db, *, payment: dict, at: datetime) -> Optional[dict]:
             "synthetic": False,
             "demo": {"clockRunId": _run_id(payment)},
         }
-        return _insert_open(db[APPROVAL_REQUESTS], doc)
+        return _insert_open(db[WORKFLOW], doc)
     except Exception:  # noqa: BLE001 - best-effort view; see the module docstring
         logger.exception("could not open approval request for %s", payment.get("paymentId"))
         return None
 
 
-def _close(db, collection: str, *, payment_id: str, status: str, by: str, at: datetime) -> None:
+def _close(db, kind: str, *, payment_id: str, status: str, by: str, at: datetime) -> None:
     try:
-        db[collection].update_one(
-            {"paymentId": payment_id, "status": OPEN},
+        db[WORKFLOW].update_one(
+            {"kind": kind, "paymentId": payment_id, "status": OPEN},
             {"$set": {"status": status, "resolvedBy": by, "resolvedAt": at}},
         )
     except Exception:  # noqa: BLE001 - best-effort view; see the module docstring
-        logger.exception("could not close %s record for %s", collection, payment_id)
+        logger.exception("could not close %s record for %s", kind, payment_id)
 
 
 def close_approval_request(db, *, payment_id: str, status: str, by: str, at: datetime) -> None:
-    _close(db, APPROVAL_REQUESTS, payment_id=payment_id, status=status, by=by, at=at)
+    _close(db, APPROVAL_REQUEST, payment_id=payment_id, status=status, by=by, at=at)
 
 
 def enqueue_screening(db, *, payment: dict, reason: str, matched: Optional[str], at: datetime,
@@ -124,7 +128,9 @@ def enqueue_screening(db, *, payment: dict, reason: str, matched: Optional[str],
         analysts = sorted(db[STAFF_DIRECTORY].find({"role": "ANALYST"}),
                           key=lambda s: s.get("staffId") or "")
         assigned = next((s.get("staffId") for s in analysts if on_shift(s, at)), None)
+        created = datetime.now(timezone.utc)
         doc = {
+            "kind": SCREENING_ITEM,
             "screeningItemId": f"SQ-{ObjectId()}",
             "paymentId": payment.get("paymentId"),
             "queuedAt": queued_at or at,
@@ -138,16 +144,18 @@ def enqueue_screening(db, *, payment: dict, reason: str, matched: Optional[str],
             "synthetic": synthetic,
             "demo": {"clockRunId": _run_id(payment)},
             # Real time, not business time: the TTL on synthetic items runs on the wall clock.
-            "createdAt": datetime.now(timezone.utc),
+            "createdAt": created,
         }
-        return _insert_open(db[SCREENING_QUEUE], doc)
+        if synthetic:
+            doc["expireAt"] = cutoff_workflow.expires_at(created)
+        return _insert_open(db[WORKFLOW], doc)
     except Exception:  # noqa: BLE001 - best-effort view; see the module docstring
         logger.exception("could not enqueue screening item for %s", payment.get("paymentId"))
         return None
 
 
 def close_screening_item(db, *, payment_id: str, status: str, by: str, at: datetime) -> None:
-    _close(db, SCREENING_QUEUE, payment_id=payment_id, status=status, by=by, at=at)
+    _close(db, SCREENING_ITEM, payment_id=payment_id, status=status, by=by, at=at)
 
 
 def screening_position(db, *, payment_id: str, at: datetime) -> Optional[dict]:
@@ -156,11 +164,12 @@ def screening_position(db, *, payment_id: str, at: datetime) -> Optional[dict]:
     Ahead = higher priority, or same priority and queued earlier. Run-scoped so concurrent
     presenters never see each other's queues. `at` is business time, for `analystsOnShift`.
     """
-    queue = db[SCREENING_QUEUE]
-    item = queue.find_one({"paymentId": payment_id, "status": OPEN})
+    queue = db[WORKFLOW]
+    item = queue.find_one({"kind": SCREENING_ITEM, "paymentId": payment_id, "status": OPEN})
     if item is None:
         return None
-    scope = {"demo.clockRunId": (item.get("demo") or {}).get("clockRunId"), "status": OPEN}
+    scope = {"kind": SCREENING_ITEM,
+             "demo.clockRunId": (item.get("demo") or {}).get("clockRunId"), "status": OPEN}
     ahead = (
         queue.count_documents({**scope, "priority": {"$gt": item["priority"]}})
         + queue.count_documents({**scope, "priority": item["priority"],

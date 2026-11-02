@@ -1,4 +1,5 @@
-"""Cutoff plan A3: the hold records (`approvalRequests`, `screeningQueue`) and stage events.
+"""Cutoff plan A3: the hold records (approval requests and screening items in
+`cutoffWorkflow`).
 
 The hold state on `payments` is the truth; these are best-effort views the cutoff agent reads.
 Driven through the real `initiate_payment` with a `clock_run_id`, as in `test_cutoff_holds`.
@@ -12,7 +13,7 @@ from contexts.fraud_evaluation.domain import fraud_rules
 from contexts.payment_order_initiation.domain import duplicate_detection
 from data import ensure_indexes
 from services.payments_service import PaymentsService
-from shared import business_clock, hold_queues, stage_events
+from shared import business_clock, cutoff_workflow, hold_queues
 from tests.test_cutoff_holds import (
     APPROVER,
     POTENTIAL,
@@ -62,8 +63,9 @@ def _screening_held(service, db, hh=10, mm=0):
     return _domestic(service, _run_at(db, hh, mm), creditor_party=POTENTIAL)
 
 
-def _records(db, name, payment):
-    return [d for d in db[name].docs if d["paymentId"] == payment["paymentId"]]
+def _records(db, kind, payment):
+    return [d for d in db["cutoffWorkflow"].docs
+            if d.get("kind") == kind and d.get("paymentId") == payment["paymentId"]]
 
 
 def _et(hh, mm, day=None):
@@ -76,7 +78,7 @@ def _et(hh, mm, day=None):
 def test_approval_hold_opens_one_request(service, db):
     held = _approval_held(service, db)
 
-    [request] = _records(db, "approvalRequests", held)
+    [request] = _records(db, hold_queues.APPROVAL_REQUEST, held)
     assert request["status"] == hold_queues.OPEN
     assert request["approvalRequestId"].startswith("APR-")
     assert request["requiredApprovers"] == [APPROVER]
@@ -93,14 +95,14 @@ def test_approve_closes_request_before_resume(service, db, monkeypatch):
     real_run = payment_lifecycle.run
 
     def spy(ctx, **kw):
-        seen["status"] = _records(db, "approvalRequests", held)[0]["status"]
+        seen["status"] = _records(db, hold_queues.APPROVAL_REQUEST, held)[0]["status"]
         return real_run(ctx, **kw)
 
     monkeypatch.setattr(payment_lifecycle, "run", spy)
     service.approve_payment(held["paymentId"], approver_id=APPROVER, decision="APPROVED")
 
     assert seen["status"] == hold_queues.APPROVED
-    [request] = _records(db, "approvalRequests", held)
+    [request] = _records(db, hold_queues.APPROVAL_REQUEST, held)
     assert request["resolvedBy"] == APPROVER and request["resolvedAt"] is not None
 
 
@@ -109,7 +111,7 @@ def test_approve_rejected_closes_request(service, db):
 
     service.approve_payment(held["paymentId"], approver_id=APPROVER, decision="REJECTED")
 
-    [request] = _records(db, "approvalRequests", held)
+    [request] = _records(db, hold_queues.APPROVAL_REQUEST, held)
     assert (request["status"], request["resolvedBy"]) == (hold_queues.REJECTED, APPROVER)
 
 
@@ -120,7 +122,7 @@ def test_screening_hold_enqueues_with_on_shift_analyst(service, db):
     held = _domestic(service, _run_at(db, 17, 50), creditor_party=dict(POTENTIAL, **CA_BANK))
     assert held["status"] == "PENDING_SCREENING"
 
-    [item] = _records(db, "screeningQueue", held)
+    [item] = _records(db, hold_queues.SCREENING_ITEM, held)
     assert item["status"] == hold_queues.OPEN
     assert item["screeningItemId"].startswith("SQ-")
     assert item["matched"] == "NORTHGATE TRADING FZE"
@@ -135,7 +137,7 @@ def test_screening_hit_closes_item(service, db):
 
     service.resolve_screening(held["paymentId"], analyst_id="ANALYST-1", outcome="HIT")
 
-    [item] = _records(db, "screeningQueue", held)
+    [item] = _records(db, hold_queues.SCREENING_ITEM, held)
     assert (item["status"], item["resolvedBy"]) == (hold_queues.HIT, "ANALYST-1")
 
 
@@ -154,76 +156,28 @@ def test_screening_clear_closes_item_on_every_branch(service, db, branch):
     expected = {"resume": "IN_PROGRESS", "cutoff_exception": "CUTOFF_EXCEPTION",
                 "next_value_date": "ROUTED"}[branch]
     assert resolved["status"] == expected
-    [item] = _records(db, "screeningQueue", held)
+    [item] = _records(db, hold_queues.SCREENING_ITEM, held)
     assert item["status"] == hold_queues.CLEARED
 
 
 def test_record_write_failure_never_breaks_the_hold(service, db):
     class Broken(FakeCollection):
-        def insert_one(self, *a, **kw):
+        def insert_one(self, doc, *a, **kw):
+            if doc.get("kind") == cutoff_workflow.CLOCK:
+                return super().insert_one(doc, *a, **kw)
             raise RuntimeError("boom")
 
-    db["approvalRequests"] = Broken()
-    db["screeningQueue"] = Broken()
-    db["paymentStageEvents"] = Broken()
+    db["cutoffWorkflow"] = Broken(db["cutoffWorkflow"].docs, key="_id")
 
     assert _approval_held(service, db)["status"] == "PENDING_APPROVAL"
     assert _screening_held(service, db)["status"] == "PENDING_SCREENING"
 
 
-def test_untagged_writes_no_records_or_events(service, db):
+def test_untagged_writes_no_records(service, db):
     _domestic(service, instructed_amount=25_000.0)
     _domestic(service, creditor_party=POTENTIAL)
 
-    assert db["approvalRequests"].docs == []
-    assert db["screeningQueue"].docs == []
-    assert db["paymentStageEvents"].docs == []
-
-
-# --- stage events -------------------------------------------------------------
-
-def test_tagged_transitions_append_events_with_prev_stage_and_duration(service, db):
-    held = _approval_held(service, db)
-    service.approve_payment(held["paymentId"], approver_id=APPROVER, decision="APPROVED")
-
-    payment = _stored(db, held)
-    events = [e for e in db["paymentStageEvents"].docs if e["paymentId"] == held["paymentId"]]
-    lifecycle_events = payment["lifecycle"]["events"]
-    assert [e["toState"] for e in events] == [e["state"] for e in lifecycle_events[1:]]
-    assert [e["meta"]["stage"] for e in events] == [e["state"] for e in lifecycle_events[:-1]]
-    for event in events:
-        assert event["source"] == "LIVE"
-        assert event["clockRunId"] == held["demo"]["clockRunId"]
-        assert event["durationMs"] >= 0
-        assert event["meta"]["rail"] == "WIRE"
-    approved = next(e for e in events if e["meta"]["stage"] == "PENDING_APPROVAL")
-    assert approved["meta"]["segment"] == "COMMERCIAL"
-
-
-def test_stage_event_duration_and_naive_datetimes():
-    coll = FakeCollection()
-    entered = datetime(2026, 10, 6, 21, 0)               # naive: read as UTC
-    payment = {"paymentId": "P", "rail": "WIRE"}
-    events = [
-        {"state": "ROUTED", "at": entered},
-        {"state": "PENDING_SCREENING", "at": entered + timedelta(minutes=4)},
-    ]
-
-    stage_events.append(coll, payment, at=entered + timedelta(minutes=4), events=events)
-
-    [event] = coll.docs
-    assert event["durationMs"] == 4 * 60 * 1000
-    assert event["at"].tzinfo is not None
-    assert (event["meta"]["stage"], event["toState"]) == ("ROUTED", "PENDING_SCREENING")
-
-
-def test_session_bound_advance_writes_no_event(service, db):
-    payment = _initiate(service, clock_run_id=_run_at(db, 10, 0))
-
-    assert payment["status"] == "SETTLED"
-    events = [e for e in db["paymentStageEvents"].docs if e["paymentId"] == payment["paymentId"]]
-    assert events, "the tagged transitions outside the session still record"
-    assert "SETTLED" not in {e["toState"] for e in events}
+    assert [d for d in db["cutoffWorkflow"].docs if d.get("kind") != cutoff_workflow.CLOCK] == []
 
 
 # --- queue position -----------------------------------------------------------
@@ -305,62 +259,35 @@ def test_untagged_duplicate_ignores_tagged(service, db):
 
 # --- ensure_indexes -----------------------------------------------------------
 
-@pytest.mark.parametrize("specs", [
-    ensure_indexes.APPROVAL_REQUESTS_INDEXES, ensure_indexes.SCREENING_QUEUE_INDEXES,
-])
-def test_hold_queues_declare_unique_partial_open_index(specs):
-    unique = next(s for s in specs if s.get("unique"))
-    assert unique["keys"] == [("paymentId", 1)]
+def test_workflow_declares_one_unique_partial_open_index_per_kind_and_payment():
+    [unique] = [s for s in ensure_indexes.CUTOFF_WORKFLOW_INDEXES if s.get("unique")]
+    assert unique["keys"] == [("kind", 1), ("paymentId", 1)]
     assert unique["partialFilterExpression"] == {"status": {"$eq": "OPEN"}}
+
+
+def test_workflow_ttl_runs_on_expire_at_only():
+    [ttl] = [s for s in ensure_indexes.CUTOFF_WORKFLOW_INDEXES if "expireAfterSeconds" in s]
+    assert ttl["keys"] == [("expireAt", 1)]
+    assert ttl["expireAfterSeconds"] == 0
+
+
+def test_workflow_indexes_never_repeat_a_key_pattern():
+    # Two partial indexes on one key pattern fail before MongoDB 7.3.
+    keys = [tuple(s["keys"]) for s in ensure_indexes.CUTOFF_WORKFLOW_INDEXES]
+    assert len(keys) == len(set(keys))
 
 
 def test_registry_covers_the_a3_collections(monkeypatch):
     seen = []
     monkeypatch.setattr(ensure_indexes, "_ensure",
                         lambda conn, db_name, coll, specs: seen.append(coll) or [])
-    monkeypatch.setattr(ensure_indexes, "_ensure_time_series", lambda *a, **kw: None)
     monkeypatch.setattr(ensure_indexes, "_ensure_payment_history", lambda *a, **kw: [])
 
     ensure_indexes.ensure_transactions_indexes(FakeConnection(None), "db")
 
-    assert {"approvalRequests", "screeningQueue", "staffDirectory",
-            "paymentStageEvents"} <= set(seen)
-
-
-class _ListingDb:
-    def __init__(self, existing):
-        self.existing, self.created = existing, []
-
-    def list_collections(self, filter):
-        return [c for c in self.existing if c["name"] == filter["name"]]
-
-    def create_collection(self, name, **kw):
-        self.created.append((name, kw))
-
-
-def test_time_series_created_when_absent():
-    db = _ListingDb([])
-    ensure_indexes._ensure_time_series(db, "paymentStageEvents",
-                                       timeseries=ensure_indexes.STAGE_EVENTS_TIMESERIES,
-                                       expire_after_seconds=30 * 86400)
-    [(name, kw)] = db.created
-    assert kw["timeseries"] == {"timeField": "at", "metaField": "meta", "granularity": "minutes"}
-    assert kw["expireAfterSeconds"] == 30 * 86400
-
-
-def test_time_series_refuses_a_regular_collection():
-    db = _ListingDb([{"name": "paymentStageEvents", "type": "collection"}])
-    with pytest.raises(RuntimeError, match="regular collection"):
-        ensure_indexes._ensure_time_series(db, "paymentStageEvents",
-                                           timeseries=ensure_indexes.STAGE_EVENTS_TIMESERIES,
-                                           expire_after_seconds=1)
-    assert db.created == []
-    # An existing time series is left alone.
-    ok = _ListingDb([{"name": "paymentStageEvents", "type": "timeseries"}])
-    ensure_indexes._ensure_time_series(ok, "paymentStageEvents", timeseries={},
-                                       expire_after_seconds=1)
-    assert ok.created == []
-
+    assert {"cutoffWorkflow", "staffDirectory"} <= set(seen)
+    assert not {"demoClocks", "approvalRequests", "screeningQueue"} & set(seen)
+    assert "paymentStageEvents" not in seen
 
 
 # --- canonicalJsonStorage unique index ---------------------------------------------

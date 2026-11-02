@@ -11,7 +11,7 @@ and a `demo.clockRunId`, in a non-closed status. `--payment-id` narrows the run 
 payments; one that is missing, or not a cutoff-demo payment, is reported and fails the run.
 
 `--apply` takes each run through the same code the janitor uses: a run whose clock expired
-(`demoClocks` has a 24 h TTL) is recovered first, then `release_run` acts as `cutoff-cleanup`.
+(clock runs expire after 24 h) is recovered first, then `release_run` acts as `cutoff-cleanup`.
 Re-running is safe; payments already settling just settle (about 30 s). Exit code is 1 when a
 named id is missing or ineligible, or when any payment is still open after `--apply`.
 

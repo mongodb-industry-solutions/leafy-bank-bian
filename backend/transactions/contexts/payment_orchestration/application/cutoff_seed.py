@@ -1,5 +1,5 @@
 """The cutoff demo's seeded world (cutoff plan Part B): staff, two approvers, a funds-short
-account, Lena's backlog and ~14 days of stage-duration history. Pure builders, no I/O —
+account and Lena's backlog. Pure builders, no I/O —
 `backend/data/load_cutoff_seed.py` writes them.
 
 Every document carries `sourceSystem: cutoff-demo-seed`, so the loader can tell what it owns
@@ -7,9 +7,9 @@ on a database shared with other demos.
 
 ## Off the payment chain
 
-History is `paymentStageEvents` points with `source: "SEED"` and synthetic `HIST-` ids; it
-never goes into `payments` (defect 2026-08-31). Lena's backlog is `synthetic: true` approval
-requests with no matching payment.
+Lena's backlog is `synthetic: true` approval requests with no matching payment, so it never
+goes into `payments` (defect 2026-08-31). Stage timing is a static estimate in the agent
+(`payment_agent/cutoff_evidence.py`), not seeded history.
 
 ## The story the seed tells (business time, ET)
 
@@ -22,16 +22,13 @@ requests with no matching payment.
 
 from __future__ import annotations
 
-import math
-import random
 from datetime import date, datetime, time, timedelta, timezone
 
 from contexts.payment_orchestration.domain.cutoff_policy import next_business_day
+from shared import cutoff_workflow
 from shared.business_clock import ET
 
 SOURCE_SYSTEM = "cutoff-demo-seed"
-SEED_SOURCE = "SEED"
-HISTORY_PREFIX = "HIST-"
 
 ABC_ACCOUNT = "ACC-acc10001"
 FUNDS_SHORT_ACCOUNT = "ACC-acc10003"
@@ -47,7 +44,7 @@ STAFF_LENA = "STAFF-lena"
 STAFF_ANALYST_3 = "STAFF-analyst-3"
 
 FUNDS_SHORT_AVAILABLE = 6_300.0
-EXPECTED_CREDIT = {"amount": 4_000.0, "currency": "USD", "expectedAtEt": "17:45",
+EXPECTED_CREDIT = {"amount": 4_000.0, "currency": "USD", "expectedAtEt": "19:30",
                    "from": "Contoso Retail", "reference": "INV-88213", "status": "EXPECTED"}
 
 # Added to ACC-acc10001's mandate. Fixed `addedAt`, so a re-run never differs.
@@ -56,8 +53,6 @@ ABC_SIGNATORIES = [
     {"customerId": RAJ, "type": "JOINT", "signingRule": "JOINT", "addedAt": "2026-10-06"},
 ]
 
-DAY_START_ET = 8 * 60
-FEDWIRE_CLOSE_ET = 18 * 60 + 45
 
 
 def _et(day: date, hhmm: str) -> datetime:
@@ -146,6 +141,7 @@ def synthetic_lena_requests(business_date: date, n: int = 6) -> list[dict]:
     docs = []
     for i in range(1, n + 1):
         docs.append({
+            "kind": cutoff_workflow.APPROVAL_REQUEST,
             "approvalRequestId": f"APR-SEED-LENA-{i}",
             "paymentId": f"SYN-LENA-{i}",
             "accountId": f"ACC-SYN-LENA-{i}",
@@ -165,101 +161,3 @@ def synthetic_lena_requests(business_date: date, n: int = 6) -> list[dict]:
             "sourceSystem": SOURCE_SYSTEM,
         })
     return docs
-
-
-# --- history ------------------------------------------------------------------
-
-JOURNEYS_PER_DAY = 36
-_SEGMENTS = (("COMMERCIAL", 50), ("SME", 30), ("RETAIL", 20))
-_FAST_SECONDS = 2.0                  # median of an automated stage
-
-# (median minutes, sigma) for the slow stages. Screening p90 = 5 * e^(1.2816 * 0.45) ≈ 9 min.
-_APPROVAL = (25.0, 0.8)
-_SCREENING = (5.0, 0.45)
-_SCREENING_LATE_FACTOR = 1.8         # after 17:00 one analyst carries the queue
-_ROUTED = (3.0, 0.6)
-_AUTHORISED = (4.0, 0.6)
-_LATE_EXECUTION_FACTOR = 1.5         # after 18:00 the Fedwire rush; C5's remaining-work p90
-
-
-def _weighted(rng: random.Random, pairs) -> str:
-    return rng.choices([p[0] for p in pairs], weights=[p[1] for p in pairs])[0]
-
-
-def _lognormal_seconds(rng: random.Random, median_minutes: float, sigma: float) -> float:
-    return median_minutes * 60 * math.exp(rng.gauss(0, sigma))
-
-
-def _journey(rng: random.Random, start: datetime) -> list[tuple[str, float]]:
-    """The stages one payment passes through, as (stage left, seconds spent in it)."""
-    rail = "WIRE" if rng.random() < 0.8 else "INTERNAL"
-    wire_type = (("DOMESTIC" if rng.random() < 0.6 else "INTERNATIONAL")
-                 if rail == "WIRE" else None)
-    segment = _weighted(rng, _SEGMENTS)
-    amount = 8_000 * math.exp(rng.gauss(0, 1.0))
-
-    def fast():
-        return _FAST_SECONDS * math.exp(rng.gauss(0, 0.5))
-
-    states = ["DRAFT", "INITIATED"]
-    if segment == "COMMERCIAL" and amount > 10_000 and rng.random() < 0.3:
-        states.append("PENDING_APPROVAL")
-    states += ["VALIDATED", "ENRICHED", "FINAL_VALIDATED", "ROUTED"]
-    if rail == "WIRE" and rng.random() < 0.15:
-        states.append("PENDING_SCREENING")
-    states += ["AUTHORISED", "APPROVED", "SUBMITTED"]
-
-    steps, at = [], start
-    for left in states[:-1]:
-        et_minutes = at.astimezone(ET).hour * 60 + at.astimezone(ET).minute
-        if left == "PENDING_APPROVAL":
-            seconds = _lognormal_seconds(rng, *_APPROVAL)
-        elif left == "PENDING_SCREENING":
-            seconds = _lognormal_seconds(rng, *_SCREENING)
-            if et_minutes >= 17 * 60:
-                seconds *= _SCREENING_LATE_FACTOR
-        elif left in ("ROUTED", "AUTHORISED"):
-            seconds = _lognormal_seconds(rng, *(_ROUTED if left == "ROUTED" else _AUTHORISED))
-            if et_minutes >= 18 * 60:
-                seconds *= _LATE_EXECUTION_FACTOR
-        else:
-            seconds = fast()
-        at = at + timedelta(seconds=seconds)
-        steps.append((left, seconds))
-    return {"rail": rail, "wireType": wire_type, "segment": segment}, states, steps
-
-
-def build_history(*, end_date: date, seed: int = 20261006, days: int = 14) -> list[dict]:
-    """Stage-duration points for the `days` calendar days before `end_date` (weekdays only),
-    plus `end_date` itself up to Fedwire's 18:45 ET close. Deterministic in its inputs."""
-    rng = random.Random(f"{seed}:{end_date.isoformat()}:{days}")
-    batch = end_date.isoformat()
-    points = []
-    for offset in range(days, -1, -1):
-        day = end_date - timedelta(days=offset)
-        if day.weekday() >= 5:
-            continue
-        close = _et(day, "18:45") if day == end_date else None
-        for n in range(JOURNEYS_PER_DAY):
-            start_minute = rng.uniform(DAY_START_ET, FEDWIRE_CLOSE_ET - 15)
-            start = (datetime.combine(day, time(0), tzinfo=ET)
-                     + timedelta(minutes=start_minute)).astimezone(timezone.utc)
-            meta, states, steps = _journey(rng, start)
-            payment_id = f"{HISTORY_PREFIX}{day:%Y%m%d}-{n:03d}"
-            at = start
-            for (left, seconds), to_state in zip(steps, states[1:]):
-                at = at + timedelta(seconds=seconds)
-                if close is not None and at > close:
-                    break
-                points.append({
-                    "at": at,
-                    "meta": {"rail": meta["rail"], "segment": meta["segment"], "stage": left},
-                    "toState": to_state,
-                    "durationMs": int(seconds * 1000),
-                    "paymentId": payment_id,
-                    "wireType": meta["wireType"],
-                    "clockRunId": None,
-                    "source": SEED_SOURCE,
-                    "seedBatch": batch,
-                })
-    return points

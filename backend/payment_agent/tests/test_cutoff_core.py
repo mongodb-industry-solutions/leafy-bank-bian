@@ -16,11 +16,12 @@ import cutoff_risk as cr
 import cutoff_rules as rules
 import cutoff_window as cw
 from tests import _transactions
-from tests._fakes import FakeColl, FakeDB
+from tests._fakes import FakeColl, FakeDB, seed_workflow
 
 TX_POLICY = _transactions.load("contexts/payment_orchestration/domain/cutoff_policy.py",
                                "cutoff_policy")
 TX_QUEUES = _transactions.load("shared/hold_queues.py", "hold_queues")
+TX_WORKFLOW = _transactions.load("shared/cutoff_workflow.py", "cutoff_workflow")
 
 DAY = date(2026, 10, 6)  # a Tuesday, EDT
 
@@ -31,6 +32,12 @@ def et(h, m, day=DAY):
 
 DOMESTIC = cw.window_for(rail="WIRE", wire_type="DOMESTIC", currency="USD")
 INTL = cw.window_for(rail="WIRE", wire_type="INTERNATIONAL", currency="USD")
+
+
+def test_workflow_names_match_transactions():
+    assert ev.WORKFLOW == clock.CLOCKS == TX_WORKFLOW.COLLECTION
+    assert ev.APPROVAL_REQUEST == TX_WORKFLOW.APPROVAL_REQUEST
+    assert ev.SCREENING_ITEM == TX_WORKFLOW.SCREENING_ITEM
 
 
 # --- window parity ------------------------------------------------------------------------
@@ -80,11 +87,11 @@ def test_window_for_payment_reads_wire_details():
 
 def test_clock_now_applies_offset_uncached_and_none_when_run_gone():
     db = FakeDB()
-    db["demoClocks"] = FakeColl([{"_id": "CLK-1", "offsetSeconds": 600,
-                                  "businessDate": "2026-10-02"}])
+    seed_workflow(db, "CLOCK", [{"_id": "CLK-1", "offsetSeconds": 600,
+                                 "businessDate": "2026-10-02"}])
     real = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
     assert clock.now(db, "CLK-1", real_now=real) == real + timedelta(minutes=10)
-    db["demoClocks"].update_one({"_id": "CLK-1"}, {"$set": {"offsetSeconds": 1200}})
+    db["cutoffWorkflow"].update_one({"_id": "CLK-1"}, {"$set": {"offsetSeconds": 1200}})
     assert clock.now(db, "CLK-1", real_now=real) == real + timedelta(minutes=20)
     assert clock.now(db, "CLK-gone", real_now=real) is None
     assert clock.now(db, None, real_now=real) is None
@@ -294,7 +301,7 @@ def _queue_db():
                   "queuedAt": et(17, 0), "demo": {"clockRunId": "CLK-2"}})
     items.append({"paymentId": "SYN-done", "status": "CLEARED", "priority": 9,
                   "queuedAt": et(17, 0), "demo": {"clockRunId": "CLK-1"}})
-    db["screeningQueue"] = FakeColl(items)
+    seed_workflow(db, "SCREENING_ITEM", items)
     return db
 
 
@@ -305,7 +312,7 @@ def test_screening_status_matches_transactions_and_respects_priority():
     theirs = TX_QUEUES.screening_position(db, payment_id="PAY-c2", at=at)
     assert {k: mine[k] for k in theirs} == theirs == {"position": 8, "ahead": 7,
                                                       "analystsOnShift": 1}
-    db["screeningQueue"].update_one({"paymentId": "PAY-c2"}, {"$set": {"priority": 1}})
+    db["cutoffWorkflow"].update_one({"paymentId": "PAY-c2"}, {"$set": {"priority": 1}})
     raised = ev.screening_status(db, payment_id="PAY-c2", at=at)
     assert raised["position"] == 1 and raised["runMaxPriority"] == 1
     assert raised == {**raised, **TX_QUEUES.screening_position(db, payment_id="PAY-c2", at=at)}
@@ -315,7 +322,8 @@ def test_screening_status_matches_transactions_and_respects_priority():
 def test_approval_status_primary_backup_and_workload():
     db = FakeDB()
     db["staffDirectory"] = FakeColl(STAFF)
-    db["approvalRequests"] = FakeColl(
+    seed_workflow(
+        db, "APPROVAL_REQUEST",
         [{"paymentId": "PAY-c1", "status": "OPEN", "approvalRequestId": "APR-1",
           "primaryApprover": "S-maya", "assignedTo": "S-maya", "requestedAt": et(17, 5),
           "reminders": [{"at": et(17, 6)}]}]
@@ -333,75 +341,45 @@ def test_funds_position_and_open_exceptions():
     db = FakeDB()
     db["accounts"] = FakeColl([{"accountId": "ACC-3", "balance": {"available": 6300.0},
                                 "expectedCredits": [{"amount": 4000.0, "status": "EXPECTED",
-                                                     "expectedAtEt": "17:45"}]}])
+                                                     "expectedAtEt": "19:30"}]}])
     db["exceptions"] = FakeColl([
         {"paymentId": "PAY-1", "status": "OPEN", "category": "FRAUD"},
         {"paymentId": "PAY-1", "status": "RESOLVED", "category": "OTHER"}])
     funds = ev.funds_position(db, {"debtor": {"accountId": "ACC-3"}, "instructedAmount": 9500.0},
                               business_date=DAY)
     assert funds["shortfall"] == 3200.0
-    assert funds["expectedCredits"][0]["expectedAt"] == et(17, 45)
+    assert funds["expectedCredits"][0]["expectedAt"] == et(19, 30)
     assert ev.open_exceptions(db, "PAY-1") == {"count": 1, "categories": ["FRAUD"]}
 
 
-def _event(pid, stage, minutes, at, source="SEED", rail="WIRE"):
-    return {"paymentId": pid, "meta": {"rail": rail, "stage": stage}, "at": at,
-            "durationMs": int(minutes * 60000), "source": source}
+def test_stage_timing_sums_the_downstream_estimates():
+    t = ev.stage_timing(FakeDB(), rail="WIRE", status=cr.PENDING_APPROVAL, at=et(17, 5))
+    assert t["method"] == "static-estimate"
+    assert t["stages"] == ["VALIDATED", "ENRICHED", "FINAL_VALIDATED", "ROUTED", "AUTHORISED",
+                           "APPROVED"]
+    assert (t["remainingP50Min"], t["remainingP90Min"]) == (7.1, 15.3)
+    assert (t["stageP50Min"], t["stageP90Min"]) == (25.0, 69.8)
 
 
-def test_stage_timing_python_path_filters_and_sums_journeys():
-    at = et(18, 0)
-    events = [
-        # complete journey within the window: 3 + 5 = 8 minutes
-        _event("J1", "AUTHORISED", 3, at - timedelta(days=1)),
-        _event("J1", "APPROVED", 5, at - timedelta(days=1)),
-        # incomplete journey: ignored for the remaining journey
-        _event("J2", "AUTHORISED", 1, at - timedelta(days=2)),
-        # outside the time-of-day window, after `at`, too old, other rail
-        _event("J3", "AUTHORISED", 50, at - timedelta(days=1, hours=3)),
-        _event("J4", "AUTHORISED", 50, at + timedelta(minutes=5)),
-        _event("J5", "AUTHORISED", 50, at - timedelta(days=20)),
-        _event("J6", "AUTHORISED", 50, at - timedelta(days=1), rail="INTERNAL"),
-        _event("PAY-live", "PENDING_SCREENING", 9, at - timedelta(minutes=30), source="LIVE"),
-        _event("J7", "PENDING_SCREENING", 5, at - timedelta(days=1)),
-    ]
-    db = FakeDB()
-    db["paymentStageEvents"] = FakeColl(events)
-    t = ev.stage_timing(db, rail="WIRE", status=cr.PENDING_SCREENING, at=at)
-    assert t["method"] == "python" and t["stages"] == ["AUTHORISED", "APPROVED"]
-    assert (t["remainingP50Min"], t["remainingP90Min"], t["journeySamples"]) == (8.0, 8.0, 1)
-    assert (t["stageP50Min"], t["stageP90Min"], t["stageSamples"]) == (5.0, 9.0, 2)
-    assert t["sourceMix"] == {"SEED": 4, "LIVE": 1}
-    assert [p["paymentId"] for p in t["liveRecent"]] == ["PAY-live"]
+def test_stage_timing_slows_execution_after_18():
+    before = ev.stage_timing(FakeDB(), rail="WIRE", status=cr.CUTOFF_EXCEPTION, at=et(17, 59))
+    after = ev.stage_timing(FakeDB(), rail="WIRE", status=cr.CUTOFF_EXCEPTION, at=et(18, 16))
+    assert (before["remainingP50Min"], before["remainingP90Min"]) == (7.0, 15.2)
+    assert (after["remainingP50Min"], after["remainingP90Min"]) == (10.5, 22.7)
+    assert after["stageP50Min"] is None, "CUTOFF_EXCEPTION has no stage estimate of its own"
 
 
-def test_stage_timing_uses_percentile_aggregation_when_available():
-    seen = {}
-
-    class AggColl(FakeColl):
-        def aggregate(self, pipeline):
-            seen["pipeline"] = pipeline
-            return iter([{"journeys": [{"n": 12, "p": [600000, 1200000]}],
-                          "stage": [{"n": 4, "p": [300000, 540000]}],
-                          "mix": [{"_id": "SEED", "n": 40}, {"_id": "LIVE", "n": 2}],
-                          "live": []}])
-
-    db = FakeDB()
-    db["paymentStageEvents"] = AggColl()
-    t = ev.stage_timing(db, rail="WIRE", status=cr.CUTOFF_EXCEPTION, at=et(18, 16))
-    assert t["method"] == "$percentile"
-    assert (t["remainingP50Min"], t["remainingP90Min"], t["journeySamples"]) == (10.0, 20.0, 12)
-    assert (t["stageP50Min"], t["stageP90Min"]) == (5.0, 9.0)
-    assert t["sourceMix"] == {"SEED": 40, "LIVE": 2}
-    facet = seen["pipeline"][-1]["$facet"]
-    assert facet["journeys"][-1]["$group"]["p"]["$percentile"]["p"] == [0.5, 0.9]
+def test_stage_timing_doubles_screening_after_17():
+    early = ev.stage_timing(FakeDB(), rail="WIRE", status=cr.PENDING_SCREENING, at=et(16, 34))
+    late = ev.stage_timing(FakeDB(), rail="WIRE", status=cr.PENDING_SCREENING, at=et(17, 50))
+    assert (early["stageP50Min"], early["stageP90Min"]) == (5.0, 9.0)
+    assert (late["stageP50Min"], late["stageP90Min"]) == (10.0, 18.0)
 
 
-def test_percentile_helper_nearest_rank():
-    assert ev.percentile([], 0.5) is None
-    assert ev.percentile([5, 1, 3], 0.5) == 3
-    assert ev.percentile(list(range(1, 11)), 0.9) == 9
-    assert ev.percentile([7], 0.9) == 7
+def test_stage_timing_has_no_estimate_for_a_funds_hold():
+    t = ev.stage_timing(FakeDB(), rail="WIRE", status=cr.PENDING_FUNDS, at=et(16, 45))
+    assert t["stageP50Min"] is None and t["stageP90Min"] is None
+    assert t["remainingP50Min"] > 0
 
 
 # --- fakes --------------------------------------------------------------------------------
@@ -422,43 +400,3 @@ def test_fake_supports_the_new_operators_and_unique_keys():
     assert after["n"] == 2
     with pytest.raises(DuplicateKeyError):
         coll.find_one_and_update({"active": False}, {"$set": {"active": True}})
-
-
-class _AggColl(FakeColl):
-    def __init__(self, out):
-        super().__init__()
-        self.out, self.pipelines = out, []
-
-    def aggregate(self, pipeline):
-        self.pipelines.append(pipeline)
-        return iter(self.out)
-
-
-def test_timing_aggregate_parses_the_facet_result():
-    """The fakes cannot run `$percentile`; this pins the result parsing. The pipeline itself
-    is checked at the C4 live gate against Atlas (MongoDB 7.0+)."""
-    at = et(17, 5)
-    db = FakeDB()
-    db[ev.STAGE_EVENTS] = _AggColl([{
-        "journeys": [{"_id": None, "n": 12, "p": [480_000, 1_200_000]}],
-        "stage": [{"_id": None, "n": 30, "p": [300_000, 600_000]}],
-        "mix": [{"_id": "SEED", "n": 40}, {"_id": None, "n": 2}],
-        "live": [{"paymentId": "PAY-1", "meta": {"stage": "PENDING_APPROVAL"},
-                  "durationMs": 120_000, "at": at}],
-    }])
-    out = ev._timing_aggregate(db, rail="WIRE", stages=["ROUTED"], stage="PENDING_APPROVAL", at=at)
-    assert (out["remainingP50Min"], out["remainingP90Min"], out["journeySamples"]) == (8, 20, 12)
-    assert (out["stageP50Min"], out["stageP90Min"], out["stageSamples"]) == (5, 10, 30)
-    assert out["sourceMix"] == {"SEED": 40, "UNKNOWN": 2}
-    assert out["liveRecent"] == [{"paymentId": "PAY-1", "stage": "PENDING_APPROVAL",
-                                  "durationMin": 2, "at": at}]
-    assert out["method"] == "$percentile"
-
-
-def test_timing_aggregate_with_no_samples_has_no_percentiles():
-    db = FakeDB()
-    db[ev.STAGE_EVENTS] = _AggColl([{"journeys": [], "stage": [], "mix": [], "live": []}])
-    out = ev._timing_aggregate(db, rail="WIRE", stages=["ROUTED"], stage="PENDING_FUNDS",
-                               at=et(17, 5))
-    assert out["remainingP50Min"] is None and out["stageP90Min"] is None
-    assert out["journeySamples"] == 0 and out["sourceMix"] == {} and out["liveRecent"] == []

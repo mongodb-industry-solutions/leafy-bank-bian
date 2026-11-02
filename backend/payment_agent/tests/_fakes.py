@@ -161,3 +161,11 @@ class FakeDB(dict):
         if name not in self:
             self[name] = FakeColl()
         return dict.__getitem__(self, name)
+
+
+def seed_workflow(db, kind, docs):
+    """Put `docs` in the shared `cutoffWorkflow` collection as `kind`, replacing that kind's
+    earlier documents. Clock runs, approval requests and screening items live side by side."""
+    coll = db["cutoffWorkflow"]
+    coll.docs = [d for d in coll.docs if d.get("kind") != kind]
+    coll.docs.extend({**copy.deepcopy(d), "kind": kind} for d in docs)

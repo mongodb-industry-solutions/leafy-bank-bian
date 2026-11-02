@@ -581,6 +581,8 @@ _ACTOR = "ledger-service"
 _ACTOR_TYPE = "SERVICE"
 _SOURCE_SYSTEM = "ledger-service"
 _ELIGIBLE_STATES = ("SETTLED", "POSTED")
+# clientReference prefix of the cut-off demo wires; mirrors transactions `statement.py`.
+CUTOFF_DEMO_REF_PREFIX = "CUTOFF-DEMO-"
 
 
 def _upsert_reconciliation_item(ri_coll, check: ReconciliationCheck) -> dict:
@@ -813,8 +815,12 @@ def reconcile_settled_payments(connection: MongoDBConnection, db_name: str,
             "lifecycle.currentState": {"$in": list(_ELIGIBLE_STATES)},
             "lifecycle.reconciliationStatus": {"$ne": RECONCILED},
         },
-        {"_id": 0, "paymentId": 1},
+        {"_id": 0, "paymentId": 1, "clientReference": 1},
     ))
+    # Cut-off demo wires have no statement story (the transactions simulator skips them), so
+    # sweeping them would raise MISSING for a line that is never coming.
+    eligible = [d for d in eligible
+                if not (d.get("clientReference") or "").startswith(CUTOFF_DEMO_REF_PREFIX)]
 
     counts = {RECONCILED: 0, DISCREPANT: 0, PENDING: 0, OUTCOME_MISSING: 0}
     for doc in eligible:

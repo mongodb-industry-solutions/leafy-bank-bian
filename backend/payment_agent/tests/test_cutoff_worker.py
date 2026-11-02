@@ -242,18 +242,9 @@ def test_a_released_payment_is_not_a_candidate(runs):
     assert not runs and db["cutoffCases"].count_documents({}) == 0
 
 
-def test_a_next_day_open_is_outside_every_scenario_time_of_day_window():
-    # Scenario anchors (transactions `cutoff_scenarios`, ET minutes: 16:30 to 18:35).
-    open_tod = 9 * 60
-    for anchor in (16 * 60 + 30, 16 * 60 + 45, 17 * 60 + 5, 17 * 60 + 50, 18 * 60 + 35):
-        lo, hi = ev._tod_bounds(et(anchor // 60, anchor % 60))
-        assert not lo <= ev._tod(et(9, 0)) <= hi
-        assert not lo <= open_tod <= hi
-
-
 def test_a_gone_clock_run_expires_the_case():
     db = _held()
-    db["demoClocks"] = FakeColl()
+    db["cutoffWorkflow"] = FakeColl()
     assert cwk.stale_outcome(db, {"paymentId": PID, "clockRunId": RUN}) == cases.CLOCK_EXPIRED
 
 

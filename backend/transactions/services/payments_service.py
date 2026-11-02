@@ -62,7 +62,7 @@ from contexts.payment_order_initiation.application import funds_reservation
 from contexts.payment_order_initiation.domain import checks, lifecycle, lifecycle_history
 from process.payment_context import PaymentCollections, PaymentContext
 from contexts.payment_orchestration.domain import cutoff_policy
-from shared import business_clock, hold_queues, stage_events
+from shared import business_clock, hold_queues
 
 logger = logging.getLogger(__name__)
 
@@ -794,11 +794,6 @@ class PaymentsService:
             )
         return payment
 
-    @property
-    def _stage_events(self):
-        # Every hold route refuses untagged payments, so these advances are always tagged.
-        return self.db[stage_events.STAGE_EVENTS]
-
     def _held_context(self, payment: dict) -> PaymentContext:
         return self._context_from_doc(
             payment, customer_ref=payment.get("customerId", ""), authentication=None,
@@ -920,7 +915,7 @@ class PaymentsService:
                 self.payments, payment["_id"], lifecycle.ROUTED,
                 actor=analyst_id, from_state=lifecycle.PENDING_SCREENING, at=now,
                 reason="Screening cleared; warehoused for the next value date already chosen.",
-                extra=resolution, stage_events=self._stage_events,
+                extra=resolution,
             )
 
         window = self._cutoff_window(payment)
@@ -942,7 +937,6 @@ class PaymentsService:
                     "cutoff.trippedAt": now,
                     "cutoff.resumeFrom": "4b",
                 },
-                stage_events=self._stage_events,
             )
 
         self.payments.update_one({"_id": payment["_id"]}, {"$set": resolution})
@@ -989,7 +983,7 @@ class PaymentsService:
         updated = lifecycle.advance(
             self.payments, payment["_id"], lifecycle.ROUTED,
             actor=decided_by, reason=reason, from_state=lifecycle.CUTOFF_EXCEPTION,
-            at=now, extra=extra, stage_events=self._stage_events,
+            at=now, extra=extra,
         )
         if decision == "NEXT_VALUE_DATE":
             return updated

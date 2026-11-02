@@ -231,33 +231,33 @@ EXCEPTIONS_INDEXES = [
 ]
 
 
-# Demo clock runs (`shared.business_clock`). Throwaway by design: a run only matters while a
-# presenter is driving it, so a 24h TTL keeps the collection from accumulating.
-DEMO_CLOCKS_INDEXES = [
-    {"name": "idx_demo_clocks_created_at_ttl", "keys": [("createdAt", ASCENDING)],
-     "expireAfterSeconds": 86400},
-]
+# Cutoff workflow records: demo clock runs, approval requests, screening items, told apart by
+# `kind` (`shared.cutoff_workflow`).
+#
+# TTL: only documents that carry `expireAt` expire (clock runs, synthetic screening items);
+# real approval requests never do.
+#
+# One OPEN record per (kind, payment): the unique partial index is what makes `hold_queues`
+# insert-then-catch idempotent. PARTIAL on `status == OPEN`, so closed records never block a
+# later re-hold, and clock runs (no `status`) never enter it. One index serves both kinds:
+# a second unique partial index on the same key would conflict before MongoDB 7.3.
+_APPROVAL_ONLY = {"kind": {"$eq": "APPROVAL_REQUEST"}}
+_SCREENING_ONLY = {"kind": {"$eq": "SCREENING_ITEM"}}
 
-
-# Cutoff plan A3: the hold queues the cutoff agent reads. One OPEN record per payment — the
-# unique partial index is what makes `hold_queues` insert-then-catch idempotent. PARTIAL on
-# `status == OPEN`, so closed records never block a later re-hold.
-APPROVAL_REQUESTS_INDEXES = [
-    {"name": "idx_approval_open_unique", "keys": [("paymentId", ASCENDING)], "unique": True,
+CUTOFF_WORKFLOW_INDEXES = [
+    {"name": "idx_workflow_expire_at_ttl", "keys": [("expireAt", ASCENDING)],
+     "expireAfterSeconds": 0},
+    {"name": "idx_workflow_open_unique",
+     "keys": [("kind", ASCENDING), ("paymentId", ASCENDING)], "unique": True,
      "partialFilterExpression": {"status": {"$eq": "OPEN"}}},
-    {"name": "idx_approval_assignee_status",
-     "keys": [("assignedTo", ASCENDING), ("status", ASCENDING)]},
-]
-
-SCREENING_QUEUE_INDEXES = [
-    {"name": "idx_screening_open_unique", "keys": [("paymentId", ASCENDING)], "unique": True,
-     "partialFilterExpression": {"status": {"$eq": "OPEN"}}},
+    {"name": "idx_workflow_approval_assignee_status",
+     "keys": [("assignedTo", ASCENDING), ("status", ASCENDING)],
+     "partialFilterExpression": _APPROVAL_ONLY},
     # Serves `hold_queues.screening_position`: run-scoped OPEN items by priority then age.
-    {"name": "idx_screening_run_order",
+    {"name": "idx_workflow_screening_run_order",
      "keys": [("demo.clockRunId", ASCENDING), ("status", ASCENDING),
-              ("priority", DESCENDING), ("queuedAt", ASCENDING)]},
-    {"name": "idx_screening_synthetic_ttl", "keys": [("createdAt", ASCENDING)],
-     "expireAfterSeconds": 86400, "partialFilterExpression": {"synthetic": True}},
+              ("priority", DESCENDING), ("queuedAt", ASCENDING)],
+     "partialFilterExpression": _SCREENING_ONLY},
 ]
 
 STAFF_DIRECTORY_INDEXES = [
@@ -277,14 +277,6 @@ CUTOFF_CASES_INDEXES = [
     {"name": "idx_cutoff_case_ttl", "keys": [("openedAt", ASCENDING)],
      "expireAfterSeconds": 7 * 86400},
 ]
-
-STAGE_EVENTS_COLLECTION = "paymentStageEvents"
-STAGE_EVENTS_TIMESERIES = {"timeField": "at", "metaField": "meta", "granularity": "minutes"}
-STAGE_EVENTS_EXPIRE_SECONDS = 30 * 86400
-STAGE_EVENTS_INDEXES = [
-    {"name": "idx_stage_events_payment", "keys": [("paymentId", ASCENDING)]},
-]
-
 
 # Lifecycle events and checks, one document per entry, discriminated by `kind` (see
 # `contexts/payment_order_initiation/domain/lifecycle_history.py`). `_id` is
@@ -330,25 +322,6 @@ def _ensure_payment_history(connection: MongoDBConnection, db_name: str) -> list
     return _ensure(connection, db_name, PAYMENT_HISTORY_COLLECTION, PAYMENT_HISTORY_INDEXES)
 
 
-def _ensure_time_series(db, name: str, *, timeseries: dict, expire_after_seconds: int) -> None:
-    """Create a time-series collection if absent; refuse one that exists as a regular collection.
-
-    A first `insert_one` auto-creates a REGULAR collection, so this must run before any live
-    tagged traffic. A regular one cannot be converted in place, so fail loudly rather than
-    index it as if it were fine.
-    """
-    existing = list(db.list_collections(filter={"name": name}))
-    if not existing:
-        db.create_collection(name, timeseries=timeseries,
-                             expireAfterSeconds=expire_after_seconds)
-        return
-    if existing[0].get("type") != "timeseries":
-        raise RuntimeError(
-            f"{name} exists as a regular collection; drop it so it can be re-created as a "
-            "time series."
-        )
-
-
 def _drop_if_filter_changed(coll, spec: dict) -> None:
     """Drop an existing index whose partial filter differs from the spec's.
 
@@ -378,13 +351,6 @@ def _ensure(connection: MongoDBConnection, db_name: str, collection: str, specs:
     return ensured
 
 
-def _ensure_stage_events(connection: MongoDBConnection, db_name: str) -> list[str]:
-    _ensure_time_series(connection.get_database(db_name), STAGE_EVENTS_COLLECTION,
-                        timeseries=STAGE_EVENTS_TIMESERIES,
-                        expire_after_seconds=STAGE_EVENTS_EXPIRE_SECONDS)
-    return _ensure(connection, db_name, STAGE_EVENTS_COLLECTION, STAGE_EVENTS_INDEXES)
-
-
 def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> dict[str, list[str]]:
     """Ensure indexes for the transactions service's collections. Returns a collection→names map."""
     return {
@@ -401,14 +367,11 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
             connection, db_name, "canonicalJsonStorage", PAYMENT_MESSAGES_INDEXES
         ),
         "exceptions": _ensure(connection, db_name, "exceptions", EXCEPTIONS_INDEXES),
-        "demoClocks": _ensure(connection, db_name, "demoClocks", DEMO_CLOCKS_INDEXES),
-        "approvalRequests": _ensure(
-            connection, db_name, "approvalRequests", APPROVAL_REQUESTS_INDEXES
+        "cutoffWorkflow": _ensure(
+            connection, db_name, "cutoffWorkflow", CUTOFF_WORKFLOW_INDEXES
         ),
-        "screeningQueue": _ensure(connection, db_name, "screeningQueue", SCREENING_QUEUE_INDEXES),
         "staffDirectory": _ensure(connection, db_name, "staffDirectory", STAFF_DIRECTORY_INDEXES),
         "cutoffCases": _ensure(connection, db_name, "cutoffCases", CUTOFF_CASES_INDEXES),
-        STAGE_EVENTS_COLLECTION: _ensure_stage_events(connection, db_name),
     }
 
 

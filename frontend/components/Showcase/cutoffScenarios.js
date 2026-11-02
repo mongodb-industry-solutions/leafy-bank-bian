@@ -64,12 +64,12 @@ export const CUTOFF_SCENARIOS = [
     recommended: true,
     decision: {
       cause: { label: "Account short of funds", code: "FUNDS" },
-      constraint: { label: "No credit expected today", code: "WILL_MISS" },
+      constraint: { label: "No credit before Fedwire closes", code: "WILL_MISS" },
       action: { label: "Hold for the next value date", code: "HOLD_NEXT_VALUE_DATE" },
     },
     title: "Short of funds",
     story:
-      "A domestic wire is USD 3,200 short of funds, and no incoming credit will cover it today. " +
+      "A domestic wire is USD 3,200 short of funds, and the incoming credit that would cover it isn't due until after Fedwire closes. " +
       "The agent informs the customer, then asks the operator to hold the wire for the next value date.",
     bank: "Bank of America",
     wire: {
@@ -101,7 +101,7 @@ export const CUTOFF_SCENARIOS = [
         "At 16:45 ET, the domestic wire to Lakeside Components is still USD 3,200 short of funds and on hold, with " +
         "45 minutes left before the 17:30 ET internal cut-off.",
       watch:
-        "At 16:50 ET, the agent sees that no incoming credit will arrive in time and informs the customer about the " +
+        "At 16:45 ET, the agent sees that the expected credit lands after Fedwire's 18:45 ET close, too late to send today, and informs the customer about the " +
         "USD 3,200 shortfall.",
       decide:
         "The agent asks to hold the wire for the next value date. Moving a wire to another day needs your approval.",

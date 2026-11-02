@@ -51,10 +51,9 @@ def _seeded_db() -> FakeDb:
         "payments": FakeCollection(key="paymentId"),
         "transactions": FakeCollection(key="transactionId"),
         "notifications": FakeCollection(key="notificationId"),
-        "demoClocks": FakeCollection(key="_id"),
         "staffDirectory": FakeCollection(cutoff_seed.staff_docs(today), key="staffId"),
-        "approvalRequests": FakeCollection(cutoff_seed.synthetic_lena_requests(today),
-                                           key="approvalRequestId"),
+        # Clock runs, approval requests and screening items share one collection.
+        "cutoffWorkflow": FakeCollection(cutoff_seed.synthetic_lena_requests(today), key="_id"),
     })
 
 
@@ -126,15 +125,16 @@ def test_rerunning_a_scenario_supersedes_and_still_holds(service, db, key):
     assert [_stored(db, r)["status"] for r in results[:2]] == ["REJECTED", "REJECTED"]
     assert _stored(db, results[0])["lifecycle"]["events"][-1]["reason"] == \
         cutoff_scenarios.SUPERSEDED_REASON
-    for name in ("approvalRequests", "screeningQueue"):
-        open_real = [d for d in db[name].docs
+    for kind in (hold_queues.APPROVAL_REQUEST, hold_queues.SCREENING_ITEM):
+        records = [d for d in db["cutoffWorkflow"].docs if d.get("kind") == kind]
+        open_real = [d for d in records
                      if d["status"] == hold_queues.OPEN and not d.get("synthetic")]
         assert [d["paymentId"] for d in open_real] in ([], [results[2]["paymentId"]])
-        cancelled = {d["paymentId"] for d in db[name].docs
+        cancelled = {d["paymentId"] for d in records
                      if d["status"] == hold_queues.CANCELLED and not d.get("synthetic")}
         assert cancelled <= {results[0]["paymentId"], results[1]["paymentId"]}
-    stale_backlog = [d for d in db["screeningQueue"].docs
-                     if d["status"] == hold_queues.OPEN and d.get("synthetic")
+    stale_backlog = [d for d in db["cutoffWorkflow"].docs
+                     if d.get("kind") == hold_queues.SCREENING_ITEM and d["status"] == hold_queues.OPEN and d.get("synthetic")
                      and d["demo"]["clockRunId"] != results[2]["runId"]]
     assert stale_backlog == []
 
@@ -224,7 +224,8 @@ def test_c5_is_ten_minutes_from_fedwire(service, db):
 def test_synthetic_queue_items_create_no_payments(service, db):
     cutoff_scenarios.run_one(service, "C2")
 
-    synthetic = [d for d in db["screeningQueue"].docs if d["synthetic"]]
+    synthetic = [d for d in db["cutoffWorkflow"].docs
+                 if d.get("kind") == hold_queues.SCREENING_ITEM and d["synthetic"]]
     assert len(synthetic) == 7
     payment_ids = {p["paymentId"] for p in db["payments"].docs}
     assert not payment_ids & {d["paymentId"] for d in synthetic}
@@ -253,7 +254,7 @@ def test_weekend_rolls_back_to_the_previous_weekday():
 def test_run_records_its_anchor_and_business_date(service, db):
     result = cutoff_scenarios.run_one(service, "C1")
 
-    run = db["demoClocks"].find_one({"_id": result["runId"]})
+    run = db["cutoffWorkflow"].find_one({"_id": result["runId"]})
     assert run["scenario"] == "C1"
     assert run["anchorEtMinutes"] == 17 * 60 + 5
     assert run["businessDate"] == cutoff_seed.business_date_for(
@@ -263,7 +264,7 @@ def test_run_records_its_anchor_and_business_date(service, db):
 def test_advance_moves_only_its_run_and_invalidates_the_cache(service, db):
     mine = cutoff_scenarios.run_one(service, "C1")["runId"]
     other = cutoff_scenarios.run_one(service, "C3")["runId"]
-    clocks = db["demoClocks"]
+    clocks = db["cutoffWorkflow"]
     other_before = clocks.find_one({"_id": other})["offsetSeconds"]
     business_clock.now(mine, clocks=clocks)           # warm the cache
     before = clocks.find_one({"_id": mine})["offsetSeconds"]
@@ -293,7 +294,7 @@ def test_reset_restores_the_start_minute(service, db):
     clock = cutoff_scenarios.move_clock(db, run_id, reset=True)
 
     assert business_clock.to_et(clock["businessNow"]).strftime("%H:%M") == "17:05"
-    now = business_clock.now(run_id, clocks=db["demoClocks"])
+    now = business_clock.now(run_id, clocks=db["cutoffWorkflow"])
     assert business_clock.minutes_since_midnight_et(now) == 17 * 60 + 5
 
 
@@ -311,7 +312,7 @@ def test_move_clock_needs_exactly_one_action(service, db, kwargs):
 
 def test_next_business_day_jumps_to_the_next_open_and_moves_the_business_date(service, db):
     run_id = cutoff_scenarios.run_one(service, "C1")["runId"]
-    run = db["demoClocks"].find_one({"_id": run_id})
+    run = db["cutoffWorkflow"].find_one({"_id": run_id})
     expected = cutoff_policy.next_business_day(
         datetime.fromisoformat(run["businessDate"]).date())
 
@@ -319,21 +320,21 @@ def test_next_business_day_jumps_to_the_next_open_and_moves_the_business_date(se
 
     business_et = business_clock.to_et(clock["businessNow"])
     assert business_et.date() == expected and business_et.strftime("%H:%M") == "09:00"
-    stored = db["demoClocks"].find_one({"_id": run_id})
+    stored = db["cutoffWorkflow"].find_one({"_id": run_id})
     assert stored["businessDate"] == expected.isoformat()
-    now = business_clock.now(run_id, clocks=db["demoClocks"])
+    now = business_clock.now(run_id, clocks=db["cutoffWorkflow"])
     assert business_clock.minutes_since_midnight_et(now) == 9 * 60
 
 
 def test_next_business_day_from_a_friday_lands_on_monday(service, db):
     run_id = cutoff_scenarios.run_one(service, "C1")["runId"]
     friday = datetime(2026, 10, 9).date()
-    db["demoClocks"].update_one({"_id": run_id}, {"$set": {"businessDate": friday.isoformat()}})
+    db["cutoffWorkflow"].update_one({"_id": run_id}, {"$set": {"businessDate": friday.isoformat()}})
 
     clock = cutoff_scenarios.move_clock(db, run_id, next_business_day="09:00")
 
     assert business_clock.to_et(clock["businessNow"]).date().isoformat() == "2026-10-12"
-    assert db["demoClocks"].find_one({"_id": run_id})["businessDate"] == "2026-10-12"
+    assert db["cutoffWorkflow"].find_one({"_id": run_id})["businessDate"] == "2026-10-12"
 
 
 def test_next_business_day_is_forward_only_and_repeatable(service, db):
@@ -343,7 +344,7 @@ def test_next_business_day_is_forward_only_and_repeatable(service, db):
 
     again = cutoff_scenarios.move_clock(db, run_id, next_business_day="09:00", real_now=later)
 
-    stored = db["demoClocks"].find_one({"_id": run_id})
+    stored = db["cutoffWorkflow"].find_one({"_id": run_id})
     assert again["offsetSeconds"] == first["offsetSeconds"] == stored["offsetSeconds"]
     assert stored["businessDate"] == stored[cutoff_scenarios.FAST_FORWARDED_TO]
 

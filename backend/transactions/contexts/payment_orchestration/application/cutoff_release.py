@@ -338,7 +338,7 @@ def release_run(service, run_id: str, *, actor: str,
 # --- expired runs and the janitor -----------------------------------------------
 
 def recover_run(service, old_run_id: str, *, real_now: Optional[datetime] = None) -> str:
-    """A live run for payments whose clock run expired (`demoClocks` has a 24 h TTL).
+    """A live run for payments whose clock run expired (clock runs expire after 24 h).
 
     The new run reads next business day 09:00 ET, already fast-forwarded, and the payments
     are re-tagged to it with `demo.recoveredFrom`. A run that still exists is returned as

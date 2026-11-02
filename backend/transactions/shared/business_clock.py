@@ -1,7 +1,7 @@
 """Business clock: the one place the money path asks "what time is it?".
 
 An untagged payment gets real UTC. A payment tagged with a demo clock run (`demo.clockRunId`)
-gets real UTC plus that run's `offsetSeconds`, read from `demoClocks`. That lets a presenter
+gets real UTC plus that run's `offsetSeconds`, read from the `cutoffWorkflow` collection (kind CLOCK). That lets a presenter
 put a payment at 17:31 ET without waiting for 17:31 ET, while every stage still reads one
 consistent clock.
 
@@ -24,10 +24,12 @@ from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
+from shared import cutoff_workflow
+
 logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
-CLOCKS = "demoClocks"
+CLOCKS = cutoff_workflow.COLLECTION
 
 # A demo run's offset is fixed at creation, so a short cache only saves the round trip that
 # every stage transition would otherwise make. Keyed per run id.
@@ -72,16 +74,19 @@ def create_run(clocks, *, offset_seconds: int, real_now: Optional[datetime] = No
                scenario: Optional[str] = None, anchor_et_minutes: Optional[int] = None,
                business_date: Optional[date] = None,
                session_id: Optional[str] = None) -> str:
-    """Persist a clock run and return its id. `createdAt` feeds the 24h TTL index.
+    """Persist a clock run and return its id. `expireAt` feeds the collection's TTL index.
 
     The optional fields record what the run was anchored to, so a clock `reset` can return
     to the start minute (cutoff plan Q7) and a re-run can find its predecessors.
     """
     run_id = f"CLK-{ObjectId()}"
+    created = real_now or datetime.now(timezone.utc)
     doc = {
         "_id": run_id,
+        "kind": cutoff_workflow.CLOCK,
         "offsetSeconds": int(offset_seconds),
-        "createdAt": real_now or datetime.now(timezone.utc),
+        "createdAt": created,
+        "expireAt": cutoff_workflow.expires_at(created),
     }
     if scenario is not None:
         doc["scenario"] = scenario
@@ -103,7 +108,7 @@ def forget(clock_run_id: str) -> None:
 
 
 def clocks_for(ctx):
-    """The `demoClocks` handle for a context, or None when the context has no database."""
+    """The `cutoffWorkflow` handle for a context, or None when the context has no database."""
     collections = getattr(ctx, "collections", None)
     db = getattr(collections, "db", None) if collections is not None else None
     return db[CLOCKS] if db is not None else None
@@ -119,7 +124,7 @@ def _offset_seconds(clock_run_id: str, clocks) -> Optional[int]:
     if cached and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
         return cached[1]
     if clocks is None:
-        logger.warning("clock run %s requested without a demoClocks handle; using real time",
+        logger.warning("clock run %s requested without a cutoffWorkflow handle; using real time",
                        clock_run_id)
         return None
     try:
