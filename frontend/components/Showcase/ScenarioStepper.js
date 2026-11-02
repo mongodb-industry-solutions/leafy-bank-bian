@@ -4,7 +4,7 @@
 // the payment, its trace, the OPEN exceptions list and the followed exceptions' agent{}.
 // AgentThinking owns only its own steps poll.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Body, Overline } from "@leafygreen-ui/typography";
 import { agentApi, coreApi, pipelineApi } from "@/lib/api/client";
 import { usePaymentWorkflow, usePipelineTrace, useWorkflowExceptions } from "@/lib/api/hooks";
@@ -20,7 +20,7 @@ import DecisionScene from "./scenes/DecisionScene";
 import ResultScene from "./scenes/ResultScene";
 import AgentFailure from "./scenes/AgentFailure";
 import { gapOf, railLegOf } from "./scenes/format";
-import { phaseOfStep, useRunLog } from "./runLog";
+import { phaseOfStep, usePacedEvents, useRunLog } from "./runLog";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
@@ -30,6 +30,8 @@ const EXPECTED_OUTCOMES = {
   R1: ["RECONCILED"], R1b: ["RECONCILED"], R2: ["RECONCILED"], TL: ["RECONCILED"],
   R4: ["RECONCILED", "ESCALATED"], R5: ["ANSWERED", "ESCALATED"],
 };
+const BATCH_KICK_GAP_MS = 12000;
+const BATCH_KICK_LIMIT = 5;
 const OWN_CATEGORIES = new Set([CATEGORY.DISCREPANCY, CATEGORY.MISSING]);
 
 const generateStatement = (includeOrphan) =>
@@ -197,6 +199,20 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
 
   const { steps: agentSteps, started: agentStarted } = useAgentSteps(followedId, !outcome);
 
+  // The payment flips to RECONCILED on the next GL batch, which the scheduler runs every 10
+  // minutes. Once the agent has closed the exception, trigger the batch ourselves (the earlier
+  // steps do the same) and retry a few times: the adjustment journal may not be posted yet.
+  const batchKicks = useRef({ at: 0, count: 0 });
+  const agentResolved = agent?.verification?.result === "RESOLVED";
+  const awaitingBatch = scenarioKey !== "R5" && agentResolved && !reconciled;
+  useEffect(() => {
+    const k = batchKicks.current;
+    if (!awaitingBatch || k.count >= BATCH_KICK_LIMIT || Date.now() - k.at < BATCH_KICK_GAP_MS) return;
+    k.at = Date.now();
+    k.count += 1;
+    pipelineApi("batch/trigger", null, { method: "POST" });
+  }, [awaitingBatch, tick]);
+
   // The first non-zero gap seen is the "before" of the result card; reconciling zeroes the live one.
   const railLeg = railLegOf(trace);
   const liveGap = gapOf(railLeg);
@@ -207,10 +223,12 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
 
   // verify() clears proposedAction on the agent record; the remembered one keeps the proposal on screen.
   const proposal = agent?.proposedAction || (followedId ? lastProposals[followedId] : null);
-  const { events, push: pushEvent } = useRunLog({
+  const { events: allEvents, push: pushEvent } = useRunLog({
     scenario, scenarioKey, steps, index, step, ctx, payment, trace, agentSteps, agentStarted, agent, proposal,
     exceptions: trackedExceptions, gapMajor: liveGap == null ? null : liveGap / 100,
   });
+  // Lines appear one at a time, as in the cut-off walkthrough, so the presenter can read each.
+  const { events, backlog } = usePacedEvents(allEvents);
 
   const countdownLeft = step.countdown && ctx.settledAt
     ? Math.max(0, Math.ceil(OVERDUE_SECONDS - (now - ctx.settledAt) / 1000))
@@ -230,6 +248,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     if (step.gate === "decided" && !ctx.decision) return "Approve or reject the proposal";
     if (step.final && !outcome) {
       if (revisedProposalPending) return "The agent revised its proposal. Approve or reject it";
+      if (awaitingBatch) return "Exception resolved. Waiting for the ledger batch to mark the payment reconciled…";
       return scenarioKey === "TL" ? "Waiting for the agent's next sweep…" : "Waiting for the outcome…";
     }
     return null;
@@ -309,10 +328,11 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     externalWait:
       step.countdown && countdownLeft > 0 ? `Statement window closes in ${countdownLeft}s`
       : awaitingReply ? "Waiting for the correspondent bank's reply"
+      : awaitingBatch ? "Waiting for the ledger batch to reconcile the payment"
       : step.final && !outcome && scenarioKey === "TL" ? "Waiting for the agent's next sweep"
       : null,
     systemWait: agentGate && !followedId ? "Waiting for the exception to appear" : null,
-    agentBusy: !!followedId && !outcome && !agent?.error && agentWorking && !revisedProposalPending,
+    agentBusy: !!followedId && !outcome && !agent?.error && agentWorking && !revisedProposalPending && !awaitingBatch,
     agentSteps,
     bank: scenario.bank,
   });
@@ -361,6 +381,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
           controller={controller}
           activity={activity}
           events={events}
+          pending={backlog > 0 ? "Next event coming…" : null}
           sources={sources}
           evidence={actOf(step.key) >= 2 && (
             <ProblemScene
