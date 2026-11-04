@@ -398,7 +398,7 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         "acceptanceDecision": None,
         # Stage 2's slots, present-but-empty for the same reason as every other block here:
         # a later stage fills them without an `$exists`-branching read. The per-check trail is
-        # not stored here: it lives in `paymentHistory` (`domain/lifecycle_history.py`).
+        # not stored here: it lives in `paymentTimeline` (`domain/lifecycle_history.py`).
         "authentication": None,
         "entitlement": None,
         # Stage 3's as-captured/diff record (doc 17 B1, Doina Q21). The SIXTH field written

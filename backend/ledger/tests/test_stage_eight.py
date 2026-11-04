@@ -640,7 +640,7 @@ def test_the_reconciled_event_matches_the_state_machines_own_shape():
     c.seed("ledgerEvents", [_principal_event()])
     reconcile_settled_payments(c, "db")
 
-    event = max((d for d in c.get_collection("db", "paymentHistory").docs if d["kind"] == "EVENT"),
+    event = max((d for d in c.get_collection("db", "paymentTimeline").docs if d["kind"] == "EVENT"),
                 key=lambda d: d["seq"])
     expected_keys = set(tx_lifecycle._event(
         "RECONCILED", "x", "SERVICE", "r", datetime(2026, 9, 3, tzinfo=timezone.utc),

@@ -34,7 +34,7 @@ for p in stuck:
     if not apply:
         continue
     now = datetime.now(timezone.utc)
-    # One transaction: the state change and its `EVENT` in `paymentHistory` land together.
+    # One transaction: the state change and its `EVENT` in `paymentTimeline` land together.
     with db.client.start_session() as session:
         with session.start_transaction():
             updated = db.payments.find_one_and_update(
@@ -47,7 +47,7 @@ for p in stuck:
             if updated is None:
                 continue
             seq = updated["lifecycle"]["eventCount"]
-            db.paymentHistory.insert_one({
+            db.paymentTimeline.insert_one({
                 "_id": f"{updated['paymentId']}:EVENT:{seq}", "paymentId": updated["paymentId"],
                 "rail": updated.get("rail"), "kind": "EVENT", "seq": seq,
                 "state": "IN_PROGRESS", "at": now, "actor": "repair-script", "actorType": "SERVICE",

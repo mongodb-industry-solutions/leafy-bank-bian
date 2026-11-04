@@ -40,7 +40,7 @@ import cutoff_agent
 import cutoff_cases as cases
 import cutoff_clock
 import cutoff_risk as risk_mod
-import payment_history
+import payment_timeline
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ def _evaluate(agent: Any, db: Any, payment: dict, source: str, real_now: datetim
 
 
 def _last_reason(db: Any, payment: dict) -> Optional[str]:
-    event = payment_history.latest_event(db, payment.get("paymentId"))
+    event = payment_timeline.latest_event(db, payment.get("paymentId"))
     return event.get("reason") if event else None
 
 

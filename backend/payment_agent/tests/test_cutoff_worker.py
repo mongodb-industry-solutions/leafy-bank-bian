@@ -42,13 +42,13 @@ def runs(monkeypatch):
 
 def _apply(db, fields):
     """Set `fields` on the payment. `_last_reason` is not a payment field: it becomes the
-    payment's latest lifecycle `EVENT` in `paymentHistory`."""
+    payment's latest lifecycle `EVENT` in `paymentTimeline`."""
     fields = dict(fields)
     reason = fields.pop("_last_reason", None)
     if fields:
         db["payments"].update_one({"paymentId": PID}, {"$set": fields})
     if reason is not None:
-        db["paymentHistory"].docs.append(
+        db["paymentTimeline"].docs.append(
             {"paymentId": PID, "kind": "EVENT", "seq": 99, "state": "REJECTED", "reason": reason})
 
 

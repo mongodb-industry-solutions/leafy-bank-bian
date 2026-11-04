@@ -61,7 +61,7 @@ def _with_payment(state: str = "IN_PROGRESS", **extra) -> FakeConnection:
     # while this test passed. Phase C's "check fixtures for fidelity" rule, and the same
     # class as stage 1's `_account()` setting `accountType` where the code reads `type`.
     c.seed("transactions", [{"paymentId": _PAY, "txnId": "TXN-0001"}])
-    # Events live in `paymentHistory`; the payment carries the counter.
+    # Events live in `paymentTimeline`; the payment carries the counter.
     c.seed("payments", [{
         "paymentId": _PAY,
         "status": state,
@@ -69,13 +69,13 @@ def _with_payment(state: str = "IN_PROGRESS", **extra) -> FakeConnection:
         "refs": {"journalEntryId": None, "ledgerEventId": None, "transactionId": None},
         **extra,
     }])
-    c.seed("paymentHistory", [{"_id": f"{_PAY}:EVENT:1", "paymentId": _PAY, "kind": "EVENT",
+    c.seed("paymentTimeline", [{"_id": f"{_PAY}:EVENT:1", "paymentId": _PAY, "kind": "EVENT",
                                "seq": 1, "state": state}])
     return c
 
 
 def _events(c: FakeConnection) -> list:
-    docs = c.get_collection("db", "paymentHistory").docs
+    docs = c.get_collection("db", "paymentTimeline").docs
     return sorted((d for d in docs if d["kind"] == "EVENT"), key=lambda d: d["seq"])
 
 
@@ -217,7 +217,7 @@ def test_a_failed_event_insert_rolls_the_posted_transition_back():
     """The POSTED state change and its `EVENT` are one transaction: no state without a
     trail, no trail without a state."""
     c = _with_payment("IN_PROGRESS")
-    c.raise_on = "paymentHistory"
+    c.raise_on = "paymentTimeline"
     from services.posting_writeback_service import write_back
     write_back("JNL-X", [_EVENT], c, "db")           # never raises (module docstring)
     p = c.get_collection("db", "payments").docs[0]
@@ -228,7 +228,7 @@ def test_a_failed_event_insert_rolls_the_posted_transition_back():
 
 
 def test_the_written_event_matches_the_state_machines_own_shape():
-    """The ledger writes `EVENT` documents to `paymentHistory` without importing the transactions service's
+    """The ledger writes `EVENT` documents to `paymentTimeline` without importing the transactions service's
     state machine (B1(d)). This is the assertion that keeps the two shapes in agreement."""
     c = _with_payment("IN_PROGRESS")
     _post(c)

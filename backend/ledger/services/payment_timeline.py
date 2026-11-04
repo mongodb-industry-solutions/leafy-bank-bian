@@ -1,8 +1,8 @@
-"""Write a lifecycle `EVENT` into `paymentHistory` alongside the `payments` update it belongs to.
+"""Write a lifecycle `EVENT` into `paymentTimeline` alongside the `payments` update it belongs to.
 
 The ledger advances `payments.lifecycle.currentState` to POSTED and RECONCILED (spec-mandated,
 see `posting_writeback_service`). `lifecycle.events[]` no longer lives on `payments`: each event
-is a `paymentHistory` document (`kind: "EVENT"`, `seq` from `lifecycle.eventCount`). The
+is a `paymentTimeline` document (`kind: "EVENT"`, `seq` from `lifecycle.eventCount`). The
 transactions service owns that design (`lifecycle_history.py`); this module mirrors only the
 document shape, because services never import each other. `test_stage_six` and
 `test_stage_eight` assert the two shapes agree.
@@ -14,7 +14,7 @@ from typing import Optional
 
 from pymongo import ReturnDocument
 
-HISTORY = "paymentHistory"
+HISTORY = "paymentTimeline"
 EVENT = "EVENT"
 
 

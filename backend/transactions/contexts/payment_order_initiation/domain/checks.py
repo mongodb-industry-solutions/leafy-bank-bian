@@ -1,4 +1,4 @@
-"""The per-check audit trail every stage from 2 on appends to (`CHECK` docs in `paymentHistory`).
+"""The per-check audit trail every stage from 2 on appends to (`CHECK` docs in `paymentTimeline`).
 
 Originally the embedded array `payments.checks[]`; moved out with `lifecycle.events[]` because
 both grew without bound (see `lifecycle_history.py`). The rationale below still holds.
@@ -13,7 +13,7 @@ result "none" — and doc 07's P1 item 4 asks for exactly this artifact: *per-ch
 actor, timestamp, sync/async*, for stage 2 **and** stage 3.
 
 One general array rather than a per-stage structure (doc 15 B3): stage 2 appends its six
-entries, stage 3 appends its ten, and a consumer filters by `stage`. The trace is one query on `paymentHistory` (`lifecycle_history.attach`).
+entries, stage 3 appends its ten, and a consumer filters by `stage`. The trace is one query on `paymentTimeline` (`lifecycle_history.attach`).
 
 ## The rules
 
@@ -100,7 +100,7 @@ def check(
 
 
 def append_checks(payments, payment_oid, entries, *, session=None) -> None:
-    """Record `entries` as `CHECK` documents in `paymentHistory`. A no-op for an empty list.
+    """Record `entries` as `CHECK` documents in `paymentTimeline`. A no-op for an empty list.
 
     One transaction: `$inc lifecycle.checkCount` by N on the payment, then insert the N
     documents with the `seq` range that increment allocated. Concurrent appends to one payment

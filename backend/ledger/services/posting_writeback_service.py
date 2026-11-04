@@ -35,7 +35,7 @@ import logging
 from datetime import datetime, timezone
 
 from database.connection import MongoDBConnection
-from services import payment_history
+from services import payment_timeline
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ def _write_back(
         # reached a statement (PAY-31f6d99c, 2026-09-30). The posting axis above still
         # records POSTED; only the state waits, exactly as for a SETTLED internal transfer.
         try:
-            payment_history.advance_with_event(
+            payment_timeline.advance_with_event(
                 payments,
                 {"paymentId": payment_id, "lifecycle.currentState": _IN_PROGRESS,
                  "lifecycle.settlementStatus": {"$ne": _SETTLEMENT_PENDING}},

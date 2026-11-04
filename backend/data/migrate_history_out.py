@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Move `payments.lifecycle.events[]` and `payments.checks[]` into `paymentHistory`.
+"""Move `payments.lifecycle.events[]` and `payments.checks[]` into `paymentTimeline`.
 
 See `.claude/outputs/plan-lifecycle-history-out.md`. Run from `backend/transactions`:
 
@@ -19,7 +19,7 @@ payments that still carry an array are selected, and history documents that alre
 `--apply` first copies `payments` to `payments_backup_<YYYYMMDD>` and refuses to touch any payment
 if that copy is missing or smaller than the set being migrated.
 
-`--reverse` rebuilds the arrays from `paymentHistory` and deletes the history documents; the
+`--reverse` rebuilds the arrays from `paymentTimeline` and deletes the history documents; the
 only rollback once new traffic has written history under the new build.
 """
 
@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from pymongo import MongoClient
 
-HISTORY = "paymentHistory"
+HISTORY = "paymentTimeline"
 EVENT = "EVENT"
 CHECK = "CHECK"
 _ENVELOPE = ("_id", "paymentId", "rail", "kind", "seq")
@@ -118,7 +118,7 @@ def migrate(db, apply: bool, batch: int) -> int:
 
 def reverse(db, apply: bool, batch: int) -> int:
     query = {"lifecycle.eventCount": {"$exists": True}}
-    print(f"{db.payments.count_documents(query)} payment(s) use paymentHistory [{'APPLY' if apply else 'DRY-RUN'}]")
+    print(f"{db.payments.count_documents(query)} payment(s) use paymentTimeline [{'APPLY' if apply else 'DRY-RUN'}]")
     reverted = 0
     for payment in db.payments.find(query, {"paymentId": 1}).batch_size(batch):
         if not apply:
@@ -141,7 +141,7 @@ def reverse(db, apply: bool, batch: int) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--apply", action="store_true", help="write changes (default: dry-run)")
-    parser.add_argument("--reverse", action="store_true", help="rebuild the arrays from paymentHistory")
+    parser.add_argument("--reverse", action="store_true", help="rebuild the arrays from paymentTimeline")
     parser.add_argument("--batch", type=int, default=200)
     args = parser.parse_args()
     load_dotenv(".env")

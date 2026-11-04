@@ -172,7 +172,7 @@ class FakeArtifacts:
 
 def _split_history(coll):
     """Move each fixture payment's embedded `lifecycle.events[]` / `checks[]` into
-    `paymentHistory` documents and leave the counters, as the writers store them. The
+    `paymentTimeline` documents and leave the counters, as the writers store them. The
     fixtures describe a payment as the API shows it; this turns that into the stored shape."""
     history = []
     for doc in coll.docs:

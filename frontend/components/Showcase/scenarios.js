@@ -154,11 +154,11 @@ export const SCENARIOS = [
     recommended: true,
     decision: {
       cause: { label: "Amount mismatch", code: "AMOUNT_MISMATCH" },
-      constraint: { label: "54.00 is not a fee RBC charges", code: "FEE refused" },
-      action: { label: "Ask the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
+      constraint: { label: "54.00 does not match any RBC fee", code: "FEE refused" },
+      action: { label: "Escalate to the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
     },
-    title: "Transposed amount",
-    story: "The bank books 7,306.00 instead of the 7,360.00 we sent. The 54.00 shortfall is larger than any fee this bank charges, so it is unexplained.",
+    title: "Amount discrepancy",
+    story: "The bank booked 7,306.00 against the 7,360.00 we sent. The 54.00 shortfall exceeds any fee RBC charges and cannot be explained.",
     talkingPoint: "A 54.00 gap is not a fee any correspondent charges, so the guard refuses FEE and the correspondent's answer settles it.",
     bank: "Royal Bank of Canada",
     wire: {
@@ -205,7 +205,7 @@ export const SCENARIOS = [
     decision: {
       cause: { label: "Unknown line", code: "ORPHANED" },
       constraint: { label: "No payment explains it", code: "no candidate" },
-      action: { label: "Ask the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
+      action: { label: "Escalate to the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
     },
     title: "Unknown statement line",
     story: "Our wire matches the statement. The statement also lists one extra line that does not belong to any payment we made.",
@@ -251,12 +251,12 @@ export const SCENARIOS = [
     mode: "autonomous",
     recommended: true,
     decision: {
-      cause: { label: "Statement is late", code: "TIMING" },
-      constraint: { label: "Moves no money", code: "no approval needed" },
-      action: { label: "Recheck on its own", code: "RECHECK" },
+      cause: { label: "Statement delayed", code: "TIMING" },
+      constraint: { label: "No funds movement involved", code: "no approval needed" },
+      action: { label: "Re-check automatically", code: "RECHECK" },
     },
-    title: "Late statement",
-    story: "Our wire settled normally, but the bank's statement has not arrived yet, so we cannot confirm it. Nothing is wrong so far.",
+    title: "Delayed statement",
+    story: "Our wire settled as expected, but the bank's statement has not yet arrived, so we cannot confirm receipt. No discrepancy has been identified.",
     talkingPoint: "RECHECK is the only action the agent may take on its own.",
     bank: "UBS",
     wire: {
@@ -301,13 +301,13 @@ export const GROUPS = [
   },
   {
     mode: "refuses",
-    title: "Knows when not to act",
-    blurb: "The agent declines to guess and asks the correspondent instead.",
+    title: "Escalates when uncertain",
+    blurb: "The agent declines to guess and escalates to the correspondent instead.",
   },
   {
     mode: "autonomous",
-    title: "Acts on its own",
-    blurb: "The one action that moves no money needs no approval.",
+    title: "Resolves autonomously",
+    blurb: "Actions that move no funds do not require approval.",
   },
 ];
 

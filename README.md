@@ -44,7 +44,7 @@ Legacy cores lock accounting behind COBOL batch cycles: the general ledger recon
 
 The payments workflow extends the money flow into a full payment lifecycle: domestic and cross-border, outgoing and incoming, aligned to ISO 20022 messaging and organized by BIAN v14 service domains. **It covers wires and internal transfers.** Rail submission, correspondent responses and external settlement run against built-in simulators, so the full lifecycle runs end to end in a demo environment.
 
-**Design in one line:** one canonical `payments` document per payment (a single `paymentId`, with a typed `wireDetails` / `internalDetails` branch, not one collection per rail) + rail adapters (the ISO 20022 message is built only at the rail boundary) + an append-only lifecycle history in `paymentHistory`.
+**Design in one line:** one canonical `payments` document per payment (a single `paymentId`, with a typed `wireDetails` / `internalDetails` branch, not one collection per rail) + rail adapters (the ISO 20022 message is built only at the rail boundary) + an append-only lifecycle history in `paymentTimeline`.
 
 *Internal transfers are book transfers: they settle at the money move (stage 5), post at stage 6, and reconcile with a single Payment-to-GL comparison. External wires settle at stage 7. Stage 9 is modelled as a state and action on the originating payment, with the queue in the `exceptions` collection.*
 
@@ -114,7 +114,7 @@ BIAN supplies business-capability and service-domain semantics; ISO 20022 suppli
 
 | Stage | BIAN service domain(s) | Collections written |
 | --- | --- | --- |
-| 1 Initiation | `PaymentOrderInitiation` (42933) | `payments`, `paymentHistory` |
+| 1 Initiation | `PaymentOrderInitiation` (42933) | `payments`, `paymentTimeline` |
 | 2 Authentication & Authorization | `PartyAuthentication` (38917), `CustomerAccessEntitlement` (43057) | check results on `payments` |
 | 3 Validation & Enrichment | `PaymentOrderInitiation` | `payments` (validation, `idempotency`, `fx`, enrichment) |
 | 4 Orchestration & Approval | `PaymentOrchestration` (48782), `FraudEvaluation` (44625), `TransactionAuthorization` (43343) | `routingSnapshots` (immutable), `payments.fraud` |
@@ -243,7 +243,7 @@ Put together, the three services form one high-level flow around a single MongoD
 | `customers`        | PartyReferenceDataDirectoryEntry | Customer master + nested KYC                                                       |
 | `accounts`         | CurrentAccountFacility           | Source-of-truth balances                                                           |
 | `payments`         | PaymentOrderInitiation           | Canonical payment (outbound and inbound), lifecycle state plus posting, settlement and reconciliation axes |
-| `paymentHistory`   | PaymentOrderInitiation           | Insert-only lifecycle events and checks, one doc each, written with the `payments` update |
+| `paymentTimeline`   | PaymentOrderInitiation           | Insert-only lifecycle events and checks, one doc each, written with the `payments` update |
 | `routingSnapshots` | PaymentOrchestration             | Immutable route chosen at stage 4                                                  |
 | `paymentExecutions`| PaymentRail                      | One doc per outbound execution attempt                                             |
 | `canonicalJsonStorage` | FinancialGateway / PaymentRail   | pacs.008 / pacs.002 / pacs.004 and simulated settlement or statement messages     |
@@ -257,7 +257,7 @@ Put together, the three services form one high-level flow around a single MongoD
 | `subLedgerEntries` | FinancialAccounting              | Stage ②: two entries per event (DR + CR)                                          |
 | `journalEntries`   | FinancialAccounting              | Stage ③: batched, balanced (Pacioli enforced)                                     |
 
-**How the collections chain together** — no `$lookup`-style foreign keys, just a carried-forward identifier at each stage: `payments.paymentId` → (`routingSnapshots`, `paymentExecutions`, `paymentHistory`, `settlementPositions`, `reconciliationItems`, all keyed by `paymentId`) → `transactions.paymentId` → `ledgerEvents.sourceReference.sourceId` → `subLedgerEntries.sourceReference.sourceId` → `journalEntries.journalId`, which then gets stamped back onto `subLedgerEntries.journalEntryId` and `ledgerEvents.postingResult.journalEntryId`. Every hop is a single indexed lookup — that's what lets `/pipeline/trace/{paymentId}` assemble the full trace without an aggregation-pipeline join.
+**How the collections chain together** — no `$lookup`-style foreign keys, just a carried-forward identifier at each stage: `payments.paymentId` → (`routingSnapshots`, `paymentExecutions`, `paymentTimeline`, `settlementPositions`, `reconciliationItems`, all keyed by `paymentId`) → `transactions.paymentId` → `ledgerEvents.sourceReference.sourceId` → `subLedgerEntries.sourceReference.sourceId` → `journalEntries.journalId`, which then gets stamped back onto `subLedgerEntries.journalEntryId` and `ledgerEvents.postingResult.journalEntryId`. Every hop is a single indexed lookup — that's what lets `/pipeline/trace/{paymentId}` assemble the full trace without an aggregation-pipeline join.
 
 ### Indexing and validators (ledger service)
 
@@ -303,7 +303,7 @@ make setup
 # 2. Create a .env per backend service and frontend/.env.local — see Environment variables below
 
 # 3. Create indexes and validators: the GL collections (ledger) and the payment
-#    collections (transactions, e.g. paymentHistory) — see "Indexing and validators"
+#    collections (transactions, e.g. paymentTimeline) — see "Indexing and validators"
 cd backend/ledger && poetry run python -m data.ensure_indexes && cd ../..
 cd backend/transactions && poetry run python -m data.ensure_indexes && cd ../..
 

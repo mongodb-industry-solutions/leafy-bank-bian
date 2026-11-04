@@ -43,7 +43,7 @@ def main() -> int:
     db = MongoClient(os.environ["MONGODB_URI"])[os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")]
     seqs = defaultdict(lambda: defaultdict(list))
     last_state = {}
-    for h in db.paymentHistory.find({}, {"paymentId": 1, "kind": 1, "seq": 1, "state": 1}).sort("seq", 1):
+    for h in db.paymentTimeline.find({}, {"paymentId": 1, "kind": 1, "seq": 1, "state": 1}).sort("seq", 1):
         seqs[h["paymentId"]][h["kind"]].append(h["seq"])
         if h["kind"] == "EVENT":
             last_state[h["paymentId"]] = h.get("state")

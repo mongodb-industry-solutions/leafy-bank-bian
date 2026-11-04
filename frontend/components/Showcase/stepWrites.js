@@ -14,7 +14,7 @@ export function paymentDoc(payment) {
   if (!payment) return null;
   const doc = { ...payment };
   JOINED.forEach((k) => delete doc[k]);
-  // `lifecycle.events[]` and `checks[]` live in `paymentHistory`; the API joins them back.
+  // `lifecycle.events[]` and `checks[]` live in `paymentTimeline`; the API joins them back.
   // The stored payment keeps only `lifecycle.eventCount` and `checkCount`.
   if (doc.lifecycle) {
     const { events, ...lifecycle } = doc.lifecycle;
@@ -23,7 +23,7 @@ export function paymentDoc(payment) {
   return doc;
 }
 
-// The `paymentHistory` documents behind the joined `lifecycle.events[]` and `checks[]`: one per
+// The `paymentTimeline` documents behind the joined `lifecycle.events[]` and `checks[]`: one per
 // event or check, `seq` in write order. Rebuilt from the API's joined arrays, so `_id` follows
 // the stored `{paymentId}:{kind}:{seq}` form. `states` picks events, `stages` picks checks
 // by their leading stage number ("3 validate" -> "3").
@@ -66,7 +66,7 @@ const followed = ({ followedException, agent }) =>
 const W = (collection, op, fields, pick, via) => ({ collection, op, fields, pick, via });
 
 const INITIATE = [
-  W("payments", "insert", "The payment itself: lifecycle.currentState IN_PROGRESS, lifecycle.settlementStatus PENDING, clearing.*; its events and checks go to paymentHistory",
+  W("payments", "insert", "The payment itself: lifecycle.currentState IN_PROGRESS, lifecycle.settlementStatus PENDING, clearing.*; its events and checks go to paymentTimeline",
     ({ payment }) => nonEmpty(paymentDoc(payment))),
   W("transactions", "insert", "The money movement, written in the same ACID transaction that debits the customer's account",
     ({ trace }) => nonEmpty(trace?.transaction)),

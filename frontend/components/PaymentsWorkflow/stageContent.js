@@ -58,7 +58,7 @@ const COPY = {
     },
     [IN]: {
       business: "The bank decides whether to accept the incoming payment, after compliance checks.",
-      technical: "The accept or reject decision, with its checks, is recorded on the payment and in paymentHistory.",
+      technical: "The accept or reject decision, with its checks, is recorded on the payment and in paymentTimeline.",
       why: "Accept or reject is one acceptanceDecision object, rolled up from results already stored on the same document.",
     },
   },
@@ -117,10 +117,10 @@ const executionMessages = ({ payment }) =>
 
 const whole = ({ payment }) => nonEmpty(paymentDoc(payment));
 
-// One `paymentHistory` row per stage: its lifecycle events and checks, as stored.
+// One `paymentTimeline` row per stage: its lifecycle events and checks, as stored.
 const HISTORY_FIELDS = "Lifecycle events and checks from this stage, one document each with a contiguous seq";
 const history = (filter, fields = HISTORY_FIELDS) =>
-  W("paymentHistory", "insert", fields, ({ payment }) => historyDocs(payment, filter));
+  W("paymentTimeline", "insert", fields, ({ payment }) => historyDocs(payment, filter));
 
 // Writes per lifecycle stage key. A panel inside a grouped stage uses its own key; a grouped
 // stage's rail is the union of its panels.
@@ -134,7 +134,7 @@ const WRITES = {
     history({ stages: ["2"] }),
   ],
   validation: [
-    W("payments", "update", "enrichment{}, validation{} and refs.fundsReservationId (the funds hold) from this stage; the checks go to paymentHistory", whole),
+    W("payments", "update", "enrichment{}, validation{} and refs.fundsReservationId (the funds hold) from this stage; the checks go to paymentTimeline", whole),
     history({ states: ["VALIDATED", "ENRICHED", "FINAL_VALIDATED"], stages: ["3"] }),
   ],
   authorization: [
@@ -187,7 +187,7 @@ const WRITES = {
 const INBOUND_WRITES = {
   // Funds are reserved against a customer debit; inbound has none.
   validation: [
-    W("payments", "update", "enrichment{} and validation{} from this stage; the checks go to paymentHistory", whole),
+    W("payments", "update", "enrichment{} and validation{} from this stage; the checks go to paymentTimeline", whole),
     history({ states: ["VALIDATED", "ENRICHED", "FINAL_VALIDATED"], stages: ["3"] }),
   ],
   execution: [

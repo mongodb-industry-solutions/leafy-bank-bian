@@ -13,7 +13,7 @@ The canonical schema (`doinas-research/propose_payments.json`) is explicit:
 
 So every transition writes both. `status` is a mirror, never an independent value.
 
-Every transition is an **append-only** `EVENT` document in `paymentHistory` (see
+Every transition is an **append-only** `EVENT` document in `paymentTimeline` (see
 `lifecycle_history.py`) — chronological, one per transition, never rewritten or reordered. A
 correction is a new entry, not an edit. `payments` itself keeps only the fixed-size state and
 the counter `lifecycle.eventCount`, so the payment document does not grow with its history.

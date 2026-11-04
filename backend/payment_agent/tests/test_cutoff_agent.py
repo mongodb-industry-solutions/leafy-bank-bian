@@ -818,7 +818,7 @@ def test_fake_lease_filter_matches_a_missing_lease_like_mongodb():
 
 def test_the_submitted_time_is_read_from_the_latest_submitted_event():
     db = FakeDB()
-    db["paymentHistory"] = FakeColl([
+    db["paymentTimeline"] = FakeColl([
         {"paymentId": PID, "kind": "EVENT", "seq": 2, "state": "SUBMITTED", "at": et(18, 10)},
         {"paymentId": PID, "kind": "EVENT", "seq": 3, "state": "IN_PROGRESS", "at": et(18, 11)},
         {"paymentId": PID, "kind": "EVENT", "seq": 4, "state": "SUBMITTED", "at": et(18, 20)},
@@ -834,7 +834,7 @@ def test_the_trace_attaches_history_to_the_payment():
 
     db = FakeDB()
     db["payments"] = FakeColl([{"paymentId": PID, "lifecycle": {"currentState": "SETTLED", "eventCount": 2}}])
-    db["paymentHistory"] = FakeColl([
+    db["paymentTimeline"] = FakeColl([
         {"paymentId": PID, "kind": "EVENT", "seq": 2, "state": "SETTLED"},
         {"paymentId": PID, "kind": "CHECK", "seq": 1, "name": "funds_available"},
         {"paymentId": PID, "kind": "EVENT", "seq": 1, "state": "DRAFT"},

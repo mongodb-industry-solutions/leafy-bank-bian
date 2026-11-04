@@ -281,7 +281,7 @@ def test_registry_covers_the_a3_collections(monkeypatch):
     seen = []
     monkeypatch.setattr(ensure_indexes, "_ensure",
                         lambda conn, db_name, coll, specs: seen.append(coll) or [])
-    monkeypatch.setattr(ensure_indexes, "_ensure_payment_history", lambda *a, **kw: [])
+    monkeypatch.setattr(ensure_indexes, "_ensure_payment_timeline", lambda *a, **kw: [])
 
     ensure_indexes.ensure_transactions_indexes(FakeConnection(None), "db")
 

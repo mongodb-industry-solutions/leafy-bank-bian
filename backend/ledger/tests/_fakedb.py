@@ -85,7 +85,7 @@ class FakeCollection:
         self.docs: list[dict] = []
         self._owner = owner
         # pymongo's `Collection.database`: writers reach `.client` and sibling collections
-        # (`paymentHistory`) through it. The owning FakeConnection plays the database.
+        # (`paymentTimeline`) through it. The owning FakeConnection plays the database.
         self.database = owner
 
     # --- reads ---

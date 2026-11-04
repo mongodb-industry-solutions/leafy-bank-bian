@@ -58,7 +58,7 @@ class FakeCollection:
 
     # -- writes
     def insert_one(self, doc, *a, **kw):
-        # `_id` is always unique, as in Mongo. `paymentHistory._id` relies on it.
+        # `_id` is always unique, as in Mongo. `paymentTimeline._id` relies on it.
         if doc.get("_id") is not None and any(d.get("_id") == doc["_id"] for d in self.docs):
             raise DuplicateKeyError(f"dup _id={doc['_id']}")
         if self.unique_on:
@@ -190,7 +190,7 @@ class FakeSession:
     """`with_transaction` runs the callback inline and rolls the fake database back if it raises.
 
     The rollback is a snapshot of every collection's docs taken at entry. It is enough to
-    prove that two writes in one transaction land or vanish together (the `paymentHistory`
+    prove that two writes in one transaction land or vanish together (the `paymentTimeline`
     event insert vs the `payments` update); it does not model isolation between sessions.
     """
 
@@ -257,12 +257,12 @@ class FakeConnection:
 
 
 def joined(db, payment):
-    """`payment` with `lifecycle.events[]` and `checks[]` joined back from `paymentHistory`.
+    """`payment` with `lifecycle.events[]` and `checks[]` joined back from `paymentTimeline`.
 
     Tests that assert on a payment's trail read it through this, the same join the read
     service does, rather than expecting the arrays embedded on the stored document.
     """
-    return lifecycle_history.attach(db["paymentHistory"], payment)
+    return lifecycle_history.attach(db["paymentTimeline"], payment)
 
 
 # --- fixtures -----------------------------------------------------------------

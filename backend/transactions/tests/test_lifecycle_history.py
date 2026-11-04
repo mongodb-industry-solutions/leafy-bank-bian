@@ -1,4 +1,4 @@
-"""`paymentHistory` — lifecycle events and checks live outside `payments`.
+"""`paymentTimeline` — lifecycle events and checks live outside `payments`.
 
 Pins the plan's success criteria (`.claude/outputs/plan-lifecycle-history-out.md`):
 contiguous `seq` matching the counters, no embedded arrays, atomic payment-update + event
@@ -24,7 +24,7 @@ from tests.test_payments_service import (  # reuse the fixtures, don't fork them
 
 
 def _history(db, payment_id, kind):
-    return sorted((d for d in db["paymentHistory"].docs
+    return sorted((d for d in db["paymentTimeline"].docs
                    if d["paymentId"] == payment_id and d["kind"] == kind),
                   key=lambda d: d["seq"])
 
@@ -68,14 +68,14 @@ def test_check_seq_is_contiguous_and_matches_the_counter(service, db):  # noqa: 
 def test_history_ids_are_deterministic(service, db):  # noqa: F811
     _initiate(service)
 
-    for doc in db["paymentHistory"].docs:
+    for doc in db["paymentTimeline"].docs:
         assert doc["_id"] == f"{doc['paymentId']}:{doc['kind']}:{doc['seq']}"
 
 
 def test_attach_rebuilds_the_embedded_shape(service, db):  # noqa: F811
     _initiate(service)
 
-    joined = lh.attach(db["paymentHistory"], _stored(db))
+    joined = lh.attach(db["paymentTimeline"], _stored(db))
     assert [e["state"] for e in joined["lifecycle"]["events"]][0] == "DRAFT"
     assert set(joined["lifecycle"]["events"][0]) == {"state", "at", "actor", "actorType", "reason"}
     assert set(joined["checks"][0]) == {
@@ -87,7 +87,7 @@ def test_attach_ignores_history_the_payment_does_not_yet_acknowledge(service, db
     stored = _stored(db)
     stored["lifecycle"]["eventCount"] -= 1
 
-    joined = lh.attach(db["paymentHistory"], stored)
+    joined = lh.attach(db["paymentTimeline"], stored)
 
     assert len(joined["lifecycle"]["events"]) == stored["lifecycle"]["eventCount"]
 
@@ -131,7 +131,7 @@ def test_insert_payment_writes_the_payment_and_its_draft_event(db):  # noqa: F81
 def test_a_failed_event_insert_rolls_the_payment_update_back(db):  # noqa: F811
     _drafted(db)
     # Pre-seed seq 2 so the event insert collides with the `_id` the advance will allocate.
-    db["paymentHistory"].docs.append({"_id": "PAY-1:EVENT:2", "paymentId": "PAY-1",
+    db["paymentTimeline"].docs.append({"_id": "PAY-1:EVENT:2", "paymentId": "PAY-1",
                                       "kind": lh.EVENT, "seq": 2})
     before = copy.deepcopy(db["payments"].docs)
 
@@ -167,7 +167,7 @@ def test_a_failed_capture_leaves_no_orphan_draft_event(db):  # noqa: F811
     with pytest.raises(DuplicateKeyError):
         lifecycle.insert_payment(db["payments"], dup)
 
-    assert {d["paymentId"] for d in db["paymentHistory"].docs} == {"PAY-1"}
+    assert {d["paymentId"] for d in db["paymentTimeline"].docs} == {"PAY-1"}
 
 
 def test_appended_checks_take_the_next_seq_range(db):  # noqa: F811
@@ -218,14 +218,14 @@ def test_a_caller_session_is_joined_not_replaced(db):  # noqa: F811
 
 def test_history_index_orders_a_payments_entries_by_seq():
     from data import ensure_indexes
-    [spec] = ensure_indexes.PAYMENT_HISTORY_INDEXES
+    [spec] = ensure_indexes.PAYMENT_TIMELINE_INDEXES
     assert spec["keys"] == [("paymentId", 1), ("kind", 1), ("seq", 1)]
     assert spec["unique"] is True
 
 
 def test_history_validator_requires_what_the_writers_always_set():
     from data import ensure_indexes
-    schema = ensure_indexes.PAYMENT_HISTORY_VALIDATOR["$jsonSchema"]
+    schema = ensure_indexes.PAYMENT_TIMELINE_VALIDATOR["$jsonSchema"]
     event_branch, check_branch = schema["oneOf"]
     assert set(event_branch["required"]) == {"state", "actor", "actorType", "reason"}
     assert set(check_branch["required"]) == {"stage", "name", "result", "mode", "actor"}

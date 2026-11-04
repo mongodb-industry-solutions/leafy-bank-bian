@@ -282,9 +282,9 @@ CUTOFF_CASES_INDEXES = [
 # `contexts/payment_order_initiation/domain/lifecycle_history.py`). `_id` is
 # "{paymentId}:{kind}:{seq}", which already makes `(paymentId, kind, seq)` unique; the index
 # serves "every event/check of one payment in order" and the dashboard's `$lookup` on paymentId.
-PAYMENT_HISTORY_COLLECTION = "paymentHistory"
-PAYMENT_HISTORY_INDEXES = [
-    {"name": "idx_payment_history_seq",
+PAYMENT_TIMELINE_COLLECTION = "paymentTimeline"
+PAYMENT_TIMELINE_INDEXES = [
+    {"name": "idx_payment_timeline_seq",
      "keys": [("paymentId", ASCENDING), ("kind", ASCENDING), ("seq", ASCENDING)],
      "unique": True},
 ]
@@ -295,7 +295,7 @@ _HISTORY_COMMON = {
     "seq": {"bsonType": "int", "minimum": 1},
     "at": {"bsonType": "date"},
 }
-PAYMENT_HISTORY_VALIDATOR = {"$jsonSchema": {
+PAYMENT_TIMELINE_VALIDATOR = {"$jsonSchema": {
     "bsonType": "object",
     "required": ["paymentId", "kind", "seq", "at"],
     "properties": _HISTORY_COMMON,
@@ -310,16 +310,16 @@ PAYMENT_HISTORY_VALIDATOR = {"$jsonSchema": {
 }}
 
 
-def _ensure_payment_history(connection: MongoDBConnection, db_name: str) -> list[str]:
-    """Create `paymentHistory` with its validator (or refresh the validator), then its index."""
+def _ensure_payment_timeline(connection: MongoDBConnection, db_name: str) -> list[str]:
+    """Create `paymentTimeline` with its validator (or refresh the validator), then its index."""
     db = connection.get_database(db_name)
-    if PAYMENT_HISTORY_COLLECTION in db.list_collection_names():
-        db.command("collMod", PAYMENT_HISTORY_COLLECTION,
-                   validator=PAYMENT_HISTORY_VALIDATOR, validationAction="error")
+    if PAYMENT_TIMELINE_COLLECTION in db.list_collection_names():
+        db.command("collMod", PAYMENT_TIMELINE_COLLECTION,
+                   validator=PAYMENT_TIMELINE_VALIDATOR, validationAction="error")
     else:
-        db.create_collection(PAYMENT_HISTORY_COLLECTION,
-                             validator=PAYMENT_HISTORY_VALIDATOR, validationAction="error")
-    return _ensure(connection, db_name, PAYMENT_HISTORY_COLLECTION, PAYMENT_HISTORY_INDEXES)
+        db.create_collection(PAYMENT_TIMELINE_COLLECTION,
+                             validator=PAYMENT_TIMELINE_VALIDATOR, validationAction="error")
+    return _ensure(connection, db_name, PAYMENT_TIMELINE_COLLECTION, PAYMENT_TIMELINE_INDEXES)
 
 
 def _drop_if_filter_changed(coll, spec: dict) -> None:
@@ -355,7 +355,7 @@ def ensure_transactions_indexes(connection: MongoDBConnection, db_name: str) -> 
     """Ensure indexes for the transactions service's collections. Returns a collection→names map."""
     return {
         "payments": _ensure(connection, db_name, "payments", PAYMENTS_INDEXES),
-        PAYMENT_HISTORY_COLLECTION: _ensure_payment_history(connection, db_name),
+        PAYMENT_TIMELINE_COLLECTION: _ensure_payment_timeline(connection, db_name),
         "transactions": _ensure(connection, db_name, "transactions", TRANSACTIONS_INDEXES),
         "routingSnapshots": _ensure(
             connection, db_name, "routingSnapshots", ROUTING_SNAPSHOTS_INDEXES

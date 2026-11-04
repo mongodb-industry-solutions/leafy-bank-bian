@@ -97,6 +97,6 @@ def test_registry_ensures_cutoff_cases(ensure_indexes, monkeypatch):
     seen = []
     monkeypatch.setattr(ensure_indexes, "_ensure",
                         lambda conn, db_name, coll, specs: seen.append(coll) or [])
-    monkeypatch.setattr(ensure_indexes, "_ensure_payment_history", lambda *a: [])
+    monkeypatch.setattr(ensure_indexes, "_ensure_payment_timeline", lambda *a: [])
     ensure_indexes.ensure_transactions_indexes(None, "db")
     assert "cutoffCases" in seen

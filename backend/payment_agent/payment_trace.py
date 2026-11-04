@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import payment_history
+import payment_timeline
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +76,9 @@ def gather_trace(db: Any, payment_id: str, exception_id: str | None = None) -> d
     no_id = {"_id": 0}
     payment = db["payments"].find_one({"paymentId": payment_id}, no_id) if db is not None else None
     if payment is not None:
-        # `lifecycle.events[]` and `checks[]` live in `paymentHistory`; the agent reasons over
+        # `lifecycle.events[]` and `checks[]` live in `paymentTimeline`; the agent reasons over
         # the payment with both attached, as it did when they were embedded.
-        events, checks = payment_history.history_for(db, payment_id)
+        events, checks = payment_timeline.history_for(db, payment_id)
         payment = {**payment, "lifecycle": {**payment.get("lifecycle", {}), "events": events},
                    "checks": checks}
 

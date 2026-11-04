@@ -4,7 +4,7 @@
 // "api" means the write goes through the transactions or ledger service, not straight to Mongo.
 
 const TRACE = [
-  ["payments", "read"], ["paymentHistory", "read"], ["paymentExecutions", "read"],
+  ["payments", "read"], ["paymentTimeline", "read"], ["paymentExecutions", "read"],
   ["transactions", "read"], ["ledgerEvents", "read"], ["settlementPositions", "read"],
   ["reconciliationItems", "read"], ["exceptions", "read"],
 ];

@@ -1,4 +1,4 @@
-"""Readers for the lifecycle `EVENT` documents in `paymentHistory`.
+"""Readers for the lifecycle `EVENT` documents in `paymentTimeline`.
 
 `payments.lifecycle.events[]` moved out of the payment document (the transactions service owns
 the design: `lifecycle_history.py`). The agent only needs the latest event and the SUBMITTED
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-HISTORY = "paymentHistory"
+HISTORY = "paymentTimeline"
 EVENT = "EVENT"
 CHECK = "CHECK"
 

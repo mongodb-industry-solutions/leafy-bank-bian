@@ -228,7 +228,7 @@ def test_a_tagged_document_adds_only_the_demo_extras(schema):
 def test_stage_two_slots_are_empty_at_creation():
     """Stage 2 fills these; stage 1 only opens the slot, exactly as it does for `fraud`.
 
-    The per-check trail is not on the document at all: it lives in `paymentHistory`, with
+    The per-check trail is not on the document at all: it lives in `paymentTimeline`, with
     the `lifecycle.checkCount` counter standing in."""
     doc = payment_document.build(_ctx())
     assert "checks" not in doc
@@ -458,7 +458,7 @@ def test_manual_fraud_review_is_declared_in_the_canonical_enum():
     doc = payment_document.build(_ctx(payment_rail="WIRE"))
     doc["lifecycle"]["currentState"] = "MANUAL_FRAUD_REVIEW"
     doc["status"] = "MANUAL_FRAUD_REVIEW"
-    # Events are stored in `paymentHistory`, not on the payment; the guard still validates an
+    # Events are stored in `paymentTimeline`, not on the payment; the guard still validates an
     # event's enum values against the spec's `lifecycle.events[]` shape, so embed one here.
     doc["lifecycle"].setdefault("events", []).append({
         "state": "MANUAL_FRAUD_REVIEW", "at": doc["createdAt"],

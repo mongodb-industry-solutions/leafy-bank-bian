@@ -49,7 +49,7 @@ import cutoff_cases as cases
 import cutoff_clock
 import cutoff_evidence as ev
 import cutoff_risk as risk_mod
-import payment_history
+import payment_timeline
 import cutoff_rules as rules
 import cutoff_window as cw
 import transactions_client
@@ -520,7 +520,7 @@ def execute_proposal(payment_id: str, case_id: str, proposal: dict, decided_by: 
 
 
 def _submitted_at(db: Any, payment_id: str) -> Optional[datetime]:
-    event = payment_history.latest_event_with_state(db, payment_id, "SUBMITTED")
+    event = payment_timeline.latest_event_with_state(db, payment_id, "SUBMITTED")
     return event.get("at") if event else None
 
 
