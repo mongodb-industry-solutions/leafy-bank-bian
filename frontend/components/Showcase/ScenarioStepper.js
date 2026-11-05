@@ -28,11 +28,9 @@ const TICK_MS = 3000;
 // Endings each scenario is designed to reach. ESCALATED is a legitimate waypoint for R4/R5
 // (the correspondent has not answered yet); anywhere else it means the run went off script.
 const EXPECTED_OUTCOMES = {
-  R1: ["RECONCILED"], R1b: ["RECONCILED"], R2: ["RECONCILED"], TL: ["RECONCILED"],
-  R4: ["RECONCILED", "ESCALATED"], R5: ["ANSWERED", "ESCALATED"],
+  R1: ["RESOLVED", "RECONCILED"], R1b: ["RESOLVED", "RECONCILED"], R2: ["RESOLVED", "RECONCILED"], TL: ["RESOLVED", "RECONCILED"],
+  R4: ["RESOLVED", "RECONCILED", "ESCALATED"], R5: ["ANSWERED", "ESCALATED"],
 };
-const BATCH_KICK_GAP_MS = 12000;
-const BATCH_KICK_LIMIT = 5;
 // An automatic step fires this long after the log has finished showing the step before it,
 // so each beat is read before the next one starts.
 const AUTO_DELAY_MS = 2000;
@@ -202,23 +200,13 @@ export default function ScenarioStepper({ scenarioKey }) {
   const awaitingReply = !!followedException?.awaitingCounterparty && followedException.status === "OPEN";
   // The correspondent's reply closes an escalated exception that the agent last saw as ESCALATED.
   const answered = !!followedException?.escalation?.reply && followedException.status !== "OPEN";
-  const outcome = reconciled ? "RECONCILED" : answered ? "ANSWERED" : escalated ? "ESCALATED" : null;
+  // The run ends when the agent has closed its exception. The payment flips to RECONCILED on the
+  // next GL batch (scheduler, every 10 minutes); the demo does not wait for it. The result card
+  // points to the Activity page in Payments, where that status lands on its own.
+  const resolved = scenarioKey !== "R5" && agent?.verification?.result === "RESOLVED" && trackedExceptions.every((e) => e.status !== "OPEN");
+  const outcome = reconciled ? "RECONCILED" : answered ? "ANSWERED" : escalated ? "ESCALATED" : resolved ? "RESOLVED" : null;
 
   const { steps: agentSteps, started: agentStarted } = useAgentSteps(followedId, !outcome);
-
-  // The payment flips to RECONCILED on the next GL batch, which the scheduler runs every 10
-  // minutes. Once the agent has closed the exception, trigger the batch ourselves (the earlier
-  // steps do the same) and retry a few times: the adjustment journal may not be posted yet.
-  const batchKicks = useRef({ at: 0, count: 0 });
-  const agentResolved = agent?.verification?.result === "RESOLVED";
-  const awaitingBatch = scenarioKey !== "R5" && agentResolved && !reconciled;
-  useEffect(() => {
-    const k = batchKicks.current;
-    if (!awaitingBatch || k.count >= BATCH_KICK_LIMIT || Date.now() - k.at < BATCH_KICK_GAP_MS) return;
-    k.at = Date.now();
-    k.count += 1;
-    pipelineApi("batch/trigger", null, { method: "POST" });
-  }, [awaitingBatch, tick]);
 
   // The first non-zero gap seen is the "before" of the result card; reconciling zeroes the live one.
   const railLeg = railLegOf(trace);
@@ -270,7 +258,6 @@ export default function ScenarioStepper({ scenarioKey }) {
     if (step.gate === "decided" && !ctx.decision) return "Approve or reject the proposal";
     if (step.final && !outcome) {
       if (revisedProposalPending) return "The agent revised its proposal. Approve or reject it";
-      if (awaitingBatch) return "Exception resolved. Waiting for the ledger batch to mark the payment reconciled…";
       return scenarioKey === "TL" ? "Waiting for the agent's next sweep…" : "Waiting for the outcome…";
     }
     return null;
@@ -360,7 +347,7 @@ export default function ScenarioStepper({ scenarioKey }) {
   const anyOpen = trackedExceptions.some((e) => e.status === "OPEN");
   // One tone for the whole page, so the scene stripe and status card agree.
   const tone =
-    outcome === "RECONCILED" || outcome === "ANSWERED" ? "resolved"
+    outcome === "RECONCILED" || outcome === "RESOLVED" || outcome === "ANSWERED" ? "resolved"
     : awaitingReply || outcome === "ESCALATED" ? "waiting"
     : anyOpen ? "alert"
     : "neutral";
@@ -386,11 +373,10 @@ export default function ScenarioStepper({ scenarioKey }) {
     externalWait:
       step.countdown && countdownLeft > 0 ? `Statement window closes in ${countdownLeft}s`
       : awaitingReply ? "Waiting for the correspondent bank's reply"
-      : awaitingBatch ? "Waiting for the ledger batch to reconcile the payment"
       : step.final && !outcome && scenarioKey === "TL" ? "Waiting for the agent's next sweep"
       : null,
     systemWait: agentGate && !followedId ? "Waiting for the exception to appear" : null,
-    agentBusy: !!followedId && !outcome && !agent?.error && agentWorking && !revisedProposalPending && !awaitingBatch,
+    agentBusy: !!followedId && !outcome && !agent?.error && agentWorking && !revisedProposalPending,
     agentSteps,
     bank: scenario.bank,
   });

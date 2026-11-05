@@ -16,6 +16,27 @@ import styles from "./Showcase.module.css";
 const FILTERS = [["all", "All"], ["agent", "Agent"], ["code", "Code"], ["mongo", "MongoDB"], ["human", "You"]];
 const LANE_ICON = { agent: "Sparkle", code: "CurlyBraces", mongo: "Database", human: "Person" };
 const time = (at) => new Date(at).toLocaleTimeString([], { hour12: false });
+const NEAR_BOTTOM_PX = 32;
+
+// Milestones (cards, toned events) stand alone. Everything else is routine, so consecutive
+// routine events from one lane share a node and a header instead of repeating them.
+const isMilestone = (e) => !!e.card || !!e.tone;
+
+// Splits the shown events into blocks: a phase divider (when the phase changes) plus one or
+// more events that render under a single lane node.
+function toBlocks(shown) {
+  const blocks = [];
+  let lastPhase = null;
+  for (const e of shown) {
+    const divider = e.phase !== lastPhase && PHASES.includes(e.phase) ? e.phase : null;
+    lastPhase = e.phase;
+    const prev = blocks[blocks.length - 1];
+    const joins = prev && !divider && !isMilestone(e) && !isMilestone(prev.events[0]) && prev.events[0].lane === e.lane;
+    if (joins) prev.events.push(e);
+    else blocks.push({ key: e.key, divider, events: [e] });
+  }
+  return blocks;
+}
 
 // Findings and policy checks are the point of the run, so they show their content up front
 // instead of hiding it behind a click.
@@ -166,12 +187,38 @@ export default function RunConsole({
 }) {
   const [filter, setFilter] = useState("all");
   const logRef = useRef(null);
+  const following = useRef(true);
+  const lastCount = useRef(0);
+  const [unseen, setUnseen] = useState(0);
   const shown = filter === "all" ? events : events.filter((e) => e.lane === filter);
 
-  useEffect(() => {
+  const scrollToLatest = () => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length, pending]);
+    following.current = true;
+    setUnseen(0);
+  };
+
+  // Follow the log only while the viewer is at the bottom; scrolling up pauses it and new
+  // events are counted instead.
+  const onLogScroll = () => {
+    const el = logRef.current;
+    if (!el) return;
+    following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    if (following.current) setUnseen(0);
+  };
+
+  useEffect(() => {
+    const added = Math.max(0, shown.length - lastCount.current);
+    lastCount.current = shown.length;
+    if (following.current) scrollToLatest();
+    else if (added) setUnseen((n) => n + added);
+  }, [shown.length, pending]);
+
+  useEffect(() => {
+    lastCount.current = shown.length;
+    scrollToLatest();
+  }, [filter]);
 
   const actions = (
       <div className={styles.runActions}>
@@ -192,7 +239,7 @@ export default function RunConsole({
         )}
       </div>
   );
-  let lastPhase = null;
+  const blocks = toBlocks(shown);
   return (
     <div className={aside ? styles.consoleGrid : undefined}>
     <section className={`${styles.scene} ${styles.toneStripe}`}>
@@ -235,33 +282,38 @@ export default function RunConsole({
         </div>
       </div>
 
-      <div className={styles.runLog} ref={logRef} aria-live="polite">
+      <div className={styles.runLog} ref={logRef} onScroll={onLogScroll} aria-live="polite">
         {shown.length === 0 && (
           <Body className={styles.muted}>
             {events.length === 0 ? "Events appear here as the run progresses." : "No events in this filter yet."}
           </Body>
         )}
-        {shown.map((e) => {
-          const divider = e.phase !== lastPhase && PHASES.includes(e.phase) ? e.phase : null;
-          lastPhase = e.phase;
+        {blocks.map((b) => {
+          const first = b.events[0];
+          const many = b.events.length > 1;
           return (
-            <div key={e.key}>
-              {divider && (
+            <div key={b.key}>
+              {b.divider && (
                 <div className={styles.runPhase}>
-                  <span className={styles.runPhaseChip}>{divider}</span>
+                  <span className={styles.runPhaseChip}>{b.divider}</span>
                   <span className={styles.runPhaseRule} />
                 </div>
               )}
-              <div className={`${styles.runEvent} ${styles[`lane_${e.lane}`]}`}>
+              <div className={`${styles.runEvent} ${styles[`lane_${first.lane}`]}`}>
                 <span className={styles.runNode} aria-hidden="true">
-                  <Icon glyph={LANE_ICON[e.lane]} size={14} />
+                  <Icon glyph={LANE_ICON[first.lane]} size={14} />
                 </span>
-                <div className={`${styles.runCard} ${e.card ? styles.runCardFeature : ""} ${e.tone ? styles[`runCard_${e.tone}`] : ""}`}>
+                <div className={`${styles.runCard} ${first.card ? styles.runCardFeature : ""} ${first.tone ? styles[`runCard_${first.tone}`] : ""} ${!isMilestone(first) ? styles.runCardQuiet : ""}`}>
                   <div className={styles.runMeta}>
-                    <span className={styles.runLane}>{LANE_LABEL[e.lane]}</span>
-                    {Number.isFinite(e.at) && <span className={styles.muted}>{time(e.at)}</span>}
+                    <span className={styles.runLane}>{LANE_LABEL[first.lane]}{many ? ` · ${b.events.length}` : ""}</span>
+                    {!many && Number.isFinite(first.at) && <span className={styles.muted}>{time(first.at)}</span>}
                   </div>
-                  <EventBody event={e} sources={sources} />
+                  {b.events.map((e) => (
+                    <div key={e.key} className={many ? styles.logRow : undefined}>
+                      <div className={styles.logRowBody}><EventBody event={e} sources={sources} /></div>
+                      {many && Number.isFinite(e.at) && <span className={`${styles.muted} ${styles.logRowTime}`}>{time(e.at)}</span>}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -274,6 +326,12 @@ export default function RunConsole({
           </div>
         )}
       </div>
+      {unseen > 0 && (
+        <button type="button" className={styles.jumpLatest} onClick={scrollToLatest}>
+          <Icon glyph="ArrowDown" size={12} />
+          Jump to latest ({unseen} new)
+        </button>
+      )}
       </div>
 
       {result}

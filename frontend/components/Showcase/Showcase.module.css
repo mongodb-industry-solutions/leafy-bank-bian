@@ -460,25 +460,25 @@
 .writeList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 16px;
+  gap: 4px;
+  padding-top: 6px;
 }
 
 .write {
   border: 1px solid #e8edeb;
-  border-radius: 8px;
-  padding: 8px 16px;
+  border-radius: 6px;
+  padding: 4px 10px;
 }
 
 .write[open] {
-  padding-bottom: 16px;
+  padding-bottom: 8px;
 }
 
 .writeSummary {
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   list-style: none;
 }
 
@@ -1167,9 +1167,10 @@ scene + rail. One tone drives every accent. */
   display: flex;
   flex-direction: column;
   flex: none;
+  position: relative;
   height: 520px;
-  gap: 8px;
-  padding: 16px 24px;
+  gap: 6px;
+  padding: 12px 16px;
   border: 1px solid #d5dedb;
   border-radius: 12px;
   background: #fff;
@@ -1238,8 +1239,8 @@ scene + rail. One tone drives every accent. */
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  padding-bottom: 12px;
+  gap: 12px;
+  padding-bottom: 8px;
   border-bottom: 1px solid #e8edeb;
 }
 
@@ -1257,12 +1258,14 @@ scene + rail. One tone drives every accent. */
 .runFilter {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 12px;
+  gap: 4px;
+  padding: 1px 8px;
   border: 1px solid #c9d1cf;
   border-radius: 999px;
   background: #fff;
   color: #3d4f58;
+  font-size: 12px;
+  line-height: 18px;
   cursor: pointer;
 }
 
@@ -1391,8 +1394,8 @@ scene + rail. One tone drives every accent. */
 .runPhase {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 16px 0 4px;
+  gap: 10px;
+  margin: 10px 0 2px;
 }
 
 .runPhaseRule {
@@ -1404,10 +1407,10 @@ scene + rail. One tone drives every accent. */
 .runEvent {
   position: relative;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
   align-items: start;
-  padding: 4px 0;
+  padding: 2px 0;
   animation: runIn 0.35s ease-out;
 }
 
@@ -1415,9 +1418,9 @@ scene + rail. One tone drives every accent. */
 .runEvent::before {
   content: "";
   position: absolute;
-  left: 15px;
-  top: 36px;
-  bottom: -4px;
+  left: 10px;
+  top: 26px;
+  bottom: -2px;
   width: 2px;
   background: #e3eae7;
 }
@@ -1430,24 +1433,81 @@ scene + rail. One tone drives every accent. */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   color: #fff;
   background: var(--lane);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--lane) 14%, #fff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lane) 14%, #fff);
   z-index: 1;
 }
 
 .runCard {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 14px;
+  gap: 2px;
+  padding: 6px 10px;
   background: #fff;
   border: 1px solid #e3eae7;
-  border-left: 4px solid var(--lane);
-  border-radius: 10px;
+  border-left: 3px solid var(--lane);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* LeafyGreen Body is 16px; inside the log every text block follows the card's 13px instead. */
+.runCard :is(p, div, li, summary) {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Routine events: no box of their own, just a rule, so milestones stand out. */
+.runCardQuiet {
+  background: transparent;
+  border-color: transparent;
+  border-left-color: color-mix(in srgb, var(--lane) 45%, #fff);
+}
+
+.logRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.logRow + .logRow {
+  margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid #eef2f0;
+}
+
+.logRowBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.logRowTime {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.jumpLatest {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #001e2b;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 30, 43, 0.25);
 }
 
 .runCard_alert { background: #fef2f2; }
@@ -1455,15 +1515,15 @@ scene + rail. One tone drives every accent. */
 .runCard_wait { background: #fffbeb; }
 
 .runCardFeature {
-  padding: 14px 16px;
-  box-shadow: 0 2px 8px rgba(0, 30, 43, 0.08);
+  padding: 8px 12px;
+  box-shadow: 0 1px 4px rgba(0, 30, 43, 0.08);
 }
 
 .featureList {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 6px 0 0;
+  gap: 3px;
+  margin: 4px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -1476,16 +1536,23 @@ scene + rail. One tone drives every accent. */
 
 .featureTick {
   flex: none;
-  margin-top: 6px;
+  margin-top: 4px;
   color: var(--lane);
 }
 
-.checkOk svg { flex: none; margin-top: 3px; color: #00a35c; }
-.checkBad svg { flex: none; margin-top: 3px; color: #db3030; }
+.checkOk svg { flex: none; margin-top: 2px; color: #00a35c; }
+.checkBad svg { flex: none; margin-top: 2px; color: #db3030; }
 
 .thought {
-  color: #5c6c75;
-  font-style: italic;
+  color: #3d4f58;
+  padding-left: 8px;
+  border-left: 2px solid #e3eae7;
+}
+
+.runCard .mono {
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .runMeta {
@@ -1493,22 +1560,29 @@ scene + rail. One tone drives every accent. */
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  line-height: 1.2;
+}
+
+.runMeta .muted {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .runLane {
   color: var(--lane);
-  font-weight: 700;
-  font-size: 11px;
+  font-weight: 600;
+  font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .runPhaseChip {
-  padding: 2px 12px;
+  padding: 0 10px;
   border-radius: 999px;
   background: #001e2b;
   color: #fff;
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 18px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1537,6 +1611,8 @@ scene + rail. One tone drives every accent. */
 
 .runTitle {
   cursor: default;
+  font-weight: 500;
+  color: #1c2d38;
 }
 
 summary.runTitle {
@@ -1599,8 +1675,8 @@ summary.runTitle {
 
 /* The stall card's bar sweeps while the log holds, so the pause reads as a wait, not a freeze. */
 .stallBar {
-  height: 4px;
-  margin-top: 10px;
+  height: 3px;
+  margin-top: 6px;
   border-radius: 2px;
   background: linear-gradient(90deg, #e5b3b3 0%, #db3030 50%, #e5b3b3 100%);
   background-size: 200% 100%;
@@ -1616,9 +1692,9 @@ summary.runTitle {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 4px 0 4px 40px;
+  margin: 2px 0 2px 32px;
   color: #5c6c75;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 @media (prefers-reduced-motion: reduce) {

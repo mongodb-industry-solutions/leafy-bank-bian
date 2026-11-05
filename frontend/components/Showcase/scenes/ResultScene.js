@@ -44,15 +44,20 @@ export default function ResultScene({ paymentId, scenario, trace, payment, outco
       )}
       <div className={styles.chipRow}>
         <Badge variant={outcome === "ESCALATED" ? "yellow" : "green"}>
-          {outcome === "ANSWERED" ? "CORRESPONDENT REPLIED" : outcome}
+          {outcome === "ANSWERED" ? "CORRESPONDENT REPLIED" : outcome === "RESOLVED" ? "EXCEPTION RESOLVED" : outcome}
         </Badge>
         {reconciled && <Badge variant="green">Payment reconciled</Badge>}
       </div>
       <Body>{scenario.beats.verify}</Body>
+      {outcome === "RESOLVED" && !reconciled && (
+        <Body className={styles.muted}>
+          The ledger marks the payment reconciled on its next batch. Follow the reconciliation status on the Activity page in Payments.
+        </Body>
+      )}
       {paymentId && (
         <Body>
           <Link href={`/payments-workflow?payment=${encodeURIComponent(paymentId)}`}>
-            Open the full lifecycle in Payments →
+            {outcome === "RESOLVED" && !reconciled ? "Follow reconciliation in Payments Activity →" : "Open the full lifecycle in Payments →"}
           </Link>
         </Body>
       )}
