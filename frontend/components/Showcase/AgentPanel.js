@@ -1,8 +1,8 @@
 "use client";
 
-// The right-hand panel of the agent walkthroughs: whether the agent is awake and why, the
-// proposal waiting on the presenter, its reasoning, each tool call with the MongoDB
-// collections it touched, and what it concluded. Everything comes from data the steppers
+// The right-hand panel of the agent walkthroughs: where the agent is in its run, what it
+// concluded (pinned), and one line per tool call with what it found. Reasoning, arguments,
+// collections and raw results are one click away. Everything comes from data the steppers
 // already poll (the agent record and the checkpointed steps).
 
 import { useEffect, useRef, useState } from "react";
@@ -10,6 +10,7 @@ import Icon from "@leafygreen-ui/icon";
 import { Body, Overline } from "@leafygreen-ui/typography";
 import { phraseFor, ACTION_LABEL } from "./agentPhrases";
 import { mongoAccess } from "./agentMongo";
+import { findingFor } from "./agentFindings";
 import styles from "./Showcase.module.css";
 
 const OP_LABEL = { read: "reads", write: "writes", api: "writes via API" };
@@ -118,85 +119,133 @@ function AccessRow({ label, items }) {
   );
 }
 
-function CallCard({ call, bank }) {
+// One line per tool call: what it did, what it found, how much it touched. The tool name, its
+// arguments, the collections and the raw result are one click away.
+function CallRow({ call, bank }) {
   const access = mongoAccess(call.tool);
+  const reads = access.filter((a) => a.op === "read");
+  const writes = access.filter((a) => a.op !== "read");
   const pairs = argPairs(call.args);
   const running = call.result === null;
   const failed = !running && refused(call.result);
   const tone = running ? "run" : failed ? "bad" : "ok";
+  const finding = running ? null : findingFor(call.tool, call.result);
+  const meta = [
+    reads.length ? plural(reads.length, "collection") : null,
+    writes.length ? `writes ${writes.map((w) => w.collection).join(", ")}` : null,
+  ].filter(Boolean).join(" · ");
   return (
     <li className={styles.aiItem}>
       <Node glyph={failed ? "XWithCircle" : "Checkmark"} tone={tone} spinning={running} />
-      <div className={`${styles.aiCall} ${failed ? styles.aiCallBad : ""}`}>
-        <div className={styles.aiCallHead}>
-          <span className={styles.aiCallTitle}>{phraseFor(call.tool, bank)}</span>
-          <span className={styles.aiStatus}>{running ? "Running" : failed ? "Refused" : "Done"}</span>
+      <details className={`${styles.aiRow} ${failed ? styles.aiCallBad : ""}`}>
+        <summary className={styles.aiRowSummary}>
+          <span className={styles.aiRowMain}>
+            <span className={styles.aiCallTitle}>{phraseFor(call.tool, bank)}</span>
+            {running && <span className={styles.aiFinding}>Running…</span>}
+            {finding && <span className={`${styles.aiFinding} ${failed ? styles.aiFindingBad : ""}`}>{finding}</span>}
+            {meta && <span className={styles.aiMeta}>{meta}</span>}
+          </span>
+          <Icon glyph="CaretRight" size={10} className={styles.aiCaret} />
+        </summary>
+        <div className={styles.aiRowBody}>
+          <div className={styles.aiToolName}><Icon glyph="CurlyBraces" size={11} />{call.tool}</div>
+          {pairs.length > 0 && (
+            <div className={styles.aiArgs}>
+              {pairs.map(([k, v]) => (
+                <span key={k} className={styles.aiArg}><span className={styles.aiArgKey}>{k}</span>{v}</span>
+              ))}
+            </div>
+          )}
+          <AccessRow label="Reads" items={reads} />
+          <AccessRow label="Writes" items={writes} />
+          {call.result && <pre className={styles.aiPre}>{call.result}</pre>}
         </div>
-        <div className={styles.aiToolName}>
-          <Icon glyph="CurlyBraces" size={11} />{call.tool}
-        </div>
-        {pairs.length > 0 && (
-          <div className={styles.aiArgs}>
-            {pairs.map(([k, v]) => (
-              <span key={k} className={styles.aiArg}><span className={styles.aiArgKey}>{k}</span>{v}</span>
-            ))}
-          </div>
-        )}
-        <AccessRow label="Reads" items={access.filter((a) => a.op === "read")} />
-        <AccessRow label="Writes" items={access.filter((a) => a.op !== "read")} />
-        {call.result && (
-          <details className={styles.aiDetails}>
-            <summary><Icon glyph="CaretRight" size={10} className={styles.aiCaret} />Result</summary>
-            <pre className={styles.aiPre}>{call.result}</pre>
-          </details>
-        )}
-      </div>
+      </details>
     </li>
   );
 }
 
-function Findings({ agent }) {
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const prettyAction = (code) => ACTION_LABEL[code] || String(code).replaceAll("_", " ").toLowerCase().replace(/^./, (c) => c.toUpperCase());
+
+// The graph's own stages, so the audience sees where the agent is. A run that never needed a
+// human (a recheck that closed the case) shows the proposal and decision stages as skipped.
+const FLOW = ["Investigate", "Proposed", "Your call", "Executed", "Verified"];
+
+function flowOf(agent, timeline, awaitingYou) {
+  const recorded = timeline.some((t) => t.type === "call" && /^record_/.test(t.tool) && t.result !== null);
+  const decided = !!agent?.approval;
+  const proposed = !!agent?.proposedAction || decided;
+  const verified = !!agent?.verification?.result;
+  const raw = [!!agent?.cause || recorded, proposed, decided, (agent?.actionsTaken || []).length > 0, verified];
+  const skipped = raw.map((_, i) => (i === 1 || i === 2) && verified && !proposed);
+  const done = raw.map((_, i) => !skipped[i] && raw.slice(i).some(Boolean));
+  const started = timeline.length > 0 || !!agent;
+  const active = started ? done.findIndex((d, i) => !d && !skipped[i]) : -1;
+  return FLOW.map((label, i) => ({
+    label,
+    state: skipped[i] ? "skip" : done[i] ? "done" : i === active ? (i === 2 && awaitingYou ? "wait" : "now") : "idle",
+  }));
+}
+
+function Flow({ steps }) {
+  return (
+    <ol className={styles.aiFlow} aria-label="Where the agent is">
+      {steps.map((st) => (
+        <li key={st.label} className={`${styles.aiFlowStep} ${styles[`aiFlow_${st.state}`]}`}>
+          <span className={styles.aiFlowDot} aria-hidden="true">
+            {st.state === "done" ? <Icon glyph="Checkmark" size={10} /> : st.state === "skip" ? "–" : ""}
+          </span>
+          <span className={styles.aiFlowLabel}>{st.label}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// The finding, pinned above the timeline: cause and confidence as chips, the root cause, the
+// proposal, then evidence and what was done behind a click so it does not push the timeline off.
+function Summary({ agent }) {
   if (!agent) return null;
-  const rows = [
+  const chips = [
     ["Cause", agent.cause || agent.diagnosis],
     ["Blocker", agent.blocker],
     ["Confidence", agent.confidence],
-    ["Root cause", agent.rootCause],
-    ["Reasoning", agent.reasoning],
   ].filter(([, v]) => v && typeof v === "string");
+  const text = [agent.rootCause, agent.reasoning].find((v) => v && typeof v === "string");
   const evidence = Array.isArray(agent.evidence) ? agent.evidence : [];
   const actions = agent.actionsTaken || [];
-  if (!rows.length && !evidence.length && !actions.length) return null;
+  const proposal = agent.proposedAction?.action;
+  if (!chips.length && !text && !evidence.length && !actions.length) return null;
   return (
-    <section className={styles.aiConclusion}>
-      <div className={styles.aiConclusionHead}><Icon glyph="Wizard" size={14} />Conclusion</div>
-      {rows.length > 0 && (
-        <dl className={styles.aiFacts}>
-          {rows.map(([label, value]) => (
-            <div key={label} className={styles.aiFact}><dt>{label}</dt><dd>{value}</dd></div>
+    <section className={styles.aiSummary} aria-label="What the agent concluded">
+      <div className={styles.aiConclusionHead}><Icon glyph="Wizard" size={14} />Finding</div>
+      {chips.length > 0 && (
+        <div className={styles.aiChips}>
+          {chips.map(([label, value]) => (
+            <span key={label} className={styles.aiChip}><span className={styles.aiChipKey}>{label}</span>{value}</span>
           ))}
-        </dl>
+        </div>
       )}
+      {text && <p className={styles.aiSummaryText}>{text}</p>}
+      {proposal && <div className={styles.aiProposes}>Proposes: <strong>{prettyAction(proposal)}</strong></div>}
       {evidence.length > 0 && (
-        <>
-          <div className={styles.aiKicker}>Evidence</div>
+        <details className={styles.aiSummaryMore}>
+          <summary>Evidence ({evidence.length})</summary>
           <ul className={styles.featureList}>
             {evidence.map((e) => <li key={String(e)}>{typeof e === "string" ? e : JSON.stringify(e)}</li>)}
           </ul>
-        </>
+        </details>
       )}
       {actions.length > 0 && (
-        <>
-          <div className={styles.aiKicker}>Actions taken</div>
-          <ul className={styles.aiActions}>
-            {actions.map((a, i) => (
-              <li key={`${a.action}:${i}`} className={a.result === "REFUSED" ? styles.checkBad : styles.checkOk}>
-                <Icon glyph={a.result === "REFUSED" ? "XWithCircle" : "CheckmarkWithCircle"} size={14} />
-                <span>{ACTION_LABEL[a.action] || a.action} <span className={styles.muted}>({a.result})</span></span>
-              </li>
-            ))}
-          </ul>
-        </>
+        <ul className={styles.aiActions}>
+          {actions.map((a, i) => (
+            <li key={`${a.action}:${i}`} className={a.result === "REFUSED" ? styles.checkBad : styles.checkOk}>
+              <Icon glyph={a.result === "REFUSED" ? "XWithCircle" : "CheckmarkWithCircle"} size={14} />
+              <span>{prettyAction(a.action)} <span className={styles.muted}>({a.result})</span></span>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
@@ -216,13 +265,16 @@ export default function AgentPanel({ agent, steps, started, activity, activation
   const timeline = withoutClosingThought(toTimeline(steps || []), agent);
   const collections = touched(timeline);
   const toolCalls = timeline.filter((t) => t.type === "call").length;
+  const thoughts = timeline.filter((t) => t.type === "thought").length;
+  const [showReasoning, setShowReasoning] = useState(false);
+  const rows = showReasoning ? timeline : timeline.filter((t) => t.type === "call");
   const bodyRef = useRef(null);
   const [follow, setFollow] = useState(true);
 
   useEffect(() => {
     const el = bodyRef.current;
     if (el && follow) el.scrollTop = el.scrollHeight;
-  }, [timeline.length, follow]);
+  }, [rows.length, follow]);
 
   const working = activity?.kind === "agent";
   const waitsOnYou = activity?.kind === "human" && (!!children || !!needsDecision);
@@ -244,12 +296,15 @@ export default function AgentPanel({ agent, steps, started, activity, activation
         </span>
       </header>
       {activation && (
-        <Body as="div" className={styles.muted}>
+        <Body as="div" className={styles.aiActivation}>
           {activation.text}{activatedAt ? ` · ${activatedAt}` : ""}
         </Body>
       )}
+      <Flow steps={flowOf(agent, timeline, waitsOnYou)} />
 
       {children}
+
+      <Summary agent={agent} />
 
       <div className={styles.aiBody} ref={bodyRef} onScroll={(e) => {
         const el = e.currentTarget;
@@ -257,12 +312,15 @@ export default function AgentPanel({ agent, steps, started, activity, activation
       }}>
         <section className={styles.aiSection}>
           <div className={styles.aiSectionHead}>
-            <Overline>Thinking and tool calls</Overline>
-            {timeline.length > 0 && (
-              <span className={styles.muted}>
-                {toolCalls} tool call{toolCalls === 1 ? "" : "s"}
-              </span>
-            )}
+            <Overline>Tool calls</Overline>
+            <span className={styles.aiSectionTools}>
+              {toolCalls > 0 && <span className={styles.muted}>{plural(toolCalls, "call")}</span>}
+              {thoughts > 0 && (
+                <button type="button" className={styles.aiToggle} aria-pressed={showReasoning} onClick={() => setShowReasoning(!showReasoning)}>
+                  {showReasoning ? "Hide reasoning" : `Show reasoning (${thoughts})`}
+                </button>
+              )}
+            </span>
           </div>
           {collections.length > 0 && (
             <div className={styles.aiTouched} aria-label="MongoDB collections touched so far">
@@ -272,19 +330,18 @@ export default function AgentPanel({ agent, steps, started, activity, activation
               </span>
             </div>
           )}
-          {timeline.length === 0 ? (
+          {rows.length === 0 ? (
             <Body className={styles.muted}>
               {started ? "The agent has not called a tool yet." : "Nothing yet. The agent wakes when the case opens."}
             </Body>
           ) : (
             <ol className={styles.aiTimeline}>
-              {timeline.map((item) => (item.type === "thought"
+              {rows.map((item) => (item.type === "thought"
                 ? <Thought key={item.key} text={item.text} />
-                : <CallCard key={item.key} call={item} bank={bank} />))}
+                : <CallRow key={item.key} call={item} bank={bank} />))}
             </ol>
           )}
         </section>
-        <Findings agent={agent} />
       </div>
     </aside>
   );

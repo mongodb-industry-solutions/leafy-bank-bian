@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Banner from "@leafygreen-ui/banner";
+import Icon from "@leafygreen-ui/icon";
 import LeafyGreenProvider from "@leafygreen-ui/leafygreen-provider";
 import { Body } from "@leafygreen-ui/typography";
 import { agentApi } from "@/lib/api/client";
@@ -57,6 +58,7 @@ export default function ShowcaseView() {
   const scenarioKey = isCutoffKey || scenarioByKey(param) ? param : null;
   const setScenarioKey = (key) =>
     router.push(key ? `/showcase?scenario=${encodeURIComponent(key)}` : "/showcase");
+  const current = scenarioKey ? cutoffByKey(scenarioKey) || scenarioByKey(scenarioKey) : null;
   const health = useAgentHealth();
   const states = Object.values(health);
   const checking = states.some((s) => s == null);
@@ -79,12 +81,17 @@ export default function ShowcaseView() {
         {!scenarioKey && Object.entries(AGENT_COPY).map(([key, c]) =>
           health[key] === false && <Banner key={key} variant="warning">{c.offline}</Banner>)}
 
-        {scenarioKey && isCutoffKey && (
-          <CutoffStepper key={scenarioKey} scenarioKey={scenarioKey} onReset={() => setScenarioKey(null)} />
+        {scenarioKey && (
+          <nav className={styles.crumbs} aria-label="Breadcrumb">
+            <button type="button" className={styles.crumbBack} onClick={() => setScenarioKey(null)}>
+              <Icon glyph="ChevronLeft" size={14} />All scenarios
+            </button>
+            <span className={styles.crumbSep} aria-hidden="true">/</span>
+            <span className={styles.crumbHere} aria-current="page">{current?.key} · {current?.title}</span>
+          </nav>
         )}
-        {scenarioKey && !isCutoffKey && (
-          <ScenarioStepper key={scenarioKey} scenarioKey={scenarioKey} onReset={() => setScenarioKey(null)} />
-        )}
+        {scenarioKey && isCutoffKey && <CutoffStepper key={scenarioKey} scenarioKey={scenarioKey} />}
+        {scenarioKey && !isCutoffKey && <ScenarioStepper key={scenarioKey} scenarioKey={scenarioKey} />}
         {!scenarioKey && <ScenarioPicker onPick={setScenarioKey} />}
         </div>
       </div>

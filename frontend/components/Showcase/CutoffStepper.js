@@ -112,7 +112,7 @@ function alreadyApproved(err, payment) {
 
 const TRIGGER_LABEL = { STREAM: "a payments change stream", SWEEP: "the periodic sweep", MANUAL: "Run now" };
 
-export default function CutoffStepper({ scenarioKey, onReset }) {
+export default function CutoffStepper({ scenarioKey }) {
   const scenario = cutoffByKey(scenarioKey);
   const steps = useMemo(() => cutoffStepsFor(scenarioKey), [scenarioKey]);
   const [index, setIndex] = useState(0);
@@ -303,7 +303,6 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
     waiting,
     error,
     onNext: next,
-    onReset,
     onSweep: paymentId ? () => sweep(paymentId) : null,
     sweeping,
     sweepDisabled: done,

@@ -601,8 +601,8 @@ scene + rail. One tone drives every accent. */
 .scene {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 24px;
+  gap: 10px;
+  padding: 16px;
   background: #fff;
   border: 1px solid #e8edeb;
   border-radius: 16px;
@@ -1134,7 +1134,7 @@ scene + rail. One tone drives every accent. */
   justify-content: space-between;
   align-items: center;
   gap: 24px;
-  padding: 20px 24px;
+  padding: 10px 16px;
   background: var(--tone-bg);
   border: 1px solid #d5dedb;
   border-left: 6px solid var(--tone);
@@ -1150,7 +1150,7 @@ scene + rail. One tone drives every accent. */
 .runRow > .runControl {
   flex: 1;
   min-width: 0;
-  height: 240px;
+  height: 150px;
   align-items: flex-start;
   overflow-y: auto;
 }
@@ -1215,8 +1215,8 @@ scene + rail. One tone drives every accent. */
 .stepCols {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
-  margin-top: 8px;
+  gap: 12px;
+  margin-top: 4px;
 }
 
 .stepCol {
@@ -1226,7 +1226,7 @@ scene + rail. One tone drives every accent. */
 }
 
 .stepBeat {
-  padding-left: 16px;
+  padding-left: 12px;
   border-left: 3px solid #016bf8;
 }
 
@@ -1331,13 +1331,13 @@ scene + rail. One tone drives every accent. */
 .runTop {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 16px;
+  gap: 10px;
   align-items: stretch;
 }
 
 .payCard {
-  gap: 6px;
-  padding: 16px 20px;
+  gap: 3px;
+  padding: 10px 14px;
 }
 
 .payFact {
@@ -1361,15 +1361,15 @@ scene + rail. One tone drives every accent. */
 .briefFeatures {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   margin-top: auto;
 }
 
 .runTop > .briefStrip {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px 20px;
+  gap: 4px;
+  padding: 10px 14px;
   background: var(--tone-bg);
   border-color: var(--tone);
   height: 100%;
@@ -1668,8 +1668,8 @@ summary.runTitle {
 .pipeline {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+  gap: 6px;
+  padding: 8px 12px;
   border: 1px solid #e8edeb;
   border-radius: 12px;
   background: #ffffff;
@@ -1711,7 +1711,7 @@ summary.runTitle {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(8, minmax(96px, 1fr));
+  grid-template-columns: repeat(8, minmax(80px, 1fr));
   overflow-x: auto;
 }
 
@@ -1720,7 +1720,7 @@ summary.runTitle {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   padding: 0 4px;
   text-align: center;
 }
@@ -1729,9 +1729,9 @@ summary.runTitle {
 .pipeStage:not(:last-child)::after {
   content: "";
   position: absolute;
-  top: 15px;
-  left: calc(50% + 18px);
-  right: calc(-50% + 18px);
+  top: 11px;
+  left: calc(50% + 14px);
+  right: calc(-50% + 14px);
   height: 2px;
   background: #d6dedb;
 }
@@ -1744,19 +1744,19 @@ summary.runTitle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 2px solid #c9d1cf;
   background: #ffffff;
   color: #5c6c75;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .pipeLabel {
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 11px;
+  line-height: 14px;
   color: #5c6c75;
 }
 
@@ -2176,3 +2176,238 @@ summary.runTitle {
 
 .mongoRead { background: #e3f1fb; color: #0b61a4; }
 .mongoWrite { background: #e3fcf7; color: #00684a; }
+
+/* Compact typography for the run header: the scenario card, the payment card and the step card
+   used the full 16px/28px body, which made each of them tall. The extra class in the selector
+   outranks LeafyGreen's own single-class Body styles. */
+.runTop > .briefStrip > p,
+.stepCol > p,
+.pipeline .pipelineNote {
+  font-size: 13px;
+  line-height: 19px;
+  margin: 0;
+}
+
+.payCard .payFact > span {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.payCard .paneTitle {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.runTop .briefHead + .chipRow,
+.payCard .chipRow {
+  gap: 4px;
+}
+
+/* Breadcrumb above a running scenario: navigation, kept apart from the step controls. */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: -12px;
+  font-size: 14px;
+  color: #5c6c75;
+}
+
+.crumbBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px 2px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: #016bf8;
+  font: inherit;
+  cursor: pointer;
+}
+
+.crumbBack:hover {
+  background: #e1f0ff;
+}
+
+.crumbHere {
+  color: #1c2d38;
+  font-weight: 600;
+}
+
+/* Agent panel: where the agent is, the pinned finding, and one-line tool-call rows. */
+.aiActivation {
+  font-size: 12px;
+  line-height: 16px;
+  color: #5c6c75;
+}
+
+.aiFlow {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aiFlowStep {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+}
+
+.aiFlowStep:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: calc(50% + 10px);
+  right: calc(-50% + 10px);
+  height: 2px;
+  background: #d6dedb;
+}
+
+.aiFlow_done:not(:last-child)::after { background: #00a35c; }
+
+.aiFlowDot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #c9d1cf;
+  background: #fff;
+  color: #5c6c75;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.aiFlowLabel {
+  font-size: 11px;
+  line-height: 14px;
+  color: #5c6c75;
+}
+
+.aiFlow_done .aiFlowDot { border-color: #00a35c; background: #00a35c; color: #fff; }
+.aiFlow_now .aiFlowDot { border-color: #7c3aed; background: #f3ecfe; box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15); }
+.aiFlow_wait .aiFlowDot { border-color: #ffc010; background: #fffbea; box-shadow: 0 0 0 3px rgba(255, 192, 16, 0.3); }
+.aiFlow_skip .aiFlowDot { border-style: dashed; }
+.aiFlow_now .aiFlowLabel,
+.aiFlow_wait .aiFlowLabel { color: #001e2b; font-weight: 600; }
+.aiFlow_skip .aiFlowLabel { color: #a3afb5; }
+
+.aiSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 38vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid #cfe9dd;
+  border-radius: 10px;
+  background: #f4fbf7;
+}
+
+.aiChips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.aiChip {
+  display: inline-flex;
+  gap: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #cfe9dd;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1c2d38;
+}
+
+.aiChipKey { font-weight: 400; color: #5c6c75; }
+
+.aiSummary .aiSummaryText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: #1c2d38;
+}
+
+.aiProposes { font-size: 13px; color: #1c2d38; }
+
+.aiSummaryMore summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #5c6c75;
+}
+
+.aiSummary .featureList { margin: 6px 0 0; font-size: 12px; line-height: 17px; }
+
+.aiSectionTools { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; }
+
+.aiToggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #016bf8;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A tool call is one row; the detail opens under it. */
+.aiRow {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid #e8edeb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.aiRowSummary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.aiRowSummary::-webkit-details-marker { display: none; }
+
+.aiRowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.aiRow .aiCallTitle { font-size: 13px; line-height: 18px; }
+
+.aiFinding {
+  font-size: 12px;
+  line-height: 17px;
+  color: #1c2d38;
+  overflow-wrap: anywhere;
+}
+
+.aiFindingBad { color: #b42318; }
+
+.aiMeta {
+  font-size: 11px;
+  line-height: 15px;
+  color: #7a8a92;
+}
+
+.aiRow[open] .aiCaret { transform: rotate(90deg); }
+.aiRow .aiCaret { flex: none; margin-top: 5px; color: #5c6c75; }
+
+.aiRowBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #eef2f0;
+}

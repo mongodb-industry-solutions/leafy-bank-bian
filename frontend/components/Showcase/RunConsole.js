@@ -190,7 +190,6 @@ export default function RunConsole({
             {controller.sweeping ? "Agent running…" : "Run now"}
           </Button>
         )}
-        <Button size="small" onClick={controller.onReset}>All scenarios</Button>
       </div>
   );
   let lastPhase = null;

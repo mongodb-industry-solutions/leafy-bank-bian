@@ -133,7 +133,7 @@ export default function PaymentPipeline({ payment, status, paymentId, mode = "cu
         </div>
       )}
 
-      {where.state && !handoff && (
+      {where.state && !handoff && !(recon && where.complete) && (
         <Body className={`${styles.pipelineNote} ${where.held ? styles.pipelineNoteHeld : ""}`}>
           {where.held ? `Held at stage ${where.stage}. ${where.note}` : where.failed ? `Payment ended as ${where.note}.` : where.note}
         </Body>

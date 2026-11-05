@@ -118,7 +118,7 @@ function useAgentRecords(ids, tick) {
   return records;
 }
 
-export default function ScenarioStepper({ scenarioKey, onReset }) {
+export default function ScenarioStepper({ scenarioKey }) {
   const scenario = scenarioByKey(scenarioKey);
   const steps = useMemo(() => stepsFor(scenarioKey), [scenarioKey]);
   const [index, setIndex] = useState(0);
@@ -407,7 +407,6 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     error,
     onNext: next,
     onReplyNow: replyNow,
-    onReset,
   };
 
   return (
