@@ -24,7 +24,7 @@ function effectOf(proposal, bank) {
 }
 
 /** Act 4: the climax. Approve and Reject are the primary controls. */
-export default function DecisionScene({ scenario, exceptionId, proposal, canDecide, onDecided }) {
+export default function DecisionScene({ scenario, exceptionId, proposal, canDecide, onDecided, compact = false }) {
   const [acting, setActing] = useState(null);
   const [error, setError] = useState(null);
 
@@ -46,7 +46,7 @@ export default function DecisionScene({ scenario, exceptionId, proposal, canDeci
 
   return (
     <div className={styles.section}>
-      <div className={styles.proposal}>
+      <div className={`${styles.proposal} ${compact ? styles.proposalCompact : ""}`}>
         <Overline>The agent proposes</Overline>
         <Body className={styles.proposalAction}>
           {scenario.decision.action.label}
@@ -58,13 +58,23 @@ export default function DecisionScene({ scenario, exceptionId, proposal, canDeci
             <Body>{effect}</Body>
           </>
         )}
-        {proposal.rationale && (
+        {compact ? (
+          <details className={styles.dockMore}>
+            <summary>Why, and the policy rule</summary>
+            {proposal.rationale && <Body className={styles.muted}>{proposal.rationale}</Body>}
+            <Body className={styles.policy}>Policy: {scenario.policyLine}</Body>
+          </details>
+        ) : (
           <>
-            <Overline>Why</Overline>
-            <Body className={styles.muted}>{proposal.rationale}</Body>
+            {proposal.rationale && (
+              <>
+                <Overline>Why</Overline>
+                <Body className={styles.muted}>{proposal.rationale}</Body>
+              </>
+            )}
+            <Body className={styles.policy}>Policy: {scenario.policyLine}</Body>
           </>
         )}
-        <Body className={styles.policy}>Policy: {scenario.policyLine}</Body>
       </div>
       {canDecide && (
         <div className={styles.actions}>

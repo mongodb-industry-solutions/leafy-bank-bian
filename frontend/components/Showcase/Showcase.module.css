@@ -1547,6 +1547,38 @@ summary.runTitle {
   margin-left: 8px;
 }
 
+/* The proposal waiting on the presenter: pinned to the bottom of the viewport so it is never
+   off screen, and compact so it does not cover the run. */
+.decisionDock {
+  position: sticky;
+  bottom: 12px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 2px solid #ffc010;
+  border-radius: 12px;
+  background: #fffbeb;
+  box-shadow: 0 -4px 16px rgba(28, 45, 56, 0.12);
+}
+
+.decisionDock .proposal.proposalCompact {
+  border-top: 0;
+  padding-top: 0;
+  gap: 4px;
+}
+
+.decisionDock .proposalAction { font-size: 16px; }
+
+.dockMore summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #5c6c75;
+}
+
+.dockMore > * { margin-top: 6px; }
+
 .reviewPanel {
   display: flex;
   flex-direction: column;
@@ -1875,6 +1907,10 @@ summary.runTitle {
   gap: 16px;
   min-height: 160px;
   overflow-y: auto;
+  /* Card borders were touching the scrollbar and looked clipped. */
+  overflow-x: hidden;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
 }
 
 .aiSection {
@@ -1912,6 +1948,7 @@ summary.runTitle {
 
 .aiItem {
   position: relative;
+  min-width: 0;
   display: flex;
   gap: 10px;
   padding-bottom: 12px;

@@ -349,14 +349,11 @@ export default function CutoffStepper({ scenarioKey, onReset }) {
               started={started}
               activity={activity}
               activation={caseDoc?.trigger ? { text: `Triggered by ${TRIGGER_LABEL[caseDoc.trigger.source] || caseDoc.trigger.source}`, at: caseDoc.openedAt } : null}
-            >
-              {agent?.proposedAction && canDecide && (
-                <div className={styles.reviewPanel}>
-                  <Overline>Needs your decision</Overline>
-                  <Proposal caseId={caseDoc?.caseId} proposal={agent.proposedAction} canDecide={canDecide} onDecided={onDecided} />
-                </div>
-              )}
-            </AgentPanel>
+              needsDecision={!!agent?.proposedAction && canDecide}
+            />
+          )}
+          decision={agent?.proposedAction && canDecide && (
+            <Proposal caseId={caseDoc?.caseId} proposal={agent.proposedAction} canDecide={canDecide} onDecided={onDecided} />
           )}
           result={step.final && !revisedProposal && (
             <div className={styles.section}>

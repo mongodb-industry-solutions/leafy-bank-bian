@@ -28,11 +28,25 @@ function toTimeline(steps) {
       const at = open.findIndex((c) => c.tool === s.tool);
       if (at >= 0) open.splice(at, 1)[0].result = String(s.text || "");
     } else if (s.kind !== "note" && s.text) {
-      out.push({ type: "thought", key: `t${i}`, text: String(s.text) });
+      out.push({ type: "thought", key: `t${i}`, text: plain(String(s.text)) });
     }
   });
   return out;
 }
+
+// The agent's last message restates its conclusion, which the Conclusion card below shows in
+// full, so once a cause is recorded that closing thought is dropped rather than shown clamped.
+function withoutClosingThought(timeline, agent) {
+  const last = timeline[timeline.length - 1];
+  return last?.type === "thought" && agent?.cause ? timeline.slice(0, -1) : timeline;
+}
+
+// Thoughts arrive as markdown; the panel shows plain text, so strip the markers.
+const plain = (text) =>
+  text
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/`([^`]+)`/g, "$1");
 
 function touched(timeline) {
   const tally = new Map();
@@ -196,10 +210,10 @@ function Findings({ agent }) {
  * @param {{kind: string, text: string}|null} p.activity  the run's current wait, for the status line
  * @param {{text: string, at?: any}|null} p.activation  why the agent woke
  * @param {string=} p.bank            correspondent bank, for tool phrases
- * @param {React.ReactNode} p.children the human-decision panel, shown first
+ * @param {boolean=} p.needsDecision  a proposal waits on the presenter (the decision itself is docked by RunConsole)
  */
-export default function AgentPanel({ agent, steps, started, activity, activation, bank, children }) {
-  const timeline = toTimeline(steps || []);
+export default function AgentPanel({ agent, steps, started, activity, activation, bank, needsDecision, children }) {
+  const timeline = withoutClosingThought(toTimeline(steps || []), agent);
   const collections = touched(timeline);
   const toolCalls = timeline.filter((t) => t.type === "call").length;
   const bodyRef = useRef(null);
@@ -211,7 +225,7 @@ export default function AgentPanel({ agent, steps, started, activity, activation
   }, [timeline.length, follow]);
 
   const working = activity?.kind === "agent";
-  const waitsOnYou = activity?.kind === "human" && !!children;
+  const waitsOnYou = activity?.kind === "human" && (!!children || !!needsDecision);
   const state = agent?.error && !agent?.verification ? "Failed"
     : waitsOnYou ? "Waiting for you"
       : working ? "Thinking"

@@ -162,7 +162,7 @@ function ActivityBanner({ activity }) {
 }
 
 export default function RunConsole({
-  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, aside, failure, result, activity,
+  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, aside, failure, result, activity, decision,
 }) {
   const [filter, setFilter] = useState("all");
   const logRef = useRef(null);
@@ -278,6 +278,14 @@ export default function RunConsole({
       </div>
 
       {result}
+
+      {/* Docked to the bottom of the viewport while the proposal waits, so it is never off screen. */}
+      {decision && (
+        <div className={styles.decisionDock} role="region" aria-label="Needs your decision">
+          <Overline>Needs your decision</Overline>
+          {decision}
+        </div>
+      )}
     </section>
     <div className={styles.rightCol}>
       {actions}
