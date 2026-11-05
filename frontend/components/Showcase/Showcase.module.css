@@ -2487,3 +2487,41 @@ summary.runTitle {
   padding-top: 8px;
   border-top: 1px solid #eef2f0;
 }
+
+/* End-of-run summary, sitting under the lifecycle strip. */
+.resultBar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 14px;
+  border: 1px solid #b7e1c8;
+  border-radius: 10px;
+  background: #f0faf4;
+}
+
+.resultBarWarn {
+  border-color: #f3b4b4;
+  background: #fef2f2;
+}
+
+.resultHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.resultGap {
+  font-size: 13px;
+  color: #3d4f58;
+}
+
+.resultLink {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.resultText {
+  font-size: 13px;
+  line-height: 1.45;
+}

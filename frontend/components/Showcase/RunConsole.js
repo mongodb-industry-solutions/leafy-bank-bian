@@ -245,6 +245,7 @@ export default function RunConsole({
     <section className={`${styles.scene} ${styles.toneStripe}`}>
       {top && <div className={styles.runTop}>{top}</div>}
       {pipeline}
+      {result}
 
       <div className={styles.runRow}>
         <div className={styles.runControl}>
@@ -333,8 +334,6 @@ export default function RunConsole({
         </button>
       )}
       </div>
-
-      {result}
 
       {/* Docked to the bottom of the viewport while the proposal waits, so it is never off screen. */}
       {decision && (

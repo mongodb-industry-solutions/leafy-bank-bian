@@ -28,44 +28,32 @@ export default function ResultScene({ paymentId, scenario, trace, payment, outco
       </div>
     );
   }
+  const resolvedOnly = outcome === "RESOLVED" && !reconciled;
+  const unexpected = !expectedOutcomes.includes(outcome);
   return (
-    <div className={styles.section}>
-      {gapBefore != null && (
-        <div className={styles.gapRow}>
-          <div className={`${styles.gapSide} ${styles.gapBad}`}>
-            <Overline>Gap before</Overline>
-            <span className={styles.gapFigure}>{minor(gapBefore)}</span>
-          </div>
-          <div className={`${styles.gapSide} ${gapNow ? styles.gapBad : styles.gapOk}`}>
-            <Overline>Gap now</Overline>
-            <span className={styles.gapFigure}>{minor(gapNow ?? 0)}</span>
-          </div>
-        </div>
-      )}
-      <div className={styles.chipRow}>
-        <Badge variant={outcome === "ESCALATED" ? "yellow" : "green"}>
-          {outcome === "ANSWERED" ? "CORRESPONDENT REPLIED" : outcome === "RESOLVED" ? "EXCEPTION RESOLVED" : outcome}
+    <div className={`${styles.resultBar} ${unexpected ? styles.resultBarWarn : ""}`}>
+      <div className={styles.resultHead}>
+        <Badge variant="green">
+          {outcome === "ANSWERED" ? "CORRESPONDENT REPLIED" : resolvedOnly ? "EXCEPTION RESOLVED" : outcome}
         </Badge>
-        {reconciled && <Badge variant="green">Payment reconciled</Badge>}
-      </div>
-      <Body>{scenario.beats.verify}</Body>
-      {outcome === "RESOLVED" && !reconciled && (
-        <Body className={styles.muted}>
-          The ledger marks the payment reconciled on its next batch. Follow the reconciliation status on the Activity page in Payments.
-        </Body>
-      )}
-      {paymentId && (
-        <Body>
-          <Link href={`/payments-workflow?payment=${encodeURIComponent(paymentId)}`}>
-            {outcome === "RESOLVED" && !reconciled ? "Follow reconciliation in Payments Activity →" : "Open the full lifecycle in Payments →"}
+        {gapBefore != null && (
+          <span className={styles.resultGap}>
+            Gap <strong>{minor(gapBefore)}</strong> → <strong className={gapNow ? styles.error : undefined}>{minor(gapNow ?? 0)}</strong>
+          </span>
+        )}
+        {paymentId && (
+          <Link href={`/payments-workflow?payment=${encodeURIComponent(paymentId)}`} className={styles.resultLink}>
+            {resolvedOnly ? "Follow reconciliation in Payments Activity" : "Open in Payments"} →
           </Link>
-        </Body>
-      )}
-      <Body className={styles.muted}>Expected: {scenario.expected}</Body>
-      {!expectedOutcomes.includes(outcome) && (
+        )}
+      </div>
+      <Body className={styles.resultText}>
+        {scenario.beats.verify}
+        {resolvedOnly && " The ledger marks the payment reconciled on its next batch."}
+      </Body>
+      {unexpected && (
         <Body className={styles.error}>
-          This run ended differently than the scenario expects. Check the exception and the
-          payment before continuing.
+          Ended differently than expected ({scenario.expected}). Check the exception and the payment before continuing.
         </Body>
       )}
     </div>
