@@ -337,8 +337,8 @@ const STEP = {
       "Each stage is recorded on the payment document, and the customer's account is " +
       "debited in the same ACID transaction.",
     run: "initiate",
-    // One click runs this step and the next `chain` ones: setup is not the agent story.
-    chain: 2,
+    // The presenter starts the wire; settle, GL post, statement and match then follow on
+    // their own, one at a time, each after the log has finished showing the previous one.
     button: "Send the wire",
   },
   settle: {
@@ -352,6 +352,7 @@ const STEP = {
       "to SETTLED. Nothing calls the ledger directly: a MongoDB change stream sees the status " +
       "change and the ledger service writes its settlement event.",
     run: "settle",
+    auto: "Waiting for the correspondent to confirm settlement",
   },
   glpost: {
     key: "glpost",
@@ -365,6 +366,7 @@ const STEP = {
       "correspondent (1111). Every journal balances to the cent. As far as our own books " +
       "are concerned, this payment is done.",
     run: "batch",
+    auto: "The ledger batch is journaling the payment",
   },
   statement: {
     key: "statement",
@@ -377,7 +379,6 @@ const STEP = {
       "record: a camt.053 statement of every movement on our nostro account. This is the " +
       "external evidence reconciliation checks our books against.",
     run: "statement",
-    chain: 1,
     // The correspondent sends this on its own; nobody presses anything.
     auto: "Receiving the correspondent's statement",
     button: "Receive the statement",
@@ -394,6 +395,7 @@ const STEP = {
       "RECONCILED with no human involved. When they don't, an exception opens, and the " +
       "change stream on the exceptions collection wakes the Reconciliation Agent.",
     run: "batch",
+    auto: "Reconciliation is comparing payment, ledger and statement",
   },
   overdue: {
     key: "overdue",

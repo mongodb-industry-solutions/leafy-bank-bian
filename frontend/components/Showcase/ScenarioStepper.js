@@ -21,7 +21,7 @@ import DecisionScene from "./scenes/DecisionScene";
 import ResultScene from "./scenes/ResultScene";
 import AgentFailure from "./scenes/AgentFailure";
 import { gapOf, railLegOf } from "./scenes/format";
-import { phaseOfStep, usePacedEvents, useRunLog } from "./runLog";
+import { BEAT_DWELL_MS, phaseOfStep, usePacedEvents, useRunLog } from "./runLog";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
@@ -33,7 +33,11 @@ const EXPECTED_OUTCOMES = {
 };
 const BATCH_KICK_GAP_MS = 12000;
 const BATCH_KICK_LIMIT = 5;
-const AUTO_DELAY_MS = 1500;
+// An automatic step fires this long after the log has finished showing the step before it,
+// so each beat is read before the next one starts.
+const AUTO_DELAY_MS = 2000;
+// Gap between log lines. Key beats hold longer through their own `dwell` (see runLog).
+const LOG_GAP_MS = 1500;
 const OWN_CATEGORIES = new Set([CATEGORY.DISCREPANCY, CATEGORY.MISSING]);
 
 const generateStatement = (includeOrphan) =>
@@ -231,7 +235,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     exceptions: trackedExceptions, gapMajor: liveGap == null ? null : liveGap / 100,
   });
   // Lines appear one at a time, as in the cut-off walkthrough, so the presenter can read each.
-  const { events, backlog } = usePacedEvents(allEvents);
+  const { events, backlog } = usePacedEvents(allEvents, LOG_GAP_MS);
 
   const countdownLeft = step.countdown && ctx.settledAt
     ? Math.max(0, Math.ceil(OVERDUE_SECONDS - (now - ctx.settledAt) / 1000))
@@ -276,26 +280,27 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
     }
   }
 
-  // Steps marked `auto` run on their own once reached. Each tries once; a failure leaves the
-  // button for a manual retry instead of looping.
+  // Steps marked `auto` run on their own once reached, but only after the paced log has caught
+  // up (backlog 0), so a step never starts while the previous one is still being narrated.
+  // Each tries once; a failure leaves the button for a manual retry instead of looping.
   const nextRef = useRef(next);
   nextRef.current = next;
   const autoTried = useRef(new Set());
   useEffect(() => {
-    if (!step.auto || running || waiting || autoTried.current.has(step.key)) return undefined;
+    if (!step.auto || running || waiting || backlog > 0 || autoTried.current.has(step.key)) return undefined;
     const id = setTimeout(() => {
       autoTried.current.add(step.key);
       nextRef.current();
     }, AUTO_DELAY_MS);
     return () => clearTimeout(id);
-  }, [step.key, step.auto, running, waiting]);
+  }, [step.key, step.auto, running, waiting, backlog]);
 
   async function next() {
     if (running || waiting || step.final) return;
     setRunning(true);
     setError(null);
-    // A step may chain the ones after it into a single click. Each success advances the
-    // index, so a failure part-way leaves the failed step current and Next retries from there.
+    // A step may declare `chain` to run the ones after it in one click (none do now). Each success
+    // advances the index, so a failure part-way leaves the failed step current and Next retries.
     const last = Math.min(index + (step.chain || 0), steps.length - 1);
     let local = ctx;
     let at = index;
@@ -314,6 +319,7 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
             lane: "code",
             ord: at - 0.5,
             tone: "good",
+            dwell: BEAT_DWELL_MS,
             title: `${received.late ? "Late statement" : "Statement"} received from ${scenario.bank}`,
             detail: `${received.id}: ${received.lines} line${received.lines === 1 ? "" : "s"}${received.orphans ? `, ${received.orphans} not ours` : ""}`,
           });

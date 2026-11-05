@@ -29,6 +29,12 @@ const PHASE_OF_STEP = {
 // Steps not listed sort by their position in the step list.
 const WRITES_ORD = { investigate: 250, approve: 445, late: 500, verify: 800 };
 
+// How long the paced log holds after a beat the audience should take in (statement arrival, the
+// gap, the exception, the agent waking, the decision, the outcome) before the next line appears.
+export const BEAT_DWELL_MS = 2600;
+// Setup steps carry MongoDB write documents that take longer to read than a one-line event.
+const WRITES_DWELL_MS = { initiate: 2400, settle: 2000, glpost: 2000, statement: 2000, match: 2200 };
+
 export const phaseOfStep = (stepKey) => PHASE_OF_STEP[stepKey] || PAYMENT;
 
 const label = (value) => String(value).replaceAll("_", " ").toLowerCase();
@@ -115,7 +121,7 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
     const moment = momentsFor(scenarioKey, s.key)[0];
     out.push({
       key: `writes:${s.key}`, phase: phaseOfStep(s.key), lane: "mongo", ord: WRITES_ORD[s.key] ?? si,
-      stepKey: s.key, title: s.title,
+      stepKey: s.key, title: s.title, dwell: WRITES_DWELL_MS[s.key],
       detail: moment?.text, tag: moment?.feature, writes,
     });
   });
@@ -124,7 +130,7 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
   const gap = gapOf(leg);
   if (gap != null) {
     out.push({
-      key: "gap", phase: DETECTION, lane: "code", ord: 100, tone: gap ? "alert" : "good",
+      key: "gap", phase: DETECTION, lane: "code", ord: 100, dwell: BEAT_DWELL_MS, tone: gap ? "alert" : "good",
       title: gap
         ? `Books say ${minor(leg.leftAmount)}, ${bank} statement says ${minor(leg.rightAmount)}: gap of ${minor(gap)}`
         : "Books and statement agree",
@@ -133,18 +139,18 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
 
   exceptions.forEach((e) => {
     out.push({
-      key: `exc:${e.exceptionId}`, phase: DETECTION, lane: "code", ord: 101, at: e.createdAt ? Date.parse(e.createdAt) : undefined,
+      key: `exc:${e.exceptionId}`, phase: DETECTION, lane: "code", ord: 101, dwell: BEAT_DWELL_MS, at: e.createdAt ? Date.parse(e.createdAt) : undefined,
       tone: "alert", tag: "Change stream",
       title: `Exception opened: ${label(e.category || "unknown")}`, detail: e.exceptionId,
     });
     if (e.status && e.status !== "OPEN") {
-      out.push({ key: `exc:${e.exceptionId}:${e.status}`, phase: RESOLUTION, lane: "code", ord: 650, tone: "good", title: `Exception ${label(e.status)}` });
+      out.push({ key: `exc:${e.exceptionId}:${e.status}`, phase: RESOLUTION, lane: "code", ord: 650, dwell: BEAT_DWELL_MS, tone: "good", title: `Exception ${label(e.status)}` });
     }
   });
 
   if (agentStarted) {
     out.push({
-      key: "woke", phase: INVESTIGATION, lane: "mongo", ord: 200, tag: "Change stream",
+      key: "woke", phase: INVESTIGATION, lane: "mongo", ord: 200, dwell: BEAT_DWELL_MS, tag: "Change stream",
       title: "The new exception woke the agent", detail: "Insert on exceptions, picked up through a change stream",
     });
   }
@@ -170,7 +176,7 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
   const proposed = agent?.proposedAction || proposal;
   if (proposed) {
     out.push({
-      key: "proposal", phase: INVESTIGATION, lane: "agent", ord: 420, tone: "wait",
+      key: "proposal", phase: INVESTIGATION, lane: "agent", ord: 420, dwell: BEAT_DWELL_MS, tone: "wait",
       title: `Proposed ${scenario.decision.action.label}`, detail: proposed.action,
     });
     const lines = policyLines({ ...agent, proposedAction: proposed }, scenario, gapMajor);
@@ -188,7 +194,7 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
 
   if (ctx.decision) {
     out.push({
-      key: `decision:${ctx.decision}`, phase: DECISION, lane: "human", ord: 450,
+      key: `decision:${ctx.decision}`, phase: DECISION, lane: "human", ord: 450, dwell: BEAT_DWELL_MS,
       tone: ctx.decision === "APPROVE" ? "good" : "alert",
       title: ctx.decision === "APPROVE" ? "You approved the proposal" : "You rejected the proposal",
       detail: "Stored on the exception as agent.approval",
@@ -202,12 +208,12 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
   });
   if (agent?.verification?.result) {
     out.push({
-      key: `verify:${agent.verification.result}`, phase: RESOLUTION, lane: "code", ord: 700, tone: "good",
+      key: `verify:${agent.verification.result}`, phase: RESOLUTION, lane: "code", ord: 700, dwell: BEAT_DWELL_MS, tone: "good",
       title: `Agent re-read the system: ${label(agent.verification.result)}`,
     });
   }
   if (payment?.lifecycle?.reconciliationStatus === "RECONCILED") {
-    out.push({ key: "reconciled", phase: RESOLUTION, lane: "code", ord: 710, tone: "good", title: "Payment reconciled" });
+    out.push({ key: "reconciled", phase: RESOLUTION, lane: "code", ord: 710, dwell: BEAT_DWELL_MS, tone: "good", title: "Payment reconciled" });
   }
   if (agent?.error && !agent?.verification) {
     out.push({ key: "agent-error", phase: INVESTIGATION, lane: "agent", ord: 900, tone: "alert", title: "Agent error", detail: agent.error.message });
