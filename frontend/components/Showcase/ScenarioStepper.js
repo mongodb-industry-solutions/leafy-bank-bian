@@ -238,16 +238,15 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   const { events, backlog } = usePacedEvents(allEvents, LOG_GAP_MS);
 
   // The lifecycle strip follows what the log has shown, not the live payment, which is seconds
-  // ahead: the wire leaves the bank when the initiate line appears, settles when the settle line
-  // does, is held once the exception line has been read, and reconciles when that line is read.
+  // ahead: it ticks to stage N when the "Stage N" line is read, is held once the exception line
+  // has been read, and completes when "Payment reconciled" is read.
   const pacedStrip = useMemo(() => {
     const keys = events.map((e) => e.key);
-    const seen = (k) => keys.includes(k) || keys.includes(`note:${k.replace("writes:", "")}`);
     // `exc:<id>` is an exception opening; `exc:<id>:<STATUS>` is it closing. Held while any shown one is still open.
     const closed = new Set(keys.filter((k) => /^exc:.+:[A-Z]+$/.test(k)).map((k) => k.slice(0, k.lastIndexOf(":"))));
     const opened = keys.filter((k) => k.startsWith("exc:") && !/^exc:.+:[A-Z]+$/.test(k));
     return {
-      ceiling: seen("writes:settle") ? 8 : seen("writes:initiate") ? 6 : 0,
+      ceiling: Math.max(0, ...keys.filter((k) => /^stage:\d$/.test(k)).map((k) => Number(k.slice(6)))),
       held: opened.some((k) => !closed.has(k)),
       complete: keys.includes("reconciled"),
     };
@@ -371,6 +370,11 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
   const canDecide = (step.gate === "decided" && !ctx.decision) || proposalReady || revisedProposalPending;
   const sources = { payment, trace, ownException, orphan, agent, followedException, scenarioKey };
 
+  // The decision opens only once the paced log has shown "Run paused for approval", i.e. after the
+  // presenter has read the proposal and policy lines. `canDecide` itself stays live (it gates the
+  // buttons and the wait text); this only delays when the bar appears.
+  const decisionShown = !!proposal && (canDecide || revisedProposalPending) && events.some((e) => e.key === "paused");
+
   const agentGate = step.gate === "proposal" || step.gate === "recheck";
   const agentWorking =
     (step.gate === "proposal" && !agent?.proposedAction && !agent?.verification) ||
@@ -462,10 +466,10 @@ export default function ScenarioStepper({ scenarioKey, onReset }) {
               activity={activity}
               activation={followedId ? { text: "Woken by an insert on exceptions (change stream)", at: agent?.startedAt } : null}
               bank={scenario.bank}
-              needsDecision={!!proposal && (canDecide || revisedProposalPending)}
+              needsDecision={decisionShown}
             />
           )}
-          decision={proposal && (canDecide || revisedProposalPending) && (
+          decision={decisionShown && (
             <DecisionScene
               compact
               scenario={scenario}

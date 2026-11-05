@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { momentsFor } from "./briefs";
 import { phraseFor } from "./agentPhrases";
 import { writesFor } from "./stepWrites";
+import { STAGES, stageOfState } from "./lifecycleStages";
 import { gapOf, major, minor, railLegOf } from "./scenes/format";
 
 export const PHASES = ["The payment", "Detection", "Agent investigation", "Human decision", "Resolution"];
@@ -33,6 +34,8 @@ const WRITES_ORD = { investigate: 250, approve: 445, late: 500, verify: 800 };
 // gap, the exception, the agent waking, the decision, the outcome) before the next line appears.
 export const BEAT_DWELL_MS = 2600;
 // Setup steps carry MongoDB write documents that take longer to read than a one-line event.
+// One line per lifecycle stage as the wire passes it; the pipeline strip ticks with each.
+const STAGE_DWELL_MS = 1300;
 const WRITES_DWELL_MS = { initiate: 2400, settle: 2000, glpost: 2000, statement: 2000, match: 2200 };
 
 export const phaseOfStep = (stepKey) => PHASE_OF_STEP[stepKey] || PAYMENT;
@@ -123,6 +126,18 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
       key: `writes:${s.key}`, phase: phaseOfStep(s.key), lane: "mongo", ord: WRITES_ORD[s.key] ?? si,
       stepKey: s.key, title: s.title, dwell: WRITES_DWELL_MS[s.key],
       detail: moment?.text, tag: moment?.feature, writes,
+    });
+  });
+
+  // The wire's own journey, one line per stage. The strip above the log ticks with these lines, so
+  // a stage lights up when its line is read, not when the backend finished it. Stages 1 to 6 sort
+  // ahead of the initiate step's writes and 7 to 8 ahead of the settle step's.
+  const liveState = payment?.lifecycle?.currentState || ctx.init?.status;
+  const reached = ctx.settledAt ? 8 : stageOfState(liveState);
+  STAGES.filter((st) => st.n <= reached).forEach((st) => {
+    out.push({
+      key: `stage:${st.n}`, phase: PAYMENT, lane: "code", ord: (st.n <= 6 ? -1 : 0) + st.n / 100, dwell: STAGE_DWELL_MS,
+      title: `Stage ${st.n}: ${st.label}`, detail: st.what,
     });
   });
 

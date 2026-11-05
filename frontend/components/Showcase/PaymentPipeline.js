@@ -6,33 +6,12 @@
 // then sit at stage 8 until the books and the statement agree (`mode="reconciliation"`).
 // Position comes from `lifecycle.currentState`.
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import Icon from "@leafygreen-ui/icon";
 import { Body, Overline } from "@leafygreen-ui/typography";
 import { STATE_INFO } from "./cutoffRunLog";
+import { POSITION, STAGES, STAGE_STATE, stageOfState } from "./lifecycleStages";
 import styles from "./Showcase.module.css";
-
-const STAGES = [
-  { n: 1, label: "Initiation" },
-  { n: 2, label: "Authentication & Authorization" },
-  { n: 3, label: "Validate & Enrich" },
-  { n: 4, label: "Orchestration & Approval" },
-  { n: 5, label: "Payment Execution" },
-  { n: 6, label: "Accounting & Posting" },
-  { n: 7, label: "Clearing & Settlement" },
-  { n: 8, label: "Reconciliation" },
-];
-
-// [stage the wire is in, held?]. The stage is where the wire is now, so every earlier stage is
-// done. SETTLED sits at stage 8 because stage 7 is finished and reconciliation is next.
-const POSITION = {
-  DRAFT: [1], INITIATED: [2], PENDING_APPROVAL: [2, true],
-  VALIDATED: [3], ENRICHED: [3], PENDING_FUNDS: [3, true],
-  FINAL_VALIDATED: [4], ROUTED: [4], AUTHORISED: [4], APPROVED: [4],
-  PENDING_SCREENING: [4, true], CUTOFF_EXCEPTION: [4, true], MANUAL_FRAUD_REVIEW: [4, true],
-  SUBMITTED: [5], IN_PROGRESS: [6], POSTED: [7], SETTLED: [8], RECONCILED: [8],
-};
 
 // A deferred wire is back at ROUTED with a later value date: parked on purpose, not in flight.
 const DEFERRED = {
@@ -48,20 +27,20 @@ const RECON_NOTES = {
 // Reconciliation mode: stage 8 is the live stage. It is held while an exception is open, and
 // complete once the payment's own reconciliation closes.
 //
-// With `paced`, the strip follows the walkthrough's narration instead of the live data, which
-// runs seconds ahead of the log. `paced.ceiling` is the furthest stage the log has reached,
-// `walked` the stage the strip has stepped to so far, and `held` / `complete` switch only once
-// the log has shown the exception opening and the payment reconciling. Live data still caps it.
-function locateRecon(payment, status, { reconciled, exceptionsOpen }, paced, walked) {
+// With `paced`, the strip follows the run log instead of the live data, which runs seconds
+// ahead of it. `paced.ceiling` is the furthest stage whose log line has been shown, and `held` /
+// `complete` switch only once the log has shown the exception opening and the payment
+// reconciling, so each tick lands with its line. An unknown state still shows as failed.
+function locateRecon(payment, status, { reconciled, exceptionsOpen }, paced) {
   const liveState = payment?.lifecycle?.currentState || status;
   if (!liveState) return { stage: 0, held: false, note: "Not sent yet" };
   const liveComplete = !!reconciled || liveState === "RECONCILED";
-  const liveStage = liveComplete || liveState === "COMPLETED" ? 8 : (POSITION[liveState] || [0])[0];
+  const liveStage = liveComplete ? 8 : stageOfState(liveState);
   const complete = paced ? liveComplete && !!paced.complete : liveComplete;
-  const stage = paced && !complete && liveStage ? Math.min(walked, liveStage) : liveStage;
-  if (paced && stage === 0 && liveStage) return { stage: 0, held: false, note: "Not sent yet" };
-  // A replayed stage shows its own representative state, not the live one that is further on.
-  const state = paced && stage < liveStage ? STAGE_STATE[stage] : liveState;
+  const stage = !paced || !liveStage ? liveStage : complete ? 8 : paced.ceiling;
+  if (paced && liveStage && stage === 0) return { stage: 0, held: false, note: "Not sent yet" };
+  // A stage the live payment has moved past (or not yet reached) shows its own representative state.
+  const state = stage === liveStage ? liveState : STAGE_STATE[stage];
   const held = !complete && stage === 8 && (paced ? !!paced.held : !!exceptionsOpen);
   const info = STATE_INFO[state];
   return {
@@ -102,29 +81,9 @@ function nodeStatus(n, where, recon) {
   return "idle";
 }
 
-// The state each stage stands for while the strip replays the walk to the live stage.
-const STAGE_STATE = [null, "DRAFT", "INITIATED", "VALIDATED", "AUTHORISED", "SUBMITTED", "IN_PROGRESS", "POSTED", "SETTLED"];
-const STAGE_STEP_MS = 700;
-
-/** Steps up to `target` one stage at a time, so a jump from 0 to 6 reads as five moves. Drops at once. */
-function useWalkedStage(target) {
-  const [walked, setWalked] = useState(0);
-  useEffect(() => {
-    if (walked > target) {
-      setWalked(target);
-      return undefined;
-    }
-    if (walked === target) return undefined;
-    const id = setTimeout(() => setWalked((w) => w + 1), STAGE_STEP_MS);
-    return () => clearTimeout(id);
-  }, [walked, target]);
-  return walked;
-}
-
 export default function PaymentPipeline({ payment, status, paymentId, mode = "cutoff", reconciled, exceptionsOpen, paced }) {
   const recon = mode === "reconciliation";
-  const walked = useWalkedStage(recon && paced ? paced.ceiling : 0);
-  const where = recon ? locateRecon(payment, status, { reconciled, exceptionsOpen }, paced, walked) : locate(payment, status);
+  const where = recon ? locateRecon(payment, status, { reconciled, exceptionsOpen }, paced) : locate(payment, status);
   const handoff = !recon && handedOff(where);
   const current = STAGES.find((s) => s.n === where.stage);
   return (
