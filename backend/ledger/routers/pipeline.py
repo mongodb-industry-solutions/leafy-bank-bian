@@ -199,9 +199,18 @@ def recheck_exception(exception_id: str, request: Request,
 
 @router.post("/exceptions/{exception_id}/correspondent-reply")
 def correspondent_reply_exception(exception_id: str, request: Request) -> JSONResponse:
-    """Demo: the correspondent answers an escalated exception now, without the 20s wait."""
+    """Demo: the correspondent's camt.111 now, without the simulated 20s wait. Answers only;
+    the exception stays open until a corrected camt.053 books the amount."""
     connection, db_name = request.app.state.connection, request.app.state.db_name
     return _resolution_call(correspondent_reply.reply, connection, db_name, exception_id)
+
+
+@router.post("/exceptions/{exception_id}/apply-corrected-statement")
+def apply_corrected_statement_exception(exception_id: str, request: Request) -> JSONResponse:
+    """Re-check against the correspondent's corrected camt.053; 409 until it has arrived."""
+    connection, db_name = request.app.state.connection, request.app.state.db_name
+    return _resolution_call(correspondent_reply.apply_corrected_statement,
+                            connection, db_name, exception_id)
 
 
 @router.post("/exceptions/{exception_id}/link")

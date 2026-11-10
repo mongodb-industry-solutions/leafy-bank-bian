@@ -232,6 +232,11 @@ export default function RunConsole({
             Correspondent replies now
           </Button>
         )}
+        {controller.awaitingStatement && (
+          <Button size="small" disabled={controller.running} onClick={controller.onStatementNow}>
+            Corrected statement now
+          </Button>
+        )}
         {controller.onSweep && (
           <Button size="small" disabled={controller.sweeping || controller.sweepDisabled} onClick={controller.onSweep}>
             {controller.sweeping ? "Agent running…" : "Run now"}

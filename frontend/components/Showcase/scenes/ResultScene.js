@@ -7,7 +7,7 @@ import { gapOf, minor, railLegOf } from "./format";
 import styles from "../Showcase.module.css";
 
 /** The end of the run: the gap before and after, and the outcome. */
-export default function ResultScene({ paymentId, scenario, trace, payment, outcome, gapBefore, expectedOutcomes, waiting }) {
+export default function ResultScene({ paymentId, scenario, trace, payment, outcome, gapBefore, expectedOutcomes, waiting, awaitingStatement }) {
   const leg = railLegOf(trace);
   const gapNow = gapOf(leg);
   const reconciled = payment?.lifecycle?.reconciliationStatus === "RECONCILED";
@@ -15,14 +15,35 @@ export default function ResultScene({ paymentId, scenario, trace, payment, outco
   if (!outcome) {
     return <Body className={styles.muted}>{waiting || "Verifying the result…"}</Body>;
   }
+  // R4 phase 2: the camt.111 is in, but a reply is not a booking. Open until the corrected camt.053.
+  if (outcome === "ESCALATED" && awaitingStatement) {
+    return (
+      <div className={styles.section}>
+        <div className={styles.findingCard}>
+          <Overline>Pending correction by {scenario.bank}</Overline>
+          <Body>
+            {scenario.bank} answered with a camt.111 confirming the amount. A reply alone does not change what is
+            booked: the exception stays open until {scenario.bank}&apos;s corrected camt.053 books it in our nostro.
+          </Body>
+          <Body className={styles.muted}>
+            Use &quot;Corrected statement now&quot; above, or wait. The delay is simulated, not a SWIFT response time.
+          </Body>
+        </div>
+        <Badge variant="yellow">PENDING CORRECTION</Badge>
+      </div>
+    );
+  }
   // R4/R5 phase 1: the request is out and nothing else has changed.
   if (outcome === "ESCALATED") {
     return (
       <div className={styles.section}>
         <div className={styles.findingCard}>
           <Overline>Waiting for {scenario.bank}</Overline>
-          <Body>A camt.026 investigation request was sent. The books are untouched until {scenario.bank} answers.</Body>
-          <Body className={styles.muted}>Use &quot;Correspondent replies now&quot; above, or wait about 20 seconds.</Body>
+          <Body>A camt.110 investigation request was sent. The books are untouched until {scenario.bank} answers.</Body>
+          <Body className={styles.muted}>
+            Use &quot;Correspondent replies now&quot; above, or wait about 20 seconds. The delay is simulated, not a
+            SWIFT response time.
+          </Body>
         </div>
         <Badge variant="yellow">ESCALATED</Badge>
       </div>

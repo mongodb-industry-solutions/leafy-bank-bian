@@ -288,7 +288,7 @@ const ACTION_LABELS = {
   RETURN_FUNDS: "Return funds",
   ACCEPT_DISCREPANCY: "Accept discrepancy",
   DISMISS: "Dismiss",
-  RECHECK: "Statement line arrived",
+  RECHECK: "Statement re-checked",
   REPAIR: "Repair",
   RETURN: "Return",
   POST_ADJUSTMENT: "Post adjustment",

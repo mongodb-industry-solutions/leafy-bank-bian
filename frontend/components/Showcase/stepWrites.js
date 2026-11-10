@@ -55,8 +55,12 @@ export const ledgerEvents = (suffixes) => ({ payment, trace }) => {
   const keys = suffixes.map((s) => (s ? `${pid}-${s}` : pid));
   return nonEmpty((trace?.allLedgerEvents || []).filter((e) => keys.includes(e.idempotencyKey)));
 };
-const camt026 = ({ payment }) =>
+const camt110 = ({ payment }) =>
   nonEmpty((payment?.messages || []).filter((m) => m.purpose === "INVESTIGATION_REQUEST"));
+const camt111 = ({ payment }) =>
+  nonEmpty((payment?.messages || []).filter((m) => m.purpose === "INVESTIGATION_RESPONSE"));
+const correctedStatement = ({ payment }) =>
+  nonEmpty((payment?.statements || []).filter((m) => m.statement?.correction));
 const exceptionsOpened = ({ ownException, orphan, scenarioKey }) =>
   nonEmpty(scenarioKey === "R5" ? [orphan] : scenarioKey === "R2" ? [orphan, ownException] : [ownException]);
 // The exception doc with the freshest agent{} (the stepper polls agent{} separately).
@@ -146,23 +150,29 @@ const APPROVE_BY_SCENARIO = {
     W("settlementPositions", "update", "actualAmount, sourceMessageRef from the linked line", position),
   ],
   R4: [
-    W("canonicalJsonStorage", "insert", "camt.026 query to the correspondent: purpose INVESTIGATION_REQUEST", camt026),
+    W("canonicalJsonStorage", "insert", "camt.110 investigation request to the correspondent: purpose INVESTIGATION_REQUEST, caseId", camt110),
   ],
   R5: [
-    W("canonicalJsonStorage", "insert", "camt.026 query to the correspondent about the unknown line (escalation.paymentMessageId on the exception)",
+    W("canonicalJsonStorage", "insert", "camt.110 investigation request to the correspondent about the unknown line (escalation.paymentMessageId on the exception)",
       () => null),
   ],
 };
 // The simulated correspondent's answer to the escalation, shown on the final step.
-const REPLY_WRITER = "Ledger service, correspondent reply (after 20s or on demand)";
+const REPLY_WRITER = "Ledger service, simulated correspondent reply (after 20s or on demand)";
+const CORRECTION_WRITER = "Transactions gateway, simulated corrected statement (after the reply or on demand)";
+const RECHECK_WRITER = "Ledger service, statement matching and recheck";
 const REPLY_BY_SCENARIO = {
   R4: [
-    W("settlementPositions", "update", "actualAmount set to the confirmed amount, sourceMessageRef", position, REPLY_WRITER),
-    W("exceptions", "update", "awaitingCounterparty false, escalation.reply, status RESOLVED (RECHECK)", followed, REPLY_WRITER),
+    W("canonicalJsonStorage", "insert", "camt.111 investigation response: purpose INVESTIGATION_RESPONSE, correlated by caseId", camt111, REPLY_WRITER),
+    W("exceptions", "update", "awaitingCounterparty false, escalation.reply, awaitingCorrectedStatement true. Still OPEN: a reply is not a booking", followed, REPLY_WRITER),
+    W("canonicalJsonStorage", "insert", "Corrected camt.053: reversal of the 7,306.00 entry (RvslInd) and the 7,360.00 booking, statement.correction", correctedStatement, CORRECTION_WRITER),
+    W("settlementPositions", "update", "actualAmount 7,360.00 from the corrected entry, sourceMessageRef, correctedFrom", position, RECHECK_WRITER),
+    W("exceptions", "update", "status RESOLVED (RECHECK), escalation.correctedStatement", followed, RECHECK_WRITER),
     W("payments", "update", "lifecycle.reconciliationStatus RECONCILED, set by the tie-out",
-      ({ payment }) => nonEmpty(paymentDoc(payment)), REPLY_WRITER),
+      ({ payment }) => nonEmpty(paymentDoc(payment)), RECHECK_WRITER),
   ],
   R5: [
+    W("canonicalJsonStorage", "insert", "camt.111 investigation response: misposting confirmed", () => null, REPLY_WRITER),
     W("exceptions", "update", "awaitingCounterparty false, escalation.reply, status DISMISSED", followed, REPLY_WRITER),
   ],
 };

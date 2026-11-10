@@ -20,8 +20,9 @@ Per category, never chosen by hand:
                                 and is never part of a cleanup.
   anything else              -> DISMISS.
 
-ESCALATE_TO_CORRESPONDENT is never used: _escalate keeps the row OPEN (A4 D4) —
-that is why the 10-03-approved R4 (PAY-bb089a16) is still in the queue.
+ESCALATE_TO_CORRESPONDENT is never used: _escalate keeps the row OPEN (A4 D4). An
+escalated row closes only after the correspondent's camt.111 and its corrected
+camt.053 (ledger `correspondent_reply`), or by the cleanup action above.
 
 Env overrides: TRANSACTIONS_BASE_URL (default http://localhost:8002),
 LEDGER_BASE_URL (default http://localhost:8003).

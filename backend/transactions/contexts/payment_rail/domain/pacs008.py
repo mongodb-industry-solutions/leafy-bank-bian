@@ -75,9 +75,9 @@ _NB_OF_TXS = "1"
 # decision, never stored on the payment — see `settlement_method()` and Q40.
 SETTLEMENT_CLEARING = "CLRG"
 
-# `payment.uetr` is stored with a `UETR-` prefix, but ISO's UETR is a bare UUIDv4 and a prefixed
-# value fails schema validation. Strip at message-build time only, so stored values and lookups
-# keep working. Idempotent: legacy and bare values pass through unchanged.
+# ISO's UETR is a bare UUIDv4 and is now minted and stored that way. Payments created before
+# 2026-11-10 carried a `UETR-` prefix (see `backend/data/migrate_uetr_to_uuid4.py`); stripping
+# here keeps any unmigrated value from leaking a prefix into a message. Bare values pass through.
 _UETR_STORAGE_PREFIX = "UETR-"
 
 

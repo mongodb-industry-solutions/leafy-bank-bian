@@ -22,6 +22,7 @@ from api_models import (
     ScreeningResolveRequest,
     InboundMessageRequest,
     InboundSimulateRequest,
+    StatementCorrectionRequest,
     StatementGenerateRequest,
     PaymentConfirmationRequest,
     PaymentOrderBulkInitiateRequest,
@@ -402,6 +403,35 @@ def financial_gateway_statement_generate(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logging.error("FinancialGateway/Statement/Generate failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal payment processing error.")
+
+
+@app.post("/FinancialGateway/{financialgatewayid}/Statement/Correction")
+def financial_gateway_statement_correction(
+    financialgatewayid: str,
+    body: StatementCorrectionRequest,
+):
+    """Demo control: the correspondent books its correcting camt.053 now (simulator route).
+
+    Follows its camt.111 reply to our camt.110: reverses the mis-booked line and books the
+    expected amount. Without this the worker issues it after a simulated delay.
+    """
+    try:
+        doc = payments_service.issue_corrected_statement(body.exceptionId)
+        return _bian_response({
+            "paymentMessageId": doc["paymentMessageId"],
+            "accountCode": doc["statement"]["accountCode"],
+            "sequence": doc["statement"]["sequence"],
+            "correction": doc["statement"]["correction"],
+            "entries": [{k: e.get(k) for k in ("lineNo", "reference", "amount", "creditDebit",
+                                               "reversal")} for e in doc["entries"]],
+        })
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logging.error("FinancialGateway/Statement/Correction failed: %s", e)
         raise HTTPException(status_code=500, detail="Internal payment processing error.")
 
 

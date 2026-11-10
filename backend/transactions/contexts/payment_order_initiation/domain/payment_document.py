@@ -23,6 +23,7 @@ stays unapplied until they are (and until `fraud` becomes nullable — Doina Q9)
 
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from typing import Optional
 
@@ -257,7 +258,8 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         "stepUpReason": None,
         "instructionId": derive_ref("INSTR", oid),
         "txnId": derive_ref("TXN", oid),
-        "uetr": f"UETR-{str(oid)}",
+        # ISO 20022 UETR: a bare lowercase UUIDv4 (SWIFT gpi format), never prefixed.
+        "uetr": str(uuid.uuid4()),
         "msgId": derive_ref("MSG", oid),
         "customerId": ctx.debtor_customer_id,
         "initiatedAt": now,

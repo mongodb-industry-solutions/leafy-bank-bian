@@ -19,6 +19,10 @@ export const TOOL_MONGO = {
     ["exceptions", "read"], ["payments", "read"], ["canonicalJsonStorage", "read"],
     ["settlementPositions", "read"], AGENT_RECON,
   ],
+  check_discrepancy_explanations: [
+    ["exceptions", "read"], ["payments", "read"], ["settlementPositions", "read"],
+    ["canonicalJsonStorage", "read"], ["correspondentBanks", "read"], AGENT_RECON,
+  ],
   get_correspondent_profile: [
     ["exceptions", "read"], ["payments", "read"], ["correspondentBanks", "read"], ["settlementPositions", "read"],
   ],

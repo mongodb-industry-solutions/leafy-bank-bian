@@ -130,7 +130,8 @@ def _resolution_for(outcome: str, charge_bearer: str) -> tuple[str, str]:
     if outcome == camt053.LATE:
         return CATEGORY_RECONCILIATION_MISSING, ACTION_RECHECK
     if outcome == camt053.AMOUNT_TRANSPOSED:
-        # Escalated, then the correspondent's corrected line cleared it on re-check.
+        # Escalated (camt.110), answered (camt.111), then the correspondent's corrected
+        # camt.053 cleared it on re-check.
         return CATEGORY_RECONCILIATION_DISCREPANCY, ACTION_RECHECK
     if outcome == ORPHAN:
         return CATEGORY_ORPHANED_SETTLEMENT, ACTION_DISMISS
@@ -142,7 +143,7 @@ _NOTES = {
     (camt053.FEE_DEDUCTED, ACTION_ACCEPT_DISCREPANCY): "Correspondent charge on a shared/beneficiary-borne wire; accepted, no entry.",
     (camt053.REFERENCE_ALTERED, ACTION_LINK_STATEMENT_ENTRY): "Correspondent re-keyed the reference; same amount and value date — linked.",
     (camt053.LATE, ACTION_RECHECK): "Line booked one statement late; cleared on re-check.",
-    (camt053.AMOUNT_TRANSPOSED, ACTION_RECHECK): "Digits transposed on the statement; investigation request sent, corrected line received.",
+    (camt053.AMOUNT_TRANSPOSED, ACTION_RECHECK): "Amount mis-booked by the correspondent; camt.110 investigation sent, corrected camt.053 booked the expected amount.",
     (ORPHAN, ACTION_DISMISS): "Statement line with no internal payment; correspondent confirmed a misposting.",
 }
 
@@ -165,7 +166,7 @@ def _exception(*, payment_id, category, action, outcome, bic, charge_bearer, stm
         "resolution": {"action": action, "by": by, "at": resolved_at,
                        "note": _NOTES[(outcome, action)]},
         "awaitingCounterparty": False,
-        # No camt.026 doc exists for history, so no `paymentMessageId` either.
+        # No camt.110 doc exists for history, so no `paymentMessageId` either.
         "escalation": ({"by": _OPERATOR, "at": raised_at + timedelta(minutes=20), "note": None}
                        if escalated else None),
         "agent": None,

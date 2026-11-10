@@ -197,7 +197,7 @@ def build_message(
         "instructionId": f"INSTR-{uuid.uuid4().hex[:10].upper()}",
         "endToEndId": f"E2E-{uuid.uuid4().hex[:12].upper()}",
         "txnId": f"TXN-{uuid.uuid4().hex[:10].upper()}",
-        "uetr": uetr or f"UETR-{uuid.uuid4()}",
+        "uetr": uetr or str(uuid.uuid4()),
         "amount": amount,
         "currency": currency,
         "chargeBearer": "SHAR",

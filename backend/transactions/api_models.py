@@ -544,6 +544,14 @@ class StatementGenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class StatementCorrectionRequest(BaseModel):
+    """`POST /FinancialGateway/{id}/Statement/Correction` — demo trigger for the
+    correspondent's correcting camt.053 after it answered a camt.110 investigation."""
+
+    exceptionId: str
+    model_config = ConfigDict(extra="forbid")
+
+
 class FraudEvaluationRequest(BaseModel):
     """BIAN `POST /FraudEvaluation/Evaluate`.
 

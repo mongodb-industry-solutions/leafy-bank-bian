@@ -97,7 +97,7 @@ def test_an_ungrounded_fee_is_refused_at_check_proposal_too():
     assert _check(known_charges=[25.0]) is None
     refusal = _check(discrepancy_amount=54.0, known_charges=[25.0], params={"amount": 54.0})
     assert refusal and "AMOUNT_MISMATCH" in refusal
-    assert "not a fee" in _check(discrepancy_amount=54.0, known_charges=[25.0],
+    assert "No evidence supports a fee" in _check(discrepancy_amount=54.0, known_charges=[25.0],
                                  charge_bearer="SHAR", action=policy.ACCEPT, params={})
 
 
@@ -574,3 +574,31 @@ def test_messages_to_steps_shapes_each_message_kind():
     assert steps[2] == {"kind": "tool_call", "text": None, "tool": "payment_trace_lookup", "args": {"k": 1}}
     assert steps[3]["tool"] == "payment_trace_lookup" and len(steps[3]["text"]) == 600
     assert steps[4]["args"] == {"action": "LINK"}
+
+
+def test_r4_checks_rule_out_the_ordinary_causes_and_the_threshold_only_triggers_escalation():
+    """Doina 2026-11-10: 54.00 is not called an error because it exceeds RBC's fee. Currency,
+    amount fields, FX, charge bearer and reported charges are checked; the 25.00 threshold
+    decides escalation, not the cause."""
+    import recon_evidence
+
+    payment = {"currency": "USD", "instructedCurrency": "USD", "instructedAmount": 7360.0,
+               "amount": 7360.0, "fxRate": None, "chargeBearer": "SHAR"}
+    position = {"expectedAmount": 7360.0, "expectedCurrency": "USD",
+                "actualAmount": 7306.0, "actualCurrency": "USD"}
+    entry = {"currency": "USD", "amount": 7306.0, "charges": None}
+
+    out = recon_evidence.discrepancy_checks(payment, position, entry, [25.0])
+
+    assert out["gap"] == 54.0
+    assert [c["check"] for c in out["checks"]] == [
+        "CURRENCY", "AMOUNT_FIELDS", "FX", "CHARGE_BEARER", "REPORTED_CHARGES", "LEVIED_CHARGES"]
+    assert out["explainedBy"] == [] and out["unexplained"] is True
+    assert out["escalation"]["thresholdAmount"] == 25.0 and out["escalation"]["required"] is True
+    assert "does not establish the cause" in out["escalation"]["rule"]
+
+    # A reported charge equal to the gap explains it: nothing to escalate.
+    explained = recon_evidence.discrepancy_checks(
+        payment, position, {**entry, "charges": 54.0}, [25.0])
+    assert explained["explainedBy"] == ["REPORTED_CHARGES"]
+    assert explained["escalation"]["required"] is False

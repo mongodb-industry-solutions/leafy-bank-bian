@@ -11,6 +11,7 @@ already used for outbound pacs.008 storage"*.
 | status response | OUTBOUND  | `STATUS_RESPONSE` | FR-5.IN2    |
 | return          | OUTBOUND  | `RETURN`          | FR-9.IN3    |
 | nostro statement| INBOUND   | `ACCOUNT_STATEMENT` | recon plan A1 (camt.053, no paymentId) |
+| investigation   | OUTBOUND  | `INVESTIGATION_REQUEST` | recon plan A4 (camt.110) |
 
 ⚠️ **`direction` here is the MESSAGE's travel, not the payment's.** An INBOUND payment emits
 OUTBOUND pacs.002 and pacs.004 messages — two of the three rows above. The two fields are
@@ -247,57 +248,47 @@ def statement_doc(
     }
 
 
-# Plan A4 — the investigation request ESCALATE_TO_CORRESPONDENT sends. camt.026
-# UnableToApply is the ISO message for "we cannot reconcile this entry; tell us what it is",
-# which covers all three escalated cases (orphan line, overdue line, amount mismatch).
+# Plan A4 — the investigation request ESCALATE_TO_CORRESPONDENT sends: a camt.110 on the
+# SWIFT Case Management path (see `camt110`). The correspondent answers with a camt.111.
 PURPOSE_INVESTIGATION_REQUEST = "INVESTIGATION_REQUEST"
-INVESTIGATION_MESSAGE_FORMAT = "camt.026.001.07"
 
 
 def investigation_request_doc(
     *,
     oid: ObjectId,
     exception: dict,
+    payment: Optional[dict],
     note: Optional[str],
     now: datetime,
 ) -> dict:
-    """The camt.026-shaped case we send the correspondent about one reconciliation exception.
+    """The camt.110 investigation request we send the correspondent about one exception.
 
     Cites whichever subject the exception has: a payment, or (for an orphan) the statement
-    line. The demo has no counterparty that replies (A4 D4); the exception stays OPEN.
+    line. The exception stays OPEN; the correspondent's camt.111 is correlated back by
+    `caseId`, and only a corrected camt.053 closes it (see ledger `correspondent_reply`).
     """
+    from contexts.financial_gateway.domain import camt110
+
     subject = exception.get("subjectRef") or {}
-    detail = exception.get("detail") or {}
     is_line = subject.get("kind") == "STATEMENT_LINE"
-    payment_id = None if is_line else exception.get("paymentId")
     case_id = derive_ref("CASE", oid)
+    message = camt110.build(
+        msg_id=derive_ref("MSG", oid), case_id=case_id, exception=exception,
+        payment=None if is_line else payment, note=note, now=now)
     return {
         "_id": oid,
         "paymentMessageId": derive_ref("PM", oid),
-        "paymentId": payment_id,
+        "paymentId": None if is_line else exception.get("paymentId"),
         "paymentExecutionId": None,
         "direction": OUTBOUND,
         "purpose": PURPOSE_INVESTIGATION_REQUEST,
-        "messageStandard": pacs008.MESSAGE_STANDARD,
-        "messageFormat": INVESTIGATION_MESSAGE_FORMAT,
-        "mappingVersion": pacs008.MAPPING_VERSION,
-        "payload": {
-            "Document": {"UblToApply": {
-                "Assgnmt": {"Id": case_id, "CreDtTm": now.isoformat()},
-                "Case": {"Id": case_id, "Cretr": "LEAFYBANK"},
-                "Undrlyg": (
-                    {"StmtRef": subject.get("paymentMessageId"), "NtryNb": subject.get("lineNo"),
-                     "NtryRef": detail.get("reference")}
-                    if is_line else {"OrgnlEndToEndId": payment_id}
-                ),
-                "Justfn": {
-                    "Ctgy": exception.get("category"),
-                    "AddtlInf": note or detail.get("discrepancyReason"),
-                },
-            }}
-        },
-        "rawMessage": None,
+        "messageStandard": camt110.MESSAGE_STANDARD,
+        "messageFormat": camt110.MESSAGE_FORMAT,
+        "mappingVersion": camt110.MAPPING_VERSION,
+        "payload": message,
+        "rawMessage": camt110.to_xml(message),
         "rawMessageRef": None,
+        "caseId": case_id,
         "exceptionId": exception.get("exceptionId"),
         "subjectRef": subject or None,
         "transformationAudit": None,

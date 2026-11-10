@@ -55,6 +55,8 @@ FEE_DEDUCTED = "FEE_DEDUCTED"
 REFERENCE_ALTERED = "REFERENCE_ALTERED"
 LATE = "LATE"
 AMOUNT_TRANSPOSED = "AMOUNT_TRANSPOSED"
+# Not a lever: marks the lines a correcting statement carries (`correction_entries`).
+CORRECTION = "CORRECTION"
 STATEMENT_OUTCOMES = (CLEAN, FEE_DEDUCTED, REFERENCE_ALTERED, LATE, AMOUNT_TRANSPOSED)
 
 # The intermediary's deducted charge — Doina's $25 story (Sep 17 L1264-1270). The single
@@ -133,6 +135,50 @@ def entry_for(position: dict, outcome: Optional[str]) -> dict:
     }
 
 
+def correction_entries(original: Optional[dict], position: dict, *,
+                       original_ref: Optional[dict]) -> list[dict]:
+    """The lines a correcting statement carries for one investigated payment. Pure.
+
+    For a mis-booked line (`original` given): the reversal of what was booked, then the
+    booking at the amount we expected. ISO reports the reversal of a debit as a CRDT entry
+    with `RvslInd` true, so the nostro balance nets back before the rebooking. For a line
+    that never arrived (`original` None): the booking alone.
+
+    `reversesEntry` / `correctsEntry` point at the original line (`original_ref`,
+    `{paymentMessageId, lineNo}`). They are our annotations, never ISO, and are how the
+    ledger's statement matching applies the correction instead of matching afresh.
+    """
+    payment_id = position["paymentId"]
+    expected = float(position.get("expectedAmount") or position.get("grossAmount") or 0.0)
+    currency = position.get("expectedCurrency") or position.get("currency") or "USD"
+    rebooked = {
+        "reference": payment_id,
+        "amount": expected,
+        "currency": currency,
+        "creditDebit": _DEBIT,
+        "charges": None,
+        "correctsEntry": original_ref,
+        "simulatedPaymentId": payment_id,
+        "simulatedOutcome": CORRECTION,
+        "recon": _unmatched(),
+    }
+    if original is None:
+        return [rebooked]
+    reversal = {
+        "reference": original["reference"],
+        "amount": original["amount"],
+        "currency": original.get("currency") or currency,
+        "creditDebit": _CREDIT,
+        "reversal": True,
+        "charges": None,
+        "reversesEntry": original_ref,
+        "simulatedPaymentId": payment_id,
+        "simulatedOutcome": CORRECTION,
+        "recon": _unmatched(),
+    }
+    return [reversal, rebooked]
+
+
 def orphan_entry(rng: random.Random, correspondent_bics: list[str]) -> dict:
     """One plausible line with no internal counterpart (the spec's "orphaned settlement")."""
     amount = float(rng.choice([1_250, 3_400, 7_800, 12_500, 18_750]))
@@ -168,7 +214,7 @@ def to_ntry(entry: dict, *, booking_date: datetime) -> dict:
         tx_details["Chrgs"] = {"TtlChrgsAndTaxAmt": _amt(entry["charges"], entry["currency"])}
     if entry.get("counterpartyBic"):
         tx_details["RltdAgts"] = {"CdtrAgt": {"FinInstnId": {"BICFI": entry["counterpartyBic"]}}}
-    return {
+    ntry = {
         "Amt": _amt(entry["amount"], entry["currency"]),
         "CdtDbtInd": entry["creditDebit"],
         "Sts": {"Cd": "BOOK"},
@@ -177,6 +223,11 @@ def to_ntry(entry: dict, *, booking_date: datetime) -> dict:
         "AcctSvcrRef": entry["reference"],
         "NtryDtls": [{"TxDtls": [tx_details]}],
     }
+    if entry.get("reversal"):
+        # ISO places RvslInd straight after CdtDbtInd; dict order is XML order.
+        ntry = {k: ntry[k] for k in ("Amt", "CdtDbtInd")} | {"RvslInd": "true"} | {
+            k: v for k, v in ntry.items() if k not in ("Amt", "CdtDbtInd")}
+    return ntry
 
 
 def closing_balance(opening: float, entries: list[dict]) -> float:

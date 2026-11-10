@@ -17,6 +17,7 @@ both are held by shape tests here instead.
 import ast
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -154,6 +155,10 @@ def test_the_message_identifies_itself(wire_payment, db):  # noqa: F811
     tracking story hangs on."""
     pmt_id = _txn(db["paymentExecutions"].docs[0]["message"])["PmtId"]
     assert pmt_id["UETR"] == pacs008.iso_uetr(wire_payment["uetr"])
+    # ISO 20022 / SWIFT gpi: a lowercase UUIDv4, stored and sent with no prefix.
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", wire_payment["uetr"]
+    )
     assert pmt_id["EndToEndId"] == wire_payment["endToEndId"]
     assert pmt_id["InstrId"] == wire_payment["instructionId"]
     assert pmt_id["TxId"] == wire_payment["txnId"]

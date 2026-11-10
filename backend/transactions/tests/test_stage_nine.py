@@ -625,14 +625,35 @@ def test_escalate_sends_one_investigation_request_and_keeps_the_exception_open(s
     msg = db["canonicalJsonStorage"].find_one(
         {"paymentMessageId": updated["escalation"]["paymentMessageId"]})
     assert msg["purpose"] == "INVESTIGATION_REQUEST"
-    assert msg["messageFormat"].startswith("camt.026")
-    assert msg["payload"]["Document"]["UblToApply"]["Undrlyg"]["OrgnlEndToEndId"] == payment["paymentId"]
+    # SWIFT Case Management: camt.110 request (camt.111 is the reply), not camt.026.
+    assert msg["messageFormat"] == "camt.110.001.01"
+    request = msg["payload"]["Document"]["InvstgtnReq"]["InvstgtnReq"]
+    assert request["Undrlyg"]["IntrBk"]["OrgnlEndToEndId"] == payment["paymentId"]
+    assert request["Undrlyg"]["IntrBk"]["OrgnlUETR"] == payment["uetr"]
+    assert request["RqstrInvstgtnId"] == msg["caseId"] == updated["escalation"]["caseId"]
+    assert "<InvstgtnReq>" in msg["rawMessage"] and "camt.110.001.01" in msg["rawMessage"]
     with pytest.raises(ExceptionConflict):
         service.resolve_exception(exc["exceptionId"], action=ACTION_ESCALATE_TO_CORRESPONDENT)
     assert db["canonicalJsonStorage"].count_documents({"purpose": "INVESTIGATION_REQUEST"}) == 1
     # Still closable afterwards by the bearer-correct action.
     assert service.resolve_exception(
         exc["exceptionId"], action=ACTION_ACCEPT_DISCREPANCY)["status"] == STATUS_RESOLVED
+
+
+def test_escalate_is_refused_while_a_corrected_statement_is_pending(service, db):
+    """After the camt.111 `awaitingCounterparty` is false, but the correction is still
+    owed: a second camt.110 would overwrite the escalation and drop its reply."""
+    _, exc = _discrepant_wire(service, db, charge_bearer="SHAR")
+    db["exceptions"].update_one(
+        {"exceptionId": exc["exceptionId"]},
+        {"$set": {"awaitingCounterparty": False, "awaitingCorrectedStatement": True,
+                  "escalation": {"caseId": "CASE-1", "reply": {"at": None}}}})
+
+    with pytest.raises(ExceptionConflict):
+        service.resolve_exception(exc["exceptionId"], action=ACTION_ESCALATE_TO_CORRESPONDENT)
+
+    assert db["canonicalJsonStorage"].count_documents({"purpose": "INVESTIGATION_REQUEST"}) == 0
+    assert _exc(db)["escalation"]["caseId"] == "CASE-1"
 
 
 def test_an_orphan_line_escalates_and_dismisses_without_a_payment(service, db):
@@ -653,8 +674,9 @@ def test_an_orphan_line_escalates_and_dismisses_without_a_payment(service, db):
     escalated = service.resolve_exception("EXC-ORPH", action=ACTION_ESCALATE_TO_CORRESPONDENT)
     msg = db["canonicalJsonStorage"].find_one({"purpose": "INVESTIGATION_REQUEST"})
     assert msg["paymentId"] is None
-    assert msg["payload"]["Document"]["UblToApply"]["Undrlyg"] == {
-        "StmtRef": "PM-STMT", "NtryNb": 3, "NtryRef": "8EBAA746/LEAFYBK"}
+    assert msg["payload"]["Document"]["InvstgtnReq"]["InvstgtnReq"]["Undrlyg"] == {"StmtNtry": {
+        "OrgnlStmtId": "PM-STMT", "OrgnlNtryNb": 3, "OrgnlNtryRef": "8EBAA746/LEAFYBK",
+        "OrgnlAmt": {"@Ccy": "USD", "#text": 1250.0}}}
     assert escalated["status"] == STATUS_OPEN
 
     dismissed = service.resolve_exception("EXC-ORPH", action=ACTION_DISMISS,

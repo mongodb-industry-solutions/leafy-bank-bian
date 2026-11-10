@@ -125,6 +125,15 @@ class FakeCollection:
         self.docs.extend(dict(d) for d in docs)
         return type("R", (), {"inserted_ids": [d.get("_id") for d in docs]})()
 
+    def delete_one(self, query: dict, session=None):
+        self._guard()
+        self._owner.journal.append(("delete_one", self.name))
+        for i, d in enumerate(self.docs):
+            if _matches(d, query):
+                del self.docs[i]
+                return type("R", (), {"deleted_count": 1})()
+        return type("R", (), {"deleted_count": 0})()
+
     def update_many(self, query: dict, update: dict, session=None):
         self._guard()
         self._owner.journal.append(("update_many", self.name))

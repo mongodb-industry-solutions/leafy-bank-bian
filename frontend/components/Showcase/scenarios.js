@@ -154,12 +154,12 @@ export const SCENARIOS = [
     recommended: true,
     decision: {
       cause: { label: "Amount mismatch", code: "AMOUNT_MISMATCH" },
-      constraint: { label: "54.00 does not match any RBC fee", code: "FEE refused" },
+      constraint: { label: "No check explains the 54.00 gap", code: "FEE refused" },
       action: { label: "Escalate to the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
     },
     title: "Amount discrepancy",
-    story: "The bank booked 7,306.00 against the 7,360.00 we sent. The 54.00 shortfall exceeds any fee RBC charges and cannot be explained.",
-    talkingPoint: "A 54.00 gap is not a fee any correspondent charges, so the guard refuses FEE and the correspondent's answer settles it.",
+    story: "RBC booked 7,306.00 in our nostro against the 7,360.00 we sent. Currency, amounts, FX, charge bearer and reported charges leave the 54.00 gap unexplained.",
+    talkingPoint: "The agent doesn't guess a cause. It rules out the usual explanations, asks RBC, and closes only when RBC's statement books the right amount.",
     bank: "Royal Bank of Canada",
     wire: {
       beneficiary: "Adventure Works Supply Co",
@@ -171,30 +171,36 @@ export const SCENARIOS = [
       purpose: "Quarterly rent",
     },
     amount: "7,360.00",
-    expected: "Reconciled once the correspondent confirms the amount",
-    policyLine: "Discrepancy · FEE refused (54.00 is not a levied charge) → ESCALATE_TO_CORRESPONDENT",
+    expected: "Reconciled once RBC's corrected camt.053 books 7,360.00",
+    policyLine: "Discrepancy · unexplained after checks · FEE refused (no reported or levied charge of 54.00) · above the 25.00 internal escalation threshold → ESCALATE_TO_CORRESPONDENT",
     beats: {
       initiate: "We send USD 7,360.00 to Adventure Works at Royal Bank of Canada.",
       settle: "RBC confirms settlement.",
       glpost: "Our books say 7,360.00 left our nostro account.",
       statement:
-        "RBC's statement shows 7,306.00. Two digits are swapped: a keying error at the " +
-        "correspondent, not a fee.",
+        "RBC sends Leafy a camt.053 for Leafy's nostro account at RBC, showing a booked " +
+        "entry of 7,306.00.",
       match: "A 54.00 RECONCILIATION_DISCREPANCY opens.",
       investigate:
-        "A model could easily rationalise 54.00 as a fee plus an extra charge, and early " +
-        "versions did. A guard in code now only accepts FEE as the cause when the gap equals " +
-        "a charge the correspondent actually levies. RBC charges 25.00, so FEE is refused. " +
-        "The agent classifies it as an AMOUNT_MISMATCH and proposes escalating to RBC.",
+        "The agent checks currency (USD throughout), the amount fields (instructed, " +
+        "payment amount and expected settlement all 7,360.00), FX (none on this wire), the charge bearer " +
+        "(SHAR) and reported charges (none on the entry). Nothing explains 54.00. A guard in " +
+        "code accepts FEE only when the gap equals a reported or levied charge, so FEE is " +
+        "refused. The agent records an unexplained AMOUNT_MISMATCH. The gap is above our " +
+        "25.00 escalation threshold, an internal rule for when to ask the correspondent, not " +
+        "proof of the cause, so it proposes escalating to RBC.",
       approve:
-        "Approving sends a camt.026 investigation request to RBC. We don't write off or " +
-        "adjust money we can't explain.",
+        "Approving sends RBC a camt.110 investigation request through SWIFT Case " +
+        "Management. We don't write off or adjust money we can't explain.",
       verify:
-        "First the exception stays open, marked as awaiting the correspondent, with the " +
-        "books untouched. About 20 seconds later the simulated RBC answers and confirms the " +
-        "full 7,360.00 (or use \"Correspondent replies now\"). The settlement position takes " +
-        "the confirmed amount, the recheck agrees, the exception closes and the payment is " +
-        "RECONCILED. No adjustment was ever booked.",
+        "RBC replies with a camt.111, correlated to our request by case id, confirming " +
+        "7,360.00 (simulated after about 20 seconds, or use \"Correspondent replies now\"). " +
+        "A reply is not a booking: the exception stays open, pending correction, and the " +
+        "settlement position still shows 7,306.00. RBC then sends a corrected camt.053 that " +
+        "reverses the 7,306.00 entry and books 7,360.00 in our nostro (simulated, or use " +
+        "\"Corrected statement now\"). The settlement position takes 7,360.00 from that " +
+        "statement, the recheck agrees, the exception closes and the payment is RECONCILED. " +
+        "No write-off, no adjustment.",
     },
   },
   {
@@ -237,11 +243,11 @@ export const SCENARIOS = [
         "The agent searches our payments for anything that could explain the line, and finds " +
         "no candidate. With nothing to link, policy allows only escalation or dismissal.",
       approve:
-        "Approving sends a camt.026 investigation request to Barclays to explain the line. " +
+        "Approving sends a camt.110 investigation request to Barclays to explain the line. " +
         "We don't book money we can't attribute.",
       verify:
         "Our own wire is already RECONCILED. The orphan stays open, awaiting Barclays. About " +
-        "20 seconds later the simulated Barclays answers that the line was a misposting " +
+        "20 seconds later (simulated) Barclays answers with a camt.111 that the line was a misposting " +
         "(or use \"Correspondent replies now\") and the exception is dismissed. No money " +
         "was booked.",
     },

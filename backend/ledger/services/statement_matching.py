@@ -40,11 +40,22 @@ RECON_UNMATCHED = "UNMATCHED"
 RECON_AUTO_MATCHED = "AUTO_MATCHED"
 MATCHED_BY_EXACT_KEY = "EXACT_KEY"
 MATCHED_BY_REFERENCE_ONLY = "REFERENCE_ONLY"
+# A correcting statement (the correspondent's answer to a camt.110 investigation, booked as
+# accounting evidence): its reversal line nets off the mis-booked line, and its rebooking
+# line replaces the position's actual amount. Both carry a pointer to the original line
+# (`reversesEntry` / `correctsEntry`, from the ISO reversal's reference), so they are applied
+# against that line rather than matched afresh.
+MATCHED_BY_REVERSAL = "REVERSAL"
+MATCHED_BY_CORRECTION = "CORRECTION"
 
 # Plan B: backfilled statements (`statement.historical`) are agent evidence — precedents and
 # correspondent lag — never live books, so neither matching nor orphan-raising reads them.
 _LIVE_UNMATCHED = {"purpose": STATEMENT_PURPOSE, "entries.recon.status": RECON_UNMATCHED,
                    "statement.historical": {"$ne": True}}
+
+
+def _by_sequence(statements) -> list[dict]:
+    return sorted(statements, key=lambda s: (s.get("statement") or {}).get("sequence") or 0)
 
 
 def _to_minors(amount) -> Optional[int]:
@@ -65,6 +76,48 @@ def _match_line(positions_coll, account_code: str, currency: str, line: dict) ->
     return position
 
 
+def _apply_reversal(messages, stmt: dict, line: dict, now: datetime) -> None:
+    """Pair a reversal line with the line it reverses; both stay on the books as history."""
+    ref = line["reversesEntry"]
+    line["recon"] = {"status": RECON_AUTO_MATCHED, "matchedPaymentId": None,
+                     "matchedBy": MATCHED_BY_REVERSAL, "reverses": ref, "at": now}
+    original = messages.find_one({"paymentMessageId": ref["paymentMessageId"]}, {"entries": 1})
+    if original is None:
+        return
+    entries = original.get("entries") or []
+    for entry in entries:
+        if entry.get("lineNo") == ref["lineNo"]:
+            entry.setdefault("recon", {})["reversedBy"] = {
+                "paymentMessageId": stmt.get("paymentMessageId"), "lineNo": line.get("lineNo"),
+                "at": now}
+    messages.update_one({"_id": original["_id"]}, {"$set": {"entries": entries}})
+
+
+def _apply_correction(positions, account_code: str, stmt: dict, line: dict,
+                      now: datetime) -> bool:
+    """Rebook the position at the corrected line's amount. Conditional on the position still
+    citing the original statement, so a replay or a racing matcher applies it once."""
+    ref = line["correctsEntry"]
+    position = positions.find_one(
+        {"paymentId": line.get("reference"), "settlementAccountCode": account_code,
+         "sourceMessageRef": ref["paymentMessageId"]},
+        sort=[("createdAt", -1)])
+    if position is None:
+        return False
+    claimed = positions.update_one(
+        {"_id": position["_id"], "sourceMessageRef": ref["paymentMessageId"]},
+        {"$set": {"actualAmount": line.get("amount"),
+                  "actualCurrency": line.get("currency") or position.get("actualCurrency"),
+                  "actualBookedAt": now,
+                  "sourceMessageRef": stmt.get("paymentMessageId"),
+                  "correctedFrom": {"amount": position.get("actualAmount"), **ref}}})
+    if not claimed.matched_count:
+        return False
+    line["recon"] = {"status": RECON_AUTO_MATCHED, "matchedPaymentId": position["paymentId"],
+                     "matchedBy": MATCHED_BY_CORRECTION, "corrects": ref, "at": now}
+    return True
+
+
 def match_statements(connection: MongoDBConnection, db_name: str,
                      now: Optional[datetime] = None) -> dict:
     """Match every UNMATCHED line on every statement. Idempotent: a matched line and a
@@ -74,7 +127,11 @@ def match_statements(connection: MongoDBConnection, db_name: str,
     positions = connection.get_collection(db_name, "settlementPositions")
 
     result = {"lines": 0, "matched": 0, "unmatched": 0}
-    for stmt in messages.find(_LIVE_UNMATCHED):
+    # Oldest first: a correction's reversal rewrites the original statement's `entries`, so
+    # the original must already be processed (and written) or its stale copy from this
+    # cursor would overwrite `reversedBy`. A correction also needs the position the
+    # original statement booked.
+    for stmt in _by_sequence(messages.find(_LIVE_UNMATCHED)):
         header = stmt.get("statement") or {}
         account_code = header.get("accountCode")
         entries = stmt.get("entries") or []
@@ -83,6 +140,18 @@ def match_statements(connection: MongoDBConnection, db_name: str,
             if (line.get("recon") or {}).get("status") != RECON_UNMATCHED:
                 continue
             result["lines"] += 1
+            if line.get("reversesEntry"):
+                _apply_reversal(messages, stmt, line, now)
+                changed = True
+                result["matched"] += 1
+                continue
+            if line.get("correctsEntry"):
+                if _apply_correction(positions, account_code, stmt, line, now):
+                    changed = True
+                    result["matched"] += 1
+                else:
+                    result["unmatched"] += 1
+                continue
             position = _match_line(positions, account_code, header.get("currency"), line)
             if position is None:
                 result["unmatched"] += 1
@@ -144,6 +213,11 @@ def raise_orphans(connection: MongoDBConnection, db_name: str) -> dict:
         for line in entries:
             recon = line.get("recon") or {}
             if recon.get("status") != RECON_UNMATCHED or recon.get("exceptionId"):
+                continue
+            if line.get("reversesEntry") or line.get("correctsEntry"):
+                # A correction line that could not be applied yet (its position or original
+                # is not there). It is not a settlement with no payment: leave it for the
+                # next match pass instead of queueing a bogus orphan.
                 continue
             line_no = line.get("lineNo")
             exc = record_exception(

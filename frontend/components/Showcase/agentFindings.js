@@ -41,6 +41,23 @@ const FINDINGS = {
     return n ? `${plural(n, "candidate")}${score ? `, best score ${score}` : ""}` : null;
   },
 
+  check_discrepancy_explanations(text) {
+    if (/^Only for|^No settlement/.test(text)) return clip(text);
+    const data = parse(text);
+    // The result is cut at 600 chars, so fall back to the leading fields when it will not parse.
+    const gap = data ? data.gap : Number(first(/"gap":\s*(-?[\d.]+)/, text));
+    const explained = data
+      ? data.explainedBy || []
+      : [...text.matchAll(/"explainedBy":\s*\[([^\]]*)\]/g)].flatMap((m) => m[1].match(/\w+/g) || []);
+    const head = Number.isFinite(gap) && gap !== 0 ? `Gap ${num(Math.abs(gap))}` : "Gap";
+    if (explained.length) return `${head} explained by ${explained.map(label).join(", ")}`;
+    if (data?.unexplained) {
+      return `${head} unexplained by the ordinary causes${data.escalation?.required ? ", above the internal escalation threshold" : ""}`;
+    }
+    if (/"unexplained":\s*true/.test(text)) return `${head} unexplained by the ordinary causes`;
+    return head === "Gap" ? null : `${head}, explanation checks run`;
+  },
+
   get_correspondent_profile(text) {
     if (/^No correspondent/.test(text)) return "No correspondent on this payment";
     const data = parse(text);

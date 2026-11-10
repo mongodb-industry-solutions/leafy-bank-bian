@@ -402,7 +402,7 @@ AWS_REGION=us-east-1               # Bedrock region; credentials come from the s
 BEDROCK_MODEL_ID=                  # optional override of the default Haiku 4.5 profile
 ```
 
-Optional simulation workers (all default as shown): `ENABLE_SETTLEMENT_COMPLETION=true`, `ENABLE_STATEMENT_SIM=true`, `ENABLE_INBOUND_SIM=false`, `ENABLE_CUTOFF_RELEASE_JANITOR=false` (transactions), and `ENABLE_CORRESPONDENT_REPLY_SIM=true` (ledger).
+Optional simulation workers (all default as shown): `ENABLE_SETTLEMENT_COMPLETION=true`, `ENABLE_STATEMENT_SIM=true`, `ENABLE_INBOUND_SIM=false`, `ENABLE_CUTOFF_RELEASE_JANITOR=false` (transactions), and `ENABLE_CORRESPONDENT_REPLY_SIM=true` (ledger). An escalated reconciliation exception is answered by a simulated camt.111 (ledger, `CORRESPONDENT_REPLY_SECONDS`, default 20) and closes only after the correspondent's corrected camt.053, which the transactions statement worker books about 20 seconds later. Both delays are demo pacing, not SWIFT response times.
 
 **Frontend** — create `frontend/.env.local`. The UI proxies BIAN requests to each service by path segment, so it needs the backend URLs:
 

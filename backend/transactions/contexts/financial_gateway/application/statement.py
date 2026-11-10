@@ -201,3 +201,116 @@ def generate_statement(
     logger.info("statement %s (seq %d) for %s: %d lines",
                 doc["paymentMessageId"], sequence, account_code, len(entries))
     return doc
+
+
+# ── Correcting statement (reconciliation plan A4, 2026-11-10) ──────────────────────────
+#
+# A correspondent's camt.111 reply is a statement of intent, not accounting evidence: it
+# cannot move the booked amount. What closes an escalated discrepancy is the correspondent's
+# next camt.053 actually booking the expected amount — the reversal of the mis-booked line
+# and the rebooking at 7,360.00 for R4. This is that statement. The ledger's statement
+# matching applies it; the exception closes only when the tie-out then agrees.
+
+CORRECTED_STATEMENT_SECONDS = 20  # simulated: after the camt.111, not a SWIFT service level
+
+
+def _original_line(messages, payment_id: str) -> Optional[tuple[dict, dict]]:
+    """The live statement line matched to this payment, with its statement."""
+    stmt = messages.find_one(
+        {"purpose": PURPOSE_ACCOUNT_STATEMENT, "statement.historical": {"$ne": True},
+         "entries": {"$elemMatch": {"recon.matchedPaymentId": payment_id,
+                                    "reversal": {"$ne": True}}}},
+        sort=[("statement.sequence", -1)])
+    if stmt is None:
+        return None
+    line = next(e for e in reversed(stmt["entries"])
+                if (e.get("recon") or {}).get("matchedPaymentId") == payment_id
+                and not e.get("reversal"))
+    return stmt, line
+
+
+def correction_for(db, exception_id: str) -> Optional[dict]:
+    return db["canonicalJsonStorage"].find_one(
+        {"purpose": PURPOSE_ACCOUNT_STATEMENT, "statement.correction.exceptionId": exception_id})
+
+
+def issue_corrected_statement(db, exception_id: str, *,
+                              now: Optional[datetime] = None) -> dict:
+    """Write the correspondent's correcting camt.053 for one answered investigation.
+
+    Legal only once the correspondent has replied (camt.111) and the exception is still
+    OPEN awaiting this statement. Idempotent per exception: a second call returns the first
+    statement.
+    """
+    existing = correction_for(db, exception_id)
+    if existing is not None:
+        return existing
+    exc = db["exceptions"].find_one({"exceptionId": exception_id})
+    if exc is None:
+        raise LookupError(f"Exception {exception_id} not found.")
+    if exc.get("status") != "OPEN" or not exc.get("awaitingCorrectedStatement"):
+        raise ValueError(f"Exception {exception_id} is not awaiting a corrected statement.")
+    position = db["settlementPositions"].find_one(
+        {"paymentId": exc["paymentId"]}, sort=[("createdAt", -1)])
+    if position is None:
+        raise ValueError(f"Payment {exc['paymentId']} has no settlement position.")
+    account_code = position.get("settlementAccountCode") or NOSTRO_USD
+    messages = db["canonicalJsonStorage"]
+    found = _original_line(messages, exc["paymentId"])
+    original_stmt, original = found if found else (None, None)
+    if exc.get("category") == "RECONCILIATION_DISCREPANCY" and original is None:
+        raise ValueError(f"No booked statement line to correct for {exc['paymentId']}.")
+    original_ref = ({"paymentMessageId": original_stmt["paymentMessageId"],
+                     "lineNo": original["lineNo"]} if original else None)
+    entries = camt053.correction_entries(original, position, original_ref=original_ref)
+
+    for _ in range(2):  # one retry: the periodic statement may take the window first
+        now = now or datetime.now(timezone.utc)
+        previous = _previous_statement(messages, account_code)
+        window_from = _as_datetime(previous["statement"]["window"]["to"]) if previous else now
+        sequence = previous["statement"]["sequence"] + 1 if previous else 1
+        opening = previous["statement"]["closingBalance"] if previous else 0.0
+        currency = entries[-1]["currency"]
+        oid = ObjectId()
+        message = camt053.build(
+            statement_id=derive_ref("STMT", oid), account_code=account_code,
+            currency=currency, window_from=window_from, window_to=now, sequence=sequence,
+            opening_balance=opening, entries=entries, now=now)
+        doc = statement_doc(
+            oid=oid, message=message, account_code=account_code, currency=currency,
+            window_from=window_from, window_to=now, sequence=sequence,
+            opening_balance=opening,
+            closing_balance=camt053.closing_balance(opening, entries),
+            entries=entries, now=now)
+        doc["statement"]["correction"] = {
+            "exceptionId": exception_id,
+            "caseId": (exc.get("escalation") or {}).get("caseId"),
+            "paymentId": exc["paymentId"],
+            "corrects": original_ref,
+        }
+        try:
+            messages.insert_one(doc)
+        except DuplicateKeyError:
+            # Either a concurrent caller wrote this exception's correction (theirs wins),
+            # or the periodic statement took the window first (retry on the next one).
+            winner = correction_for(db, exception_id)
+            if winner is not None:
+                return winner
+            now = None
+            continue
+        logger.info("corrected statement %s for %s (%s)",
+                    doc["paymentMessageId"], exc["paymentId"], exception_id)
+        return doc
+    raise RuntimeError(f"Could not write the corrected statement for {exception_id}.")
+
+
+def due_corrections(db, *, delay_seconds: int = CORRECTED_STATEMENT_SECONDS,
+                    now: Optional[datetime] = None) -> list[str]:
+    """Answered investigations whose simulated correcting statement is due."""
+    from datetime import timedelta
+
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(seconds=delay_seconds)
+    ids = [e["exceptionId"] for e in db["exceptions"].find(
+        {"status": "OPEN", "awaitingCorrectedStatement": True,
+         "escalation.reply.at": {"$lte": cutoff}}, {"exceptionId": 1})]
+    return [i for i in ids if correction_for(db, i) is None]

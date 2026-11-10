@@ -5,6 +5,7 @@ const PHRASES = {
   payment_trace_lookup: () => "Reading the payment's full history",
   reconciliation_analysis: () => "Comparing books with the statement",
   find_statement_candidates: () => "Searching for matching statement lines",
+  check_discrepancy_explanations: () => "Checking what could explain the gap",
   get_correspondent_profile: (bank) => `Checking ${bank}'s fee schedule`,
   get_resolution_precedents: () => "Looking at how similar cases were resolved",
   record_investigation: () => "Recording the finding",

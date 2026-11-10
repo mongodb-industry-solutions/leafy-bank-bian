@@ -47,8 +47,9 @@ _ALLOWED = {
     },
     CATEGORY_DISCREPANCY: {
         FEE: None,  # chargeBearer-dependent, see allowed_actions
-        # A transposed amount clears only when the correspondent sends a corrected line, so
-        # the agent may ask for one and re-check — never accept or post a number it doubts.
+        # An unexplained amount clears only when the correspondent books a corrected entry on
+        # its camt.053, so the agent may ask for one (camt.110) and re-check — never accept or
+        # post a number it cannot explain.
         AMOUNT_MISMATCH: {ESCALATE, RECHECK},
     },
     CATEGORY_ORPHANED: {
@@ -56,6 +57,11 @@ _ALLOWED = {
         ORPHANED: {ESCALATE, DISMISS},
     },
 }
+
+# Our internal escalation rule (Doina, 2026-11-10): an amount gap the evidence does not
+# explain, and that is larger than this, goes to the correspondent. It decides WHEN we escalate;
+# it is not evidence of WHY the amounts differ — a gap above it is not thereby an error.
+ESCALATION_THRESHOLD = 25.0
 
 # How far the agent may defer its own next look, and how many times before it must escalate.
 MAX_RECHECK_MINUTES = 10
@@ -73,13 +79,14 @@ def allowed_actions(category: str, cause: str, charge_bearer: Optional[str]) -> 
 
 def fee_cause_refusal(discrepancy_amount: Optional[float],
                       known_charges: Optional[list]) -> Optional[str]:
-    """Why a FEE cause is inadmissible, or None when it is grounded in a levied charge.
+    """Why a FEE cause is inadmissible, or None when it is grounded in a known charge.
 
-    A fee explanation is only admissible when the discrepancy equals a charge the
-    correspondent actually levies — otherwise the model is rationalising an unknown
-    delta as a fee (defect 2026-10-03, R4: 54.0 explained as "fee + extra correspondent
-    charge" and proposed for acceptance). Any other delta is an AMOUNT_MISMATCH, whose
-    permitted actions never move money.
+    A fee explanation is only admissible when the discrepancy equals a charge the evidence
+    shows — reported on the statement entry or levied by the correspondent — otherwise the
+    model is rationalising an unknown delta as a fee (defect 2026-10-03, R4: 54.0 explained
+    as "fee + extra correspondent charge" and proposed for acceptance). Any other delta is an
+    unexplained AMOUNT_MISMATCH, whose permitted actions never move money. Refusing FEE does
+    not claim the amount is wrong; it says the fee explanation has no support.
     """
     if not known_charges or discrepancy_amount is None:
         return None
@@ -88,9 +95,9 @@ def fee_cause_refusal(discrepancy_amount: Optional[float],
     if amount in charges:
         return None
     permitted = sorted(_ALLOWED[CATEGORY_DISCREPANCY][AMOUNT_MISMATCH])
-    return (f"The discrepancy {amount} matches no charge this correspondent levies "
-            f"({charges}); it is not a fee. Record AMOUNT_MISMATCH instead "
-            f"(permitted: {permitted}).")
+    return (f"No evidence supports a fee: the discrepancy {amount} equals no charge reported "
+            f"on the entry or levied by this correspondent ({charges}). Record "
+            f"AMOUNT_MISMATCH (cause unexplained) instead (permitted: {permitted}).")
 
 
 def check_proposal(*, category: str, cause: Optional[str], charge_bearer: Optional[str],

@@ -259,6 +259,25 @@ class PaymentsService:
                                   include_orphan=include_orphan,
                                   skip_presenter_driven=skip_presenter_driven)
 
+    def issue_corrected_statement(self, exception_id: str) -> dict:
+        """The correspondent's correcting camt.053 for one answered investigation."""
+        from contexts.financial_gateway.application.statement import issue_corrected_statement
+        return issue_corrected_statement(self.db, exception_id)
+
+    def issue_due_corrected_statements(self) -> list[dict]:
+        """Every correcting statement whose simulated delay has passed (statement worker)."""
+        from contexts.financial_gateway.application.statement import (
+            due_corrections,
+            issue_corrected_statement,
+        )
+        docs = []
+        for exception_id in due_corrections(self.db):
+            try:
+                docs.append(issue_corrected_statement(self.db, exception_id))
+            except (LookupError, ValueError) as e:
+                logging.info("corrected statement skipped for %s: %s", exception_id, e)
+        return docs
+
     def simulate_inbound(
         self,
         scenario: str = "HAPPY",
@@ -1540,7 +1559,8 @@ class PaymentsService:
                     f"claimed by {pos['paymentId']}; link it or escalate, do not dismiss.")
 
     def _escalate(self, exc: dict, note: Optional[str], now: datetime) -> None:
-        """Send the correspondent a camt.026 case and keep the exception OPEN (A4 D4).
+        """Send the correspondent a camt.110 investigation request and keep the exception
+        OPEN (A4 D4).
 
         Claimed first (conditional on OPEN and not yet escalated), so a double-click sends
         one request; the message insert shares the claim's ACID txn.
@@ -1549,14 +1569,21 @@ class PaymentsService:
         from contexts.financial_gateway.domain.inbound_documents import investigation_request_doc
 
         oid = ObjectId()
-        message = investigation_request_doc(oid=oid, exception=exc, note=note, now=now)
+        payment = self.payments.find_one(
+            {"paymentId": exc.get("paymentId")},
+            {"_id": 0, "uetr": 1, "amount": 1, "currency": 1, "correspondent": 1})
+        message = investigation_request_doc(oid=oid, exception=exc, payment=payment,
+                                            note=note, now=now)
 
         def callback(session) -> None:
             claim = self.db["exceptions"].find_one_and_update(
-                {"_id": exc["_id"], "status": STATUS_OPEN, "awaitingCounterparty": {"$ne": True}},
+                {"_id": exc["_id"], "status": STATUS_OPEN, "awaitingCounterparty": {"$ne": True},
+                 "awaitingCorrectedStatement": {"$ne": True}},
                 {"$set": {
                     "awaitingCounterparty": True,
                     "escalation": {"paymentMessageId": message["paymentMessageId"],
+                                   "caseId": message["caseId"],
+                                   "messageFormat": message["messageFormat"],
                                    "by": "payments-operations", "at": now, "note": note},
                     "updatedAt": now,
                 }},

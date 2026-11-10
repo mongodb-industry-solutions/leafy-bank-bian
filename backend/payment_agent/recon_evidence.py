@@ -219,3 +219,101 @@ def resolution_precedents(db: Any, bic: str, category: str, limit: int = 10) -> 
         "discrepancyAmount": (r.get("detail") or {}).get("discrepancyAmount"),
         "at": r.get("createdAt"),
     } for r in rows]
+
+
+# ── Discrepancy checks (Doina, 2026-11-10) ───────────────────────────────────────────
+#
+# Before the agent calls an amount gap unexplained it rules out the ordinary explanations:
+# currency, the amount fields, FX, the charge bearer and charges reported on the entry. A gap
+# larger than a correspondent's fee is NOT by itself evidence of an error; the escalation
+# threshold (policy.ESCALATION_THRESHOLD) is our rule for when to ask, not proof of a cause.
+
+def _num(value) -> Optional[float]:
+    return None if value is None else round(float(value), 2)
+
+
+def statement_entry(db: Any, payment_id: str, position: Optional[dict]) -> Optional[dict]:
+    """The statement entry the position's actual amount was booked from."""
+    ref = (position or {}).get("sourceMessageRef")
+    if not ref:
+        return None
+    stmt = db["canonicalJsonStorage"].find_one(
+        {"paymentMessageId": ref, "purpose": STATEMENT_PURPOSE}, {"_id": 0, "entries": 1})
+    return next((e for e in (stmt or {}).get("entries") or []
+                 if (e.get("recon") or {}).get("matchedPaymentId") == payment_id
+                 and not e.get("reversal")), None)
+
+
+def discrepancy_checks(payment: dict, position: dict, entry: Optional[dict],
+                       levied_charges: list[float],
+                       threshold: float = policy.ESCALATION_THRESHOLD) -> dict:
+    """Which ordinary causes could explain `expected − booked`. Pure.
+
+    Each check reports what it found and whether that explains the gap. `unexplained` is
+    true only when none does; `escalation.required` applies our internal threshold to an
+    unexplained gap.
+    """
+    expected = _num(position.get("expectedAmount", position.get("grossAmount")))
+    booked = _num(position.get("actualAmount"))
+    gap = None if expected is None or booked is None else round(expected - booked, 2)
+    cur_payment = payment.get("currency")
+    cur_instructed = payment.get("instructedCurrency") or cur_payment
+    cur_expected = position.get("expectedCurrency") or position.get("currency")
+    cur_booked = (entry or {}).get("currency") or position.get("actualCurrency")
+    instructed = _num(payment.get("instructedAmount"))
+    amount = _num(payment.get("amount"))
+    fx_rate = payment.get("fxRate") or (payment.get("fx") or {}).get("rate")
+    reported = _num((entry or {}).get("charges"))
+    bearer = payment.get("chargeBearer")
+
+    currencies = {c for c in (cur_payment, cur_expected, cur_booked) if c}
+    checks = [
+        {"check": "CURRENCY",
+         "finding": f"payment {cur_payment}, expected {cur_expected}, booked {cur_booked}",
+         "explainsGap": len(currencies) > 1},
+        {"check": "AMOUNT_FIELDS",
+         "finding": (f"instructed {instructed}, payment amount {amount}, expected settlement "
+                     f"{expected}, booked {booked}"),
+         "explainsGap": None not in (instructed, amount, expected)
+                        and not instructed == amount == expected},
+        {"check": "FX",
+         "finding": (f"FX applied at rate {fx_rate} ({cur_instructed}->{cur_payment})"
+                     if fx_rate or cur_instructed != cur_payment
+                     else f"no FX: instructed and settled in {cur_payment}"),
+         "explainsGap": bool(fx_rate) or cur_instructed != cur_payment},
+        {"check": "CHARGE_BEARER",
+         "finding": (f"{bearer}: " + ("we bear all charges, so none may be deducted from the "
+                                      "amount" if bearer == "DEBT" else
+                                      "a deducted charge is possible, but only a reported or "
+                                      "levied charge of exactly the gap would explain it")),
+         "explainsGap": False},
+        {"check": "REPORTED_CHARGES",
+         "finding": (f"statement entry reports charges of {reported}" if reported
+                     else "no charges reported on the statement entry"),
+         "explainsGap": reported is not None and gap is not None and reported == abs(gap)},
+        {"check": "LEVIED_CHARGES",
+         "finding": f"correspondent's charge policy: {levied_charges}",
+         "explainsGap": gap is not None and abs(gap) in {_num(c) for c in levied_charges}},
+    ]
+    explained_by = [c["check"] for c in checks if c["explainsGap"]]
+    unexplained = gap not in (None, 0) and not explained_by
+    return {
+        "expectedAmount": expected, "bookedAmount": booked, "gap": gap,
+        "checks": checks, "explainedBy": explained_by, "unexplained": unexplained,
+        "escalation": {
+            "thresholdAmount": threshold,
+            "rule": ("Internal escalation rule: an unexplained gap above the threshold is "
+                     "escalated to the correspondent. It triggers escalation; it does not "
+                     "establish the cause."),
+            "required": unexplained and abs(gap) > threshold,
+        },
+    }
+
+
+def discrepancy_checks_for(db: Any, payment_id: str, bic: Optional[str]) -> Optional[dict]:
+    payment = db["payments"].find_one({"paymentId": payment_id}, {"_id": 0}) or {}
+    position = _latest_position(db, payment_id)
+    if position is None:
+        return None
+    entry = statement_entry(db, payment_id, position)
+    return discrepancy_checks(payment, position, entry, known_charges(db, bic))

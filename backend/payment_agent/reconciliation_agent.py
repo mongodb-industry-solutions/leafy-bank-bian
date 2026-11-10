@@ -90,7 +90,9 @@ Steps:
 has no payment; the exception detail describes the line).
 2. `get_correspondent_profile` (charge policy, reference format, usual booking lag) and \
 `get_resolution_precedents` (how similar cases were resolved before).
-3. For MISSING or ORPHANED: `find_statement_candidates`.
+3. For MISSING or ORPHANED: `find_statement_candidates`. For a DISCREPANCY: \
+`check_discrepancy_explanations` (currency, amount fields, FX, charge bearer, reported and \
+levied charges).
 4. `record_investigation` with a cause: TIMING_LAG, REFERENCE_MISMATCH, AMOUNT_MISMATCH, FEE \
 or ORPHANED. Cite specific records and amounts as evidence. The reply lists the actions \
 permitted for that cause.
@@ -102,9 +104,15 @@ correspondent's usual lag. Do not escalate a timing lag until rechecks are exhau
 Rules:
 - Only permitted actions are accepted; a refused proposal explains why — fix it or pick \
 another permitted action. Never invent a statement line: LINK uses a candidate index.
-- A FEE cause is accepted only when the discrepancy equals a charge the correspondent's \
-chargePolicy actually levies (else the bank default 25.0). Any other delta is an \
-AMOUNT_MISMATCH: escalate it, never accept it.
+- Never conclude an amount is erroneous because it exceeds a correspondent's fee. A FEE \
+cause is accepted only when the discrepancy equals a charge reported on the statement entry \
+or levied in the correspondent's chargePolicy. When the checks explain nothing, the cause is \
+AMOUNT_MISMATCH: unexplained, not proven wrong. Cite each check's finding as evidence.
+- The escalation threshold (25.00) is our internal rule for when an unexplained gap goes to \
+the correspondent. Say so; never present it as the cause.
+- Escalation sends a camt.110 investigation request. The correspondent's camt.111 reply does \
+not close the case: it closes only when the correspondent's corrected camt.053 books the \
+expected amount.
 - For FEE, the payment's chargeBearer decides the books, not you.
 - An adjustment amount must equal the discrepancy exactly.
 - End with a two-sentence summary for the operator.
@@ -132,8 +140,15 @@ def _charge_bearer(db: Any, exc: dict) -> Optional[str]:
 
 
 def _known_charges(db: Any, exc: dict) -> list:
-    """Every charge this exception's correspondent levies (recon_evidence)."""
-    return recon_evidence.known_charges(db, _correspondent_bic(db, exc, exc.get("paymentId")))
+    """Every charge that could ground a FEE: those this exception's correspondent levies
+    (recon_evidence), plus any reported on the statement entry itself."""
+    charges = recon_evidence.known_charges(db, _correspondent_bic(db, exc, exc.get("paymentId")))
+    if _is_statement_line(exc):
+        return charges
+    position = recon_evidence._latest_position(db, exc.get("paymentId"))
+    entry = recon_evidence.statement_entry(db, exc.get("paymentId"), position)
+    reported = (entry or {}).get("charges")
+    return sorted(set(charges) | ({round(float(reported), 2)} if reported else set()))
 
 
 def set_agent_fields(db: Any, exception_id: str, fields: dict, push: Optional[dict] = None) -> None:
@@ -195,6 +210,22 @@ line: unreconciled payments it could belong to. Scored deterministically by refe
         set_agent_fields(db, exception_id, {"candidates": candidates})
         return json.dumps([{"index": i, **c} for i, c in enumerate(candidates)] or
                           "No candidates found.", default=str)
+
+    @tool
+    def check_discrepancy_explanations(state: Annotated[dict, InjectedState]) -> str:
+        """For an amount DISCREPANCY: check whether currency, the amount fields, FX, the \
+charge bearer, or a reported / levied charge explains the gap, and whether our internal \
+escalation threshold applies. The threshold decides escalation, never the cause."""
+        exception_id, payment_id = _ids(state)
+        exc = _exception(db, exception_id)
+        if exc.get("category") != policy.CATEGORY_DISCREPANCY:
+            return "Only for a RECONCILIATION_DISCREPANCY."
+        checks = recon_evidence.discrepancy_checks_for(
+            db, payment_id, _correspondent_bic(db, exc, payment_id))
+        if checks is None:
+            return "No settlement position for this payment."
+        set_agent_fields(db, exception_id, {"discrepancyChecks": checks})
+        return json.dumps(checks, default=str)
 
     @tool
     def get_correspondent_profile(state: Annotated[dict, InjectedState]) -> str:
@@ -333,7 +364,7 @@ ESCALATE_TO_CORRESPONDENT, DISMISS or RECHECK. Refused unless permitted for the 
         return f"Proposed {action_up}; awaiting operator approval."
 
     return [payment_trace_lookup, reconciliation_analysis, find_statement_candidates,
-            get_correspondent_profile, get_resolution_precedents, record_investigation,
+            check_discrepancy_explanations, get_correspondent_profile, get_resolution_precedents, record_investigation,
             recheck_reconciliation, schedule_recheck, propose_action]
 
 
@@ -476,7 +507,7 @@ def build_reconciliation_agent(model: Any, db: Any, checkpointer: Any):
                 exc = _exception(db, exception_id)
             if exc.get("status") != "OPEN":
                 result = VERIFIED_RESOLVED
-            elif exc.get("awaitingCounterparty"):
+            elif exc.get("awaitingCounterparty") or exc.get("awaitingCorrectedStatement"):
                 result = VERIFIED_ESCALATED
             else:
                 result = VERIFIED_OPEN

@@ -17,7 +17,7 @@ function effectOf(proposal, bank) {
     case "LINK_STATEMENT_ENTRY":
       return "The statement line is linked to the payment. One link closes both exceptions.";
     case "ESCALATE_TO_CORRESPONDENT":
-      return `A camt.026 investigation request goes to ${bank}. The books stay untouched.`;
+      return `A camt.110 investigation request goes to ${bank}. The books stay untouched until ${bank} books a correction.`;
     default:
       return null;
   }

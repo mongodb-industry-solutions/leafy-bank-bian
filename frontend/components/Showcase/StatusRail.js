@@ -14,10 +14,13 @@ function exceptionChip(exceptions) {
   if (!exceptions.length) return null;
   const open = exceptions.filter((e) => e.status === "OPEN");
   if (!open.length) return <Badge variant="green">Exception closed</Badge>;
-  const waiting = open.every((e) => e.awaitingCounterparty);
+  const pendingCorrection = open.every((e) => e.awaitingCorrectedStatement);
+  const waiting = pendingCorrection || open.every((e) => e.awaitingCounterparty);
   return (
     <Badge variant={waiting ? "yellow" : "red"}>
-      {waiting ? "Awaiting correspondent" : `${open.length} exception${open.length === 1 ? "" : "s"} open`}
+      {pendingCorrection ? "Pending corrected statement"
+        : waiting ? "Awaiting correspondent"
+        : `${open.length} exception${open.length === 1 ? "" : "s"} open`}
     </Badge>
   );
 }

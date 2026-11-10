@@ -35,7 +35,9 @@ def generate_cycle(service) -> list:
     Skips the walkthrough's scenario wires: the presenter books those by hand."""
     docs = [service.generate_statement(account_code=code, skip_presenter_driven=True)
             for code in ACCOUNT_CODES]
-    return [d for d in docs if d]
+    # Not skipped for the walkthrough: the correcting statement follows the correspondent's
+    # camt.111 on its own (simulated delay), like the reply itself.
+    return [d for d in docs if d] + service.issue_due_corrected_statements()
 
 
 def run(service, interval: int = DEFAULT_INTERVAL_SECONDS) -> None:

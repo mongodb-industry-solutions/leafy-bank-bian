@@ -197,6 +197,16 @@ PAYMENT_MESSAGES_INDEXES = [
         "unique": True,
         "partialFilterExpression": {"purpose": "ACCOUNT_STATEMENT"},
     },
+    # One correcting camt.053 per escalated exception. The worker and the "Corrected
+    # statement now" button can race; the window index does not stop them because the
+    # loser sees the winner as `previous` and gets a fresh window.
+    # (`statement.issue_corrected_statement` catches the rejection and returns the winner.)
+    {
+        "name": "idx_statement_correction_unique",
+        "keys": [("statement.correction.exceptionId", ASCENDING)],
+        "unique": True,
+        "partialFilterExpression": {"statement.correction.exceptionId": {"$exists": True}},
+    },
 ]
 
 # Stage 9 — the `exceptions` queue. One OPEN occurrence per (paymentId, category) is the

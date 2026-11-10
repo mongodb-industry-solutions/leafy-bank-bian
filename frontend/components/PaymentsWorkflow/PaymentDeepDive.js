@@ -2043,7 +2043,7 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
                   busy ||
                   (a === "REPAIR" && !repairAccount && !suggestedAccount) ||
                   (a === "LINK_STATEMENT_ENTRY" && !linkTarget) ||
-                  (a === "ESCALATE_TO_CORRESPONDENT" && open.awaitingCounterparty)
+                  (a === "ESCALATE_TO_CORRESPONDENT" && (open.awaitingCounterparty || open.awaitingCorrectedStatement))
                 }
                 onClick={() => doResolve(a)}
               >
@@ -2088,6 +2088,9 @@ function ExceptionsPanel({ exceptions, payment, onResolve, onResolveUta, onLedge
             <span className={styles.exceptionStatus}>{e.status}</span>
             {e.status === "OPEN" && e.awaitingCounterparty && (
               <StatusPill family="yellow">Awaiting correspondent</StatusPill>
+            )}
+            {e.status === "OPEN" && e.awaitingCorrectedStatement && (
+              <StatusPill family="yellow">Pending corrected statement</StatusPill>
             )}
           </div>
           <div className={styles.exceptionDetail}>{exceptionDetailText(e)}</div>

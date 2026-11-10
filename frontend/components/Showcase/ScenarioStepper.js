@@ -198,6 +198,9 @@ export default function ScenarioStepper({ scenarioKey }) {
   const escalated =
     agent?.verification?.result === "ESCALATED" || (followedException?.awaitingCounterparty && followedException?.status === "OPEN");
   const awaitingReply = !!followedException?.awaitingCounterparty && followedException.status === "OPEN";
+  // The camt.111 is in but is not accounting evidence: the exception stays open until the
+  // correspondent's corrected camt.053 books the expected amount.
+  const awaitingStatement = !!followedException?.awaitingCorrectedStatement && followedException.status === "OPEN";
   // The correspondent's reply closes an escalated exception that the agent last saw as ESCALATED.
   const answered = !!followedException?.escalation?.reply && followedException.status !== "OPEN";
   // The run ends when the agent has closed its exception. The payment flips to RECONCILED on the
@@ -273,7 +276,33 @@ export default function ScenarioStepper({ scenarioKey }) {
       const { error: err } = await pipelineApi(
         `exceptions/${followedId}/correspondent-reply`, null, { method: "POST" });
       if (err) throw new Error(err);
-      setNote("The correspondent answered the investigation request.");
+      setNote(`${scenario.bank} answered with a camt.111. The exception stays open until a corrected camt.053 books the amount.`);
+      setTick((t) => t + 1);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  // Demo shortcut for the simulated delay: the correspondent books its corrected camt.053,
+  // then the ledger re-checks against it.
+  async function statementNow() {
+    setRunning(true);
+    setError(null);
+    try {
+      const { error: issueErr } = await coreApi("FinancialGateway/GW-WIRE-01/Statement/Correction", {
+        method: "POST",
+        body: { exceptionId: followedId },
+      });
+      if (issueErr) throw new Error(issueErr);
+      const { error: err } = await pipelineApi(
+        `exceptions/${followedId}/apply-corrected-statement`, null, { method: "POST" });
+      // The worker applied it first, so the exception is no longer awaiting. That is the
+      // outcome we wanted; the next poll shows it rather than an error. (A 409 for "no
+      // corrected statement has arrived" is a different message and still surfaces.)
+      if (err && !/not awaiting a corrected statement/i.test(err)) throw new Error(err);
+      setNote(`${scenario.bank}'s corrected camt.053 arrived and was applied.`);
       setTick((t) => t + 1);
     } catch (e) {
       setError(e.message || String(e));
@@ -348,7 +377,7 @@ export default function ScenarioStepper({ scenarioKey }) {
   // One tone for the whole page, so the scene stripe and status card agree.
   const tone =
     outcome === "RECONCILED" || outcome === "RESOLVED" || outcome === "ANSWERED" ? "resolved"
-    : awaitingReply || outcome === "ESCALATED" ? "waiting"
+    : awaitingReply || awaitingStatement || outcome === "ESCALATED" ? "waiting"
     : anyOpen ? "alert"
     : "neutral";
   // The proposal is decidable as soon as the agent has made one; waiting for the next step's
@@ -372,7 +401,8 @@ export default function ScenarioStepper({ scenarioKey }) {
     running: running ? step.auto || "Applying this step" : null,
     externalWait:
       step.countdown && countdownLeft > 0 ? `Statement window closes in ${countdownLeft}s`
-      : awaitingReply ? "Waiting for the correspondent bank's reply"
+      : awaitingReply ? "Waiting for the correspondent bank's camt.111 reply (simulated)"
+      : awaitingStatement ? "Waiting for the correspondent bank's corrected camt.053 (simulated)"
       : step.final && !outcome && scenarioKey === "TL" ? "Waiting for the agent's next sweep"
       : null,
     systemWait: agentGate && !followedId ? "Waiting for the exception to appear" : null,
@@ -390,9 +420,11 @@ export default function ScenarioStepper({ scenarioKey }) {
     running,
     waiting,
     awaitingReply,
+    awaitingStatement,
     error,
     onNext: next,
     onReplyNow: replyNow,
+    onStatementNow: statementNow,
   };
 
   return (
@@ -474,6 +506,7 @@ export default function ScenarioStepper({ scenarioKey }) {
               gapBefore={gapBefore}
               expectedOutcomes={EXPECTED_OUTCOMES[scenarioKey] || []}
               waiting={waiting}
+              awaitingStatement={awaitingStatement}
             />
           )}
         />

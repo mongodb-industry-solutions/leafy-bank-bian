@@ -200,3 +200,106 @@ def test_the_simulator_leaves_cutoff_demo_wires_unbooked(service, db):
 
     assert {e["simulatedPaymentId"] for e in sim["entries"]} == {ambient}
     assert cutoff not in {e["simulatedPaymentId"] for e in sim["entries"]}
+
+
+# --- correcting statement (Doina 2026-11-10) ----------------------------------
+
+def _answered_discrepancy(service, db, *, amount=7360.0):
+    """A transposed wire booked on a statement, matched (as the ledger would), escalated
+    and answered by the correspondent's camt.111."""
+    from contexts.financial_gateway.application.statement import generate_statement as gen
+
+    pid = _settled_wire(service, db, camt053.AMOUNT_TRANSPOSED, amount=amount)
+    stmt = gen(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False, now=_later(1))
+    for e in stmt["entries"]:
+        e["recon"] = {"status": "AUTO_MATCHED", "matchedPaymentId": e["simulatedPaymentId"],
+                      "matchedBy": "REFERENCE_ONLY", "at": None}
+    db["canonicalJsonStorage"].update_one({"_id": stmt["_id"]},
+                                          {"$set": {"entries": stmt["entries"]}})
+    db["exceptions"].insert_one({
+        "exceptionId": "EXC-R4", "paymentId": pid, "category": "RECONCILIATION_DISCREPANCY",
+        "status": "OPEN", "awaitingCounterparty": False, "awaitingCorrectedStatement": True,
+        "escalation": {"caseId": "CASE-1", "reply": {"at": _later(1)}}})
+    return pid, stmt
+
+
+def test_the_correcting_statement_reverses_the_booked_line_and_books_the_expected_amount(
+        service, db):
+    from contexts.financial_gateway.application.statement import issue_corrected_statement
+
+    pid, original = _answered_discrepancy(service, db)
+
+    doc = issue_corrected_statement(db, "EXC-R4", now=_later(2))
+
+    reversal, rebooked = doc["entries"]
+    assert (reversal["amount"], reversal["creditDebit"], reversal["reversal"]) == (7306.0, "CRDT", True)
+    assert reversal["reversesEntry"] == {"paymentMessageId": original["paymentMessageId"], "lineNo": 1}
+    assert (rebooked["reference"], rebooked["amount"], rebooked["creditDebit"]) == (pid, 7360.0, "DBIT")
+    assert rebooked["correctsEntry"] == reversal["reversesEntry"]
+    assert doc["statement"]["sequence"] == original["statement"]["sequence"] + 1
+    assert doc["statement"]["correction"]["exceptionId"] == "EXC-R4"
+    # Opening is the original's closing; the reversal nets the 7,306 back out first.
+    assert doc["statement"]["closingBalance"] == round(
+        original["statement"]["closingBalance"] + 7306.0 - 7360.0, 2)
+    assert doc["rawMessage"].count("<RvslInd>true</RvslInd>") == 1
+    assert "reversesEntry" not in doc["rawMessage"] and "correctsEntry" not in doc["rawMessage"]
+    # Idempotent per exception.
+    assert issue_corrected_statement(db, "EXC-R4")["_id"] == doc["_id"]
+
+
+def test_a_concurrent_correction_returns_the_winner_not_a_second_statement(service, db):
+    """The worker and the "Corrected statement now" button can race past the idempotency
+    check. The unique index rejects the loser; it must get the winner back."""
+    from pymongo.errors import DuplicateKeyError
+    import contexts.financial_gateway.application.statement as statement_module
+
+    _answered_discrepancy(service, db)
+    winner = statement_module.issue_corrected_statement(db, "EXC-R4", now=_later(2))
+    real = statement_module.correction_for
+    calls = {"n": 0}
+
+    def miss_once(database, exception_id):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else real(database, exception_id)
+
+    class RejectingMessages:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def insert_one(self, doc, *a, **kw):
+            raise DuplicateKeyError("idx_statement_correction_unique")
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    class DbView:
+        def __getitem__(self, name):
+            coll = db[name]
+            return RejectingMessages(coll) if name == "canonicalJsonStorage" else coll
+
+    statement_module.correction_for = miss_once
+    try:
+        again = statement_module.issue_corrected_statement(DbView(), "EXC-R4")
+    finally:
+        statement_module.correction_for = real
+
+    assert again["_id"] == winner["_id"]
+
+
+def test_no_correcting_statement_before_the_correspondent_has_replied(service, db):
+    from contexts.financial_gateway.application.statement import issue_corrected_statement
+
+    _answered_discrepancy(service, db)
+    db["exceptions"].update_one({"exceptionId": "EXC-R4"},
+                                {"$set": {"awaitingCorrectedStatement": False}})
+    with pytest.raises(ValueError, match="not awaiting"):
+        issue_corrected_statement(db, "EXC-R4")
+
+
+def test_the_worker_issues_the_correction_only_after_the_simulated_delay(service, db):
+    from contexts.financial_gateway.application.statement import due_corrections
+
+    _answered_discrepancy(service, db)
+    replied_at = db["exceptions"].find_one({"exceptionId": "EXC-R4"})["escalation"]["reply"]["at"]
+    assert due_corrections(db, delay_seconds=20, now=replied_at + timedelta(seconds=19)) == []
+    assert due_corrections(db, delay_seconds=20, now=replied_at + timedelta(seconds=20)) == ["EXC-R4"]

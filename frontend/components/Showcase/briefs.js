@@ -36,9 +36,9 @@ export const BRIEFS = {
     autonomy: { level: 2, alone: "Searches the statement for candidates and proposes a link", needsYou: "Linking the statement line" },
   },
   R4: {
-    hard: "The statement is 54.00 short, and no correspondent charges a fee of that size.",
-    decides: "Whether to trust a fee explanation or ask the correspondent.",
-    guarantees: "Code refuses a fee explanation unless the amount is a charge the correspondent actually levies.",
+    hard: "RBC's statement books 7,306.00 against our 7,360.00, and nothing on the payment or the entry explains the 54.00.",
+    decides: "Whether any check explains the gap, or whether to ask the correspondent.",
+    guarantees: "Code refuses a fee explanation unless the gap equals a reported or levied charge, and only a corrected statement closes the case.",
     mongo: MONGO_RECON,
     autonomy: { level: 2, alone: "Declines to guess and proposes asking the correspondent", needsYou: "Sending the query" },
   },

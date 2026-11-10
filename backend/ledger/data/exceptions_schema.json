@@ -89,16 +89,24 @@
         },
         "awaitingCounterparty": {
           "bsonType": ["bool", "null"],
-          "description": "Plan A4 — true once ESCALATE_TO_CORRESPONDENT sent an investigation request. The exception stays OPEN until RECHECK / LINK / POST_ADJUSTMENT / DISMISS closes it."
+          "description": "Plan A4 — true once ESCALATE_TO_CORRESPONDENT sent a camt.110 investigation request, false once the correspondent's camt.111 reply arrives. The exception stays OPEN until RECHECK / LINK / POST_ADJUSTMENT / DISMISS closes it."
+        },
+        "awaitingCorrectedStatement": {
+          "bsonType": ["bool", "null"],
+          "description": "True after a camt.111 confirmed the amount: a reply is not accounting evidence, so the exception stays OPEN until the correspondent's corrected camt.053 books the amount and the RECHECK agrees."
         },
         "escalation": {
           "bsonType": ["object", "null"],
-          "description": "Plan A4 — the investigation request sent to the correspondent (canonicalJsonStorage, purpose INVESTIGATION_REQUEST, camt.029-style).",
+          "description": "Plan A4 — the camt.110 investigation request sent to the correspondent (canonicalJsonStorage, purpose INVESTIGATION_REQUEST), its camt.111 reply, and the corrected camt.053 that closed it.",
           "properties": {
             "paymentMessageId": {"bsonType": "string"},
+            "caseId": {"bsonType": "string"},
+            "messageFormat": {"bsonType": "string"},
             "by": {"bsonType": "string"},
             "at": {"bsonType": "date"},
-            "note": {"bsonType": ["string", "null"]}
+            "note": {"bsonType": ["string", "null"]},
+            "reply": {"bsonType": ["object", "null"], "description": "The camt.111 (canonicalJsonStorage, purpose INVESTIGATION_RESPONSE): by, at, outcome, paymentMessageId, confirmedAmount."},
+            "correctedStatement": {"bsonType": ["object", "null"], "description": "The corrected camt.053 that closed the exception: paymentMessageId, bookedAmount."}
           }
         },
         "agent": {
