@@ -119,42 +119,105 @@
   gap: 40px;
 }
 
-.agentSection {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
 .agentSectionTitle {
   margin: 0;
   padding-bottom: 8px;
   border-bottom: 1px solid #dbe2e0;
 }
 
-.group {
+/* Scenario matrix: a behaviour label, then one equal-width slot per agent. */
+.matrix {
+  --label-col: 240px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 24px;
 }
 
-.group > .pickerGrid {
+.matrixHeadRow,
+.matrixRow {
+  display: grid;
+  grid-template-columns: var(--label-col) repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.matrixRow {
+  align-items: stretch;
+  padding-top: 24px;
+  border-top: 1px solid #e8edeb;
+}
+
+.matrixHeadRow + .matrixRow { border-top: 0; padding-top: 0; }
+
+.matrixCell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.matrixCell > .cardWrap { flex: 1; }
+
+/* The agent's name inside a cell is only needed once the header row is gone (narrow screens). */
+.matrixCellAgent { display: none; }
+
+.matrixEmpty {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  border: 1px dashed #c9d1cf;
+  border-radius: 12px;
+  color: #889397;
+  font-size: 13px;
+}
+
+/* Two scenarios compared in one slot: one heading, two half-width cards. */
+.pair {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--accent-bg, #e8edeb);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent-bg, #e8edeb) 35%, #fff);
+}
+
+.pairHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 0 4px;
+  font-size: 13px;
+}
+
+.pairTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent, #1c2d38);
+}
+
+.pairCards {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .groupHead {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  /* Title (22px) + a two-line blurb (2 x 18px), so every card row starts at the same height. */
-  min-height: 58px;
 }
 
-.group .groupHead h3 {
+.groupHead h3 {
   font-size: 16px;
   line-height: 22px;
 }
 
-.group .groupHead p {
+.groupHead p {
   font-size: 13px;
   line-height: 18px;
 }
@@ -175,37 +238,24 @@
   margin: 0;
 }
 
-.groupRow {
-  display: grid;
-  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
-  gap: 24px 16px;
-  align-items: stretch;
-}
-
-.groupRow > .group {
-  grid-column: span var(--span);
-}
-
-.pickerGrid {
-  display: grid;
-  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
-  gap: 16px;
-  align-items: stretch;
-}
-
-/* Narrow screens: one group per row, cards wrap at a readable width. */
+/* Narrow screens: no header row; each behaviour stacks its agents' cells, each naming its agent. */
 @media (max-width: 1100px) {
-  .groupRow {
-    grid-template-columns: 1fr;
-  }
+  .matrixHeadRow { display: none; }
 
-  .groupRow > .group {
-    grid-column: auto;
-  }
+  .matrixRow { grid-template-columns: minmax(0, 1fr); }
 
-  .pickerGrid {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  .matrixCellAgent {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #5c6c75;
   }
+}
+
+@media (max-width: 700px) {
+  .pairCards { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Mode themes feed both the group header and its cards. */

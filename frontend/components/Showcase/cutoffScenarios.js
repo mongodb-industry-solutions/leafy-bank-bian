@@ -118,21 +118,6 @@ export const CUTOFF_SCENARIOS = [
   },
 ];
 
-export const CUTOFF_GROUPS = [
-  {
-    mode: "approval",
-    icon: "Person",
-    title: "Rescued in time",
-    blurb: "The agent clears what it can on its own, then asks a human to expedite.",
-  },
-  {
-    mode: "refuses",
-    icon: "Clock",
-    title: "Can't make it",
-    blurb: "The agent says so early and asks to move the wire to another day.",
-  },
-];
-
 // How the last act closes the payment. `watch`: it is already settling, so the panel only
 // watches. `fastForward` adds one button that moves the payment on; the case keeps the
 // agent's decision either way.

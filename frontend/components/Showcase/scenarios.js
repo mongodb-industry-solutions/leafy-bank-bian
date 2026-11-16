@@ -298,22 +298,32 @@ export const SCENARIOS = [
   },
 ];
 
-// How the picker groups scenarios: by what the agent does, because that is the point of each.
+// The picker's rows: what the agent does, the same three behaviours for every agent, so the
+// audience sees one set of rules. A scenario's `mode` places it in a row.
 export const GROUPS = [
   {
     mode: "approval",
-    title: "Acts after a human approves",
-    blurb: "The same $25 gap can need two different answers, depending on who pays the charges.",
+    title: "Needs your approval",
+    blurb: "The agent proposes a fix and waits for a human before any money moves.",
   },
   {
     mode: "refuses",
-    title: "Escalates when uncertain",
-    blurb: "The agent declines to guess and escalates to the correspondent instead.",
+    title: "Declines to force it",
+    blurb: "When no safe fix exists, the agent says so and hands the case on.",
   },
   {
     mode: "autonomous",
-    title: "Resolves autonomously",
+    title: "Resolves on its own",
     blurb: "Actions that move no funds do not require approval.",
+  },
+];
+
+// Scenarios shown side by side as one comparison, because the contrast is the point.
+export const PAIRS = [
+  {
+    keys: ["R1", "R1b"],
+    title: "Same $25 gap, two answers",
+    blurb: "Who pays the charges decides the right fix.",
   },
 ];
 

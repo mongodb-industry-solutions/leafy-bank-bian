@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import Icon from "@leafygreen-ui/icon";
 import { H2, H3, Body } from "@leafygreen-ui/typography";
 import ScenarioInfo from "./ScenarioBrief";
-import { ENABLED_SCENARIOS, GROUPS, stepsFor } from "./scenarios";
-import { CUTOFF_SCENARIOS, CUTOFF_GROUPS } from "./cutoffScenarios";
+import { ENABLED_SCENARIOS, GROUPS, PAIRS, stepsFor } from "./scenarios";
+import { CUTOFF_SCENARIOS } from "./cutoffScenarios";
 import styles from "./Showcase.module.css";
 
 const MODE_ICON = {
@@ -73,43 +73,82 @@ function ScenarioCard({ scenario, ran, onPick }) {
   );
 }
 
-// Every card is one column of the same four-column grid in both sections, so all cards share one size.
-// A group spans as many columns as it has cards.
-const CARD_COLUMNS = 4;
+// One matrix: rows are what the agent does, columns are the agents. Every cell is one slot, so
+// all cards share one width; a pair fills its slot with two half-width cards under one heading.
+const AGENTS = [
+  { id: "recon", title: "Reconciliation agent", scenarios: ENABLED_SCENARIOS },
+  { id: "cutoff", title: "Cut-off agent", scenarios: CUTOFF_SCENARIOS },
+];
 
-function AgentSection({ id, title, groups, scenarios, ran, onPick }) {
-  const filled = groups
-    .map((group) => ({ group, items: scenarios.filter((s) => s.mode === group.mode) }))
-    .filter(({ items }) => items.length);
+// A cell's scenarios as render items: a pair when all its keys sit in this cell, else single cards.
+function cellItems(scenarios) {
+  const items = [];
+  const paired = new Set();
+  for (const pair of PAIRS) {
+    const members = pair.keys.map((k) => scenarios.find((s) => s.key === k));
+    if (members.every(Boolean)) {
+      items.push({ type: "pair", key: pair.keys.join("+"), pair, members });
+      pair.keys.forEach((k) => paired.add(k));
+    }
+  }
+  scenarios.filter((s) => !paired.has(s.key)).forEach((s) => items.push({ type: "card", key: s.key, scenario: s }));
+  return items;
+}
+
+function Cell({ agent, mode, ran, onPick }) {
+  const items = cellItems(agent.scenarios.filter((s) => s.mode === mode));
   return (
-    <section className={styles.agentSection} aria-labelledby={id}>
-      <H2 id={id} className={styles.agentSectionTitle}>{title}</H2>
-      <div className={styles.groupRow} style={{ "--cols": CARD_COLUMNS }}>
-        {filled.map(({ group, items }) => (
-          <div key={group.mode} className={`${styles.group} ${styles[`mode_${group.mode}`]}`}
-            style={{ "--span": items.length }}>
-            <div className={styles.groupHead}>
-              <span className={styles.groupIcon}>
-                <Icon glyph={group.icon || MODE_ICON[group.mode]} size={14} />
-              </span>
-              <div>
-                <H3 className={styles.groupTitle}>{group.title}</H3>
-                <Body className={styles.muted}>{group.blurb}</Body>
-              </div>
-            </div>
-            <div className={styles.pickerGrid} style={{ "--cols": items.length }}>
-              {items.map((s) => (
-                <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={onPick} />
-              ))}
-            </div>
+    <div className={styles.matrixCell}>
+      <span className={styles.matrixCellAgent}>{agent.title}</span>
+      {items.length === 0 && <div className={styles.matrixEmpty}>No scenario yet</div>}
+      {items.map((item) => (item.type === "pair" ? (
+        <div key={item.key} className={styles.pair}>
+          <div className={styles.pairHead}>
+            <span className={styles.pairTitle}>{item.pair.title}</span>
+            <span className={styles.muted}>{item.pair.blurb}</span>
           </div>
-        ))}
-      </div>
-    </section>
+          <div className={styles.pairCards}>
+            {item.members.map((s) => (
+              <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={onPick} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <ScenarioCard key={item.key} scenario={item.scenario} ran={ran.includes(item.key)} onPick={onPick} />
+      )))}
+    </div>
   );
 }
 
-// Both agents on one page, reconciliation first.
+function ScenarioMatrix({ ran, onPick }) {
+  return (
+    <div className={styles.matrix}>
+      <div className={styles.matrixHeadRow}>
+        <span />
+        {AGENTS.map((a) => (
+          <H2 key={a.id} className={styles.agentSectionTitle}>{a.title}</H2>
+        ))}
+      </div>
+      {GROUPS.map((group) => (
+        <div key={group.mode} className={`${styles.matrixRow} ${styles[`mode_${group.mode}`]}`}>
+          <div className={styles.groupHead}>
+            <span className={styles.groupIcon}>
+              <Icon glyph={group.icon || MODE_ICON[group.mode]} size={14} />
+            </span>
+            <div>
+              <H3 className={styles.groupTitle}>{group.title}</H3>
+              <Body className={styles.muted}>{group.blurb}</Body>
+            </div>
+          </div>
+          {AGENTS.map((a) => (
+            <Cell key={a.id} agent={a} mode={group.mode} ran={ran} onPick={onPick} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ScenarioPicker({ onPick }) {
   const [ran, markRan] = useRanScenarios();
   const pick = (key) => {
@@ -119,10 +158,7 @@ export default function ScenarioPicker({ onPick }) {
 
   return (
     <div id="showcase-scenarios" className={styles.picker}>
-      <AgentSection id="recon-scenarios" title="Reconciliation agent" groups={GROUPS}
-        scenarios={ENABLED_SCENARIOS} ran={ran} onPick={pick} />
-      <AgentSection id="cutoff-scenarios" title="Cut-off agent" groups={CUTOFF_GROUPS}
-        scenarios={CUTOFF_SCENARIOS} ran={ran} onPick={pick} />
+      <ScenarioMatrix ran={ran} onPick={pick} />
     </div>
   );
 }
