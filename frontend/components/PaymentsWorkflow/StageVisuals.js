@@ -559,6 +559,30 @@ export function GateCards({ payment, checks }) {
   );
 }
 
+/**
+ * Stage 2's dual-approval outcome, stated outright. The gate row alone ("Required approval ✓")
+ * hid the threshold and the approver in a tooltip, so above-threshold payments looked no
+ * different from small ones.
+ */
+export function DualApprovalCallout({ payment }) {
+  const e = payment?.entitlement;
+  if (!e?.dualApprovalRequired) return null;
+  const ccy = payment?.currency;
+  const status = e.dualApproval?.status;
+  const approver = e.dualApproval?.approvedBy || e.dualApprovalBy;
+  let outcome;
+  if (status === "PENDING") outcome = "Held at PENDING_APPROVAL for a second signatory.";
+  else if (e.dualApprovalSimulated) outcome = `Second approver ${approver || "—"} (simulated: no human approved this payment).`;
+  else outcome = `Approved by ${approver || "—"}.`;
+  return (
+    <div className={styles.dualApprovalCallout}>
+      <strong>Dual approval required:</strong>{" "}
+      {fmtAmount(payment?.amount, ccy)} is above the {e.segment || "default"} threshold of{" "}
+      {fmtAmount(e.dualApprovalThreshold, ccy)}. {outcome}
+    </div>
+  );
+}
+
 /** The amount against the per-payment limit and the dual-approval threshold. */
 export function LimitGauge({ payment }) {
   const e = payment?.entitlement;

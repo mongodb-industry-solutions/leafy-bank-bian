@@ -27,7 +27,7 @@ import MongoRail from "./MongoRail";
 import KeyFacts from "./KeyFacts";
 import {
   PostingChain, FundsFlow, CategoryTable, FxProvenance, CutoffClock, PartyFlow, EnvelopeChips,
-  StatePath, IntakeOrder, BianStrip, Card, StageStates, GateCards, LimitGauge, ResolutionOutcome,
+  StatePath, IntakeOrder, BianStrip, Card, StageStates, GateCards, DualApprovalCallout, LimitGauge, ResolutionOutcome,
   RouteMap, FraudMeter, AcceptanceRollup, RailFlow, SettlementOutcomes, PostingDirection,
   InboundResolutionChecks, InboundValidationChecks,
 } from "./StageVisuals";
@@ -1565,6 +1565,7 @@ function StageDetailBody({ stage, payment, onResolveException, onResolveUta, onL
 
         {kind === "checks" && (
           <div className={styles.stageStack}>
+            <DualApprovalCallout payment={payment} />
             <GateCards payment={payment} checks={checkList} />
             <LimitGauge payment={payment} />
             <TransitionsCard stageKey={key} payment={payment} />
