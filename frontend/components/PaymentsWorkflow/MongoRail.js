@@ -3,7 +3,7 @@
 // The MongoDB rail beside a lifecycle stage: why MongoDB fits this stage, then one row per
 // collection the stage writes (operation badge, what changed, live document). The first row
 // with a document opens expanded. In the Business lens the rail collapses to a one-line
-// summary the presenter can expand.
+// summary the presenter can expand. Below the writes, any aggregation pipelines the stage runs.
 
 import { useState } from "react";
 import Badge from "@leafygreen-ui/badge";
@@ -34,6 +34,8 @@ function WriteRow({ write, sources, open }) {
             {JSON.stringify(docs.length === 1 ? docs[0] : docs, null, 2)}
           </Code>
         </div>
+      ) : write.pick.untracked ? (
+        <Body className={styles.empty}>Written at this stage; this page does not load the document.</Body>
       ) : (
         <Body className={styles.empty}>Not written yet. It appears here as soon as it lands.</Body>
       )}
@@ -41,7 +43,26 @@ function WriteRow({ write, sources, open }) {
   );
 }
 
-export default function MongoRail({ writes, why, sources, collapsed }) {
+function QueryRow({ query }) {
+  return (
+    <details className={styles.row}>
+      <summary className={styles.summary}>
+        <span className={styles.head}>
+          <span className={styles.collection}>{query.collection}</span>
+          <Badge variant="yellow">aggregate</Badge>
+        </span>
+        <span className={styles.fields}>{query.title}</span>
+        <span className={styles.via}>{query.when}</span>
+      </summary>
+      <div className={styles.code}>
+        <Code language="javascript" copyButtonAppearance="hover">{query.pipeline}</Code>
+      </div>
+      <Body className={styles.empty}>Source: {query.source}</Body>
+    </details>
+  );
+}
+
+export default function MongoRail({ writes, queries = [], why, sources, collapsed }) {
   const [expanded, setExpanded] = useState(false);
   if (!writes.length) return null;
 
@@ -73,6 +94,12 @@ export default function MongoRail({ writes, why, sources, collapsed }) {
           open={i === firstWithDoc}
         />
       ))}
+      {queries.length > 0 && (
+        <>
+          <div className={styles.title}>Aggregation pipelines run</div>
+          {queries.map((q) => <QueryRow key={q.source} query={q} />)}
+        </>
+      )}
       {collapsed && (
         <button type="button" className={styles.link} onClick={() => setExpanded(false)}>
           Hide MongoDB detail

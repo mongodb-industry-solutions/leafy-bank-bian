@@ -31,7 +31,7 @@ import {
   RouteMap, FraudMeter, AcceptanceRollup, RailFlow, SettlementOutcomes, PostingDirection,
   InboundResolutionChecks, InboundValidationChecks,
 } from "./StageVisuals";
-import { stageBian, stageCopy, stageFacts, stageWrites, settlementDelta } from "./stageContent";
+import { stageBian, stageCopy, stageFacts, stageQueries, stageWrites, settlementDelta } from "./stageContent";
 import StepUpModal from "@/components/StepUpModal/StepUpModal";
 import { buildLifecycleStages, groupLifecycleStages, legTotals } from "./lifecycleStages";
 import { usePaymentWorkflow, usePipelineTrace, useBatchTick, useReconciliationAgent, useLinkCandidates } from "@/lib/api/hooks";
@@ -401,6 +401,7 @@ function StagePane({ stage, state, payment, trace, lens, onApprove, onResolve, o
           <div className={styles.paneRail}>
             <MongoRail
               writes={writes}
+              queries={stageQueries(stage)}
               why={copy?.why}
               sources={sources}
               collapsed={lens === "business"}

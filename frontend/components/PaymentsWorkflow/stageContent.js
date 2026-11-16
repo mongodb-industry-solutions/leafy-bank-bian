@@ -17,8 +17,8 @@ const COPY = {
   initiation: {
     [OUT]: {
       business: "The customer's instruction is captured and the debtor and creditor are frozen as they were at that moment.",
-      technical: "One insert into payments, with the parties embedded as an immutable snapshot and the idempotency key enforced by a unique index.",
-      why: "One payments document serves every rail: a wire adds a wireDetails envelope and an internal transfer adds internalDetails. No per-rail collection and no schema change.",
+      technical: "One ACID transaction inserts the payments document, with the parties embedded as an immutable snapshot, and its first paymentTimeline event.",
+      why: "One payments document serves every rail: each carries wireDetails, achDetails and internalDetails, and only the envelope for its own rail is filled. No per-rail collection and no schema change."
     },
     [IN]: {
       business: "A payment message arrives from another bank and is recorded exactly as received.",
@@ -35,14 +35,14 @@ const COPY = {
     [IN]: {
       business: "The beneficiary named in the message is matched to a real account at this bank.",
       technical: "An accounts lookup resolves the beneficiary; the result is persisted as beneficiaryResolution on the payment.",
-      why: "Beneficiary resolution is an indexed lookup on accounts in the same cluster as the payment, and its verdict is stored beside the claim it resolved, so both can be compared later.",
+      why: "Beneficiary resolution is a lookup on accounts in the same cluster as the payment, and its verdict is stored beside the claim it resolved, so both can be compared later.",
     },
   },
   validation: {
     [OUT]: {
       business: "The payment is checked for completeness and viability, and missing details such as FX and fees are filled in.",
-      technical: "$jsonSchema validation, then enrichment{} and validation{} written back to the payments document. The funds check moves the amount from balance.available to balance.hold on the account and records the reservation id in refs.fundsReservationId on the payment.",
-      why: "Required fields are enforced by the database's own $jsonSchema validator, the enrichment record keeps each field's before and after, and the fx object carries rate provenance a single scalar could not.",
+      technical: "Validation and enrichment results are written back to the payments document. The funds hold is one ACID transaction: a conditional update moves the amount from balance.available to balance.hold only if available covers it, and marks the reservation on the payment.",
+      why: "The conditional update makes the balance check and the hold one atomic step, so two payments cannot reserve the same funds. The enrichment record keeps each field's before and after, and the fx object carries rate provenance a single scalar could not.",
     },
     [IN]: {
       business: "The incoming payment is validated, screened and enriched before it can be accepted.",
@@ -65,7 +65,7 @@ const COPY = {
   execution: {
     [OUT]: {
       business: "The payment is converted to the network's message format and sent.",
-      technical: "A paymentExecutions document per attempt and a pacs.008 in canonicalJsonStorage, built from the canonical payment.",
+      technical: "A paymentExecutions document per attempt and a pacs.008 in canonicalJsonStorage, then the money move: one ACID transaction releases the hold, debits the debtor only if funds are available, credits the creditor, and inserts the transactions and notifications documents.",
       why: "The canonical payment and the ISO 20022 message are separate documents linked by id, and each attempt gets its own paymentExecutions document, so a new rail adds a mapping and a retry never overwrites history.",
     },
     [IN]: {
@@ -77,8 +77,8 @@ const COPY = {
   "g:Accounting & Posting": {
     both: {
       business: "The bank's books record the money movement as balanced debits and credits.",
-      technical: "A ledger event is written, a change stream posts its sub-ledger entries and one journal in an ACID transaction, keyed by idempotencyKey.",
-      why: "Multi-document ACID transactions keep debits equal to credits, and change streams run the posting without polling.",
+      technical: "A change stream on transactions writes the ledger event (unique idempotencyKey). A second change stream posts its sub-ledger entries in an ACID transaction. A scheduled batch aggregates posted entries into one balanced journal per period.",
+      why: "Change streams resume from a stored token after a restart, unique indexes make every posting idempotent, and a $expr validator on journalEntries rejects any journal whose debits and credits differ.",
     },
   },
   "g:Clearing & Settlement": {
@@ -92,7 +92,7 @@ const COPY = {
     both: {
       business: "The bank proves the payment, its ledger entries and the correspondent's statement all agree.",
       technical: "Statement lines are matched to positions, then a reconciliationItems document records the three-way result; a break opens an exception.",
-      why: "The three legs of the match sit in one document and a $lookup brings the evidence together.",
+      why: "The three legs of the match sit in one reconciliationItems document, and each statement line is claimed with a conditional update so it can match only one position.",
     },
   },
 };
@@ -116,6 +116,9 @@ const executionMessages = ({ payment }) =>
   nonEmpty((payment?.messages || []).filter((m) => !m.purpose || m.purpose === "STATUS_RESPONSE"));
 
 const whole = ({ payment }) => nonEmpty(paymentDoc(payment));
+// Written at this stage but not returned by any endpoint this page reads.
+const untracked = () => null;
+untracked.untracked = true;
 
 // One `paymentTimeline` row per stage: its lifecycle events and checks, as stored.
 const HISTORY_FIELDS = "Lifecycle events and checks from this stage, one document each with a contiguous seq";
@@ -135,17 +138,21 @@ const WRITES = {
   ],
   validation: [
     W("payments", "update", "enrichment{}, validation{} and refs.fundsReservationId (the funds hold) from this stage; the checks go to paymentTimeline", whole),
+    W("accounts", "update", "Funds hold: balance.available to balance.hold, conditional on available covering the amount, in the same transaction as the payment marker", untracked),
     history({ states: ["VALIDATED", "ENRICHED", "FINAL_VALIDATED"], stages: ["3"] }),
   ],
   authorization: [
     W("routingSnapshots", "insert", "The routing decision: network, correspondent, cut-off, rationale",
       ({ payment }) => nonEmpty(payment?.routingSnapshot)),
     W("payments", "update", "fraud{} and authorization", whole),
-    history({ states: ["ROUTED", "AUTHORISED", "APPROVED", "ACCEPTED", "REJECTED"], stages: ["4"] }),
+    history({ states: ["ROUTED", "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED", "ACCEPTED", "REJECTED"], stages: ["4"] }),
   ],
   execution: [
     W("paymentExecutions", "insert", "The rail submission attempt", ({ payment }) => nonEmpty(payment?.executions)),
     W("canonicalJsonStorage", "insert", "The ISO 20022 message sent and the status received", executionMessages),
+    W("transactions", "insert", "The debit record, in the money-move ACID transaction", ({ trace }) => nonEmpty(trace?.transaction)),
+    W("accounts", "update", "Hold released, debtor debited only if funds are available, creditor credited: same transaction", untracked),
+    W("notifications", "insert", "Customer notifications: same transaction", untracked),
     history({ states: ["SUBMITTED", "IN_PROGRESS"], stages: ["5"] }),
   ],
   ledgerEvent: [
@@ -166,7 +173,7 @@ const WRITES = {
     history({ states: ["POSTED"] }, "The POSTED event, written by the ledger service in the same transaction as the state change"),
   ],
   settlementConfirm: [
-    W("settlementPositions", "update", "Expected amount, window and settled status", position),
+    W("settlementPositions", "insert", "Expected amount, window and settled status", position),
     history({ states: ["SETTLED"], stages: ["7"] }),
   ],
   settlementPosting: [
@@ -212,6 +219,90 @@ export function stageWrites(stage, direction) {
     seen.add(id);
     return true;
   });
+}
+
+// Aggregation pipelines the backend runs at a stage, copied from the source named in `source`.
+// They are hand-copied, not fetched: update them when that source changes.
+const Q = (collection, title, when, source, pipeline) => ({ collection, title, when, source, pipeline });
+
+const QUERIES = {
+  generalLedger: [
+    Q("subLedgerEntries", "Completeness check", "GL batch, before each journal is written",
+      "ledger/services/journal_service.py:210", `db.subLedgerEntries.aggregate([
+  { $match: { status: "POSTED", journalEntryId: "" } },
+  { $group: {
+      _id: "$sourceReference.sourceId",
+      count: { $sum: 1 },
+      sides: { $addToSet: "$side" },
+      periodCodes: { $addToSet: "$periodCode" }
+  } }
+])
+// An event enters the journal only with exactly one DEBIT and one CREDIT in one period.`),
+    Q("subLedgerEntries", "Journal summary", "GL batch, one balanced journal per period",
+      "ledger/services/journal_service.py:241", `db.subLedgerEntries.aggregate([
+  { $match: {
+      status: "POSTED",
+      journalEntryId: "",
+      "sourceReference.sourceId": { $in: completeEventIds }
+  } },
+  { $group: {
+      _id: { periodCode: "$periodCode", controlAccountCode: "$controlAccountCode", side: "$side" },
+      amount: { $sum: "$amount" },
+      currency: { $first: "$currency" },
+      count: { $sum: 1 },
+      subLedgerIds: { $push: "$subLedgerId" },
+      eventIds: { $addToSet: "$sourceReference.sourceId" },
+      eventTypes: { $addToSet: "$eventType" }
+  } }
+])`),
+  ],
+  reconciliation: [
+    Q("canonicalJsonStorage", "Candidate statement lines", "Reconciliation agent, when a break opens an exception",
+      "payment_agent/recon_evidence.py:117", `db.canonicalJsonStorage.aggregate([
+  { $match: {
+      purpose: STATEMENT_PURPOSE,
+      "statement.accountCode": position.settlementAccountCode,
+      "statement.historical": { $ne: true },
+      "entries.recon.status": "UNMATCHED"
+  } },
+  { $unwind: "$entries" },
+  { $match: {
+      "entries.recon.status": "UNMATCHED",
+      "entries.amount": { $gte: expected - tolerance, $lte: expected + tolerance }
+  } },
+  { $project: {
+      _id: 0, paymentMessageId: 1,
+      lineNo: "$entries.lineNo", reference: "$entries.reference",
+      amount: "$entries.amount", charges: "$entries.charges",
+      bookingDate: "$statement.window.to"
+  } }
+])`),
+    Q("settlementPositions", "Candidate payments for a statement line", "Reconciliation agent, when a break opens an exception",
+      "payment_agent/recon_evidence.py:142", `db.settlementPositions.aggregate([
+  { $match: {
+      settlementAccountCode: statement.accountCode,
+      actualAmount: null,
+      expectedAmount: { $gte: amount - tolerance, $lte: amount + tolerance }
+  } },
+  { $lookup: {
+      from: "payments", localField: "paymentId", foreignField: "paymentId",
+      as: "payment",
+      pipeline: [{ $project: { _id: 0, lifecycle: 1 } }]
+  } },
+  { $match: {
+      "payment.lifecycle.currentState": { $in: ["SETTLED", "POSTED"] },
+      "payment.lifecycle.reconciliationStatus": { $ne: "RECONCILED" }
+  } },
+  { $project: { _id: 0, paymentId: 1, expectedAmount: 1 } },
+  { $limit: 50 }
+])`),
+  ],
+};
+
+/** The aggregation pipelines behind a stage; a grouped stage gets the union of its panels'. */
+export function stageQueries(stage) {
+  const panels = stage.children?.length > 1 ? stage.children : [stage];
+  return panels.flatMap((p) => QUERIES[p.key] || []);
 }
 
 /** Documents available now for a list of writes, for the collapsed rail's summary. */

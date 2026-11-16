@@ -145,7 +145,8 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  min-height: 48px; /* room for a two-line blurb so every card row starts at the same height */
+  /* Title (22px) + a two-line blurb (2 x 18px), so every card row starts at the same height. */
+  min-height: 58px;
 }
 
 .group .groupHead h3 {

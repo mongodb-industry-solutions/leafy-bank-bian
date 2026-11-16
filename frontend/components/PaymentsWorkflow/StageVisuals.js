@@ -35,13 +35,13 @@ export function PostingChain({ payment, trace }) {
   return (
     <div className={styles.chain} role="group" aria-label="How the payment reaches the ledger">
       <Node label="Payment" detail={payment?.paymentId || "—"} done={!!payment} />
-      <Hop label="same ACID transaction" />
+      <Hop label="money-move ACID transaction" />
       <Node label="Transaction" detail={trace?.transaction ? "debited" : "pending"} done={!!trace?.transaction} />
       <Hop label="change stream" async />
       <Node label="Ledger event" detail={events ? `${events} event${events > 1 ? "s" : ""}` : "pending"} done={events > 0} />
-      <Hop label="GL batch" async />
+      <Hop label="change stream" async />
       <Node label="Sub-ledger" detail={entries ? `${entries} entries` : "pending"} done={entries > 0} />
-      <Hop label="same ACID transaction" />
+      <Hop label="GL batch aggregation" async />
       <Node label="Journal" detail={journals ? `${journals} posted` : "pending"} done={journals > 0} />
     </div>
   );
