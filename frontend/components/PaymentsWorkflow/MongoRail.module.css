@@ -141,13 +141,6 @@
   color: var(--pw-text);
 }
 
-.source {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: var(--pw-faint);
-  overflow-wrap: anywhere;
-}
-
 .txn {
   display: flex;
   flex-direction: column;

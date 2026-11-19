@@ -58,7 +58,6 @@ function QueryRow({ query }) {
       <div className={styles.code}>
         <Code language="javascript" copyButtonAppearance="hover">{query.pipeline}</Code>
       </div>
-      <Body className={styles.empty}>Source: {query.source}</Body>
     </details>
   );
 }
@@ -84,7 +83,6 @@ function Capabilities({ items }) {
       {active && (
         <div className={styles.chipDetail}>
           <span>{active.detail}</span>
-          <code className={styles.source}>backend/{active.source}</code>
         </div>
       )}
     </div>
@@ -109,7 +107,6 @@ function TxnGroup({ txn, count, collections, children }) {
         <span className={styles.txnMeta}>
           {count} writes in {collections} collection{collections === 1 ? "" : "s"}: all commit or none do
         </span>
-        <code className={styles.source}>backend/{txn.source}</code>
       </div>
       {children}
     </div>
