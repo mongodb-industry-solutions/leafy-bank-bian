@@ -53,6 +53,13 @@ class _InsufficientFunds(Exception):
     """Raised inside the reserve transaction so the payment marker rolls back too."""
 
 
+def guarded_filter(account_id, amount) -> dict:
+    """The write-skew guard: the balance check rides in the update's filter on the one shared
+    account document, so racing reserves conflict instead of each passing a stale read.
+    Shared with the concurrency demo so the snippet it shows cannot drift from this filter."""
+    return {"accountId": account_id, "balance.available": {"$gte": amount}}
+
+
 def reservation_id_for(payment_id: str) -> str:
     """Deterministic, so a replayed stage 3 names the same reservation."""
     return f"RSV-{payment_id.removeprefix('PAY-')}"
@@ -87,7 +94,7 @@ def reserve(ctx, *, now: Optional[datetime] = None) -> Optional[dict]:
         if marked.matched_count == 0:
             return {"reservationId": reservation_id}
         held = c.accounts.find_one_and_update(
-            {"accountId": ctx.debtor_account_ref, "balance.available": {"$gte": amount}},
+            guarded_filter(ctx.debtor_account_ref, amount),
             {"$inc": {"balance.available": -amount, "balance.hold": amount},
              "$set": {"balance.updatedAt": now, "updatedAt": now}},
             session=session,

@@ -216,6 +216,8 @@ def run(ctx: PaymentContext) -> None:
     # instructed amount and the reservation id is returned (Doina, Oct 2026). Stage 5 releases
     # the reservation and posts the debit; any earlier rejection releases it too. Stage 5's
     # own `$gte` guard stays as the backstop.
+    if ctx.before_reserve is not None:
+        ctx.before_reserve(ctx)
     reservation = funds_reservation.reserve(ctx, now=now)
     available = (debtor.get("balance", {}) or {}).get("available", 0)
     if reservation is None and _holds_for_funds(ctx):

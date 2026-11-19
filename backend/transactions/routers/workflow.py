@@ -300,3 +300,17 @@ def settle_due(request: Request) -> JSONResponse:
 
     connection, db_name = _deps(request)
     return to_json_response({"settled": settle.complete_due(connection, db_name, delay_seconds=0)})
+
+
+# Write-skew showcase (W1): three real wires race one $200 account through the saga.
+@router.post("/demo/concurrency/payments")
+def run_concurrency_payments(request: Request) -> JSONResponse:
+    """Fire 3 concurrent $80 wires at the persistent demo account; return every attempt."""
+    from contexts.payment_order_initiation.application import concurrency_demo
+
+    connection, db_name = _deps(request)
+    try:
+        return to_json_response(concurrency_demo.run(request.app.state.payments_service,
+                                                     connection, db_name))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))

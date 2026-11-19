@@ -6,6 +6,7 @@ import { H2, H3, Body } from "@leafygreen-ui/typography";
 import ScenarioInfo from "./ScenarioBrief";
 import { ENABLED_SCENARIOS, GROUPS, PAIRS, stepsFor } from "./scenarios";
 import { CUTOFF_SCENARIOS } from "./cutoffScenarios";
+import { CONCURRENCY_GROUP, CONCURRENCY_SCENARIOS } from "./concurrencyScenarios";
 import styles from "./Showcase.module.css";
 
 const MODE_ICON = {
@@ -54,7 +55,9 @@ function DecisionFlow({ decision }) {
 function ScenarioCard({ scenario, ran, onPick }) {
   const meta = scenario.startEt
     ? `${scenario.cardAmount || `USD ${scenario.amount}`} · ${scenario.startEt} ET`
-    : `${scenario.bank} · USD ${scenario.amount} · ${stepsFor(scenario.key).length} steps`;
+    : scenario.bank
+      ? `${scenario.bank} · USD ${scenario.amount} · ${stepsFor(scenario.key).length} steps`
+      : scenario.cardAmount;
   return (
     <div className={`${styles.cardWrap} ${styles[`mode_${scenario.mode}`]}`}>
       <button type="button" className={styles.scenarioCard} onClick={() => onPick(scenario.key)}>
@@ -95,6 +98,20 @@ function cellItems(scenarios) {
   return items;
 }
 
+function GroupHead({ group }) {
+  return (
+    <div className={styles.groupHead}>
+      <span className={styles.groupIcon}>
+        <Icon glyph={group.icon || MODE_ICON[group.mode]} size={14} />
+      </span>
+      <div>
+        <H3 className={styles.groupTitle}>{group.title}</H3>
+        <Body className={styles.muted}>{group.blurb}</Body>
+      </div>
+    </div>
+  );
+}
+
 function Cell({ agent, mode, ran, onPick }) {
   const items = cellItems(agent.scenarios.filter((s) => s.mode === mode));
   return (
@@ -131,20 +148,20 @@ function ScenarioMatrix({ ran, onPick }) {
       </div>
       {GROUPS.map((group) => (
         <div key={group.mode} className={`${styles.matrixRow} ${styles[`mode_${group.mode}`]}`}>
-          <div className={styles.groupHead}>
-            <span className={styles.groupIcon}>
-              <Icon glyph={group.icon || MODE_ICON[group.mode]} size={14} />
-            </span>
-            <div>
-              <H3 className={styles.groupTitle}>{group.title}</H3>
-              <Body className={styles.muted}>{group.blurb}</Body>
-            </div>
-          </div>
+          <GroupHead group={group} />
           {AGENTS.map((a) => (
             <Cell key={a.id} agent={a} mode={group.mode} ran={ran} onPick={onPick} />
           ))}
         </div>
       ))}
+      <div className={`${styles.matrixRow} ${styles[`mode_${CONCURRENCY_GROUP.mode}`]}`}>
+        <GroupHead group={CONCURRENCY_GROUP} />
+        <div className={styles.matrixCell}>
+          {CONCURRENCY_SCENARIOS.map((s) => (
+            <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={onPick} />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

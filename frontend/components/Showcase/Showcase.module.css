@@ -274,6 +274,11 @@
   --accent-bg: #d8f7e9;
 }
 
+.mode_integrity {
+  --accent: #5a3ec8;
+  --accent-bg: #ece8ff;
+}
+
 .scenarioCard {
   position: relative;
   display: flex;
@@ -2575,4 +2580,292 @@ summary.runTitle {
 .resultText {
   font-size: 13px;
   line-height: 1.45;
+}
+
+/* W1 concurrency showcase */
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.laneLabel {
+  font-family: "Source Code Pro", Menlo, monospace;
+}
+
+.laneTrack {
+  position: relative;
+  height: 12px;
+  background: #f0f4f4;
+  border-radius: 6px;
+}
+
+.laneBar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 6px;
+}
+
+.laneWon { background: #00a35c; }
+.laneRefused { background: #889397; }
+.laneError { background: #db3030; }
+
+.laneOutcome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.laneHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* MongoDB setup panel: sits in the console's right column where the agent panel would. */
+.setupPanel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.setupHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setupSteps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.setupStep {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e8edeb;
+  border-left: 3px solid #00a35c;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.setupStepIdle {
+  border-left-color: #c9d1cf;
+  background: #f9fbfa;
+}
+
+.setupStepHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setupNum {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #d8f7e9;
+  color: #00684a;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+  text-align: center;
+}
+
+.setupStepIdle .setupNum {
+  background: #e8edeb;
+  color: #5c6c75;
+}
+
+.setupStepTitle {
+  font-weight: 600;
+  color: #1c2d38;
+}
+
+.setupChip {
+  margin-left: auto;
+  flex: none;
+}
+
+.setupStepBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: #3d4f58;
+}
+
+.setupStepBody > p,
+.setupStepBody > span {
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.setupChecks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setupChecks li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.setupChecks svg {
+  flex: none;
+  color: #00a35c;
+}
+
+/* Per-payment MongoDB steps: one card per concurrent payment, steps revealed in lockstep. */
+.opsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .opsGrid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.opsCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e8edeb;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.opsHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.opsTitle {
+  margin-right: auto;
+  font-weight: 600;
+}
+
+.opsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.opsStep {
+  --ops: #5c6c75;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 10px;
+  border-left: 3px solid var(--ops);
+}
+
+.ops_ok { --ops: #00a35c; }
+.ops_wait { --ops: #f5a300; }
+.ops_refuse { --ops: #889397; }
+.ops_info { --ops: #0b61a4; }
+
+.opsWhere {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5c6c75;
+}
+
+.opsRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.opsDot {
+  display: inline-flex;
+  flex: none;
+  color: var(--ops);
+}
+
+.opsStepTitle {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.opsResult {
+  margin-left: auto;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ops) 14%, #fff);
+  color: var(--ops);
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.opsNote {
+  font-size: 12px;
+  line-height: 17px;
+  color: #3d4f58;
+}
+
+.opsCode summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #5c6c75;
+}
+
+.opsPre {
+  margin: 4px 0 0;
+  padding: 8px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #f6f8f7;
+  font-family: "Source Code Pro", Menlo, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.opsGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }

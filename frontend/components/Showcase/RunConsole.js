@@ -10,7 +10,7 @@ import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 import { Body, Overline } from "@leafygreen-ui/typography";
 import { WriteRow } from "./StepDocuments";
-import { LANE_LABEL, PHASES } from "./runLog";
+import { LANE_LABEL } from "./runLog";
 import styles from "./Showcase.module.css";
 
 const FILTERS = [["all", "All"], ["agent", "Agent"], ["code", "Code"], ["mongo", "MongoDB"], ["human", "You"]];
@@ -28,7 +28,7 @@ function toBlocks(shown) {
   const blocks = [];
   let lastPhase = null;
   for (const e of shown) {
-    const divider = e.phase !== lastPhase && PHASES.includes(e.phase) ? e.phase : null;
+    const divider = e.phase && e.phase !== lastPhase ? e.phase : null;
     lastPhase = e.phase;
     const prev = blocks[blocks.length - 1];
     const joins = prev && !divider && !isMilestone(e) && !isMilestone(prev.events[0]) && prev.events[0].lane === e.lane;
@@ -183,7 +183,7 @@ function ActivityBanner({ activity }) {
 }
 
 export default function RunConsole({
-  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, aside, failure, result, activity, decision,
+  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, aside, failure, result, activity, decision, filters = FILTERS,
 }) {
   const [filter, setFilter] = useState("all");
   const logRef = useRef(null);
@@ -237,6 +237,7 @@ export default function RunConsole({
             Corrected statement now
           </Button>
         )}
+        {controller.extra}
         {controller.onSweep && (
           <Button size="small" disabled={controller.sweeping || controller.sweepDisabled} onClick={controller.onSweep}>
             {controller.sweeping ? "Agent running…" : "Run now"}
@@ -270,7 +271,7 @@ export default function RunConsole({
           <span className={styles.liveDot} aria-hidden="true" />
         </span>
         <div className={styles.runFilters} role="group" aria-label="Filter the log">
-          {FILTERS.map(([value, text]) => (
+          {filters.map(([value, text]) => (
             <button
               key={value}
               type="button"

@@ -16,6 +16,8 @@ import ScenarioPicker from "./ScenarioPicker";
 import ScenarioStepper from "./ScenarioStepper";
 import { cutoffByKey } from "./cutoffScenarios";
 import CutoffStepper from "./CutoffStepper";
+import { concurrencyByKey } from "./concurrencyScenarios";
+import ConcurrencyStepper from "./ConcurrencyStepper";
 import styles from "./Showcase.module.css";
 
 const AGENT_COPY = {
@@ -55,10 +57,13 @@ export default function ShowcaseView() {
   const params = useSearchParams();
   const param = params.get("scenario");
   const isCutoffKey = !!cutoffByKey(param);
-  const scenarioKey = isCutoffKey || scenarioByKey(param) ? param : null;
+  const isConcurrencyKey = !!concurrencyByKey(param);
+  const scenarioKey = isCutoffKey || isConcurrencyKey || scenarioByKey(param) ? param : null;
   const setScenarioKey = (key) =>
     router.push(key ? `/showcase?scenario=${encodeURIComponent(key)}` : "/showcase");
-  const current = scenarioKey ? cutoffByKey(scenarioKey) || scenarioByKey(scenarioKey) : null;
+  const current = scenarioKey
+    ? cutoffByKey(scenarioKey) || concurrencyByKey(scenarioKey) || scenarioByKey(scenarioKey)
+    : null;
   const health = useAgentHealth();
   const states = Object.values(health);
   const checking = states.some((s) => s == null);
@@ -91,7 +96,8 @@ export default function ShowcaseView() {
           </nav>
         )}
         {scenarioKey && isCutoffKey && <CutoffStepper key={scenarioKey} scenarioKey={scenarioKey} />}
-        {scenarioKey && !isCutoffKey && <ScenarioStepper key={scenarioKey} scenarioKey={scenarioKey} />}
+        {scenarioKey && isConcurrencyKey && <ConcurrencyStepper key={scenarioKey} scenarioKey={scenarioKey} />}
+        {scenarioKey && !isCutoffKey && !isConcurrencyKey && <ScenarioStepper key={scenarioKey} scenarioKey={scenarioKey} />}
         {!scenarioKey && <ScenarioPicker onPick={setScenarioKey} />}
         </div>
       </div>

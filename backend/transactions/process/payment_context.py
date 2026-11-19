@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from bson import ObjectId
 
@@ -96,6 +96,10 @@ class PaymentContext:
     # Demo clock run (`shared.business_clock`). None = untagged: real time, today's behaviour.
     # Set only by in-process callers; persisted as `payments.demo.clockRunId`.
     clock_run_id: Optional[str] = None
+    # Demo-only rendezvous, called with the context just before stage 3 reserves funds. The
+    # concurrency showcase uses it to release several payments into the reserve together; None
+    # in every real path.
+    before_reserve: Optional[Callable[["PaymentContext"], None]] = None
 
     # --- infrastructure ------------------------------------------------------
     collections: Optional[PaymentCollections] = None

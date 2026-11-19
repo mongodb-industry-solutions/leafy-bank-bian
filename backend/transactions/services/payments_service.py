@@ -23,7 +23,7 @@ import dataclasses
 import logging
 import random
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 from pymongo.errors import DuplicateKeyError
 
@@ -199,6 +199,7 @@ class PaymentsService:
         settlement_outcome: Optional[str] = None,
         statement_outcome: Optional[str] = None,
         clock_run_id: Optional[str] = None,
+        before_reserve: Optional[Callable] = None,
     ) -> dict:
         """Initiate a payment order. Returns the persisted payment document.
 
@@ -244,6 +245,7 @@ class PaymentsService:
             statement_outcome=("FEE_DEDUCTED" if settlement_outcome == "UNMATCHED"
                                else statement_outcome),
             clock_run_id=clock_run_id,
+            before_reserve=before_reserve,
         )
         return payment_lifecycle.run(ctx)
 
