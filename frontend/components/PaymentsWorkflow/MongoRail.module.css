@@ -99,3 +99,78 @@
   cursor: pointer;
   text-decoration: underline;
 }
+
+.capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 2px 10px;
+  border: 1px solid #00684a;   /* green.dark2 */
+  border-radius: 999px;
+  background: var(--pw-bg);
+  color: #00684a;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.chipActive {
+  background: #00684a;
+  color: #fff;
+}
+
+.chipDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--pw-surface);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--pw-text);
+}
+
+.source {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--pw-faint);
+  overflow-wrap: anywhere;
+}
+
+.txn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px dashed #00684a;   /* green.dark2 */
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.txnHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.txnLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #00684a;
+}
+
+.txnMeta {
+  font-size: 12px;
+  color: var(--pw-muted);
+}
