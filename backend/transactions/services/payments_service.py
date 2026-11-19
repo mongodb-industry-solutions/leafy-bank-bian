@@ -1068,7 +1068,7 @@ class PaymentsService:
         )
 
     def with_history(self, payment: dict) -> dict:
-        """`payment` with `lifecycle.events[]` and `checks[]` joined from `paymentTimeline`.
+        """`payment` with `lifecycle.events[]` and `checks[]` joined from `paymentEvents`.
 
         The saga's own documents carry only the counters; a response that shows the payment to
         a caller joins the trail back in, so its shape is unchanged from when both were embedded.

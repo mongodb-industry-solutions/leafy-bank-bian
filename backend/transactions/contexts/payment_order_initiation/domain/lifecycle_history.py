@@ -1,7 +1,7 @@
-"""`paymentTimeline` — the lifecycle events and checks that used to live inside `payments`.
+"""`paymentEvents` — the lifecycle events and checks that used to live inside `payments`.
 
 `payments.lifecycle.events[]` and `payments.checks[]` grew without bound. Both now live one
-document per entry in `paymentTimeline`, discriminated by `kind`:
+document per entry in `paymentEvents`, discriminated by `kind`:
 
 * `EVENT` — one lifecycle transition: `state, at, actor, actorType, reason`.
 * `CHECK` — one check outcome: the fields `checks.check()` builds.
@@ -22,7 +22,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Callable, Optional
 
-HISTORY = "paymentTimeline"
+HISTORY = "paymentEvents"
 EVENT = "EVENT"
 CHECK = "CHECK"
 
@@ -31,7 +31,7 @@ _ENVELOPE = ("_id", "paymentId", "rail", "kind", "seq")
 
 
 def collection(payments):
-    """The `paymentTimeline` handle on the same database as `payments`."""
+    """The `paymentEvents` handle on the same database as `payments`."""
     return payments.database[HISTORY]
 
 

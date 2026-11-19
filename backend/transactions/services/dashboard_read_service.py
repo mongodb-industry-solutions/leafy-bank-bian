@@ -144,14 +144,14 @@ def processing_times(rows: list[dict]) -> list[dict]:
 
 
 def _dwell_rows(coll, match: dict) -> list[dict]:
-    """Time spent in each state: gap between consecutive lifecycle `EVENT`s in `paymentTimeline`."""
+    """Time spent in each state: gap between consecutive lifecycle `EVENT`s in `paymentEvents`."""
     events = "$events"
     pipeline = [
         {"$match": match},
         {"$sort": {"createdAt": -1}},
         {"$limit": DWELL_SAMPLE_LIMIT},
         # Joined after the cap, so the lookup runs for the sampled payments only. Uses the
-        # `{paymentId, kind, seq}` index on `paymentTimeline`.
+        # `{paymentId, kind, seq}` index on `paymentEvents`.
         {"$lookup": {
             "from": lifecycle_history.HISTORY,
             "localField": "paymentId",

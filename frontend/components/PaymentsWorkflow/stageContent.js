@@ -17,7 +17,7 @@ const COPY = {
   initiation: {
     [OUT]: {
       business: "The customer's instruction is captured and the debtor and creditor are frozen as they were at that moment.",
-      technical: "One ACID transaction inserts the payments document, with the parties embedded as an immutable snapshot, and its first paymentTimeline event.",
+      technical: "One ACID transaction inserts the payments document, with the parties embedded as an immutable snapshot, and its first paymentEvents event.",
       why: "One payments document serves every rail: each carries wireDetails, achDetails and internalDetails, and only the envelope for its own rail is filled. No per-rail collection and no schema change."
     },
     [IN]: {
@@ -58,7 +58,7 @@ const COPY = {
     },
     [IN]: {
       business: "The bank decides whether to accept the incoming payment, after compliance checks.",
-      technical: "The accept or reject decision, with its checks, is recorded on the payment and in paymentTimeline.",
+      technical: "The accept or reject decision, with its checks, is recorded on the payment and in paymentEvents.",
       why: "Accept or reject is one acceptanceDecision object, rolled up from results already stored on the same document.",
     },
   },
@@ -147,10 +147,10 @@ const whole = ({ payment }) => nonEmpty(paymentDoc(payment));
 const untracked = () => null;
 untracked.untracked = true;
 
-// One `paymentTimeline` row per stage: its lifecycle events and checks, as stored.
+// One `paymentEvents` row per stage: its lifecycle events and checks, as stored.
 const HISTORY_FIELDS = "Lifecycle events and checks from this stage, one document each with a contiguous seq";
 const history = (filter, fields = HISTORY_FIELDS) =>
-  W("paymentTimeline", "insert", fields, ({ payment }) => historyDocs(payment, filter));
+  W("paymentEvents", "insert", fields, ({ payment }) => historyDocs(payment, filter));
 
 // Writes per lifecycle stage key. A panel inside a grouped stage uses its own key; a grouped
 // stage's rail is the union of its panels.
@@ -166,7 +166,7 @@ const WRITES = {
     history({ stages: ["2"] }),
   ],
   validation: [
-    W("payments", "update", "enrichment{} and validation{} from this stage; the checks go to paymentTimeline", whole),
+    W("payments", "update", "enrichment{} and validation{} from this stage; the checks go to paymentEvents", whole),
     ...inTxn(TXN.fundsHold,
       W("payments", "update", "refs.fundsReservationId: the reservation marker", whole),
       W("accounts", "update", "balance.available to balance.hold, only if available covers the amount", untracked),
@@ -239,7 +239,7 @@ const WRITES = {
 const INBOUND_WRITES = {
   // Funds are reserved against a customer debit; inbound has none.
   validation: [
-    W("payments", "update", "enrichment{} and validation{} from this stage; the checks go to paymentTimeline", whole),
+    W("payments", "update", "enrichment{} and validation{} from this stage; the checks go to paymentEvents", whole),
     history({ states: ["VALIDATED", "ENRICHED", "FINAL_VALIDATED"], stages: ["3"] }),
   ],
   execution: [
@@ -358,7 +358,7 @@ const C = (label, detail, source, only) => ({ label, detail, source, only });
 const CAPABILITIES = {
   initiation: [
     C("ACID transaction · 2 collections",
-      "The payments document and its DRAFT paymentTimeline event commit together, so a rejected duplicate leaves no orphan event.",
+      "The payments document and its DRAFT paymentEvents event commit together, so a rejected duplicate leaves no orphan event.",
       TXN.capture.source),
   ],
   validation: [

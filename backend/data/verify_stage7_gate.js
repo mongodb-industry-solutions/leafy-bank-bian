@@ -40,9 +40,9 @@ if (!p) {
   quit(1);
 }
 const pid = p.paymentId;
-// Events and checks live in paymentTimeline, not on the payment: join them back.
+// Events and checks live in paymentEvents, not on the payment: join them back.
 {
-  const hist = dbc.paymentTimeline.find({ paymentId: p.paymentId }).sort({ seq: 1 }).toArray();
+  const hist = dbc.paymentEvents.find({ paymentId: p.paymentId }).sort({ seq: 1 }).toArray();
   p.lifecycle.events = hist.filter(h => h.kind === "EVENT");
   p.checks = hist.filter(h => h.kind === "CHECK");
 }
