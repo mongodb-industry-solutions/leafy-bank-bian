@@ -65,16 +65,13 @@ PAYMENTS_INDEXES = [
     # shape for an optional nested retry key. (Same lesson as defects.md `fixture-fidelity` /
     # `repo-is-not-the-database`: the fake and the real server are not the same type system.)
     #
-    # ⚠️ NOT YET APPLIED ON ATLAS — deferred to the end of the stage sequence by decision
-    # (2026-08-30, doc 13 §6). Safe only because the index is INERT today: no caller sends
-    # an `Idempotency-Key` header or an `idempotencyKey` field, so the value is always
-    # null, both idempotency paths in capture.py are gated on it, and this partial index
-    # constrains nothing.
+    # APPLIED on Atlas (`fsi-bian-test-db`, verified 2026-11-19: unique, partial `$type:
+    # string`). The UI now sends `Idempotency-Key` (`useSubmitKey`), so this index is LIVE
+    # and load-bearing: capture.py's find_one pre-check dedupes sequential retries, but only
+    # this constraint stops two concurrent requests with the same key from both moving money.
     #
-    # **Precondition — do not make any caller send an idempotency key before running this.**
-    # capture.py's find_one pre-check would then dedupe sequential retries and look correct
-    # while two concurrent requests with the same key both moved money. If you add a retry
-    # wrapper, a load test, or the header, apply this index in the same change.
+    # **Any new database/deployment must have this index before the frontend points at it.**
+    # Run `python -m data.ensure_indexes` as part of standing one up.
     #
     # Also for the Atlas run: `create_index` never drops, so the old
     # `idx_end_to_end_id_unique` survives until dropped by hand. Harmless (endToEndId is
@@ -113,6 +110,17 @@ TRANSACTIONS_INDEXES = [
     {"name": "idx_source_system_created", "keys": [
         ("sourceSystem", ASCENDING), ("createdAt", DESCENDING),
     ]},
+    # At most one reversal per original transaction. `compensation.return_of_funds` checks
+    # with a find_one first, but a read-then-insert cannot serialise concurrent callers on its
+    # own (write skew); this makes the invariant hold at the server, independent of which other
+    # documents the transaction happens to touch. PARTIAL on `$type: "string"`, not sparse:
+    # originals carry no `reversalOf`, and T360 docs share this collection.
+    {
+        "name": "idx_reversal_of_unique",
+        "keys": [("reversalOf", ASCENDING)],
+        "unique": True,
+        "partialFilterExpression": {"reversalOf": {"$type": "string"}},
+    },
 ]
 
 

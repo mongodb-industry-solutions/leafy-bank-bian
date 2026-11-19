@@ -6,7 +6,7 @@ import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 import styles from "./SendMoneyModal.module.css";
 import { useUser } from "@/lib/context/UserContext";
-import { useAccounts, useBeneficiaryAccounts } from "@/lib/api/hooks";
+import { useAccounts, useBeneficiaryAccounts, useSubmitKey } from "@/lib/api/hooks";
 import { coreApi } from "@/lib/api/client";
 
 // Drives the payment's `rail`. Note the rail does NOT drive ledger postingMode —
@@ -76,6 +76,7 @@ export default function SendMoneyModal({
   const [transferBeneficiary, setTransferBeneficiary] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
+  const submitKey = useSubmitKey();
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -144,7 +145,9 @@ export default function SendMoneyModal({
         // `client.js` attaches the resulting token, so stage 2 grades a signature the
         // bank issued instead of a claim this component invented.
       },
+      idempotencyKey: submitKey.key(),
     });
+    submitKey.settle(err);
     setSubmitting(false);
 
     if (err) {

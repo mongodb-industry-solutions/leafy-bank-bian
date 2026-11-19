@@ -890,6 +890,39 @@ def test_b2_return_funds_aborts_if_a_reversal_already_exists(service, db):
     assert debtor_after == debtor_before
 
 
+def test_b2_return_funds_maps_a_reversal_unique_collision_to_a_conflict(service, db, monkeypatch):
+    """Write-skew guard: two concurrent resolvers can both pass the find_one pre-check (each
+    snapshot sees no reversal). idx_reversal_of_unique rejects the second insert; the caller
+    must see the same ExceptionConflict, not a raw DuplicateKeyError, and no second reversal
+    may land. The fake has no rollback, so balances are not asserted — real Mongo aborts the
+    whole ACID txn on the raise."""
+    from contexts.payment_rail import documents
+    from datetime import datetime, timezone
+    from process.exceptions import ExceptionConflict
+
+    _initiate_external(service, settlement_outcome="EXCEPTION")
+    exc = _exc(db)
+    payment = _db_payment(db)
+    original = db["transactions"].find_one({"paymentId": payment["paymentId"]})
+    db["transactions"].insert_one(documents.compensating_transaction_doc(
+        original_txn=original,
+        debtor_after=db["accounts"].find_one({"accountId": payment["debtor"]["accountId"]}),
+        now=datetime.now(timezone.utc),
+    ))
+    db["transactions"].unique_on = "reversalOf"  # mirrors idx_reversal_of_unique
+
+    # Simulate the racing snapshot: the pre-check does not see the committed reversal.
+    real_find_one = db["transactions"].find_one
+
+    def stale_find_one(flt, *a, **k):
+        return None if "reversalOf" in flt else real_find_one(flt, *a, **k)
+    monkeypatch.setattr(db["transactions"], "find_one", stale_find_one)
+
+    with pytest.raises(ExceptionConflict, match="already exists"):
+        service.resolve_exception(exc["exceptionId"], action=ACTION_RETURN_FUNDS)
+    assert len([t for t in db["transactions"].docs if t.get("reversalOf")]) == 1
+
+
 def test_b5_retry_on_delayed_with_delayed_again_writes_a_fresh_occurrence(service, db):
     """B5 — RETRY_SETTLEMENT that lands DELAYED again must leave a FRESH OPEN exception so
     the queue can re-trigger. The old DELAYED occurrence is RESOLVED first (before the

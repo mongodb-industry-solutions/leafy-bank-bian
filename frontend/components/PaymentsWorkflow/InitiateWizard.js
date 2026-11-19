@@ -28,7 +28,7 @@ import { Body, H2 } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
 import { coreApi } from "@/lib/api/client";
-import { useBankAssistedParties } from "@/lib/api/hooks";
+import { useBankAssistedParties, useSubmitKey } from "@/lib/api/hooks";
 import { fmtAmount } from "@/lib/paymentsWorkflow/status";
 
 // Stepper stops at Confirmation. An "Approve" step is deliberately absent: dual approval
@@ -416,6 +416,7 @@ export default function InitiateWizard({ onInitiated }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showDemoControls, setShowDemoControls] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submitKey = useSubmitKey();
   const [submitError, setSubmitError] = useState(null);
   const [createdId, setCreatedId] = useState(null);
   // 2026-09-09 (Kiran): a held payment is approved in the lifecycle at stage 2, NOT here. Set
@@ -478,7 +479,9 @@ export default function InitiateWizard({ onInitiated }) {
     const { data, error } = await coreApi("PaymentOrderInitiation/Initiate", {
       method: "POST",
       body: buildPayload(form),
+      idempotencyKey: submitKey.key(),
     });
+    submitKey.settle(error);
     setSubmitting(false);
     if (error) {
       setSubmitError(error);

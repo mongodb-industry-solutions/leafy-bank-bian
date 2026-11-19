@@ -37,6 +37,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from pymongo.errors import DuplicateKeyError
+
 from contexts.payment_order_initiation.domain import checks
 from contexts.payment_rail import documents
 from process.exceptions import STATUS_OPEN, STATUS_RESOLVED, ExceptionConflict
@@ -177,7 +179,15 @@ def return_of_funds(
         rev_doc = documents.compensating_transaction_doc(
             original_txn=original, debtor_after=debtor_after, now=now,
         )
-        c.transactions.insert_one(rev_doc, session=session)
+        # The find_one guard above cannot stop two concurrent callers; idx_reversal_of_unique
+        # can. Raising here aborts the ACID txn, so the balance $incs above roll back too.
+        try:
+            c.transactions.insert_one(rev_doc, session=session)
+        except DuplicateKeyError as exc:
+            raise ExceptionConflict(
+                f"return_of_funds: a compensating transaction reversing {original_txn_id} "
+                "already exists — aborting to avoid double compensation."
+            ) from exc
 
         # 3. Evidence on the payment (append-only checks[]). The terminal state is NOT
         #    touched — FAILED stays FAILED (B4).

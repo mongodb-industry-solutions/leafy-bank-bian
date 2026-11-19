@@ -100,6 +100,13 @@ async function proxy(request, { params }) {
     headers.set("Authorization", auth);
   }
 
+  // Forward the caller's retry key. Without it, the backend's unique-index dedupe never sees
+  // the key and a double-submit creates two payments.
+  const idempotencyKey = request.headers.get("Idempotency-Key");
+  if (idempotencyKey) {
+    headers.set("Idempotency-Key", idempotencyKey);
+  }
+
   const fetchOptions = {
     method: request.method,
     headers,

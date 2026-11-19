@@ -58,15 +58,19 @@ const OPENFINANCE_CHAT_BASE = "/api/openfinance-chat";
  * @param {object} [options.body]
  * @param {string} [options.bearerToken]
  * @param {object} [options.params] - query params as key-value pairs (keeps path and query separate to avoid URL normalization issues)
+ * @param {string} [options.idempotencyKey] - sent as the `Idempotency-Key` header; see `useSubmitKey`
  * @returns {Promise<{data: any, error: string|null}>}
  */
-export async function coreApi(path, { method = "GET", body = null, bearerToken = null, params = null } = {}) {
+export async function coreApi(path, { method = "GET", body = null, bearerToken = null, params = null, idempotencyKey = null } = {}) {
   const headers = { "Content-Type": "application/json" };
   // An explicit token wins: the open-finance consent flow passes its own, and that is a
   // different credential for a different backend.
   const token = bearerToken || sessionTokenFor(path);
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
+  }
+  if (idempotencyKey) {
+    headers["Idempotency-Key"] = idempotencyKey;
   }
 
   let url = `${CORE_BASE}/${path}`;

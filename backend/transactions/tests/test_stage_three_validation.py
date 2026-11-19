@@ -493,47 +493,36 @@ def test_a_different_amount_is_not_a_duplicate(service, db):
     assert entry["result"] == "PASS"
 
 
-# The surfaces that BUILD an initiate payload. `api_models.py` is excluded on purpose: the
-# request contract has declared `idempotencyKey` since stage 1 (R7), and declaring a field
-# nobody populates is exactly the state this test protects.
-_CALLER_GLOBS = (
-    "frontend/components/**/*.js",
-    "frontend/lib/**/*.js",
-    "frontend/app/**/*.js",
-    "backend/ledger/static/*.html",
-)
 
+def test_callers_send_an_idempotency_key_and_the_unique_index_backs_it():
+    """Write-skew guard for retries (supersedes `test_no_caller_sends_an_idempotency_key`).
 
-def test_no_caller_sends_an_idempotency_key():
-    """The standing precondition on the deferred Atlas index (doc 17 B4, _state.md).
+    The UI now sends `Idempotency-Key`. That is safe only while `idx_idempotency_key_unique`
+    is declared unique and partial on `$type: string`: capture.py's find_one pre-check cannot
+    stop two concurrent same-key requests, the index can. Sparse would collide on the
+    present-null leaf (defect 2026-09-23 sparse-nested-null-collision).
 
-    Until `idx_idempotency_key_unique` exists on Atlas, a caller sending a key would make
-    `capture.py`'s `find_one` pre-check dedupe sequential retries and LOOK correct, while two
-    concurrent requests with the same key both moved money — a failure that appears only
-    under real concurrency. Step 4 adds duplicate detection WITHOUT crossing that line, and
-    this test is what keeps it uncrossed.
-
-    If this fails, the fix is not to delete the test: apply the index in the same change.
+    Applied on Atlas `fsi-bian-test-db` 2026-11-19. A new deployment must run
+    `python -m data.ensure_indexes` before the frontend points at it.
     """
+    from data.ensure_indexes import PAYMENTS_INDEXES
+
+    spec = next(i for i in PAYMENTS_INDEXES if i["name"] == "idx_idempotency_key_unique")
+    assert spec["keys"] == [("idempotency.idempotencyKey", 1)]
+    assert spec["unique"] is True
+    assert spec["partialFilterExpression"] == {"idempotency.idempotencyKey": {"$type": "string"}}
+    assert "sparse" not in spec
+
+    # The key must actually leave the browser: client option, proxy forward, both submitters.
     repo = Path(__file__).resolve().parents[3]
-    offenders = []
-    for glob in _CALLER_GLOBS:
-        for path in repo.glob(glob):
-            if {"node_modules", ".next"} & set(path.parts):
-                continue
-            text = path.read_text(errors="ignore")
-            # `Idempotency-Key` is the header; `idempotencyKey:` is the object-literal key
-            # in a request payload. A bare `.idempotencyKey` property READ is not a match on
-            # purpose — the GL monitor displays `ledgerEvents.idempotencyKey`, which is the
-            # LEDGER's own key on a different collection and has nothing to do with the
-            # payments index this test protects.
-            for needle in ("Idempotency-Key", "idempotencyKey:"):
-                if needle in text:
-                    offenders.append(f"{path.relative_to(repo)} :: {needle}")
-    assert not offenders, (
-        "a caller now sends an idempotency key — apply idx_idempotency_key_unique on Atlas "
-        f"in the same change: {offenders}"
-    )
+    expected = {
+        "frontend/lib/api/client.js": '"Idempotency-Key"',
+        "frontend/app/api/backend/[...path]/route.js": '"Idempotency-Key"',
+        "frontend/components/PaymentsWorkflow/InitiateWizard.js": "submitKey.key()",
+        "frontend/components/SendMoneyModal/SendMoneyModal.js": "submitKey.key()",
+    }
+    missing = [p for p, needle in expected.items() if needle not in (repo / p).read_text()]
+    assert not missing, f"idempotency key not wired through: {missing}"
 
 
 # --------------------------------------------------------------------------- #

@@ -1,8 +1,29 @@
 "use client";
 
 import { useUser } from "@/lib/context/UserContext";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { coreApi, pipelineApi, workflowApi, agentApi } from "./client";
+
+/**
+ * One idempotency key per payment *intent*, for `coreApi(..., { idempotencyKey })`.
+ *
+ * `key()` returns the same key until the server gives a definitive answer, so a double-click
+ * or a retry after a dropped connection replays the first payment instead of creating a
+ * second. `settle(error)` drops the key on success or on any HTTP error (`"<status>: ..."`),
+ * so an edited resubmit after a rejection is a new payment, not a replay of the rejected one.
+ * A network error keeps the key: the first request may have landed.
+ */
+export function useSubmitKey() {
+  const ref = useRef(null);
+  const key = useCallback(() => {
+    if (!ref.current) ref.current = crypto.randomUUID();
+    return ref.current;
+  }, []);
+  const settle = useCallback((error) => {
+    if (!error || /^\d{3}:/.test(error)) ref.current = null;
+  }, []);
+  return { key, settle };
+}
 
 // BIAN backend field names differ from what composed hooks expect.
 // These helpers normalize the wire shape once so composed hooks need no changes.
