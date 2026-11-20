@@ -7,28 +7,19 @@
 // There is no agent: the database makes the decision.
 
 import { useEffect, useMemo, useState } from "react";
-import Badge from "@leafygreen-ui/badge";
 import Button from "@leafygreen-ui/button";
-import Icon from "@leafygreen-ui/icon";
-import { Body } from "@leafygreen-ui/typography";
+import { Overline } from "@leafygreen-ui/typography";
 import { CONCURRENCY_STEPS, concurrencyByKey } from "./concurrencyScenarios";
 import { bookStatement, getPayment, runLedgerBatch, runRace, settleDue } from "./concurrencyActions";
-import { CONCURRENCY_FILTERS, deriveConcurrencyEvents, usd } from "./concurrencyRunLog";
+import { CONCURRENCY_FILTERS, deriveConcurrencyEvents } from "./concurrencyRunLog";
 import { usePacedEvents } from "./runLog";
 import { deriveActivity } from "./activity";
-import { BriefStrip } from "./ScenarioBrief";
 import PaymentPipeline from "./PaymentPipeline";
 import RunConsole from "./RunConsole";
-import { BalanceStrip, PaymentOps, SetupPanel, Verdict } from "./scenes/ConcurrencyScene";
+import { BalanceGauge, DesignPanel, PaymentOps, RaceHeader, SkewContrast, Verdict } from "./scenes/ConcurrencyScene";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
-
-const ACCOUNT_FACTS = [
-  ["Coin", "Opening balance USD 200.00"],
-  ["Note", "3 wires × USD 80.00, reserved at stage 3"],
-  ["Lock", "Invariant: balance.available >= 0"],
-];
 
 const RUNNING_TEXT = {
   race: "Sending three wires through the saga",
@@ -53,28 +44,6 @@ function usePayments(ids, tick) {
     };
   }, [key, tick]);
   return payments;
-}
-
-function AccountCard({ queued, report }) {
-  return (
-    <div className={`${styles.railCard} ${styles.toneBorder} ${styles.payCard}`}>
-      <Body as="p" className={styles.paneTitle}>USD 200.00 · demo account ACC-w1demo</Body>
-      {ACCOUNT_FACTS.map(([glyph, text]) => (
-        <div key={text} className={styles.payFact}>
-          <Icon glyph={glyph} size={14} className={styles.payFactIcon} />
-          <Body as="span">{text}</Body>
-        </div>
-      ))}
-      <div className={styles.chipRow}>
-        <Badge variant={queued ? "blue" : "lightgray"}>{queued ? "3 wires queued" : "Not queued yet"}</Badge>
-        {report && (
-          <Badge variant={report.summary.invariantHeld ? "green" : "red"}>
-            Available {usd(report.summary.finalAvailable)}
-          </Badge>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function ConcurrencyRun({ scenarioKey, onRestart }) {
@@ -163,25 +132,28 @@ function ConcurrencyRun({ scenarioKey, onRestart }) {
             summary: s.summary,
             beat: s.beat,
           }))}
-          top={(
-            <>
-              <BriefStrip scenario={scenario} />
-              <AccountCard queued={queued} report={live} />
-            </>
+          top={<RaceHeader scenario={scenario} report={live} queued={queued} />}
+          pipeline={(
+            // Secondary here: the race happens at stages 3 and 5; the full lifecycle is one click away.
+            <details className={styles.foldBox}>
+              <summary><Overline as="span">Payment lifecycle</Overline> <span className={styles.muted}>race at stages 3 and 5</span></summary>
+              <PaymentPipeline payment={lead} status={status} paymentId={winners[0]?.paymentId} mode="reconciliation" reconciled={reconciled} />
+            </details>
           )}
-          pipeline={<PaymentPipeline payment={lead} status={status} paymentId={winners[0]?.paymentId} mode="reconciliation" reconciled={reconciled} />}
           controller={controller}
           filters={CONCURRENCY_FILTERS}
           events={events}
           pending={backlog > 0 ? "Next event coming…" : null}
           activity={activity}
-          evidence={queued && (
+          logFolded
+          evidence={(
             <div className={styles.section}>
-              <BalanceStrip report={live} />
+              <BalanceGauge report={live} />
               {live && <PaymentOps report={live} payments={payments} />}
+              <SkewContrast report={live} />
             </div>
           )}
-          aside={<SetupPanel live={live} />}
+          aside={<DesignPanel live={live} stepKey={step.key} />}
           result={step.final && <div className={styles.section}><Verdict live={live} payments={payments} reconciled={reconciled} /></div>}
         />
       </div>

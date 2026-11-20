@@ -1,7 +1,7 @@
 """Live W1 run: three real wires race the persistent demo account through the saga.
 
 Requires MONGODB_URI (skips otherwise). Uses the app's database, as the endpoint does. The run
-upserts `ACC-w1demo` / `CUST-w1demo`, resets the balance to $200, and leaves the wires in
+upserts `ACC-acc10004` (owned by `CUST-abc10001`), resets the balance to $200, and leaves the wires in
 Payments, so this asserts outcomes only and cleans nothing up.
 """
 

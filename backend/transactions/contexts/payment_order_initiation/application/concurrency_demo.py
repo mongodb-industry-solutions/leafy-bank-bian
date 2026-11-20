@@ -9,10 +9,15 @@ exactly two reserve and the third is refused for insufficient funds.
 
 ## One persistent account
 
-The race runs on `ACC-w1demo`, owned by `CUST-w1demo`. Both are upserted on first use and the
-balance is reset to $200 at the start of every run, the way the EOD top-up worker resets a
-balance: no transaction record. The account carries `sourceSystem: concurrency-demo-seed` so it
-is recognisable, and it is a real customer account, so the winners' wires show up in Payments.
+The race runs on `ACC-acc10004`, ABC Manufacturing's operating account (owner `CUST-abc10001`,
+like the cut-off scenario's `ACC-acc10003`). It is upserted on first use and the balance is
+reset to $200 at the start of every run, the way the EOD top-up worker resets a balance: no
+transaction record. The account carries `sourceSystem: concurrency-demo-seed` so the seed can
+tell what it owns; everything the customer sees is named like any other account.
+
+Each wire carries an ordinary `INV-nnnnnn` client reference, like a wire keyed in the
+Payments wizard. That keeps it off the statement simulator's skip list, so the winners are
+booked on the next statement and reconcile like any other wire.
 
 ## What is recorded
 
@@ -25,9 +30,9 @@ and each transaction's commit or abort.
 
 from __future__ import annotations
 
-import copy
 import json
 import logging
+import random
 import threading
 import time
 import uuid
@@ -38,7 +43,6 @@ from types import SimpleNamespace
 from pymongo import MongoClient, monitoring
 
 from contexts.financial_gateway.application.recon_scenarios import _BANKS
-from contexts.financial_gateway.application.statement import PRESENTER_DRIVEN_REF_PREFIX
 from contexts.financial_gateway.domain import camt053
 from contexts.payment_order_initiation.application import funds_reservation
 from services.payments_service import PaymentsService
@@ -46,9 +50,8 @@ from services.payments_service import PaymentsService
 logger = logging.getLogger(__name__)
 
 SOURCE_SYSTEM = "concurrency-demo-seed"
-ACCOUNT_ID = "ACC-w1demo"
-CUSTOMER_ID = "CUST-w1demo"
-TEMPLATE_CUSTOMER_ID = "CUST-abc10001"  # a verified COMMERCIAL customer to clone
+ACCOUNT_ID = "ACC-acc10004"
+CUSTOMER_ID = "CUST-abc10001"  # ABC Manufacturing Inc., a verified COMMERCIAL customer
 OPENING = 200.0
 AMOUNT = 80.0
 WORKERS = 3
@@ -81,26 +84,17 @@ def _ms(clock: float) -> float:
 # --- the persistent demo account ------------------------------------------------------------
 
 def ensure_demo_account(db) -> None:
-    """Upsert the demo customer and account, then reset the balance to the opening amount."""
+    """Upsert the operating account, then reset the balance to the opening amount."""
     now = datetime.now(timezone.utc)
     if db["customers"].find_one({"customerId": CUSTOMER_ID}) is None:
-        template = db["customers"].find_one({"customerId": TEMPLATE_CUSTOMER_ID})
-        if template is None:
-            raise ValueError(f"Cannot create the demo customer: {TEMPLATE_CUSTOMER_ID} is missing.")
-        customer = copy.deepcopy(template)
-        customer.pop("_id", None)
-        customer.update(customerId=CUSTOMER_ID, sourceSystem=SOURCE_SYSTEM, createdBy=SOURCE_SYSTEM)
-        ident = customer.get("identification") or {}
-        ident.update(userName="w1demo", legalName="Concurrency Demo Co", tradingName="Concurrency Demo")
-        customer["identification"] = ident
-        db["customers"].insert_one(customer)
+        raise ValueError(f"Cannot open the race account: owner {CUSTOMER_ID} is missing.")
 
     account = {
         "accountBank": "Leafy Bank", "accountId": ACCOUNT_ID,
-        "accountIdentificationType": "AccountNumber", "accountNumber": "310099001",
+        "accountIdentificationType": "AccountNumber", "accountNumber": "310028844",
         "branchId": "BRANCH-DEFAULT-001", "closedAt": None, "createdAt": now, "createdBy": SOURCE_SYSTEM,
         "currency": "USD", "customerSnapshot": {"customerId": CUSTOMER_ID},
-        "description": "Concurrency demo operating account",
+        "description": "Operating account for ABC Manufacturing Inc.",
         "gl": {"accountCode": "2111", "costCenter": "CC-RETAIL-DEFAULT", "profitCenter": "PC-RETAIL-DEFAULT"},
         "linkedCardIds": [], "linkedMandateIds": [], "maturesAt": None, "openedAt": now.date().isoformat(),
         "productId": "PROD-COMM-CA-USD", "restrictions": [],
@@ -273,7 +267,7 @@ def _attempt(service: PaymentsService, db, counter: _CommandRecorder, worker: in
     counter.bind(worker)
     country, account_no, purpose = _CREDITORS[(worker - 1) % len(_CREDITORS)]
     bank = _BANKS[country]
-    reference = f"{PRESENTER_DRIVEN_REF_PREFIX}W1-{run_id}-{worker}"
+    reference = f"INV-{random.randint(0, 999999):06d}"
     attempt = {"worker": worker, "paymentId": None, "status": None, "observedAvailable": None,
                "outcome": ERROR, "writeConflicts": 0, "readAtMs": None, "writeAtMs": None,
                "doneAtMs": None, "error": None}
@@ -321,7 +315,9 @@ def _attempt(service: PaymentsService, db, counter: _CommandRecorder, worker: in
         attempt["error"] = str(e)
         barrier.abort()
     attempt["doneAtMs"] = _ms(clock)
-    payment = db["payments"].find_one({"clientReference": reference}, {"paymentId": 1, "status": 1})
+    # Invoice numbers are not unique across runs; the newest wire from this account is this one.
+    payment = db["payments"].find_one({"clientReference": reference, "debtor.accountId": ACCOUNT_ID},
+                                      {"paymentId": 1, "status": 1}, sort=[("_id", -1)])
     if payment:
         attempt.update(paymentId=payment["paymentId"], status=payment.get("status"))
     return attempt

@@ -6,7 +6,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Badge from "@leafygreen-ui/badge";
-import Code from "@leafygreen-ui/code";
 import Icon from "@leafygreen-ui/icon";
 import { Body, InlineCode, Overline } from "@leafygreen-ui/typography";
 import { usd } from "../concurrencyRunLog";
@@ -14,28 +13,6 @@ import { groupsOf, stepCount } from "../concurrencyOps";
 import styles from "../Showcase.module.css";
 
 const STEP_MS = 800;
-
-/** Available, hold and how many wires reserved. `payments` lets the balance follow later changes. */
-export function BalanceStrip({ report }) {
-  const available = report ? report.summary.finalAvailable : 200;
-  const hold = report ? report.summary.finalHold : 0;
-  return (
-    <div className={styles.gapRow}>
-      <div className={`${styles.gapSide} ${report ? (available < 0 ? styles.gapBad : styles.gapOk) : ""}`}>
-        <Overline>Available</Overline>
-        <span className={styles.gapFigure}>{usd(available)}</span>
-      </div>
-      <div className={styles.gapSide}>
-        <Overline>On hold</Overline>
-        <span className={styles.gapFigure}>{usd(hold)}</span>
-      </div>
-      <div className={styles.gapSide}>
-        <Overline>Wires reserved</Overline>
-        <span className={styles.gapFigure}>{report ? `${report.summary.winners} of ${report.params.workers}` : "0 of 3"}</span>
-      </div>
-    </div>
-  );
-}
 
 /** One shared counter, so step n of every wire appears together: the race reads as concurrent. */
 function useStepReveal(report, total) {
@@ -99,7 +76,7 @@ function PaymentOpsCard({ attempt, amount, shown, payment }) {
           <StepRow step={{
             tone: "info", title: "Read the balance",
             note: `Sees ${usd(attempt.observedAvailable ?? 0)}. Every wire sees the same figure, and the guard does not rely on it.`,
-            code: `db.accounts.find_one({"accountId": "${attempt.accountId || "ACC-w1demo"}"})`,
+            code: `db.accounts.find_one({"accountId": "${attempt.accountId || "ACC-acc10004"}"})`,
           }} />
         )}
         {groups.map((g) => {
@@ -141,57 +118,216 @@ const FALLBACK_GUARD = {
 const pretty = (value) => JSON.stringify(value, null, 2);
 const stripStamps = (update) => (update?.$inc ? { $inc: update.$inc } : update);
 
-function Step({ n, title, chip, children }) {
+// Light JSON/code colouring (keys, strings, numbers, operators), as in the lending demo, so code
+// wraps inside narrow panels instead of scrolling sideways.
+const TOKEN = /("(?:[^"\\]|\\.)*"(?=\s*:))|("(?:[^"\\]|\\.)*")|(\$[a-zA-Z]+)|(-?\b\d+(?:\.\d+)?\b)|(#.*$)/gm;
+function Tokens({ text }) {
+  const out = [];
+  let last = 0;
+  for (const m of text.matchAll(TOKEN)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const cls = m[1] ? styles.tkKey : m[2] ? (m[2].startsWith('"$') ? styles.tkOp : styles.tkStr) : m[3] ? styles.tkOp : m[4] ? styles.tkNum : styles.tkComment;
+    out.push(<span key={m.index} className={cls}>{m[0]}</span>);
+    last = m.index + m[0].length;
+  }
+  out.push(text.slice(last));
+  return out;
+}
+
+function CodeBlock({ label, children }) {
   return (
-    <li className={styles.setupStep}>
-      <div className={styles.setupStepHead}>
-        <span className={styles.setupNum}>{n}</span>
-        <Body as="span" className={styles.setupStepTitle}>{title}</Body>
-        <Badge variant="green" className={styles.setupChip}>{chip}</Badge>
+    <div className={styles.wsCode}>
+      {label && <span className={styles.wsLabel}>{label}</span>}
+      <pre><Tokens text={children} /></pre>
+    </div>
+  );
+}
+
+function Step({ title, chip, active, done, children }) {
+  return (
+    <li className={`${styles.wsTlItem} ${active ? styles.wsTlActive : done ? "" : styles.wsTlIdle}`} aria-current={active ? "step" : undefined}>
+      <span className={styles.wsTlDot} aria-hidden="true" />
+      <div className={styles.wsTlHead}>
+        <span className={styles.wsTlTitle}>{title}</span>
+        <span className={styles.wsPill}>{chip}</span>
       </div>
-      <div className={styles.setupStepBody}>{children}</div>
+      <div className={styles.wsTlBody}>{children}</div>
     </li>
   );
 }
 
-/** The right-hand panel: what the platform does to prevent write skew, in lifecycle order. */
-export function SetupPanel({ live }) {
+// Which design pieces the current walkthrough step exercises, so the panel follows the story.
+const DESIGN_FOCUS = { queue: 1, race: 2, settle: 5, glpost: 5, statement: 5, match: 5, verify: 6 };
+
+/** The right-hand panel: the MongoDB design behind the guard, as a timeline that follows the step. */
+export function DesignPanel({ live, stepKey }) {
   const guard = live?.guard || FALLBACK_GUARD;
-  const reserve = `const filter = ${pretty(guard.filter)};\nconst update = ${pretty(stripStamps(guard.update))};`;
+  const focus = DESIGN_FOCUS[stepKey] || 0;
+  const raceActive = stepKey === "race";
+  const at = (n) => ({ active: n === focus || (raceActive && n <= 4 && n >= 2), done: n < focus });
   return (
-    <div className={styles.setupPanel}>
-      <div className={styles.setupHead}>
-        <Icon glyph="Database" size={16} className={styles.payFactIcon} />
-        <Overline>How MongoDB prevents write skew</Overline>
+    <div className={styles.wsPanel}>
+      <div className={styles.wsPanelHead}>
+        <Icon glyph="Database" size={14} />
+        <span>How it is built on MongoDB</span>
         {live && <Badge variant="green">Live</Badge>}
       </div>
-      <ol className={styles.setupSteps}>
-        <Step n={1} title="One shared document" chip="Stage 3">
-          <Body>Every wire writes the <strong>same</strong> <InlineCode>accounts</InlineCode> document, so MongoDB can see writers collide.</Body>
-          <Code language="javascript" copyButtonAppearance="none" showLineNumbers={false}>
-            {"{ balance: { current, available, hold } }"}
-          </Code>
+      <ol className={styles.wsTl}>
+        <Step title="Balance lives on one document" chip="Model" {...at(1)}>
+          The invariant and the money it protects sit in <b>one</b> <InlineCode>accounts</InlineCode> document, so every wire writes the same document and MongoDB sees them collide.
+          <CodeBlock label="accounts">{`{
+  "accountId": "ACC-acc10004",
+  "balance": { "current": 200, "available": 200, "hold": 0 }
+}`}</CodeBlock>
         </Step>
-        <Step n={2} title="Reserve at stage 3" chip="Stage 3">
-          <Body>One atomic <InlineCode>findOneAndUpdate</InlineCode>. The check and the decrement are the <strong>same</strong> operation.</Body>
-          <Code language="javascript" copyButtonAppearance="none" showLineNumbers={false}>{reserve}</Code>
+        <Step title="The check is in the filter" chip="Stage 3" {...at(2)}>
+          Write skew needs a gap between read and write. Here the check and the decrement are one atomic operation.
+          <CodeBlock label="findOneAndUpdate">{`filter: ${pretty(guard.filter)}
+update: ${pretty(stripStamps(guard.update))}`}</CodeBlock>
         </Step>
-        <Step n={3} title="No match, payment rejected" chip="Stage 3">
-          <Body>
-            If the filter does not match, the payment is rejected for <strong>insufficient funds</strong>.
-            Racing writers hit <InlineCode>WriteConflict</InlineCode> (112) and retry on fresh state.
-          </Body>
+        <Step title="Collisions retry, misses refuse" chip="Stage 3" {...at(3)}>
+          Concurrent writers raise <InlineCode>WriteConflict</InlineCode> (112); <InlineCode>with_transaction</InlineCode> retries on fresh state. No match means insufficient funds, and nothing is written.
         </Step>
-        <Step n={4} title="Debit at stage 5" chip="Stage 5">
-          <Body>One transaction. All four commit, or none do.</Body>
-          <ul className={styles.setupChecks}>
-            <li><Icon glyph="Checkmark" size={12} />Release the hold</li>
-            <li><Icon glyph="Checkmark" size={12} />Debit with the same <InlineCode>$gte</InlineCode> guard</li>
-            <li><Icon glyph="Checkmark" size={12} />Credit the receiver</li>
-            <li><Icon glyph="Checkmark" size={12} />Insert the <InlineCode>transactions</InlineCode> record</li>
-          </ul>
+        <Step title="Debit in one transaction" chip="Stage 5" {...at(4)}>
+          Release hold, guarded debit, credit receiver, insert <InlineCode>transactions</InlineCode> record. All commit, or none do.
+        </Step>
+        <Step title="Downstream by change stream" chip="Stage 7–8" {...at(5)}>
+          Settlement emits a change event; the ledger journals it and reconciliation matches it. Only committed wires appear.
         </Step>
       </ol>
+    </div>
+  );
+}
+
+const OPENING = 200;
+const AMOUNT = 80;
+const WIRES = 3;
+
+function Kpi({ label, value, hint, tone = "neutral" }) {
+  return (
+    <div className={`${styles.wsKpi} ${styles[`wsTone_${tone}`]}`}>
+      <span className={styles.wsLabel}>{label}</span>
+      <span className={styles.wsKpiValue}>{value}</span>
+      {hint && <span className={styles.wsKpiHint}>{hint}</span>}
+    </div>
+  );
+}
+
+/** Title, story and the four numbers that matter, as KPI tiles. */
+export function RaceHeader({ scenario, report, queued }) {
+  const s = report?.summary;
+  const state = s ? (s.invariantHeld ? ["green", "Invariant held"] : ["red", "Invariant broken"]) : queued ? ["blue", "3 wires queued"] : ["lightgray", "Not queued yet"];
+  return (
+    <div className={styles.wsHero}>
+      <div className={styles.wsHeroTop}>
+        <div>
+          <span className={styles.wsEyebrow}>Write skew · {scenario.key}</span>
+          <h2 className={styles.wsTitle}>{scenario.title}</h2>
+          <p className={styles.wsStory}>{scenario.story}</p>
+        </div>
+        <div className={styles.wsHeroSide}>
+          <Badge variant={state[0]}>{state[1]}</Badge>
+          <span className={styles.wsInvariant}><Icon glyph="Lock" size={12} />{scenario.invariant}</span>
+        </div>
+      </div>
+      <div className={styles.wsKpis}>
+        <Kpi label="Opening balance" value={usd(OPENING)} hint="ACC-acc10004" />
+        <Kpi label="Demand" value={usd(WIRES * AMOUNT)} hint={`${WIRES} wires × ${usd(AMOUNT)}`} tone="warn" />
+        <Kpi label="Wires reserved" value={s ? `${s.winners} / ${WIRES}` : `– / ${WIRES}`} hint={s ? `${s.totalWriteConflicts} write conflicts retried` : "after the race"} tone="info" />
+        <Kpi label="Available" value={usd(s ? s.finalAvailable : OPENING)} hint={s ? "never below zero" : "before the race"} tone={s ? (s.invariantHeld ? "good" : "bad") : "neutral"} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The USD 200 balance as a bar, one segment per wire. Before the race the third wire spills past
+ * zero (the demand every read saw); after it, winners fill the bar and the refused wire stays out.
+ */
+export function BalanceGauge({ report }) {
+  const attempts = report?.attempts || Array.from({ length: WIRES }, (_, i) => ({ worker: i + 1, outcome: null }));
+  const scale = WIRES * AMOUNT;
+  const pct = (v) => `${(v / scale) * 100}%`;
+  return (
+    <div className={styles.wsCard}>
+      <div className={styles.wsCardHead}>
+        <span className={styles.wsLabel}>Balance under contention</span>
+        <span className={styles.wsLegend}>
+          <i className={styles.segPending} />queued <i className={styles.segOk} />reserved <i className={styles.segRefused} />refused
+        </span>
+      </div>
+      <div className={styles.wsBar}>
+        <div className={styles.wsOverdraft} style={{ left: pct(OPENING) }} />
+        {attempts.map((a, i) => {
+          const tone = !a.outcome ? styles.segPending : a.outcome === "RESERVED" ? styles.segOk : styles.segRefused;
+          return (
+            <div key={a.worker} className={`${styles.wsSeg} ${tone}`} style={{ left: pct(i * AMOUNT), width: pct(AMOUNT) }}>
+              Wire {a.worker} · {usd(AMOUNT)}
+            </div>
+          );
+        })}
+      </div>
+      <div className={styles.wsScale}>
+        <span>USD 0 spent</span>
+        <span style={{ left: pct(OPENING) }} className={styles.wsScaleZero}>USD 200 · balance exhausted</span>
+        <span>USD 240</span>
+      </div>
+    </div>
+  );
+}
+
+function RaceRow({ label, verdict, tone }) {
+  return (
+    <li className={`${styles.wsRow} ${styles[`wsTone_${tone}`]}`}>
+      <Icon glyph={tone === "good" ? "Checkmark" : tone === "bad" ? "XWithCircle" : tone === "warn" ? "Warning" : "Clock"} size={12} />
+      <span className={styles.wsRowLabel}>{label}</span>
+      <span className={styles.wsRowVerdict}>{verdict}</span>
+    </li>
+  );
+}
+
+/**
+ * Why the naive design fails and the guarded one does not. The left card is illustrative (the
+ * anomaly, never run); the right card is filled from the live race report.
+ */
+export function SkewContrast({ report }) {
+  const live = (a) => {
+    if (a.outcome === "RESERVED") return [`${a.writeConflicts ? `retried ×${a.writeConflicts} → ` : ""}matched, −${AMOUNT}`, "good"];
+    if (a.outcome === "ERROR") return ["error", "bad"];
+    return [`${a.writeConflicts ? `retried ×${a.writeConflicts} → ` : ""}no match, refused`, "warn"];
+  };
+  return (
+    <div className={styles.wsCompare}>
+      <div className={`${styles.wsCard} ${styles.wsAccent} ${styles.wsTone_bad}`}>
+        <div className={styles.wsCardHead}>
+          <span className={styles.wsCardTitle}>Read, then write</span>
+          <span className={styles.wsPill}>Illustration · not run</span>
+        </div>
+        <CodeBlock>{`acct = accounts.find_one({...})          # every wire sees 200
+if acct["available"] >= 80:              # all three pass
+    accounts.update_one({...}, {"$set": {...}})`}</CodeBlock>
+        <ul className={styles.wsRows}>
+          {[1, 2, 3].map((w) => <RaceRow key={w} label={`Wire ${w}`} verdict="read 200 → passes → writes" tone="bad" />)}
+        </ul>
+        <div className={styles.wsOutcome}>Available ends at {usd(OPENING - WIRES * AMOUNT)}</div>
+      </div>
+      <div className={`${styles.wsCard} ${styles.wsAccent} ${styles.wsTone_good}`}>
+        <div className={styles.wsCardHead}>
+          <span className={styles.wsCardTitle}>Check inside the write</span>
+          {report ? <Badge variant="green">Live</Badge> : <span className={styles.wsPill}>MongoDB</span>}
+        </div>
+        <CodeBlock>{`accounts.find_one_and_update(
+  {"balance.available": {"$gte": 80}},
+  {"$inc": {"balance.available": -80, "balance.hold": 80}})`}</CodeBlock>
+        <ul className={styles.wsRows}>
+          {report
+            ? report.attempts.map((a) => { const [v, t] = live(a); return <RaceRow key={a.worker} label={`Wire ${a.worker}`} verdict={v} tone={t} />; })
+            : [1, 2, 3].map((w) => <RaceRow key={w} label={`Wire ${w}`} verdict="waiting for the race" tone="neutral" />)}
+        </ul>
+        <div className={styles.wsOutcome}>
+          {report ? `Available ends at ${usd(report.summary.finalAvailable)}` : `Expected: 2 paid, 1 refused, ${usd(OPENING - 2 * AMOUNT)} left`}
+        </div>
+      </div>
     </div>
   );
 }

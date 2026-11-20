@@ -183,7 +183,7 @@ function ActivityBanner({ activity }) {
 }
 
 export default function RunConsole({
-  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, aside, failure, result, activity, decision, filters = FILTERS,
+  top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, aside, failure, result, activity, decision, filters = FILTERS, logFolded = false,
 }) {
   const [filter, setFilter] = useState("all");
   const logRef = useRef(null);
@@ -246,24 +246,7 @@ export default function RunConsole({
       </div>
   );
   const blocks = toBlocks(shown);
-  return (
-    <div className={aside ? styles.consoleGrid : undefined}>
-    <section className={`${styles.scene} ${styles.toneStripe}`}>
-      {top && <div className={styles.runTop}>{top}</div>}
-      {pipeline}
-      {result}
-
-      <div className={styles.runRow}>
-        <div className={styles.runControl}>
-          <StepCards cards={stepCards} current={stepIndex} final={controller.final} waiting={controller.waiting} />
-        </div>
-      </div>
-
-      {controller.error && <Body className={styles.error}>{controller.error}</Body>}
-      <ActivityBanner activity={activity} />
-      {evidence}
-      {failure}
-
+  const logBox = (
       <div className={styles.runLogBox}>
       <div className={styles.runLogHead}>
         <span className={styles.runLogTitle}>
@@ -340,6 +323,31 @@ export default function RunConsole({
         </button>
       )}
       </div>
+  );
+  return (
+    <div className={aside ? styles.consoleGrid : undefined}>
+    <section className={`${styles.scene} ${styles.toneStripe}`}>
+      {top && <div className={styles.runTop}>{top}</div>}
+      {pipeline}
+      {result}
+
+      <div className={styles.runRow}>
+        <div className={styles.runControl}>
+          <StepCards cards={stepCards} current={stepIndex} final={controller.final} waiting={controller.waiting} />
+        </div>
+      </div>
+
+      {controller.error && <Body className={styles.error}>{controller.error}</Body>}
+      <ActivityBanner activity={activity} />
+      {evidence}
+      {failure}
+
+      {logFolded ? (
+        <details className={styles.foldBox}>
+          <summary><Overline as="span">Run log</Overline> <span className={styles.muted}>{events.length} events</span></summary>
+          {logBox}
+        </details>
+      ) : logBox}
 
       {/* Docked to the bottom of the viewport while the proposal waits, so it is never off screen. */}
       {decision && (
