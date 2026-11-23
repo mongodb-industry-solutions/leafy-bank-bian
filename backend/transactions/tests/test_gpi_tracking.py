@@ -373,6 +373,21 @@ def test_an_international_wire_is_in_transit_after_capture_and_credited_at_compl
     assert _tracking(db)["outcome"] == gpi.CREDITED
 
 
+def test_completion_is_credited_when_stored_hops_read_back_naive(service, db):
+    """Real Mongo (client not tz_aware) returns stored `at` naive while the completion clock
+    is aware. Comparing them raised TypeError, which `track` swallowed, so live payments
+    stayed IN_TRANSIT after settlement (PAY-ac2e2c3c, 2026-11-23)."""
+    _initiate_to_gb(service)
+    for doc in db["paymentEvents"].docs:
+        if doc.get("kind") == gpi.KIND:
+            doc["at"] = doc["at"].replace(tzinfo=None)
+
+    settle.complete_due(FakeConnection(db), "db", delay_seconds=0)
+
+    assert _gpi(db)[-1]["gpiStatus"] == gpi.ACCC
+    assert _tracking(db)["trackingStatus"] == gpi.CREDITED
+
+
 def test_completion_on_a_demo_clock_uses_business_time(service, db):
     _initiate_to_gb(service)
     db["cutoffWorkflow"].insert_one({"_id": "CLK-x", "kind": "CLOCK", "offsetSeconds": 3600})

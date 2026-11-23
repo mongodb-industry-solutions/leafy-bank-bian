@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import logging
 import dataclasses
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from pymongo.errors import BulkWriteError, OperationFailure
@@ -70,6 +70,7 @@ def emit(payments, payment: dict, steps: list, *, now: datetime, direction: str,
     """
     history = lifecycle_history.collection(payments)
     ordered = sorted(steps, key=lambda st: st.seq)
+    now, base = _as_utc(now), _as_utc(base)
 
     def at(step: gpi.Step) -> datetime:
         if base is None or step.gpi_status in gpi.FINAL_STATUSES:
@@ -77,8 +78,8 @@ def emit(payments, payment: dict, steps: list, *, now: datetime, direction: str,
         return gpi.stamp(base, step.seq - 1)
 
     def work(s):
-        stored = list(history.find(
-            {"paymentId": payment["paymentId"], "kind": gpi.KIND}, session=s))
+        stored = [_utc_at(d) for d in history.find(
+            {"paymentId": payment["paymentId"], "kind": gpi.KIND}, session=s)]
         fresh = _fresh_documents(payment, ordered, stored, at=at, direction=direction,
                                  hops_total=hops_total)
         if fresh:
@@ -170,7 +171,20 @@ def track_inbound(payments, payment: Optional[dict], *, now: datetime, outcome: 
 def _first_report_at(payments, payment: dict) -> Optional[datetime]:
     first = lifecycle_history.collection(payments).find_one(
         {"_id": f"{payment['paymentId']}:{gpi.KIND}:1"})
-    return (first or {}).get("at")
+    return _as_utc((first or {}).get("at"))
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """The client is not tz_aware, so stored datetimes come back naive (UTC by BSON
+    definition) while hook clocks are aware. Comparing the two raises TypeError, which
+    `track` swallows — that silently dropped every final status after stage 5."""
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _utc_at(doc: dict) -> dict:
+    return {**doc, "at": _as_utc(doc.get("at"))}
 
 
 def _report_failure(exc: Exception, payment_id: Optional[str]) -> None:
