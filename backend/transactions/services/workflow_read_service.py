@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from contexts.payment_order_initiation.domain import lifecycle, lifecycle_history
-from contexts.payment_rail.domain import pacs008
+from contexts.payment_rail.domain import gpi, pacs008
 from database.connection import MongoDBConnection
 
 # A payment needing attention is one that stopped somewhere it will never leave. The set is
@@ -207,8 +207,10 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
         return None
     # `lifecycle.events[]` and `checks[]` live in `paymentEvents`; join them back so the
     # response keeps the shape it had when both were embedded.
-    payment = lifecycle_history.attach(
-        connection.get_collection(db_name, lifecycle_history.HISTORY), payment)
+    history = connection.get_collection(db_name, lifecycle_history.HISTORY)
+    payment = lifecycle_history.attach(history, payment)
+    # Simulated SWIFT gpi hop reports, in seq order. `seq` is kept: the tracker keys rows on it.
+    payment["gpiEvents"] = lifecycle_history.entries(history, payment_id, gpi.KIND, keep_seq=True)
     # Empty lists, not absent keys: a payment written before stage 5 existed, or an internal
     # transfer that legitimately has no artifacts (doc 19 B4), must read as "none" rather
     # than making the UI branch on `undefined`.
@@ -258,6 +260,53 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
         .sort("createdAt", 1)
     )
     return payment
+
+
+def get_tracking(connection: MongoDBConnection, db_name: str, uetr: str) -> Optional[dict]:
+    """The gpi tracker view of one UETR: `{uetr, paymentId, tracking, route, events[]}`.
+
+    Accepts the bare UUID or the legacy `UETR-` prefixed form, any case; payments created
+    before 2026-11-10 may still store the prefix, GPI events always store the bare lowercase
+    value.
+
+    A UETR should name one payment, but nothing enforces it (an inbound wire carries the
+    sender's). When several payments share it the earliest-created wins, ties broken by
+    paymentId — deterministic, and the original instruction rather than a later echo.
+    """
+    raw = (uetr or "").strip()
+    if raw[:5].upper() == "UETR-":
+        raw = raw[5:]
+    bare = raw.lower()
+    if not bare:
+        return None
+    history = connection.get_collection(db_name, lifecycle_history.HISTORY)
+    payments = _payments(connection, db_name)
+    # Resolve through the GPI events first (`idx_payment_events_gpi_uetr`), then
+    # `payments.uetr` (`idx_payments_uetr`) for a payment not tracked yet.
+    tracked = sorted({e["paymentId"] for e in history.find(
+        {"kind": gpi.KIND, "uetr": bare}, {"paymentId": 1})})
+    flt = ({"paymentId": {"$in": tracked}} if tracked
+           else {"uetr": {"$in": [bare, f"UETR-{bare}", raw, f"UETR-{raw}"]}})
+    candidates = list(payments.find(
+        flt, {"_id": 0, "paymentId": 1, "tracking": 1, "createdAt": 1}))
+    if not candidates:
+        return None
+    payment = min(candidates, key=_creation_order)
+    snapshot = connection.get_collection(db_name, "routingSnapshots").find_one(
+        {"paymentId": payment["paymentId"]}, {"_id": 0, "route": 1}) or {}
+    events = lifecycle_history.entries(history, payment["paymentId"], gpi.KIND, keep_seq=True)
+    return {
+        "uetr": bare,
+        "paymentId": payment["paymentId"],
+        "tracking": payment.get("tracking"),
+        "route": snapshot.get("route") or [],
+        "events": events,
+    }
+
+
+def _creation_order(payment: dict) -> tuple:
+    created = payment.get("createdAt")
+    return (created is None, str(created or ""), payment["paymentId"])
 
 
 def _with_xml(execution: dict) -> dict:

@@ -32,7 +32,9 @@ from datetime import datetime, timezone
 
 from bson import ObjectId
 
-from contexts.payment_order_initiation.domain import checks, lifecycle
+from contexts.payment_order_initiation.domain import bank_identity, checks, lifecycle
+from contexts.payment_rail.application import gpi_tracking
+from contexts.payment_rail.domain import gpi
 from process import exceptions as exc_module
 from shared.refs import derive_ref
 
@@ -267,7 +269,7 @@ def _close_returned(service, payment: dict, message: dict, reason_code: str,
         lifecycle.RETURNED if state in (lifecycle.ACCEPTED, lifecycle.IN_PROGRESS)
         else lifecycle.REJECTED
     )
-    lifecycle.advance(
+    returned = lifecycle.advance(
         service.payments,
         payment["_id"],
         to_state,
@@ -293,3 +295,11 @@ def _close_returned(service, payment: dict, message: dict, reason_code: str,
             actor="payments-operations", at=now,
         )
     ])
+    # GPI: our report on the received wire. Unable-to-apply means no customer was ever
+    # credited, so the tracker reads REJECTED whatever lifecycle state the return closes at
+    # (GPI's rule: RETURNED only after credit).
+    gpi_tracking.track_inbound(
+        service.payments, returned, now=now, outcome=gpi.REJECTED,
+        reason_code=reason_code,
+        our_bic=bank_identity.OUR_BIC, our_country=bank_identity.OUR_BANK_COUNTRY,
+    )

@@ -14,7 +14,7 @@ Reads  ctx: payment_doc, payment_rail, priority, instructed_amount/currency,
             payment_oid, current_state, collections
 Writes ctx: current_state -> ROUTED; execution_strategy, routing_snapshot_id, warehoused;
             `routingSnapshots` (insert-only); `payments.wireDetails.network`,
-            `payments.correspondent.{correspondentBic,intermediaryBic}`,
+            `payments.correspondent.{correspondentBic,intermediaryBic,instructedAgentBic}`,
             `payments.refs.routingSnapshotId`; six `payments.checks[]` entries
 
 ## What refuses here, and what warns
@@ -40,14 +40,17 @@ same-day `requestedExecutionDate`, or it will look like a regression.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
-from contexts.payment_order_initiation.domain import checks, lifecycle
+from contexts.payment_order_initiation.domain import bank_identity, checks, lifecycle
 from contexts.payment_orchestration.domain import cutoff_policy, documents, routing
 from process.payment_context import PaymentContext
 from shared import business_clock
 
 STAGE = "4 orchestrate"
+
+logger = logging.getLogger(__name__)
 
 
 def run(ctx: PaymentContext) -> None:
@@ -129,6 +132,12 @@ def run(ctx: PaymentContext) -> None:
         # stamping an intermediary would describe a hop that does not happen.
         if (creditor.get("bic") or "").upper() != strategy.correspondent_bic.upper():
             updates["correspondent.intermediaryBic"] = strategy.correspondent_bic
+    # The first hop out of Leafy Bank (GPI plan §1b). A NEW field on purpose:
+    # `correspondentBic` keeps meaning the country correspondent, which reconciliation and
+    # the chargePolicy fee evidence key on.
+    if strategy.sender_correspondent_bic:
+        updates["correspondent.instructedAgentBic"] = strategy.sender_correspondent_bic
+    route = _resolve_route(ctx, strategy, creditor)
 
     # --- 4. within_cutoff (R2's cut-off input) -------------------------------
     if strategy.cutoff_hour_et is None:
@@ -155,6 +164,7 @@ def run(ctx: PaymentContext) -> None:
         strategy=strategy,
         resolved_correspondent=resolved_correspondent,
         now=now,
+        route=route,
     )
     _insert_snapshot(ctx, snapshot)
     ctx.routing_snapshot_id = snapshot["routingSnapshotId"]
@@ -275,6 +285,46 @@ def _resolve_correspondent(ctx, strategy, record):
         "account data exists in the model (Q28).",
     )
     return {"bankName": bank.bank_name, "country": bank.bank_country}
+
+
+def _resolve_route(ctx, strategy, creditor: dict) -> list:
+    """Copy each hop's directory facts onto the route, by value, for the snapshot.
+
+    A directory miss is logged as a WARN and leaves the hop with null name/country and
+    `gpiMember: false` — the decision stands, exactly as in `_resolve_correspondent`. No new
+    check is recorded: stage 4's check list is a fixed contract, and the correspondent miss
+    that matters to an operator is already `correspondent_resolved`.
+    """
+    hops = []
+    for hop in strategy.route:
+        bank = ctx.reference_data.bank_by_bic(hop.bic) if ctx.reference_data else None
+        if bank is None:
+            logger.warning(
+                "route hop %s %s is not in the bank directory — recorded unresolved",
+                hop.role, hop.bic,
+            )
+        name, country = _hop_fallback(hop, creditor)
+        entry = {
+            "seq": hop.seq,
+            "role": hop.role,
+            "bic": hop.bic,
+            "bankName": bank.bank_name if bank else name,
+            "country": bank.bank_country if bank else country,
+            "gpiMember": bool(bank and bank.gpi_member),
+        }
+        if hop.keyed_by:
+            entry["keyedBy"] = hop.keyed_by
+        hops.append(entry)
+    return hops
+
+
+def _hop_fallback(hop, creditor: dict) -> tuple:
+    """Name/country the payment itself already knows, for the two ends of the route."""
+    if hop.role == routing.DEBTOR_AGENT:
+        return bank_identity.OUR_BANK_NAME, bank_identity.OUR_BANK_COUNTRY
+    if hop.role == routing.CREDITOR_AGENT:
+        return creditor.get("bankName"), creditor.get("bankCountry")
+    return None, None
 
 
 def _insert_snapshot(ctx, snapshot: dict) -> None:

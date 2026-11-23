@@ -314,4 +314,18 @@ def transformation_audit(message: dict, *, settlement_mtd: Optional[str],
         ),
         "at": now,
     })
+    instd = (((pacs008.body(message).get("GrpHdr") or {}).get("InstdAgt") or {})
+             .get("FinInstnId") or {}).get("BICFI")
+    cdtr = ((((pacs008.body(message).get("CdtTrfTxInf") or [{}])[0].get("CdtrAgt") or {})
+             .get("FinInstnId") or {}).get("BICFI"))
+    if instd and instd != cdtr:
+        entries.append({
+            "element": "GrpHdr/InstdAgt",
+            "source": "ROUTING_SNAPSHOT",
+            "detail": (
+                f"{instd} is the route's SENDER_CORRESPONDENT hop (routingSnapshots.route), "
+                "not the creditor agent — the payment leaves through our correspondent."
+            ),
+            "at": now,
+        })
     return entries

@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
 
+from contexts.payment_order_initiation.domain import bank_identity
+
 # --- the enums we may emit ----------------------------------------------------
 # Sourced from the spec, never hand-rolled (defect 2026-04-28). `wireDetails.network`:
 #   ["FEDWIRE", "CHIPS", "SWIFT", "LYNX", "SEPA"]
@@ -80,6 +82,30 @@ _CORRESPONDENT_BY_COUNTRY = {
     "CA": "ROYCCAT2",
 }
 
+# Our USD clearing correspondent: the first hop of every SWIFT wire we send in USD (GPI plan
+# decision 4). Keyed by currency because it is the currency's correspondent, not the
+# destination's. A currency missing here gets no sender-correspondent hop — today's
+# behaviour for non-USD (decision 5). ⚠️ SIMULATED, like the table above, and covered by the
+# same seed parity test through `route_bics()`.
+_SENDER_CORRESPONDENT_BY_CURRENCY = {"USD": "CHASUS33"}
+
+# `routingSnapshots.route[].role`. COVER_INTERMEDIARY is reserved for the pacs.009 COV leg.
+DEBTOR_AGENT = "DEBTOR_AGENT"
+SENDER_CORRESPONDENT = "SENDER_CORRESPONDENT"
+INTERMEDIARY = "INTERMEDIARY"
+CREDITOR_AGENT = "CREDITOR_AGENT"
+
+
+@dataclass(frozen=True)
+class RouteHop:
+    """One institution on the payment's path. Names and GPI membership are reference data,
+    resolved by the caller — `decide()` stays pure."""
+
+    seq: int
+    role: str
+    bic: str
+    keyed_by: Optional[str] = None
+
 
 @dataclass(frozen=True)
 class ExecutionStrategy:
@@ -100,6 +126,10 @@ class ExecutionStrategy:
     within_cutoff: bool
     value_date: Optional[str]
     rationale: str
+    # Defaults keep the snapshot-reconstruction call sites (payments_service) valid: a
+    # reconstructed strategy carries no route.
+    route: tuple = ()
+    sender_correspondent_bic: Optional[str] = None
 
 
 def decide(
@@ -154,8 +184,23 @@ def decide(
     # `else` branch above covers INTERNAL and any future rail, not the untyped case.
 
     correspondent_bic = None
+    sender_correspondent_bic = None
+    route: tuple = ()
     requires_correspondent = network == SWIFT
     if requires_correspondent:
+        sender_correspondent_bic = _SENDER_CORRESPONDENT_BY_CURRENCY.get(
+            (currency or "").upper()
+        )
+        # Paying CHASUS33's own customer: the beneficiary bank IS our USD correspondent, so
+        # there is no separate first hop (and InstdAgt falls back to the creditor's bank).
+        if sender_correspondent_bic and creditor_bic and (
+                sender_correspondent_bic.upper() == creditor_bic.upper()):
+            sender_correspondent_bic = None
+        if sender_correspondent_bic:
+            rationale += (
+                f" Leaves Leafy Bank through our {currency.upper()} correspondent "
+                f"{sender_correspondent_bic}."
+            )
         correspondent_bic = _CORRESPONDENT_BY_COUNTRY.get((creditor_country or "").upper())
         if correspondent_bic:
             same = bool(creditor_bic) and correspondent_bic.upper() == creditor_bic.upper()
@@ -174,6 +219,13 @@ def decide(
                 f" No correspondent is configured for {where}; SWIFT selected without a "
                 "named correspondent."
             )
+        route = _route(
+            sender_correspondent_bic=sender_correspondent_bic,
+            correspondent_bic=correspondent_bic,
+            currency=currency,
+            creditor_country=creditor_country,
+            creditor_bic=creditor_bic,
+        )
 
     cutoff_hour = _CUTOFF_HOUR_ET.get(network) if network else None
     within_cutoff = cutoff_hour is None or now_hour_et < cutoff_hour
@@ -190,6 +242,30 @@ def decide(
             requested_execution_date, now=now, within_cutoff=within_cutoff
         ),
         rationale=rationale,
+        route=route,
+        sender_correspondent_bic=sender_correspondent_bic,
+    )
+
+
+def _route(*, sender_correspondent_bic, correspondent_bic, currency, creditor_country,
+           creditor_bic) -> tuple:
+    """The SWIFT path, in order. An INTERMEDIARY hop exists only when our country
+    correspondent is neither the beneficiary's bank nor the sender correspondent — a hop to
+    the institution already holding the payment does not happen."""
+    hops = [(DEBTOR_AGENT, bank_identity.OUR_BIC, None)]
+    if sender_correspondent_bic:
+        hops.append((SENDER_CORRESPONDENT, sender_correspondent_bic,
+                     f"CURRENCY:{(currency or '').upper()}"))
+    if correspondent_bic and correspondent_bic.upper() not in {
+        (creditor_bic or "").upper(), (sender_correspondent_bic or "").upper()
+    }:
+        hops.append((INTERMEDIARY, correspondent_bic,
+                     f"COUNTRY:{(creditor_country or '').upper()}"))
+    if creditor_bic:
+        hops.append((CREDITOR_AGENT, creditor_bic, None))
+    return tuple(
+        RouteHop(seq=i, role=role, bic=bic, keyed_by=keyed_by)
+        for i, (role, bic, keyed_by) in enumerate(hops, start=1)
     )
 
 
@@ -236,6 +312,11 @@ def correspondent_countries() -> frozenset:
 def correspondent_bics() -> frozenset:
     """Every BIC the table can emit — asserted against the bank seed by a parity test."""
     return frozenset(_CORRESPONDENT_BY_COUNTRY.values())
+
+
+def route_bics() -> frozenset:
+    """Every correspondent BIC a route can name — both tables, for the seed parity test."""
+    return correspondent_bics() | frozenset(_SENDER_CORRESPONDENT_BY_CURRENCY.values())
 
 
 def networks_emitted() -> frozenset:

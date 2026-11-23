@@ -62,6 +62,8 @@ from shared.refs import derive_ref
 
 ROUTING_SNAPSHOTS = "routingSnapshots"
 
+ROUTE_VERSION = 1
+
 SOURCE_SYSTEM = "leafy-bank-payments-service"
 
 
@@ -72,6 +74,7 @@ def routing_snapshot(
     resolved_correspondent: Optional[dict],
     now: datetime,
     oid: Optional[ObjectId] = None,
+    route: Optional[list] = None,
 ) -> dict:
     """The immutable record of the routing decision, exactly as taken at this moment.
 
@@ -84,6 +87,10 @@ def routing_snapshot(
     `resolved_correspondent` is the directory row the caller resolved for the chosen
     correspondent BIC, or `None` on a miss. Recording the resolution (not just the BIC)
     is what makes the snapshot self-contained.
+
+    `route` is the ordered hop list (GPI plan §1a), already resolved by value against the
+    directory by the caller. Empty for anything that does not leave on SWIFT. A snapshot
+    without `route` predates `routeVersion` 1; readers treat it as the legacy 2-node view.
     """
     oid = oid or ObjectId()
     creditor = payment.get("creditor") or {}
@@ -131,6 +138,8 @@ def routing_snapshot(
             "nostroAccountRef": None,
             "simulated": True,
         },
+        "route": list(route or []),
+        "routeVersion": ROUTE_VERSION,
         "messageStandard": wire.get("messageDefinitionIdentifier"),
         "wireType": wire.get("wireType"),
         # --- provenance -------------------------------------------------------

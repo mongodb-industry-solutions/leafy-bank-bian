@@ -165,6 +165,10 @@ _KNOWN_EXTRAS = {
     "direction",
     "beneficiaryResolution",
     "acceptanceDecision",
+    # 2026-11-20 (GPI plan §1b): the cached GPI tracking summary keyed off `uetr`. Null at
+    # initiation; `paymentEvents` (kind GPI) is the source of truth. Moves into the spec
+    # with the `/bump-data-model` follow-up.
+    "tracking",
 }
 
 # Written only on a demo-clock (tagged) payment — cutoff plan A1/A2. Asserted on tagged
@@ -495,7 +499,16 @@ def test_object_block_shapes_match_the_spec(schema, block):
     """Sub-document shape, not just top-level keys — the 2026-05-04 `sub-doc-shape-skipped`
     defect was exactly this gap."""
     doc = payment_document.build(_ctx())
-    assert set(doc[block]) == set(schema["properties"][block]["properties"]), block
+    expected = set(schema["properties"][block]["properties"]) | _KNOWN_BLOCK_EXTRAS.get(block, set())
+    assert set(doc[block]) == expected, block
+
+
+# Sub-document fields the code writes that the spec does not declare yet. Same tripwire as
+# `_KNOWN_EXTRAS`: an entry here must be argued for.
+#   correspondent.instructedAgentBic — GPI plan §1b (2026-11-20): the sender correspondent,
+#   the first hop out. A new field so `correspondentBic` keeps its reconciliation meaning.
+#   Moves into the spec with the `/bump-data-model` follow-up.
+_KNOWN_BLOCK_EXTRAS = {"correspondent": {"instructedAgentBic"}}
 
 
 def test_blocks_the_spec_requires_non_null_are_objects_not_none(schema):

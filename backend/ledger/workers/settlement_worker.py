@@ -345,17 +345,38 @@ def process_settlement(
         )
 
 
+# A field path written only by the transactions service's gpi tracker (`payments.tracking`).
+TRACKING_FIELD_PATTERN = r"^tracking(\.|$)"
+
+# Every update to a SETTLED payment, except one that only refreshes the gpi `tracking`
+# summary. Not narrowed to `lifecycle.settlementStatus`: stage 9's ACCEPT_DISCREPANCY stamps
+# `clearing.settlementAdjustment` on an already-SETTLED payment and the adjustment rides on
+# that update (`build_adjustment_event`). The tracker's write lands after the SETTLED one and
+# would re-deliver the payment for nothing (idempotent, but a wasted lookup per hop report).
+CHANGE_STREAM_PIPELINE = [
+    {
+        "$match": {
+            "operationType": "update",
+            "fullDocument.lifecycle.settlementStatus": "SETTLED",
+            "$expr": {"$or": [
+                {"$gt": [{"$size": {"$ifNull": ["$updateDescription.removedFields", []]}}, 0]},
+                {"$anyElementTrue": [{"$map": {
+                    "input": {"$objectToArray": {
+                        "$ifNull": ["$updateDescription.updatedFields", {}]}},
+                    "as": "f",
+                    "in": {"$not": [{"$regexMatch": {
+                        "input": "$$f.k", "regex": TRACKING_FIELD_PATTERN}}]},
+                }}]},
+            ]},
+        }
+    }
+]
+
+
 def run(connection: MongoDBConnection, db_name: str, coa: ChartOfAccounts) -> None:
     logger.info("settlement_worker starting — watching payments on %s", db_name)
     payments = connection.get_collection(db_name, "payments")
-    pipeline = [
-        {
-            "$match": {
-                "operationType": "update",
-                "fullDocument.lifecycle.settlementStatus": "SETTLED",
-            }
-        }
-    ]
+    pipeline = CHANGE_STREAM_PIPELINE
 
     while True:
         resume_token = _load_resume_token(connection, db_name)

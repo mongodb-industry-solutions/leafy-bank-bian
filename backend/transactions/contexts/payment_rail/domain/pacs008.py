@@ -104,6 +104,14 @@ def settlement_method(*, clearing_network: Optional[str], via_correspondent: boo
     return SETTLEMENT_CLEARING
 
 
+def sender_correspondent(snapshot: Optional[dict]) -> Optional[dict]:
+    """The route's SENDER_CORRESPONDENT hop, or None (no route, legacy snapshot, non-USD)."""
+    for hop in (snapshot or {}).get("route") or []:
+        if hop.get("role") == "SENDER_CORRESPONDENT" and hop.get("bic"):
+            return hop
+    return None
+
+
 def _agent(bic: Optional[str], name: Optional[str] = None,
            member_id: Optional[str] = None, member_code: Optional[str] = None) -> Optional[dict]:
     """`BranchAndFinancialInstitutionIdentification6`. `None` when there is no agent at all —
@@ -189,29 +197,37 @@ def build(payment: dict, *, settlement_mtd: Optional[str] = None,
         snap.get("valueDate") or value_date
         or clearing.get("settlementDate") or payment.get("requestedExecutionDate")
     )
-    resolved_settlement_mtd = settlement_mtd or settlement_method(
-        clearing_network=snap.get("clearingNetwork"),
-        via_correspondent=bool(
-            snap_correspondent.get("bic") or correspondent.get("correspondentBic")
-        ),
+    # GPI plan §2: the route's SENDER_CORRESPONDENT is the first hop, so it is the agent we
+    # instruct and the one whose books we settle across (INDA). A snapshot without `route`
+    # (pre-routeVersion 1), or a route with no such hop (non-USD), keeps the old behaviour.
+    sender_hop = sender_correspondent(snap)
+    resolved_settlement_mtd = settlement_mtd or (
+        SETTLEMENT_COVER if sender_hop else settlement_method(
+            clearing_network=snap.get("clearingNetwork"),
+            via_correspondent=bool(
+                snap_correspondent.get("bic") or correspondent.get("correspondentBic")
+            ),
+        )
     )
     # The four agents are routing data — read off the snapshot's instructing/beneficiary
     # agents when present, falling back to the payment doc + bank_identity for the
     # standalone call. The snapshot's instructing agent is our bank; its beneficiary agent
-    # is the creditor's bank — so InstgAgt/DbtrAgt both resolve to us, InstdAgt/CdtrAgt to
-    # the creditor's bank, exactly as the routing decision recorded.
+    # is the creditor's bank — so InstgAgt/DbtrAgt both resolve to us and CdtrAgt to the
+    # creditor's bank. InstdAgt is the next hop: the sender correspondent when the route has
+    # one, otherwise the creditor's bank, exactly as the routing decision recorded.
     instg = snap_instructing or {
         "bic": bank_identity.OUR_BIC,
         "bankName": bank_identity.OUR_BANK_NAME,
         "clearingSystemMemberId": debtor.get("clearingSystemMemberId") or bank_identity.OUR_ABA,
         "clearingSystemCode": debtor.get("clearingSystemCode") or bank_identity.OUR_CLEARING_SYSTEM_CODE,
     }
-    instd = snap_beneficiary or {
+    cdtr_agt = snap_beneficiary or {
         "bic": creditor.get("bic"),
         "bankName": creditor.get("bankName"),
         "clearingSystemMemberId": creditor.get("clearingSystemMemberId"),
         "clearingSystemCode": creditor.get("clearingSystemCode"),
     }
+    instd = sender_hop or cdtr_agt
 
     group_header = {
         "MsgId": payment.get("msgId"),
@@ -267,8 +283,8 @@ def build(payment: dict, *, settlement_mtd: Optional[str] = None,
         # snapshot — see the build() docstring: the snapshot cannot decide the hop.
         "IntrmyAgt1": _agent(correspondent.get("intermediaryBic")),
         "CdtrAgt": _agent(
-            instd.get("bic"), instd.get("bankName"),
-            instd.get("clearingSystemMemberId"), instd.get("clearingSystemCode"),
+            cdtr_agt.get("bic"), cdtr_agt.get("bankName"),
+            cdtr_agt.get("clearingSystemMemberId"), cdtr_agt.get("clearingSystemCode"),
         ),
         "Cdtr": _party(creditor),
         "CdtrAcct": _account(creditor),

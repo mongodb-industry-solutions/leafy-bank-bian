@@ -1230,3 +1230,34 @@ def test_the_settled_inbound_payment_carries_the_fields_the_settlement_worker_ne
     position = db["settlementPositions"].find_one({})
     assert position["settlementAccountCode"] == code
     assert position["clearingAccountCode"] == settle_mod._WIRE_CLEARING_CODE
+
+
+# =============================================================================
+# GPI (decision 3): one report of our own per received wire
+# =============================================================================
+
+def _gpi_events(db):
+    return [d for d in db["paymentEvents"].docs if d["kind"] == "GPI"]
+
+
+def test_a_settled_inbound_wire_gets_one_accc_event_and_reads_credited(service, db):
+    service.receive_inbound(_message())
+
+    [event] = _gpi_events(db)
+    assert (event["gpiStatus"], event["direction"], event["outcome"]) == (
+        "ACCC", "INBOUND", "CREDITED")
+    assert (event["fromBic"], event["toBic"]) == ("DEUTDEFF", "LEAFUS33")
+    assert event["uetr"] == "inbound-001", "the sender's UETR, bare"
+    assert _payment_doc(db)["tracking"]["trackingStatus"] == "CREDITED"
+
+
+def test_an_inbound_return_before_acceptance_reads_rejected(service, db):
+    payment, _ = _held(service, db)
+    from contexts.financial_gateway.application import uta
+
+    uta.build_return(service, payment, return_reason_code=pacs004.REASON_ACCOUNT_INCORRECT)
+
+    [event] = _gpi_events(db)
+    assert (event["gpiStatus"], event["reasonCode"], event["outcome"]) == (
+        "RJCT", pacs004.REASON_ACCOUNT_INCORRECT, "REJECTED")
+    assert _payment_doc(db)["tracking"]["trackingStatus"] == "REJECTED"

@@ -312,3 +312,47 @@ def test_the_seed_names_gl_1111_nostro_central_bank_cash():
     by_code = {a["accountCode"]: a for a in json.loads(seed.read_text())}
     assert by_code["1111"]["accountName"] == "Nostro/Central Bank Cash"
     assert by_code["1121"]["accountName"] == "Minimum Reserve Requirements"
+
+
+# --- the change-stream filter -------------------------------------------------
+
+def _passes(change: dict) -> bool:
+    """Python reading of CHANGE_STREAM_PIPELINE's `$match` — only the operators it uses."""
+    import re
+
+    from workers.settlement_worker import CHANGE_STREAM_PIPELINE, TRACKING_FIELD_PATTERN
+
+    match = CHANGE_STREAM_PIPELINE[0]["$match"]
+    assert set(match) == {"operationType", "fullDocument.lifecycle.settlementStatus", "$expr"}
+    if change["operationType"] != match["operationType"]:
+        return False
+    status = ((change.get("fullDocument") or {}).get("lifecycle") or {}).get("settlementStatus")
+    if status != match["fullDocument.lifecycle.settlementStatus"]:
+        return False
+    desc = change.get("updateDescription") or {}
+    if desc.get("removedFields"):
+        return True
+    return any(not re.match(TRACKING_FIELD_PATTERN, k) for k in desc.get("updatedFields") or {})
+
+
+_SETTLED = {"lifecycle": {"settlementStatus": "SETTLED"}}
+
+
+@pytest.mark.parametrize("fields,expected", [
+    ({"lifecycle.settlementStatus": "SETTLED", "lifecycle.currentState": "SETTLED"}, True),
+    ({"clearing.settlementAdjustment": {"amount": 25}}, True),  # stage 9 rides on this
+    ({"tracking": {"trackingStatus": "CREDITED"}}, False),
+    ({"tracking.trackingStatus": "CREDITED", "tracking.hopsConfirmed": 4}, False),
+    ({"tracking.gpiStatus": "ACCC", "updatedAt": "now"}, True),
+    ({"trackingRef": "x"}, True),
+])
+def test_the_stream_ignores_tracking_only_updates(fields, expected):
+    change = {"operationType": "update", "fullDocument": _SETTLED,
+              "updateDescription": {"updatedFields": fields, "removedFields": []}}
+    assert _passes(change) is expected
+
+
+def test_the_stream_still_needs_a_settled_update():
+    assert not _passes({"operationType": "insert", "fullDocument": _SETTLED})
+    assert not _passes({"operationType": "update", "fullDocument": {},
+                        "updateDescription": {"updatedFields": {"x": 1}}})

@@ -35,6 +35,9 @@ HISTORY = "paymentEvents"
 EVENT = "EVENT"
 CHECK = "CHECK"
 _ENVELOPE = ("_id", "paymentId", "rail", "kind", "seq")
+# Only these kinds have an embedded form. GPI hop reports share the collection but were never
+# arrays on the payment, so they are neither counted, rebuilt nor deleted here.
+_EMBEDDED_KINDS = {"$in": [EVENT, CHECK]}
 
 
 def history_documents(payment: dict) -> list:
@@ -99,11 +102,13 @@ def migrate(db, apply: bool, batch: int) -> int:
         with db.client.start_session() as session:
             with session.start_transaction():
                 have = {d["_id"] for d in db[HISTORY].find(
-                    {"paymentId": payment["paymentId"]}, {"_id": 1}, session=session)}
+                    {"paymentId": payment["paymentId"], "kind": _EMBEDDED_KINDS}, {"_id": 1},
+                    session=session)}
                 fresh = [d for d in docs if d["_id"] not in have]
                 if fresh:
                     db[HISTORY].insert_many(fresh, session=session)
-                stored = db[HISTORY].count_documents({"paymentId": payment["paymentId"]}, session=session)
+                stored = db[HISTORY].count_documents(
+                    {"paymentId": payment["paymentId"], "kind": _EMBEDDED_KINDS}, session=session)
                 if stored != len(docs):
                     raise RuntimeError(f"{payment['paymentId']}: {stored} history docs, expected {len(docs)}")
                 db.payments.update_one(
@@ -125,14 +130,16 @@ def reverse(db, apply: bool, batch: int) -> int:
             continue
         with db.client.start_session() as session:
             with session.start_transaction():
-                docs = list(db[HISTORY].find({"paymentId": payment["paymentId"]}, session=session))
+                docs = list(db[HISTORY].find(
+                    {"paymentId": payment["paymentId"], "kind": _EMBEDDED_KINDS}, session=session))
                 events, checks = embedded_arrays(docs)
                 db.payments.update_one(
                     {"_id": payment["_id"]},
                     {"$set": {"lifecycle.events": events, "checks": checks},
                      "$unset": {"lifecycle.eventCount": "", "lifecycle.checkCount": ""}},
                     session=session)
-                db[HISTORY].delete_many({"paymentId": payment["paymentId"]}, session=session)
+                db[HISTORY].delete_many(
+                    {"paymentId": payment["paymentId"], "kind": _EMBEDDED_KINDS}, session=session)
         reverted += 1
     print(f"reverted {reverted} payment(s)")
     return reverted

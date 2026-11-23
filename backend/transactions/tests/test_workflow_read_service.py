@@ -657,3 +657,117 @@ def test_the_corridor_filter_uses_the_stage_three_category_with_a_wire_type_fall
     assert international[1]["wireDetails.wireType"] == "INTERNATIONAL"
     assert "$or" not in svc._build_filter()
     assert "$or" not in svc._build_filter(corridor="bogus")
+
+
+# --- GPI tracking (GPI plan §5) ------------------------------------------------
+
+_UETR = "0f9a6c1e-1111-4222-8333-444455556666"
+_ROUTE = [
+    {"seq": 1, "role": "DEBTOR_AGENT", "bic": "LEAFUS33", "country": "US", "gpiMember": True},
+    {"seq": 2, "role": "CREDITOR_AGENT", "bic": "BARCGB22", "country": "GB", "gpiMember": True},
+]
+
+
+def _gpi_conn(*, stored_uetr=_UETR):
+    from contexts.payment_rail.domain import gpi
+
+    payment = _payment("PAY-G")
+    payment["uetr"] = stored_uetr
+    payment["tracking"] = {"trackingStatus": gpi.CREDITED}
+    connection = FakeConnection(FakePayments([payment]),
+                                routing_snapshot={"paymentId": "PAY-G", "route": _ROUTE})
+    steps = gpi.script(_ROUTE, gpi.CREDITED)
+    # Stored out of order: readers must sort by seq.
+    docs = [gpi.event_document(payment, s, at=NOW, direction=gpi.OUTBOUND)
+            for s in reversed(steps)]
+    connection.artifacts[lifecycle_history.HISTORY].docs.extend(docs)
+    return connection
+
+
+def test_get_payment_attaches_gpi_events_in_seq_order_without_the_envelope():
+    payment = svc.get_payment(_gpi_conn(), "db", "PAY-G")
+    assert [e["gpiStatus"] for e in payment["gpiEvents"]] == ["ACSP", "ACCC"]
+    assert [e["hop"]["seq"] for e in payment["gpiEvents"]] == [1, 2]
+    # `seq` survives: the tracker keys and numbers rows on it.
+    assert [e["seq"] for e in payment["gpiEvents"]] == [1, 2]
+    for key in ("_id", "paymentId", "kind", "rail"):
+        assert key not in payment["gpiEvents"][0]
+    # GPI rows never leak into the lifecycle trail.
+    assert all("gpiStatus" not in e for e in payment["lifecycle"]["events"])
+
+
+def test_get_payment_gpi_events_is_an_empty_list_for_an_untracked_payment(conn):
+    assert svc.get_payment(conn, "db", "PAY-1")["gpiEvents"] == []
+
+
+@pytest.mark.parametrize("asked,stored", [
+    (_UETR, _UETR),
+    (f"UETR-{_UETR}", _UETR),
+    (_UETR, f"UETR-{_UETR}"),  # an unmigrated payment
+])
+def test_tracking_accepts_bare_and_legacy_prefixed_uetrs(asked, stored):
+    result = svc.get_tracking(_gpi_conn(stored_uetr=stored), "db", asked)
+    assert result["uetr"] == _UETR
+    assert result["paymentId"] == "PAY-G"
+    assert result["tracking"]["trackingStatus"] == "CREDITED"
+    assert result["route"] == _ROUTE
+    assert [e["gpiStatus"] for e in result["events"]] == ["ACSP", "ACCC"]
+
+
+def test_tracking_resolves_an_untracked_payment_through_payments():
+    connection = _gpi_conn()
+    connection.artifacts[lifecycle_history.HISTORY].docs = [
+        d for d in connection.artifacts[lifecycle_history.HISTORY].docs if d["kind"] != "GPI"]
+    result = svc.get_tracking(connection, "db", _UETR)
+    assert result["paymentId"] == "PAY-G" and result["events"] == []
+
+
+def test_tracking_unknown_uetr_is_none():
+    assert svc.get_tracking(_gpi_conn(), "db", "nope") is None
+    assert svc.get_tracking(_gpi_conn(), "db", "") is None
+
+
+def test_tracking_route_404s_an_unknown_uetr():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from routers import workflow
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        connection=_gpi_conn(), db_name="db")))
+    assert b'"paymentId":"PAY-G"' in workflow.get_tracking(request, _UETR).body
+    with pytest.raises(HTTPException) as err:
+        workflow.get_tracking(request, "unknown")
+    assert err.value.status_code == 404
+
+
+@pytest.mark.parametrize("asked", [_UETR.upper(), f"uetr-{_UETR.upper()}", f"  {_UETR}  "])
+def test_tracking_normalises_case_and_whitespace(asked):
+    result = svc.get_tracking(_gpi_conn(), "db", asked)
+    assert result["uetr"] == _UETR and result["paymentId"] == "PAY-G"
+
+
+def test_tracking_finds_an_untracked_payment_stored_with_an_uppercase_uetr():
+    connection = _gpi_conn(stored_uetr=_UETR.upper())
+    connection.artifacts[lifecycle_history.HISTORY].docs = []
+    assert svc.get_tracking(connection, "db", _UETR.upper())["paymentId"] == "PAY-G"
+
+
+def test_tracking_with_a_shared_uetr_returns_the_earliest_created_payment():
+    """Nothing makes a UETR unique; the choice is deterministic, not insertion order."""
+    from contexts.payment_rail.domain import gpi
+
+    connection = _gpi_conn()
+    later = _payment("PAY-A")  # sorts first by id, but created later
+    later.update(uetr=_UETR, createdAt=datetime(2099, 1, 1, tzinfo=timezone.utc))
+    store = connection.coll
+    store.docs.insert(0, later)
+    connection.artifacts[lifecycle_history.HISTORY].docs.insert(0, gpi.event_document(
+        later, gpi.script(_ROUTE)[0], at=NOW, direction=gpi.OUTBOUND))
+    for _ in range(2):
+        assert svc.get_tracking(connection, "db", _UETR)["paymentId"] == "PAY-G"
+    # Equal creation times: the lower paymentId wins.
+    for doc in store.docs:
+        doc["createdAt"] = NOW
+    assert svc.get_tracking(connection, "db", _UETR)["paymentId"] == "PAY-A"

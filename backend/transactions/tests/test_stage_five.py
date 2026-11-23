@@ -223,6 +223,62 @@ def test_the_pacs008_reads_routing_settlement_from_the_snapshot_record(wire_paym
     assert grp_hdr["InstdAgt"]["FinInstnId"]["BICFI"] == snapshot["beneficiaryAgent"]["bic"]
 
 
+_ROUTE_SNAPSHOT = {
+    "clearingNetwork": "SWIFT",
+    "valueDate": "2026-09-01",
+    "instructingAgent": {"bic": "LEAFUS33", "bankName": "Leafy Bank"},
+    "beneficiaryAgent": {"bic": "NWBKGB2L", "bankName": "NatWest"},
+    "correspondent": {"required": True, "bic": "BARCGB22"},
+    "route": [
+        {"seq": 1, "role": "DEBTOR_AGENT", "bic": "LEAFUS33"},
+        {"seq": 2, "role": "SENDER_CORRESPONDENT", "bic": "CHASUS33",
+         "bankName": "JPMorgan Chase Bank, N.A."},
+        {"seq": 3, "role": "INTERMEDIARY", "bic": "BARCGB22"},
+        {"seq": 4, "role": "CREDITOR_AGENT", "bic": "NWBKGB2L"},
+    ],
+    "routeVersion": 1,
+}
+_ROUTE_PAYMENT = {"paymentId": "PAY-1", "currency": "USD", "amount": 1.0,
+                  "correspondent": {"correspondentBic": "BARCGB22",
+                                    "intermediaryBic": "BARCGB22"}}
+
+
+def test_the_instructed_agent_is_the_sender_correspondent_when_the_route_has_one():
+    """GPI plan §2: the message goes to CHASUS33 first; the beneficiary stays CdtrAgt and
+    the country correspondent stays IntrmyAgt1. Settled across a correspondent's books."""
+    body = pacs008.body(pacs008.build(_ROUTE_PAYMENT, snapshot=_ROUTE_SNAPSHOT))
+    assert body["GrpHdr"]["InstdAgt"]["FinInstnId"]["BICFI"] == "CHASUS33"
+    assert body["GrpHdr"]["SttlmInf"]["SttlmMtd"] == pacs008.SETTLEMENT_COVER
+    txn = body["CdtTrfTxInf"][0]
+    assert txn["CdtrAgt"]["FinInstnId"]["BICFI"] == "NWBKGB2L"
+    assert txn["IntrmyAgt1"]["FinInstnId"]["BICFI"] == "BARCGB22"
+
+
+def test_a_legacy_snapshot_without_a_route_keeps_the_old_instructed_agent():
+    legacy = {k: v for k, v in _ROUTE_SNAPSHOT.items() if k not in ("route", "routeVersion")}
+    body = pacs008.body(pacs008.build(_ROUTE_PAYMENT, snapshot=legacy))
+    assert body["GrpHdr"]["InstdAgt"]["FinInstnId"]["BICFI"] == "NWBKGB2L"
+    assert body["GrpHdr"]["SttlmInf"]["SttlmMtd"] == pacs008.SETTLEMENT_CLEARING
+
+
+def test_a_route_without_a_sender_correspondent_keeps_the_old_instructed_agent():
+    """Non-USD: no currency correspondent, today's behaviour."""
+    snap = dict(_ROUTE_SNAPSHOT, route=[h for h in _ROUTE_SNAPSHOT["route"]
+                                        if h["role"] != "SENDER_CORRESPONDENT"])
+    body = pacs008.body(pacs008.build(_ROUTE_PAYMENT, snapshot=snap))
+    assert body["GrpHdr"]["InstdAgt"]["FinInstnId"]["BICFI"] == "NWBKGB2L"
+    assert body["GrpHdr"]["SttlmInf"]["SttlmMtd"] == pacs008.SETTLEMENT_CLEARING
+
+
+def test_the_audit_records_where_the_sender_correspondent_instructed_agent_came_from():
+    from datetime import datetime, timezone
+    message = pacs008.build(_ROUTE_PAYMENT, snapshot=_ROUTE_SNAPSHOT)
+    audit = execution_documents.transformation_audit(
+        message, settlement_mtd="INDA", now=datetime.now(timezone.utc))
+    assert any(e["element"] == "GrpHdr/InstdAgt" and e["source"] == "ROUTING_SNAPSHOT"
+               for e in audit)
+
+
 def test_the_mapper_does_no_io():
     """R1 — *"only at the rail boundary"* is a claim about call sites, so the mapper must be
     callable with a dict and nothing else. An import of pymongo or `process` here would mean
@@ -726,3 +782,23 @@ def test_an_internal_transfer_does_not_touch_the_clearing_account(service, db):
     assert creditor["balance"]["available"] == 10_250.0, "the named creditor was credited"
     clearing = db["accounts"].find_one({"accountId": "ACC-CLEARING-WIRE"})
     assert clearing["balance"]["available"] == 0, "clearing account untouched by internal transfers"
+
+
+def test_a_rail_nack_is_tracked_as_a_gpi_rejection_at_the_first_agent(service, db):  # noqa: F811
+    """GPI: the message left LEAFUS33 (ACSP) and the sender correspondent refused it."""
+    service.rail_gateway = NullRailGateway()
+    with pytest.raises(ValueError, match="Rail rejected"):
+        _initiate(
+            service, creditor_account_ref=None, payment_rail="WIRE",
+            creditor_party={"accountNo": "9876543210", "name": "Acme Corp", "bic": "NWBKGB2L",
+                            "bankName": "NatWest", "bankCountry": "GB"},
+            wire_details={"wireType": "INTERNATIONAL",
+                          "messageDefinitionIdentifier": "pain.001.001.09", "network": "SWIFT"},
+        )
+
+    events = sorted((d for d in db["paymentEvents"].docs if d["kind"] == "GPI"),
+                    key=lambda d: d["seq"])
+    assert [(e["hop"]["bic"], e["gpiStatus"]) for e in events] == [
+        ("LEAFUS33", "ACSP"), ("CHASUS33", "RJCT")]
+    assert events[-1]["reasonCode"] == "FF01"
+    assert db["payments"].docs[0]["tracking"]["trackingStatus"] == "REJECTED"

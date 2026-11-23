@@ -53,6 +53,9 @@ class BankRecord:
     clearing_system_code: Optional[str] = None
     clearing_system_member_id: Optional[str] = None
     city: Optional[str] = None
+    # SWIFT GPI membership (correspondentBanks.gpiMember). None = the directory row says
+    # nothing, which route resolution treats as a non-member.
+    gpi_member: Optional[bool] = None
 
 
 @dataclass(frozen=True)

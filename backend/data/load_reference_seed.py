@@ -80,9 +80,10 @@ TARGETS = {
     "correspondentBanks": ("swiftCode", {"recordType": BIC_DIRECTORY}),
 }
 
-# Reconciliation facts (plan B1) the agent cites. These are the ONLY fields ever written onto
-# a row that already exists — everything else on it may belong to another demo.
-FACT_FIELDS = ("chargePolicy", "referenceFormat")
+# Reconciliation facts (plan B1) the agent cites, plus the GPI membership flag the route
+# resolution reads. These are the ONLY fields ever written onto a row that already exists —
+# everything else on it may belong to another demo.
+FACT_FIELDS = ("chargePolicy", "referenceFormat", "gpiMember")
 
 
 def log(msg: str = "") -> None:

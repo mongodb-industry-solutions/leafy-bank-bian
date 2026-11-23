@@ -218,7 +218,8 @@ def test_a_caller_session_is_joined_not_replaced(db):  # noqa: F811
 
 def test_history_index_orders_a_payments_entries_by_seq():
     from data import ensure_indexes
-    [spec] = ensure_indexes.PAYMENT_EVENTS_INDEXES
+    spec, gpi_spec = ensure_indexes.PAYMENT_EVENTS_INDEXES
+    assert gpi_spec["partialFilterExpression"] == {"kind": "GPI"}
     assert spec["keys"] == [("paymentId", 1), ("kind", 1), ("seq", 1)]
     assert spec["unique"] is True
 
@@ -226,7 +227,7 @@ def test_history_index_orders_a_payments_entries_by_seq():
 def test_history_validator_requires_what_the_writers_always_set():
     from data import ensure_indexes
     schema = ensure_indexes.PAYMENT_EVENTS_VALIDATOR["$jsonSchema"]
-    event_branch, check_branch = schema["oneOf"]
+    event_branch, check_branch, _gpi_branch = schema["oneOf"]
     assert set(event_branch["required"]) == {"state", "actor", "actorType", "reason"}
     assert set(check_branch["required"]) == {"stage", "name", "result", "mode", "actor"}
     # Every field a writer produces for each kind is covered by the branch for that kind.

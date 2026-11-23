@@ -83,17 +83,20 @@ def run_in_transaction(payments, session, work: Callable[[Any], Any]):
         return own.with_transaction(work)
 
 
-def entries(history, payment_id: str, kind: str, *, upto: Optional[int] = None) -> list:
+def entries(history, payment_id: str, kind: str, *, upto: Optional[int] = None,
+            keep_seq: bool = False) -> list:
     """The `kind` entries of one payment in `seq` order, envelope fields stripped.
 
     `upto` is the payment's counter; entries past it belong to a write the payment document
-    does not yet acknowledge and are left out.
+    does not yet acknowledge and are left out. `keep_seq` keeps `seq` for readers that need
+    it as the row identity (GPI: two reports can share a hop, e.g. ACCC then RJCT).
     """
     flt: dict = {"paymentId": payment_id, "kind": kind}
     if upto is not None:
         flt["seq"] = {"$lte": upto}
     docs = sorted(history.find(flt), key=lambda d: d["seq"])
-    return [{k: v for k, v in d.items() if k not in _ENVELOPE} for d in docs]
+    drop = tuple(k for k in _ENVELOPE if not (keep_seq and k == "seq"))
+    return [{k: v for k, v in d.items() if k not in drop} for d in docs]
 
 
 def attach(history, payment: Optional[dict]) -> Optional[dict]:

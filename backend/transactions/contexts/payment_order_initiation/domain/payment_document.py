@@ -260,6 +260,10 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         "txnId": derive_ref("TXN", oid),
         # ISO 20022 UETR: a bare lowercase UUIDv4 (SWIFT gpi format), never prefixed.
         "uetr": str(uuid.uuid4()),
+        # GPI plan §1b: cached tracking summary for the UETR. Null until the first GPI event
+        # (stage 5); `paymentEvents` stays the source of truth. Not in the canonical spec —
+        # see `test_payment_document_spec._KNOWN_EXTRAS`.
+        "tracking": None,
         "msgId": derive_ref("MSG", oid),
         "customerId": ctx.debtor_customer_id,
         "initiatedAt": now,
@@ -324,6 +328,10 @@ def build(ctx, *, debtor: Optional[dict] = None, creditor: Optional[dict] = None
         "correspondent": {
             "correspondentBic": None,
             "intermediaryBic": None,
+            # GPI plan §1b: the first hop out of Leafy Bank (the currency's sender
+            # correspondent). Stage 4 stamps it; `correspondentBic` keeps its meaning.
+            # Not in the canonical spec yet (follow-up `/bump-data-model`).
+            "instructedAgentBic": None,
             # Spec-required array. Empty at initiation; stage 3 enrichment appends
             # (`enrichment_plan._plan_regulatory_reports`) when the wire is cross-border
             # or above the reporting threshold. Shape is temporary pending Doina (Q24).

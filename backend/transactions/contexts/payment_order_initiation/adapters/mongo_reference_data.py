@@ -55,6 +55,7 @@ _BANK_FIELDS = {
     "country": 1,
     "clearingSystemCode": 1,
     "clearingSystemMemberId": 1,
+    "gpiMember": 1,
     "city": 1,
 }
 
@@ -120,6 +121,7 @@ class MongoReferenceData:
             clearing_system_code=doc.get("clearingSystemCode"),
             clearing_system_member_id=doc.get("clearingSystemMemberId"),
             city=doc.get("city"),
+            gpi_member=doc.get("gpiMember"),
         )
 
     # --- purpose codes -------------------------------------------------------

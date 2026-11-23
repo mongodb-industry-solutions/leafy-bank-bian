@@ -22,6 +22,7 @@ import pytest
 
 from contexts.fraud_evaluation.domain import fraud_rules, sanctions
 from contexts.payment_orchestration.domain import documents, routing
+from contexts.payment_order_initiation.domain import bank_identity
 from services.payments_service import PaymentsService
 from tests.test_payments_service import (  # reuse the fixtures, don't fork them
     joined,
@@ -206,9 +207,95 @@ def test_every_correspondent_resolves_against_the_bank_seed():
     international wire log a resolution failure — correct, but it reads as broken."""
     rows = json.loads(_SEED.read_text())["records"]
     seeded = {r["swiftCode"] for r in rows if r.get("recordType") == "BIC_DIRECTORY"}
-    assert routing.correspondent_bics() <= seeded, (
+    assert routing.route_bics() <= seeded, (
         "a correspondent BIC is not in the bank seed"
     )
+
+
+def test_every_route_correspondent_is_a_gpi_member_in_the_seed():
+    """Route resolution reads `gpiMember` off the directory; a correspondent without it
+    would be scripted as a non-GPI hop (G001)."""
+    rows = json.loads(_SEED.read_text())["records"]
+    members = {r["swiftCode"] for r in rows if r.get("gpiMember") is True}
+    assert routing.route_bics() <= members
+    # Our own hop: every outbound script's first report is ours, and a non-member LEAFUS33
+    # would turn the debtor agent's ACSP into a G001 forward from a non-gpi bank.
+    assert bank_identity.OUR_BIC in members
+
+
+# --- the route (GPI plan §2) ---------------------------------------------------
+
+def test_a_usd_international_wire_routes_through_chase_first():
+    strategy = _decide(wire_type="INTERNATIONAL", creditor_country="GB",
+                       creditor_bic="NWBKGB2L")
+    assert strategy.sender_correspondent_bic == "CHASUS33"
+    assert [(h.seq, h.role, h.bic) for h in strategy.route] == [
+        (1, routing.DEBTOR_AGENT, "LEAFUS33"),
+        (2, routing.SENDER_CORRESPONDENT, "CHASUS33"),
+        (3, routing.INTERMEDIARY, "BARCGB22"),
+        (4, routing.CREDITOR_AGENT, "NWBKGB2L"),
+    ]
+    assert strategy.route[1].keyed_by == "CURRENCY:USD"
+    assert strategy.route[2].keyed_by == "COUNTRY:GB"
+    # The country correspondent keeps its meaning — reconciliation keys on it.
+    assert strategy.correspondent_bic == "BARCGB22"
+
+
+def test_the_route_omits_the_intermediary_when_it_is_the_beneficiary_bank():
+    strategy = _decide(wire_type="INTERNATIONAL", creditor_country="CA",
+                       creditor_bic="ROYCCAT2")
+    assert [h.role for h in strategy.route] == [
+        routing.DEBTOR_AGENT, routing.SENDER_CORRESPONDENT, routing.CREDITOR_AGENT,
+    ]
+    assert strategy.correspondent_bic == "ROYCCAT2"
+
+
+def test_a_non_usd_wire_keeps_todays_route_with_no_sender_correspondent():
+    strategy = _decide(wire_type="INTERNATIONAL", currency="EUR", creditor_country="DE",
+                       creditor_bic="COBADEFF")
+    assert strategy.sender_correspondent_bic is None
+    assert [h.bic for h in strategy.route] == ["LEAFUS33", "DEUTDEFF", "COBADEFF"]
+
+
+@pytest.mark.parametrize("creditor_bic", ["CHASUS33", "chasus33"])
+def test_paying_a_chase_customer_has_no_separate_sender_correspondent_hop(creditor_bic):
+    """The beneficiary bank IS our USD correspondent: one hop, not CHASUS33 twice."""
+    strategy = _decide(wire_type="INTERNATIONAL", creditor_country="US",
+                       creditor_bic=creditor_bic)
+    assert strategy.sender_correspondent_bic is None
+    assert [(h.role, h.bic) for h in strategy.route] == [
+        (routing.DEBTOR_AGENT, "LEAFUS33"), (routing.CREDITOR_AGENT, creditor_bic)]
+
+
+def test_the_beneficiary_bank_being_our_country_correspondent_is_skipped_once():
+    """INTERMEDIARY == creditor is dropped too (ROYCCAT2), leaving CHASUS33 as the only
+    correspondent between us and the beneficiary."""
+    strategy = _decide(wire_type="INTERNATIONAL", creditor_country="CA",
+                       creditor_bic="royccat2")
+    assert [h.bic for h in strategy.route] == ["LEAFUS33", "CHASUS33", "royccat2"]
+
+
+def test_a_domestic_or_book_payment_has_no_route():
+    assert _decide().route == ()
+    assert _decide(rail="INTERNAL", wire_type=None).route == ()
+    assert _decide().sender_correspondent_bic is None
+
+
+def test_the_snapshot_records_the_route_and_its_version():
+    strategy = _decide(wire_type="INTERNATIONAL", creditor_country="GB",
+                       creditor_bic="BARCGB22")
+    route = [{"seq": 1, "role": routing.DEBTOR_AGENT, "bic": "LEAFUS33"}]
+    snap = documents.routing_snapshot(
+        payment=_payment(), strategy=strategy, resolved_correspondent=None,
+        now=datetime.now(timezone.utc), route=route,
+    )
+    assert snap["route"] == route
+    assert snap["routeVersion"] == 1
+    domestic = documents.routing_snapshot(
+        payment=_payment(), strategy=_decide(), resolved_correspondent=None,
+        now=datetime.now(timezone.utc),
+    )
+    assert domestic["route"] == []
 
 
 def test_the_beneficiary_bank_being_our_own_correspondent_needs_no_intermediary_hop():
@@ -573,6 +660,26 @@ def test_an_international_wire_is_stamped_with_swift_and_a_correspondent(rich_se
     assert payment["correspondent"]["correspondentBic"] == "ROYCCAT2"
     # The beneficiary banks with our own correspondent, so there is no intermediary hop.
     assert payment["correspondent"]["intermediaryBic"] is None
+    assert payment["correspondent"]["instructedAgentBic"] == "CHASUS33"
+
+
+def test_the_saga_snapshot_carries_the_resolved_route(rich_service, rich_db):
+    """Hops resolved by value against the directory; a miss leaves the hop non-GPI."""
+    rich_db["correspondentBanks"] = FakeCollection([
+        {"recordType": "BIC_DIRECTORY", "swiftCode": "CHASUS33",
+         "bankName": "JPMorgan Chase Bank, N.A.", "country": "US", "gpiMember": True},
+    ], key="swiftCode")
+    payment = _international(rich_service, instructed_amount=25_000.0)
+    snap = rich_db["routingSnapshots"].docs[-1]
+    assert snap["routeVersion"] == 1
+    assert [h["bic"] for h in snap["route"]] == ["LEAFUS33", "CHASUS33", "ROYCCAT2"]
+    chase = snap["route"][1]
+    assert (chase["bankName"], chase["country"], chase["gpiMember"]) == (
+        "JPMorgan Chase Bank, N.A.", "US", True)
+    # ROYCCAT2 missed the directory: the decision stands, name falls back to the payment.
+    assert snap["route"][2]["gpiMember"] is False
+    assert snap["route"][2]["bankName"] == payment["creditor"]["bankName"]
+    assert snap["correspondent"]["bic"] == "ROYCCAT2"
 
 
 def test_the_routing_snapshot_is_written_and_referenced(service, db):

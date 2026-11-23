@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 from pymongo import ASCENDING, DESCENDING
 
+from contexts.payment_rail.domain import gpi
 from database.connection import MongoDBConnection
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,9 @@ PAYMENTS_INDEXES = [
         "unique": True,
         "partialFilterExpression": {"idempotency.idempotencyKey": {"$type": "string"}},
     },
+    # The gpi tracker's fallback for an untracked payment (`get_tracking`): resolves a UETR
+    # with no GPI events yet. Non-unique — an inbound and its return can share one.
+    {"name": "idx_payments_uetr", "keys": [("uetr", ASCENDING)]},
 ]
 
 # `transactions` is shared with the ThreatSight 360 demo, which adds ~21k docs stamped
@@ -305,11 +309,15 @@ PAYMENT_EVENTS_INDEXES = [
     {"name": "idx_payment_events_seq",
      "keys": [("paymentId", ASCENDING), ("kind", ASCENDING), ("seq", ASCENDING)],
      "unique": True},
+    # The gpi tracker: one UETR's hop reports in order (`/workflow/tracking/{uetr}`).
+    {"name": "idx_payment_events_gpi_uetr",
+     "keys": [("uetr", ASCENDING), ("seq", ASCENDING)],
+     "partialFilterExpression": {"kind": gpi.KIND}},
 ]
 
 _HISTORY_COMMON = {
     "paymentId": {"bsonType": "string"},
-    "kind": {"enum": ["EVENT", "CHECK"]},
+    "kind": {"enum": ["EVENT", "CHECK", gpi.KIND]},
     "seq": {"bsonType": "int", "minimum": 1},
     "at": {"bsonType": "date"},
 }
@@ -324,6 +332,21 @@ PAYMENT_EVENTS_VALIDATOR = {"$jsonSchema": {
                         "result": {"enum": ["PASS", "FAIL", "SKIP", "PENDING", "WARN"]},
                         "mode": {"enum": ["SYNC", "ASYNC"]}},
          "required": ["stage", "name", "result", "mode", "actor"]},
+        # Simulated SWIFT gpi hop reports (`contexts/payment_rail/domain/gpi.py`).
+        {"properties": {"kind": {"enum": [gpi.KIND]},
+                        "uetr": {"bsonType": "string"},
+                        "direction": {"enum": list(gpi.DIRECTIONS)},
+                        "hop": {"bsonType": "object",
+                                "required": ["seq", "role", "bic"],
+                                "properties": {"role": {"enum": list(gpi.HOP_ROLES)}}},
+                        "gpiStatus": {"enum": list(gpi.GPI_STATUSES)},
+                        # null on ACCC: a credit carries no reason.
+                        "reasonCode": {"bsonType": ["string", "null"]},
+                        "outcome": {"enum": [None, *gpi.OUTCOMES]},
+                        "reportable": {"bsonType": "bool"},
+                        "simulated": {"bsonType": "bool"}},
+         "required": ["uetr", "direction", "hop", "gpiStatus", "reasonCode", "outcome",
+                      "reportable", "simulated"]},
     ],
 }}
 

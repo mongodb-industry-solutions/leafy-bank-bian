@@ -283,3 +283,24 @@ def test_a_cross_border_fx_wire_records_the_fx_exchange_on_the_position(service,
     assert pos["expectedAmount"] != pos["grossAmount"], (
         "FX wire: the clearing amount (txn) must differ from the settlement amount (payment)"
     )
+
+
+def test_an_operator_settlement_credits_the_gpi_trail_synchronously(service, db):
+    """GPI on the `defer=False` path: intermediate hops and the ACCC in one go."""
+    _initiate(
+        service, creditor_account_ref=None, payment_rail="WIRE",
+        creditor_party={"accountNo": "9876543210", "name": "Acme Corp", "bic": "NWBKGB2L",
+                        "bankName": "NatWest", "bankCountry": "GB"},
+        wire_details={"wireType": "INTERNATIONAL",
+                      "messageDefinitionIdentifier": "pain.001.001.09", "network": "SWIFT"},
+        settlement_outcome="DELAYED",
+    )
+    payment = _payment(db)
+    assert payment["tracking"]["trackingStatus"] == "SENT", "a delayed wire stops at stage 5"
+
+    service.settle_payment(payment["paymentId"], outcome="MATCHED")
+
+    events = sorted((d for d in db["paymentEvents"].docs if d["kind"] == "GPI"),
+                    key=lambda d: d["seq"])
+    assert [e["gpiStatus"] for e in events] == ["ACSP", "ACSP", "ACSP", "ACCC"]
+    assert _payment(db)["tracking"]["trackingStatus"] == "CREDITED"

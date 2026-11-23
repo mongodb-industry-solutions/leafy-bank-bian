@@ -50,8 +50,10 @@ from pymongo.errors import DuplicateKeyError
 
 from contexts.financial_gateway.application import screen_and_accept
 from contexts.financial_gateway.domain.inbound_documents import status_response_doc
-from contexts.payment_order_initiation.domain import checks, lifecycle
+from contexts.payment_order_initiation.domain import bank_identity, checks, lifecycle
 from contexts.payment_rail import documents
+from contexts.payment_rail.application import gpi_tracking
+from contexts.payment_rail.domain import gpi
 from contexts.payment_settlement import settle
 from process.payment_context import PaymentContext
 
@@ -345,6 +347,11 @@ def _settle_on_arrival(ctx: PaymentContext, now: datetime) -> None:
         },
     )
     ctx.result = ctx.collections.payments.find_one({"_id": ctx.payment_oid})
+    # GPI (decision 3): our one report on a received wire — credited.
+    gpi_tracking.track_inbound(
+        ctx.collections.payments, ctx.result, now=now, outcome=gpi.CREDITED,
+        our_bic=bank_identity.OUR_BIC, our_country=bank_identity.OUR_BANK_COUNTRY,
+    )
 
 
 def _INBOUND_SETTLEMENT_CODE() -> str:

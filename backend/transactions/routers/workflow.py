@@ -193,6 +193,16 @@ def resolve_ref(request: Request, ref: str) -> JSONResponse:
     return to_json_response(result)
 
 
+@router.get("/tracking/{uetr}")
+def get_tracking(request: Request, uetr: str) -> JSONResponse:
+    """Simulated SWIFT gpi tracker for one UETR (bare or legacy `UETR-` prefixed)."""
+    connection, db_name = _deps(request)
+    result = workflow_read_service.get_tracking(connection, db_name, uetr)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"no payment found for UETR {uetr}")
+    return to_json_response(result)
+
+
 # Declared last so the literal paths above are matched first — otherwise "/workflow/stats"
 # would bind here as a paymentId.
 @router.get("/payments/{payment_id}")

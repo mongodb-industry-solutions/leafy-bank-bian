@@ -43,7 +43,10 @@ def main() -> int:
     db = MongoClient(os.environ["MONGODB_URI"])[os.getenv("LEAFYBANK_DB_NAME", "leafy_bank_bian")]
     seqs = defaultdict(lambda: defaultdict(list))
     last_state = {}
-    for h in db.paymentEvents.find({}, {"paymentId": 1, "kind": 1, "seq": 1, "state": 1}).sort("seq", 1):
+    # GPI tracking events share the collection but have no counter on the payment.
+    history = db.paymentEvents.find({"kind": {"$in": ["EVENT", "CHECK"]}},
+                                    {"paymentId": 1, "kind": 1, "seq": 1, "state": 1})
+    for h in history.sort("seq", 1):
         seqs[h["paymentId"]][h["kind"]].append(h["seq"])
         if h["kind"] == "EVENT":
             last_state[h["paymentId"]] = h.get("state")

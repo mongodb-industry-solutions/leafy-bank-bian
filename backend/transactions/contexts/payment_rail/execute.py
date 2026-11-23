@@ -96,7 +96,9 @@ from pymongo.client_session import ClientSession
 from contexts.payment_order_initiation.application import funds_reservation
 from contexts.payment_order_initiation.domain import checks, lifecycle
 from contexts.payment_rail import documents
-from contexts.payment_rail.domain import execution_documents, pacs008
+from contexts.payment_rail.application import gpi_tracking
+from contexts.payment_rail.domain import execution_documents, gpi, pacs008
+from shared import business_clock
 from shared.refs import derive_ref
 from process.payment_context import PaymentContext
 
@@ -341,6 +343,14 @@ def _execute_rail_bound(ctx: PaymentContext, record, recorded: list,
             )
         )
         _flush(ctx, recorded)
+        # GPI: the message left us (hop 1) and the first agent it reached refused it.
+        # reject_at=2 is that agent's hop seq — the sender correspondent, or the creditor
+        # agent on a route without one; the rail NACK is the first hop to see the message.
+        gpi_tracking.track(
+            ctx.collections.payments, ctx.payment_doc, now=business_clock.ctx_now(ctx),
+            route=_route(snapshot), outcome=gpi.REJECTED, reject_at=2,
+            reason_code=gpi.REASON_INVALID_FORMAT,
+        )
         raise ValueError(f"Rail rejected the payment message — {ack.status_code}: {ack.reason}")
 
     recorded.append(
@@ -399,6 +409,12 @@ def _execute_rail_bound(ctx: PaymentContext, record, recorded: list,
     # response arrives. The payment stays at IN_PROGRESS, which is a real wire's state
     # between submission and confirmation.
     ctx.result = _money_move(ctx, settle_atomically=not ctx.is_external_creditor)
+    # GPI: our own report — forwarded to the first agent. After the money move, so a payment
+    # that fails on funds never reads as SENT.
+    gpi_tracking.track(
+        ctx.collections.payments, ctx.payment_doc, now=business_clock.ctx_now(ctx),
+        route=_route(snapshot), first_only=True,
+    )
 
 
 def _next_attempt(ctx: PaymentContext) -> int:
@@ -469,6 +485,11 @@ def _load_routing_snapshot(ctx: PaymentContext, payment: dict):
     if not ref:
         return None
     return handle.find_one({"routingSnapshotId": ref})
+
+
+def _route(snapshot) -> list:
+    """The snapshot's GPI route; [] for a legacy snapshot or none, which is never tracked."""
+    return list((snapshot or {}).get("route") or [])
 
 
 def _flush(ctx: PaymentContext, recorded: list) -> None:

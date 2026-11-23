@@ -62,6 +62,8 @@ from typing import Optional
 from bson import ObjectId
 
 from contexts.payment_order_initiation.domain import checks, lifecycle
+from contexts.payment_rail.application import gpi_tracking
+from contexts.payment_rail.domain import gpi
 from process.exceptions import (
     CATEGORY_SETTLEMENT_DELAYED,
     CATEGORY_SETTLEMENT_RETURNED,
@@ -69,6 +71,7 @@ from process.exceptions import (
     record_exception,
 )
 from process.payment_context import PaymentContext
+from shared import business_clock
 from shared.refs import derive_ref
 
 logger = logging.getLogger(__name__)
@@ -438,6 +441,9 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
                 f"payment held at IN_PROGRESS with settlementStatus PENDING.",
             )
             updated = ctx.collections.payments.find_one({"_id": ctx.payment_oid})
+            # GPI: the correspondents forward it on; the creditor agent reports at completion.
+            gpi_tracking.track(ctx.collections.payments, updated,
+                               now=business_clock.ctx_now(ctx))
             ctx.stop(updated)
             return
         # `defer=False` — operator-triggered (settle_payment route): settle synchronously,
@@ -455,6 +461,8 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
             extra=extra,
         )
         _stamp_expected_window(ctx.collections.db, ctx.payment_id, datetime.fromisoformat(now_iso))
+        gpi_tracking.track(ctx.collections.payments, ctx.payment_doc,
+                           now=business_clock.ctx_now(ctx), outcome=gpi.CREDITED)
         _record_check(
             ctx, "settlement_completed", checks.PASS,
             f"Payment SETTLED via {model_info['label']}. Clearing account {_WIRE_CLEARING_CODE} "
@@ -500,6 +508,11 @@ def run(ctx: PaymentContext, defer: bool = True) -> None:
             reason=f"SIMULATED settlement returned — {response.get('returnCode')}",
             extra=extra,
         )
+        # GPI: the beneficiary bank refuses it before settlement, so the tracker reads
+        # REJECTED (GPI's rule: RETURNED only after credit); the lifecycle state is its own.
+        gpi_tracking.track(ctx.collections.payments, ctx.payment_doc,
+                           now=business_clock.ctx_now(ctx), outcome=gpi.REJECTED,
+                           reason_code=response.get("returnCode") or gpi.REASON_ACCOUNT_CLOSED)
         _record_check(
             ctx, "settlement_returned", checks.FAIL,
             f"Settlement returned — {response.get('returnCode')}. Payment RETURNED. "
@@ -570,7 +583,7 @@ def complete_due(connection, db_name: str, delay_seconds: float = 30.0) -> int:
         payment_id = doc.get("paymentId")
         now = datetime.now(timezone.utc)
         try:
-            lifecycle.advance(
+            settled = lifecycle.advance(
                 payments, payment_oid, lifecycle.SETTLED,
                 actor="payment-settlement-worker",
                 reason="SIMULATED settlement confirmed (deferred completion)",
@@ -586,6 +599,13 @@ def complete_due(connection, db_name: str, delay_seconds: float = 30.0) -> int:
             )
             continue
         _stamp_expected_window(connection.get_database(db_name), payment_id, now)
+        # GPI: the creditor agent credits the beneficiary. Business time, so a demo-clock
+        # payment's ACCC does not read earlier than its own stage-7 hops.
+        run_id = (settled.get("demo") or {}).get("clockRunId")
+        gpi_tracking.track(
+            payments, settled, outcome=gpi.CREDITED,
+            now=business_clock.now(run_id, clocks=payments.database[business_clock.CLOCKS]),
+        )
         checks.append_checks(
             payments, payment_oid,
             [checks.check(

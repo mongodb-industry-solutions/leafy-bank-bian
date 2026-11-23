@@ -13,6 +13,7 @@
         "value": "LEAFUS33"
       },
       "swiftCode": "LEAFUS33",
+      "gpiMember": true,
       "bankName": "Leafy Bank",
       "clearingSystemCode": "USABA",
       "clearingSystemMemberId": "021000021",
@@ -26,6 +27,7 @@
         "value": "CHASUS33"
       },
       "swiftCode": "CHASUS33",
+      "gpiMember": true,
       "bankName": "JPMorgan Chase Bank, N.A.",
       "clearingSystemCode": "USABA",
       "clearingSystemMemberId": "121000248",
@@ -39,6 +41,7 @@
         "value": "CITIUS33"
       },
       "swiftCode": "CITIUS33",
+      "gpiMember": true,
       "bankName": "Citibank, N.A.",
       "clearingSystemCode": "USABA",
       "clearingSystemMemberId": "021000089",
@@ -52,6 +55,7 @@
         "value": "BARCGB22"
       },
       "swiftCode": "BARCGB22",
+      "gpiMember": true,
       "bankName": "Barclays Bank PLC",
       "clearingSystemCode": "GBDSC",
       "clearingSystemMemberId": "202053",
@@ -70,6 +74,7 @@
         "value": "DEUTDEFF"
       },
       "swiftCode": "DEUTDEFF",
+      "gpiMember": true,
       "bankName": "Deutsche Bank AG",
       "clearingSystemCode": "DEBLZ",
       "clearingSystemMemberId": "50070010",
@@ -88,6 +93,7 @@
         "value": "UBSWCHZH"
       },
       "swiftCode": "UBSWCHZH",
+      "gpiMember": true,
       "bankName": "UBS Switzerland AG",
       "clearingSystemCode": "CHBCC",
       "clearingSystemMemberId": "230",
@@ -106,6 +112,7 @@
         "value": "ROYCCAT2"
       },
       "swiftCode": "ROYCCAT2",
+      "gpiMember": true,
       "bankName": "Royal Bank of Canada",
       "clearingSystemCode": "CACPA",
       "clearingSystemMemberId": "000300002",

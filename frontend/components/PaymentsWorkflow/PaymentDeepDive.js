@@ -21,6 +21,7 @@ import { Body } from "@leafygreen-ui/typography";
 
 import styles from "./PaymentsWorkflow.module.css";
 import StatusPill from "./StatusPill";
+import GpiTracker, { TrackingPill } from "./GpiTracker";
 import { STAFF } from "../Showcase/cutoffScenarios";
 import LensToggle, { useLens } from "./LensToggle";
 import MongoRail from "./MongoRail";
@@ -2447,6 +2448,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
           {payment?.status && (
             <StatusPill status={payment.status} />
           )}
+          <TrackingPill tracking={payment?.tracking} />
           <LensToggle lens={lens} onChange={setLens} />
         </div>
       </div>
@@ -2480,6 +2482,7 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
               selectedKey={selectedKey}
               onSelect={setSelectedKey}
             />
+            <GpiTracker payment={payment} lens={lens} />
             <StagePane
               stage={stages.find((s) => s.key === selectedKey) ?? stages[0]}
               state={states[Math.max(0, stages.findIndex((s) => s.key === selectedKey))]}

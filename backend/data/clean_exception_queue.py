@@ -35,6 +35,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from datetime import date
 
 TXN = os.getenv("TRANSACTIONS_BASE_URL", "http://localhost:8002").rstrip("/")
 LEDGER = os.getenv("LEDGER_BASE_URL", "http://localhost:8003").rstrip("/")
@@ -44,7 +45,7 @@ DISCREPANCY = "RECONCILIATION_DISCREPANCY"
 ORPHANED = "ORPHANED_SETTLEMENT"
 UNMATCHED = "SETTLEMENT_UNMATCHED"
 
-NOTE = "queue cleanup 2026-10-03 (backend/data/clean_exception_queue.py)"
+NOTE = f"queue cleanup {date.today().isoformat()} (backend/data/clean_exception_queue.py)"
 
 
 def call(method: str, url: str, body: dict | None = None):
@@ -150,10 +151,17 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--apply", action="store_true", help="execute (default: dry-run)")
     ap.add_argument("--skip", default="", help="comma-separated paymentIds/exceptionIds to leave alone")
+    ap.add_argument("--only", default="", help="comma-separated paymentIds/exceptionIds; "
+                    "every other OPEN exception is left alone (the DB is shared with other demos)")
     args = ap.parse_args()
     skip = {s.strip() for s in args.skip.split(",") if s.strip()}
+    only = {s.strip() for s in args.only.split(",") if s.strip()}
 
     rows = open_exceptions()
+    if only:
+        for r in rows:
+            if r.get("paymentId") not in only and r.get("exceptionId") not in only:
+                skip.update(x for x in (r.get("paymentId"), r.get("exceptionId")) if x)
     print(f"{len(rows)} OPEN exceptions")
     counts: dict[str, int] = {}
     for r in rows:
