@@ -47,6 +47,8 @@ const FAILED_STATES = new Set([
   "REJECTED", "FAILED", "RETURNED", "REVERSED", "REFUNDED", "CANCELLED",
 ]);
 const SUCCESS_TERMINAL = new Set(["SETTLED", "RECONCILED", "POSTED", "COMPLETED"]);
+// Stages that write SWIFT gpi reports: 5 (rail execution, sent) and 7 (settlement, final).
+const GPI_STAGES = new Set([5, 7]);
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
@@ -2482,7 +2484,11 @@ export default function PaymentDeepDive({ paymentId, refreshKey, onBack, onDataC
               selectedKey={selectedKey}
               onSelect={setSelectedKey}
             />
-            <GpiTracker payment={payment} lens={lens} />
+            {/* gpi reports are written at stage 5 (sent) and stage 7 (credited / rejected),
+                so the strip lives there; every other stage keeps the header pill only. */}
+            {GPI_STAGES.has((stages.find((s) => s.key === selectedKey) ?? stages[0])?.stage) && (
+              <GpiTracker payment={payment} lens={lens} />
+            )}
             <StagePane
               stage={stages.find((s) => s.key === selectedKey) ?? stages[0]}
               state={states[Math.max(0, stages.findIndex((s) => s.key === selectedKey))]}

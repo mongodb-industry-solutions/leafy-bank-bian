@@ -142,45 +142,64 @@ function HopTable({ events }) {
   );
 }
 
+// One chip per report, in seq order: the bank and what it did. Hover shows role and time.
+function HopChain({ events }) {
+  return (
+    <ol className={styles.gpiChain}>
+      {events.map((e, i) => {
+        const tone =
+          e.gpiStatus === "RJCT" ? styles.gpiHopBad : e.gpiStatus === "ACCC" ? styles.gpiHopDone : "";
+        return (
+          <li key={e.seq ?? i} className={styles.gpiChainItem}>
+            {i > 0 && <span className={styles.gpiArrow} aria-hidden>→</span>}
+            <span
+              className={`${styles.gpiHop} ${tone}`}
+              title={`${labelOf(HOP_ROLE, e.hop?.role)} · ${fmtWhen(e.at)}`}
+            >
+              <span className={styles.mono}>{e.hop?.bic ?? "—"}</span>
+              <span className={styles.gpiHopStatus}>{gpiStatusLabel(e)}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export default function GpiTracker({ payment, lens }) {
+  const [showHops, setShowHops] = useState(false);
   if (!payment?.gpiEvents?.length) return null;
 
   const events = [...payment.gpiEvents].sort((a, b) => a.seq - b.seq);
   const tracking = payment.tracking ?? trackingFrom(events);
-  const showBusiness = lens === "business" || lens === "both";
   const showTechnical = lens === "technical" || lens === "both";
-  const total = tracking.hopsTotal || 0;
-  // A final outcome ends the journey: inbound only ever records our own hop, and a rejection
-  // stops before the remaining hops, so hop counts alone would leave the bar part-full.
-  const isFinal = ["CREDITED", "REJECTED", "RETURNED"].includes(tracking.trackingStatus);
-  const confirmed = isFinal ? total : tracking.hopsConfirmed || 0;
-  const pct = total ? Math.min(100, Math.round((confirmed / total) * 100)) : 0;
 
   return (
     <section className={styles.gpiTracker}>
       <div className={styles.gpiHead}>
-        <strong>SWIFT gpi tracking</strong>
+        <span className={styles.gpiTitle}>SWIFT gpi</span>
         <TrackingPill tracking={tracking} />
         <StatusPill family="gray" label="Simulated" />
+        <span className={styles.gpiNarrative}>{narrative(tracking, events, payment.direction)}</span>
         {events[0].uetr && <CopyUetr uetr={events[0].uetr} />}
       </div>
 
-      {showBusiness && (
+      <HopChain events={events} />
+
+      {showTechnical && (
         <>
-          <div
-            className={styles.gpiProgress}
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={total}
-            aria-valuenow={confirmed}
+          <button
+            type="button"
+            className={styles.disclosure}
+            onClick={() => setShowHops((v) => !v)}
+            aria-expanded={showHops}
           >
-            <span style={{ width: `${pct}%` }} />
-          </div>
-          <p className={styles.gpiNarrative}>{narrative(tracking, events, payment.direction)}</p>
+            <Icon glyph={showHops ? "ChevronDown" : "ChevronRight"} size={12} />
+            {showHops ? "Hide gpi reports" : "Show gpi reports"}
+          </button>
+          {showHops && <HopTable events={events} />}
         </>
       )}
-
-      {showTechnical && <HopTable events={events} />}
     </section>
   );
 }
