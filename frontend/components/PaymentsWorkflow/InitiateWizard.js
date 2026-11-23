@@ -267,13 +267,11 @@ function validate(form) {
 // fabricated. Only the external wire beneficiary is made up — which is precisely the half
 // the bank does not hold and cannot look up.
 //
-// Amounts stay under the RETAIL per-payment entitlement, which is what actually decides
-// now: stage 2 checks the amount against the debtor customer's segment policy
+// Amounts stay at or under 20,000, the RETAIL per-payment entitlement, which is what actually
+// decides now: stage 2 checks the amount against the debtor customer's segment policy
 // (`entitlement_policy.py`), and the global `PAYMENT_LIMIT_USD` is only a
 // malformed-input bound. Autofill picks a real (mostly RETAIL) seed customer, so staying
 // under the RETAIL ceiling keeps every autopopulated payment acceptable.
-const AUTOFILL_MIN = 10;
-const AUTOFILL_MAX = 20000;
 
 // Autofill's beneficiary-bank pool. Every row here MUST match a `BIC_DIRECTORY` row in
 // backend/data/seed/leafy_bank_bian.correspondentBanks.json — `clearingSystemMemberId`
@@ -297,67 +295,125 @@ const EXTERNAL_BANKS = [
   { bankName: "Royal Bank of Canada", bic: "ROYCCAT2", country: "CA", clearingSystemCode: "CACPA", clearingSystemMemberId: "000300002" },
 ];
 
-const EXTERNAL_PAYEES = [
-  { name: "Northwind Traders Ltd", address: "12 Cheapside, London" },
-  { name: "Contoso Manufacturing Inc", address: "440 Industrial Way, Detroit" },
-  { name: "Fabrikam Logistics GmbH", address: "Hafenstrasse 8, Hamburg" },
-  { name: "Tailspin Aviation SA", address: "Route de Meyrin 21, Geneva" },
-  { name: "Adventure Works Supply Co", address: "77 Harbour Street, Toronto" },
+// Defined demo scenarios, applied in order: each Autopopulate click fills the NEXT one and
+// the button names it, so the presenter knows what is about to be set. 4 international,
+// 4 domestic, 4 internal. Everything that decides the path is fixed per scenario (rail,
+// bank, country, priority, transfer type, amount); only the debit account (a real funded
+// account) and the references are picked at run time.
+//
+// Routing the hints describe (backend routing.py): international = beneficiary country ≠ US
+// → SWIFT, and USD adds CHASUS33 as the first hop. An INTERMEDIARY hop only exists when the
+// beneficiary bank is not our country correspondent; every directory bank IS its country's
+// correspondent, so each international route is LEAFUS33 → CHASUS33 → beneficiary bank.
+// Domestic: priority URGENT/HIGH → Fedwire RTGS, otherwise CHIPS; neither gets gpi tracking.
+const AUTOFILL_SCENARIOS = [
+  { group: "International", label: "GB · Barclays", hint: "SWIFT, gpi tracked: LEAFUS33 → CHASUS33 → BARCGB22",
+    rail: "WIRE", bic: "BARCGB22", payee: "Northwind Traders Ltd", address: "12 Cheapside, London",
+    amount: "12450.00", priority: "NORMAL", purpose: "Supplier payment" },
+  { group: "International", label: "DE · Deutsche Bank", hint: "SWIFT, gpi tracked: LEAFUS33 → CHASUS33 → DEUTDEFF",
+    rail: "WIRE", bic: "DEUTDEFF", payee: "Fabrikam Logistics GmbH", address: "Hafenstrasse 8, Hamburg",
+    amount: "8720.50", priority: "HIGH", purpose: "Freight and handling" },
+  { group: "International", label: "CH · UBS", hint: "SWIFT, gpi tracked: LEAFUS33 → CHASUS33 → UBSWCHZH",
+    rail: "WIRE", bic: "UBSWCHZH", payee: "Tailspin Aviation SA", address: "Route de Meyrin 21, Geneva",
+    amount: "15300.00", priority: "NORMAL", purpose: "Consulting services" },
+  { group: "International", label: "CA · Royal Bank of Canada", hint: "SWIFT, gpi tracked: LEAFUS33 → CHASUS33 → ROYCCAT2",
+    rail: "WIRE", bic: "ROYCCAT2", payee: "Adventure Works Supply Co", address: "77 Harbour Street, Toronto",
+    amount: "2378.40", priority: "URGENT", purpose: "Invoice settlement" },
+
+  { group: "Domestic", label: "Citibank · urgent", hint: "Fedwire RTGS, no gpi panel",
+    rail: "WIRE", bic: "CITIUS33", payee: "Contoso Manufacturing Inc", address: "440 Industrial Way, Detroit",
+    amount: "5600.00", priority: "URGENT", purpose: "Supplier payment" },
+  { group: "Domestic", label: "Citibank · normal", hint: "CHIPS netted clearing, no gpi panel",
+    rail: "WIRE", bic: "CITIUS33", payee: "Wide World Importers", address: "350 Fifth Avenue, New York",
+    amount: "3180.75", priority: "NORMAL", purpose: "Quarterly rent" },
+  { group: "Domestic", label: "Chase · high", hint: "Fedwire RTGS, no gpi panel",
+    rail: "WIRE", bic: "CHASUS33", payee: "Litware Inc", address: "1 Market Street, San Francisco",
+    amount: "9875.00", priority: "HIGH", purpose: "Consulting services" },
+  { group: "Domestic", label: "Chase · normal", hint: "CHIPS netted clearing, no gpi panel",
+    rail: "WIRE", bic: "CHASUS33", payee: "Proseware Ltd", address: "200 Park Avenue, Chicago",
+    amount: "1240.00", priority: "NORMAL", purpose: "Invoice settlement" },
+
+  { group: "Internal", label: "Third party · small", hint: "Book transfer to another customer, own ledger",
+    rail: "INTERNAL", transferType: "THIRD_PARTY", amount: "750.00", priority: "NORMAL", purpose: "Invoice settlement" },
+  { group: "Internal", label: "Third party · large", hint: "Book transfer to another customer, own ledger",
+    rail: "INTERNAL", transferType: "THIRD_PARTY", amount: "14200.00", priority: "HIGH", purpose: "Supplier payment" },
+  { group: "Internal", label: "Own account · small", hint: "Between two accounts of the same customer",
+    rail: "INTERNAL", transferType: "OWN_ACCOUNT", amount: "1500.00", priority: "NORMAL", purpose: "Savings top-up" },
+  { group: "Internal", label: "Own account · large", hint: "Between two accounts of the same customer",
+    rail: "INTERNAL", transferType: "OWN_ACCOUNT", amount: "9800.00", priority: "NORMAL", purpose: "Treasury sweep" },
 ];
 
-const AUTOFILL_PURPOSES = [
-  "Invoice settlement",
-  "Supplier payment",
-  "Consulting services",
-  "Quarterly rent",
-  "Freight and handling",
-];
+const scenarioTitle = (s) => `${s.group} · ${s.label}`;
 
 const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
 const digits = (n) =>
   Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join("");
 
-// Real debit sides only — an account whose available balance covers the amount, so the
-// payment clears validation rather than 400-ing on insufficient funds.
-function pickDebtor(accountsByCustomer, amount) {
-  const eligible = [];
-  for (const [customerId, accounts] of accountsByCustomer) {
-    for (const a of accounts) {
-      if ((a.balance?.available ?? 0) >= amount) eligible.push({ customerId, account: a });
-    }
-  }
-  // Nothing funded well enough: fall back to any pair so the button still fills the form
-  // and the resulting error is the honest one about balances.
-  if (!eligible.length) {
-    for (const [customerId, accounts] of accountsByCustomer) {
-      for (const a of accounts) eligible.push({ customerId, account: a });
-    }
-  }
-  return eligible.length ? pick(eligible) : null;
+// Mirrors stage 2 (authenticate.py `_UNUSABLE_ACCOUNT_STATES` + entitlement_policy
+// `blocking_restrictions`): autofill must never pick an account the backend will refuse, or
+// a scenario meant to show routing dies at Authentication & Authorization instead.
+const UNUSABLE_ACCOUNT_STATES = new Set(["CLOSED", "DORMANT", "FROZEN"]);
+function usable(account, side) {
+  if (UNUSABLE_ACCOUNT_STATES.has(account.status)) return false;
+  const now = new Date().toISOString();
+  const blocking = new Set(["FULL_BLOCK", "LEGAL_HOLD", `${side}_BLOCK`]);
+  return !(account.restrictions || []).some(
+    (r) => r && blocking.has(r.type) && !(r.expiresAt && String(r.expiresAt) <= now)
+  );
 }
 
-function autofill(form, { accountsByCustomer, allAccounts }) {
-  const amount = (
-    AUTOFILL_MIN + Math.random() * (AUTOFILL_MAX - AUTOFILL_MIN)
-  ).toFixed(2);
-  const debtor = pickDebtor(accountsByCustomer, Number(amount));
+// Real debit sides only. Prefers an account that passes `fits` AND covers the amount; then
+// one that passes `fits`; then any usable one — so the button always fills the form and any
+// resulting error is the honest one (balance, currency) rather than a silent no-op.
+function pickDebtor(accountsByCustomer, amount, fits) {
+  const all = [];
+  for (const [customerId, accounts] of accountsByCustomer) {
+    for (const account of accounts) {
+      if (usable(account, "DEBIT")) all.push({ customerId, account });
+    }
+  }
+  const fitting = all.filter((d) => fits(d));
+  const funded = fitting.filter((d) => (d.account.balance?.available ?? 0) >= amount);
+  const pool = funded.length ? funded : fitting.length ? fitting : all;
+  return pool.length ? pick(pool) : null;
+}
+
+function autofill(form, scenario, { accountsByCustomer, allAccounts }) {
+  const sameCurrency = (a, b) => (a.currency || "USD") === (b.currency || "USD");
+  const creditable = (o) => usable(o, "CREDIT");
+  const ownSiblings = ({ customerId, account }) =>
+    (accountsByCustomer.get(customerId) || []).filter(
+      (o) => o.accountId !== account.accountId && sameCurrency(o, account) && creditable(o)
+    );
+  const otherCustomers = ({ customerId, account }) =>
+    allAccounts.filter(
+      (o) => o.customerId !== customerId && sameCurrency(o, account) && creditable(o)
+    );
+
+  const isOwn = scenario.transferType === "OWN_ACCOUNT";
+  const fits =
+    scenario.rail === "WIRE"
+      ? ({ account }) => (account.currency || "USD") === "USD"
+      : (d) => (isOwn ? ownSiblings(d) : otherCustomers(d)).length > 0;
+
+  const debtor = pickDebtor(accountsByCustomer, Number(scenario.amount), fits);
   if (!debtor) return form;
 
   const next = {
     ...EMPTY,
-    rail: form.rail,
+    rail: scenario.rail,
     customerId: debtor.customerId,
     debtorAccountId: debtor.account.accountId,
     currency: debtor.account.currency || "USD",
-    amount,
-    purpose: pick(AUTOFILL_PURPOSES),
+    amount: scenario.amount,
+    purpose: scenario.purpose,
     endToEndReference: `E2E-${digits(8)}`,
     clientReference: `INV-${digits(6)}`,
     // Coherent with Demo Controls: when the correspondent is set to take a $25 fee, charges
     // are DEBT so the bank absorbs it and resolution shows the Dr 5214 / Cr 1111 adjustment
-    // (reconciliation plan, Decision 2). Otherwise random, as before.
-    chargeBearer: feeTakenInFlight(form) ? "DEBT" : pick(CHARGE_BEARERS)[0],
-    priority: pick(PRIORITIES),
+    // (reconciliation plan, Decision 2).
+    chargeBearer: scenario.rail === "WIRE" && feeTakenInFlight(form) ? "DEBT" : "SLEV",
+    priority: scenario.priority,
     // B3: preserve the operator's settlement-outcome selection. autofill rebuilds from
     // EMPTY (which defaults this to MATCHED), so without carrying the current value through,
     // picking Unmatched then Autopopulate silently reverts to MATCHED → the wire settles
@@ -366,33 +422,30 @@ function autofill(form, { accountsByCustomer, allAccounts }) {
     simulatedStatementOutcome: form.simulatedStatementOutcome,
   };
 
-  if (isWire(next)) {
-    const bank = pick(EXTERNAL_BANKS);
-    const payee = pick(EXTERNAL_PAYEES);
+  if (scenario.rail === "WIRE") {
+    const bank = EXTERNAL_BANKS.find((b) => b.bic === scenario.bic);
     return {
       ...next,
-      beneficiaryName: payee.name,
-      beneficiaryAddress: payee.address,
+      beneficiaryName: scenario.payee,
+      beneficiaryAddress: scenario.address,
       beneficiaryAccountNo: digits(10),
       beneficiaryCountry: bank.country,
       beneficiaryBankName: bank.bankName,
       bic: bank.bic,
       clearingSystemCode: bank.clearingSystemCode,
-      // The directory's real value, NOT `digits(9)` — see the note on EXTERNAL_BANKS.
+      // The directory's real value, NOT a generated one — see the note on EXTERNAL_BANKS.
       clearingSystemMemberId: bank.clearingSystemMemberId,
-      accountNumberType: pick(ACCOUNT_TYPES),
+      accountNumberType: "Current",
     };
   }
 
-  // Internal: the creditor must be another account we hold, and must differ from the
-  // debit account — same rule `validate` enforces.
-  const candidates = allAccounts.filter(
-    (a) => a.accountId !== next.debtorAccountId && a.currency === next.currency
-  );
+  // Internal: another account we hold, same currency, never the debit account (the rule
+  // `validate` enforces). Own-account stays within the customer; third-party leaves it.
+  const candidates = isOwn ? ownSiblings(debtor) : otherCustomers(debtor);
   return {
     ...next,
     creditorAccountId: candidates.length ? pick(candidates).accountId : "",
-    transferType: pick(TRANSFER_TYPES)[0],
+    transferType: scenario.transferType,
   };
 }
 
@@ -423,7 +476,11 @@ export default function InitiateWizard({ onInitiated }) {
   // when Initiate returns the payment HELD for a second factor, so the confirmation routes the
   // user to the lifecycle to complete it rather than popping the OTP dialog over this form.
   const [awaitingStepUp, setAwaitingStepUp] = useState(false);
-
+  // Autopopulate walks AUTOFILL_SCENARIOS in order; the index survives "Clear form" so the
+  // presenter keeps their place in the cycle.
+  const [scenarioIdx, setScenarioIdx] = useState(0);
+  const [appliedScenario, setAppliedScenario] = useState(null);
+  const nextScenario = AUTOFILL_SCENARIOS[scenarioIdx];
   const { customers, accountsByCustomer, allAccounts, loading } = useBankAssistedParties();
 
   const set = (k, v) => {
@@ -459,13 +516,17 @@ export default function InitiateWizard({ onInitiated }) {
   }
 
   function autopopulate() {
-    setForm((f) => autofill(f, { accountsByCustomer, allAccounts }));
+    const scenario = AUTOFILL_SCENARIOS[scenarioIdx];
+    setForm((f) => autofill(f, scenario, { accountsByCustomer, allAccounts }));
+    setAppliedScenario(scenario);
+    setScenarioIdx((i) => (i + 1) % AUTOFILL_SCENARIOS.length);
     setShowErrors(false);
     setSubmitError(null);
   }
 
   function reset() {
     setForm(EMPTY);
+    setAppliedScenario(null);
     setStep(0);
     setShowErrors(false);
     setSubmitError(null);
@@ -654,9 +715,9 @@ export default function InitiateWizard({ onInitiated }) {
               onClick={autopopulate}
               disabled={loading || !allAccounts.length}
               leftGlyph={<Icon glyph="Refresh" />}
-              title="Fill with a random demo payment on the selected rail"
+              title={`Next: ${scenarioTitle(nextScenario)} (${scenarioIdx + 1}/${AUTOFILL_SCENARIOS.length}) — ${nextScenario.hint}`}
             >
-              Autopopulate
+              {`Autopopulate: ${scenarioTitle(nextScenario)}`}
             </Button>
             <Button
               variant="primary"
@@ -674,6 +735,16 @@ export default function InitiateWizard({ onInitiated }) {
             {STEPS.map((l) => <Step key={l}>{l}</Step>)}
           </Stepper>
         </div>
+
+        {appliedScenario && (
+          <div style={{ marginBottom: 16 }}>
+            <Banner variant="info">
+              <strong>Filled: {scenarioTitle(appliedScenario)}</strong> — {appliedScenario.hint}.{" "}
+              {`${appliedScenario.rail === "WIRE" ? appliedScenario.bic : appliedScenario.transferType}, ${appliedScenario.priority}, ${fmtAmount(appliedScenario.amount, form.currency)}.`}{" "}
+              Debit account and references are picked at random.
+            </Banner>
+          </div>
+        )}
 
         {loading && <div className={styles.emptyState}>Loading customers and accounts…</div>}
 
