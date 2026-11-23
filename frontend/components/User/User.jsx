@@ -56,11 +56,6 @@ const User = ({
             <img src={`/users/${user.id}.png`} alt="User Avatar" />
             <Body className={styles.userName}>{user.name}</Body>
             <Body className={styles.userRole}>{user.role}</Body>
-            {user.spendingProfile && (
-                <span className={`${styles.spendingBadge} ${styles[`spending${user.spendingProfile}`]}`}>
-                    {user.spendingProfile}
-                </span>
-            )}
             {user.features && user.features.length > 0 && (
                 <>
                     <hr className={styles.featureDivider} />
