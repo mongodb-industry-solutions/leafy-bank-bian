@@ -23,7 +23,7 @@ const Login = ({ onDone, dataReady = false }) => {
     const { selectUser, setLoginInProgress } = useUser();
     const [open, setOpen] = useState(true);
     const [selectedLocal, setSelectedLocal] = useState(null);
-    const [step, setStep] = useState('choose'); // 'choose' | 'backoffice'
+    const [step, setStep] = useState('choose'); // 'choose' | 'retail' | 'backoffice'
     // Set while the "Logging in as ..." beat plays; cleared once selection/navigation
     // proceeds. Non-null also drives the overlay below.
     const [pendingUser, setPendingUser] = useState(null);
@@ -32,19 +32,30 @@ const Login = ({ onDone, dataReady = false }) => {
     // Shown before a user selection takes effect, whether that's closing the modal
     // (backoffice) or navigating away (backoffice personas with a `url`). Passed to
     // User.jsx as onBeforeSelect so both paths route through it. Not used by the
-    // retail path — see handleRetailSelect below.
+    // retail path — see handleRetailUserSelect below.
     const showLoginTransition = (user) =>
         new Promise((resolve) => {
             setPendingUser(user);
             setTimeout(resolve, LOGIN_TRANSITION_MS);
         });
 
+    // Frida's card skips the artificial LOGIN_TRANSITION_MS pause that
+    // showLoginTransition adds — her selectUser() call needs to fire as early
+    // as possible so the dashboard fetch it kicks off runs alongside the
+    // overlay rather than after it (see handleRetailUserSelect below).
+    const beginRetailTransition = (user) => {
+        setPendingUser(user);
+        return Promise.resolve();
+    };
+
     const backofficeUsers = USER_LIST.filter(u => u.section === 'backoffice');
-    // Bank Customer logs in directly as Frida; switching users is done from the
-    // NavBar dropdown afterwards.
+    // Bank Customer shows a small picker (Frida + Loan Borrower); switching to
+    // any other retail user is done from the NavBar dropdown afterwards.
     const defaultRetailUser =
         USER_LIST.find(u => u.section === 'retail' && u.name === 'Frida') ||
         USER_LIST.find(u => u.section === 'retail');
+    const loanBorrowerUser = USER_LIST.find(u => u.section === 'retail' && u.role === 'Loan Borrower');
+    const retailPickerUsers = [defaultRetailUser, loanBorrowerUser].filter(Boolean);
 
     const handleUserSelect = (user) => {
         setSelectedLocal(user);
@@ -54,7 +65,7 @@ const Login = ({ onDone, dataReady = false }) => {
     };
 
     const finalizeRetailLogin = () => {
-        // selectUser already ran in handleRetailSelect (to start the fetch as early as
+        // selectUser already ran in handleRetailUserSelect (to start the fetch as early as
         // possible) — don't call it again here, it would needlessly reset consent/chat
         // state a second time for no behavioral gain.
         setPendingUser(null);
@@ -70,12 +81,10 @@ const Login = ({ onDone, dataReady = false }) => {
     // away so its fetches start in parallel with the overlay, not after it. Setting
     // loginInProgress keeps NavBar (which reads selectedUser directly) from showing
     // the logged-in header while this modal is still on screen.
-    const handleRetailSelect = () => {
-        if (!defaultRetailUser) return;
+    const handleRetailUserSelect = (user) => {
         retailLoginStartedAt.current = Date.now();
-        setPendingUser(defaultRetailUser);
         setLoginInProgress(true);
-        selectUser(defaultRetailUser);
+        selectUser(user);
     };
 
     // Close the overlay once the dashboard's data has arrived, holding it open at
@@ -152,7 +161,7 @@ const Login = ({ onDone, dataReady = false }) => {
                             <div className={styles.categoryContainer}>
                                 <div
                                     className={`${styles.categoryCard} ${styles.categoryRetail}`}
-                                    onClick={handleRetailSelect}
+                                    onClick={() => setStep('retail')}
                                 >
                                     <div className={styles.categoryEmoji}>🏦</div>
                                     <div className={styles.categoryTitle}>Bank Customer</div>
@@ -170,6 +179,31 @@ const Login = ({ onDone, dataReady = false }) => {
                                         Access all bank backoffice operational features including fraud detection and portfolio management.
                                     </div>
                                 </div>
+                            </div>
+                        </>
+                    )}
+
+                    {step === 'retail' && (
+                        <>
+                            <Description className={styles.descriptionModal}>
+                                Select a bank customer to login as:
+                            </Description>
+                            <div className={styles.usersContainer}>
+                                {retailPickerUsers.map(user => {
+                                    const isDefaultRetailUser = user.id === defaultRetailUser?.id;
+                                    return (
+                                        <User
+                                            user={user}
+                                            isSelectedUser={selectedLocal && selectedLocal.id === user.id}
+                                            key={user.id}
+                                            setOpen={setOpen}
+                                            setLocalSelectedUser={isDefaultRetailUser ? handleRetailUserSelect : handleUserSelect}
+                                            closeOnSelect={!isDefaultRetailUser}
+                                            onBeforeSelect={isDefaultRetailUser ? beginRetailTransition : showLoginTransition}
+                                            onExternalOpen={() => setPendingUser(null)}
+                                        />
+                                    );
+                                })}
                             </div>
                         </>
                     )}

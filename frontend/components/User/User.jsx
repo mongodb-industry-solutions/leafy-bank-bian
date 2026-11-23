@@ -15,6 +15,9 @@ const User = ({
     setLocalSelectedUser = null,
     onBeforeSelect = null,
     onExternalOpen = null,
+    // False lets setLocalSelectedUser own when the modal closes — e.g. the
+    // retail login flow waits for dashboard data before closing itself.
+    closeOnSelect = true,
 }) => {
     const { markIntentionalNavigation } = useUser();
     const handleClick = async () => {
@@ -42,7 +45,7 @@ const User = ({
         }
         if (!setLocalSelectedUser) return;
         setLocalSelectedUser(user);
-        setOpen(false);
+        if (closeOnSelect) setOpen(false);
     };
 
     return (
