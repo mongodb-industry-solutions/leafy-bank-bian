@@ -25,6 +25,7 @@ import TextInput from "@leafygreen-ui/text-input";
 import { Select, Option } from "@leafygreen-ui/select";
 import Stepper, { Step } from "@leafygreen-ui/stepper";
 import { Body, H2 } from "@leafygreen-ui/typography";
+import Tooltip from "@leafygreen-ui/tooltip";
 
 import styles from "./PaymentsWorkflow.module.css";
 import { coreApi } from "@/lib/api/client";
@@ -295,55 +296,78 @@ const EXTERNAL_BANKS = [
   { bankName: "Royal Bank of Canada", bic: "ROYCCAT2", country: "CA", clearingSystemCode: "CACPA", clearingSystemMemberId: "000300002" },
 ];
 
-// Defined demo scenarios, applied in order: each Autopopulate click fills the NEXT one and
-// the button names it, so the presenter knows what is about to be set. 4 international,
-// 4 domestic, 4 internal. Everything that decides the path is fixed per scenario (rail,
-// bank, country, priority, transfer type, amount); only the debit account (a real funded
-// account) and the references are picked at run time.
+// Defined demo scenarios, applied in order: each Autopopulate click fills the next one, and
+// the ⓘ on the button explains the payment now in the form in plain words — `title` and
+// `story` say what the transaction is, `path` how it travels. 4 international, 4 domestic,
+// 4 internal. Everything that decides the path is fixed per scenario (rail, bank, country,
+// priority, transfer type, amount); only the debit account (a real funded account) and the
+// references are picked at run time.
 //
-// Routing the hints describe (backend routing.py): international = beneficiary country ≠ US
-// → SWIFT, and USD adds CHASUS33 as the first hop. An INTERMEDIARY hop only exists when the
-// beneficiary bank is not our country correspondent; every directory bank IS its country's
-// correspondent, so each international route is LEAFUS33 → CHASUS33 → beneficiary bank.
-// Domestic: priority URGENT/HIGH → Fedwire RTGS, otherwise CHIPS; neither gets gpi tracking.
+// The `path` copy follows backend routing.py: beneficiary country ≠ US → SWIFT, and USD
+// goes through CHASUS33 (JPMorgan Chase) first. Every directory bank is also our
+// correspondent for its country, so no extra intermediary bank appears. Domestic: priority
+// URGENT/HIGH → Fedwire (settles at once), otherwise CHIPS (netted, cheaper).
 const AUTOFILL_SCENARIOS = [
-  { group: "International", label: "GB · Barclays", hint: "SWIFT, gpi tracked: LEAFUS33 → CHASUS33 → BARCGB22",
+  { group: "International", label: "GB · Barclays", title: "International wire to the UK",
+    story: "A supplier payment to Northwind Traders in London, banking with Barclays.",
+    path: "Sent over SWIFT via JPMorgan Chase (our US dollar correspondent) to Barclays. Tracked hop by hop with SWIFT gpi.",
     rail: "WIRE", bic: "BARCGB22", payee: "Northwind Traders Ltd", address: "12 Cheapside, London",
     amount: "12450.00", priority: "NORMAL", purpose: "Supplier payment" },
-  { group: "International", label: "DE · Deutsche Bank", hint: "SWIFT, gpi tracked: LEAFUS33 → CHASUS33 → DEUTDEFF",
+  { group: "International", label: "DE · Deutsche Bank", title: "International wire to Germany",
+    story: "A freight bill paid to Fabrikam Logistics in Hamburg, banking with Deutsche Bank. High priority.",
+    path: "Sent over SWIFT via JPMorgan Chase to Deutsche Bank. Tracked hop by hop with SWIFT gpi.",
     rail: "WIRE", bic: "DEUTDEFF", payee: "Fabrikam Logistics GmbH", address: "Hafenstrasse 8, Hamburg",
     amount: "8720.50", priority: "HIGH", purpose: "Freight and handling" },
-  { group: "International", label: "CH · UBS", hint: "SWIFT, gpi tracked: LEAFUS33 → CHASUS33 → UBSWCHZH",
+  { group: "International", label: "CH · UBS", title: "International wire to Switzerland",
+    story: "A consulting fee paid to Tailspin Aviation in Geneva, banking with UBS.",
+    path: "Sent over SWIFT via JPMorgan Chase to UBS. Tracked hop by hop with SWIFT gpi.",
     rail: "WIRE", bic: "UBSWCHZH", payee: "Tailspin Aviation SA", address: "Route de Meyrin 21, Geneva",
     amount: "15300.00", priority: "NORMAL", purpose: "Consulting services" },
-  { group: "International", label: "CA · Royal Bank of Canada", hint: "SWIFT, gpi tracked: LEAFUS33 → CHASUS33 → ROYCCAT2",
+  { group: "International", label: "CA · Royal Bank of Canada", title: "International wire to Canada",
+    story: "An urgent invoice payment to Adventure Works in Toronto, banking with Royal Bank of Canada.",
+    path: "Sent over SWIFT via JPMorgan Chase to Royal Bank of Canada. Tracked hop by hop with SWIFT gpi.",
     rail: "WIRE", bic: "ROYCCAT2", payee: "Adventure Works Supply Co", address: "77 Harbour Street, Toronto",
     amount: "2378.40", priority: "URGENT", purpose: "Invoice settlement" },
 
-  { group: "Domestic", label: "Citibank · urgent", hint: "Fedwire RTGS, no gpi panel",
+  { group: "Domestic", label: "Citibank · urgent", title: "Urgent US wire",
+    story: "An urgent supplier payment to Contoso Manufacturing in Detroit, banking with Citibank.",
+    path: "Stays in the US. Urgent, so it goes over Fedwire and settles immediately.",
     rail: "WIRE", bic: "CITIUS33", payee: "Contoso Manufacturing Inc", address: "440 Industrial Way, Detroit",
     amount: "5600.00", priority: "URGENT", purpose: "Supplier payment" },
-  { group: "Domestic", label: "Citibank · normal", hint: "CHIPS netted clearing, no gpi panel",
+  { group: "Domestic", label: "Citibank · normal", title: "Standard US wire",
+    story: "Quarterly rent paid to Wide World Importers in New York, banking with Citibank.",
+    path: "Stays in the US. Not urgent, so it goes over CHIPS, which nets payments and costs less than Fedwire.",
     rail: "WIRE", bic: "CITIUS33", payee: "Wide World Importers", address: "350 Fifth Avenue, New York",
     amount: "3180.75", priority: "NORMAL", purpose: "Quarterly rent" },
-  { group: "Domestic", label: "Chase · high", hint: "Fedwire RTGS, no gpi panel",
+  { group: "Domestic", label: "Chase · high", title: "High-priority US wire",
+    story: "A consulting fee paid to Litware in San Francisco, banking with JPMorgan Chase.",
+    path: "Stays in the US. High priority, so it goes over Fedwire and settles immediately.",
     rail: "WIRE", bic: "CHASUS33", payee: "Litware Inc", address: "1 Market Street, San Francisco",
     amount: "9875.00", priority: "HIGH", purpose: "Consulting services" },
-  { group: "Domestic", label: "Chase · normal", hint: "CHIPS netted clearing, no gpi panel",
+  { group: "Domestic", label: "Chase · normal", title: "Standard US wire",
+    story: "An invoice paid to Proseware in Chicago, banking with JPMorgan Chase.",
+    path: "Stays in the US. Not urgent, so it goes over CHIPS, which nets payments and costs less than Fedwire.",
     rail: "WIRE", bic: "CHASUS33", payee: "Proseware Ltd", address: "200 Park Avenue, Chicago",
     amount: "1240.00", priority: "NORMAL", purpose: "Invoice settlement" },
 
-  { group: "Internal", label: "Third party · small", hint: "Book transfer to another customer, own ledger",
+  { group: "Internal", label: "Third party · small", title: "Transfer to another Leafy Bank customer",
+    story: "A small invoice payment to a different customer who also banks with Leafy Bank.",
+    path: "Never leaves the bank: both accounts are on our own ledger, so it settles at once.",
     rail: "INTERNAL", transferType: "THIRD_PARTY", amount: "750.00", priority: "NORMAL", purpose: "Invoice settlement" },
-  { group: "Internal", label: "Third party · large", hint: "Book transfer to another customer, own ledger",
+  { group: "Internal", label: "Third party · large", title: "Large transfer to another Leafy Bank customer",
+    story: "A large supplier payment to a different customer who also banks with Leafy Bank.",
+    path: "Never leaves the bank: both accounts are on our own ledger, so it settles at once.",
     rail: "INTERNAL", transferType: "THIRD_PARTY", amount: "14200.00", priority: "HIGH", purpose: "Supplier payment" },
-  { group: "Internal", label: "Own account · small", hint: "Between two accounts of the same customer",
+  { group: "Internal", label: "Own account · small", title: "Move money between your own accounts",
+    story: "A customer tops up one of their own accounts from another.",
+    path: "Never leaves the bank: same customer, same ledger, settles at once.",
     rail: "INTERNAL", transferType: "OWN_ACCOUNT", amount: "1500.00", priority: "NORMAL", purpose: "Savings top-up" },
-  { group: "Internal", label: "Own account · large", hint: "Between two accounts of the same customer",
+  { group: "Internal", label: "Own account · large", title: "Large move between your own accounts",
+    story: "A treasury sweep: a customer moves a large balance between two of their own accounts.",
+    path: "Never leaves the bank: same customer, same ledger, settles at once.",
     rail: "INTERNAL", transferType: "OWN_ACCOUNT", amount: "9800.00", priority: "NORMAL", purpose: "Treasury sweep" },
 ];
 
-const scenarioTitle = (s) => `${s.group} · ${s.label}`;
 
 const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
 const digits = (n) =>
@@ -480,7 +504,6 @@ export default function InitiateWizard({ onInitiated }) {
   // presenter keeps their place in the cycle.
   const [scenarioIdx, setScenarioIdx] = useState(0);
   const [appliedScenario, setAppliedScenario] = useState(null);
-  const nextScenario = AUTOFILL_SCENARIOS[scenarioIdx];
   const { customers, accountsByCustomer, allAccounts, loading } = useBankAssistedParties();
 
   const set = (k, v) => {
@@ -715,9 +738,38 @@ export default function InitiateWizard({ onInitiated }) {
               onClick={autopopulate}
               disabled={loading || !allAccounts.length}
               leftGlyph={<Icon glyph="Refresh" />}
-              title={`Next: ${scenarioTitle(nextScenario)} (${scenarioIdx + 1}/${AUTOFILL_SCENARIOS.length}) — ${nextScenario.hint}`}
             >
-              {`Autopopulate: ${scenarioTitle(nextScenario)}`}
+              <span className={styles.autofillLabel}>
+                Autopopulate
+                {/* A span, not a button: a button may not nest in a button. Hover-only, so a
+                    click on it still autopopulates like the rest of the button. */}
+                <Tooltip
+                  trigger={
+                    <span className={styles.autofillInfo} aria-label="What was populated">
+                      <Icon glyph="InfoWithCircle" size={14} />
+                    </span>
+                  }
+                >
+                  {appliedScenario ? (
+                    <div className={styles.autofillTip}>
+                      <strong>{appliedScenario.title}</strong>
+                      <span>
+                        {fmtAmount(appliedScenario.amount, form.currency)} · {appliedScenario.story}
+                      </span>
+                      <span>
+                        <b>How it travels:</b> {appliedScenario.path}
+                      </span>
+                      <span className={styles.autofillTipNote}>
+                        Scenario {AUTOFILL_SCENARIOS.indexOf(appliedScenario) + 1} of{" "}
+                        {AUTOFILL_SCENARIOS.length}. The paying customer and account are picked
+                        at random; click again for the next scenario.
+                      </span>
+                    </div>
+                  ) : (
+                    `Fills the form with a ready-made demo payment. Each click moves to the next of ${AUTOFILL_SCENARIOS.length} scenarios: international wires, US wires and internal transfers.`
+                  )}
+                </Tooltip>
+              </span>
             </Button>
             <Button
               variant="primary"
@@ -735,16 +787,6 @@ export default function InitiateWizard({ onInitiated }) {
             {STEPS.map((l) => <Step key={l}>{l}</Step>)}
           </Stepper>
         </div>
-
-        {appliedScenario && (
-          <div style={{ marginBottom: 16 }}>
-            <Banner variant="info">
-              <strong>Filled: {scenarioTitle(appliedScenario)}</strong> — {appliedScenario.hint}.{" "}
-              {`${appliedScenario.rail === "WIRE" ? appliedScenario.bic : appliedScenario.transferType}, ${appliedScenario.priority}, ${fmtAmount(appliedScenario.amount, form.currency)}.`}{" "}
-              Debit account and references are picked at random.
-            </Banner>
-          </div>
-        )}
 
         {loading && <div className={styles.emptyState}>Loading customers and accounts…</div>}
 

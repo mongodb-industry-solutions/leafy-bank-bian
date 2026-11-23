@@ -1320,6 +1320,31 @@
   align-items: center;
 }
 
+.autofillLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.autofillInfo {
+  display: inline-flex;
+  color: var(--pw-muted);
+}
+
+.autofillTip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 320px;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.autofillTipNote {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
 .stepperBar {
   /* LG Stepper centers its steps internally, so the bar only needs to be a
      centered box for the whole cluster to sit on the axis. */
