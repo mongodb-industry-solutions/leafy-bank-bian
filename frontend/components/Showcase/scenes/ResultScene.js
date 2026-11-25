@@ -33,7 +33,7 @@ export default function ResultScene({ paymentId, scenario, trace, payment, outco
       </div>
     );
   }
-  // R4/R5 phase 1: the request is out and nothing else has changed.
+  // R4 phase 1: the request is out and nothing else has changed.
   if (outcome === "ESCALATED") {
     return (
       <div className={styles.section}>

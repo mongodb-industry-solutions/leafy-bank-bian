@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Icon from "@leafygreen-ui/icon";
 import { H2, H3, Body } from "@leafygreen-ui/typography";
 import ScenarioInfo from "./ScenarioBrief";
-import { ENABLED_SCENARIOS, GROUPS, PAIRS, stepsFor } from "./scenarios";
+import { SCENARIOS, GROUPS, stepsFor } from "./scenarios";
 import { CUTOFF_SCENARIOS } from "./cutoffScenarios";
 import { CONCURRENCY_GROUP, CONCURRENCY_SCENARIOS } from "./concurrencyScenarios";
 import styles from "./Showcase.module.css";
@@ -77,26 +77,11 @@ function ScenarioCard({ scenario, ran, onPick }) {
 }
 
 // One matrix: rows are what the agent does, columns are the agents. Every cell is one slot, so
-// all cards share one width; a pair fills its slot with two half-width cards under one heading.
+// all cards share one width.
 const AGENTS = [
-  { id: "recon", title: "Reconciliation agent", scenarios: ENABLED_SCENARIOS },
+  { id: "recon", title: "Reconciliation agent", scenarios: SCENARIOS },
   { id: "cutoff", title: "Cut-off agent", scenarios: CUTOFF_SCENARIOS },
 ];
-
-// A cell's scenarios as render items: a pair when all its keys sit in this cell, else single cards.
-function cellItems(scenarios) {
-  const items = [];
-  const paired = new Set();
-  for (const pair of PAIRS) {
-    const members = pair.keys.map((k) => scenarios.find((s) => s.key === k));
-    if (members.every(Boolean)) {
-      items.push({ type: "pair", key: pair.keys.join("+"), pair, members });
-      pair.keys.forEach((k) => paired.add(k));
-    }
-  }
-  scenarios.filter((s) => !paired.has(s.key)).forEach((s) => items.push({ type: "card", key: s.key, scenario: s }));
-  return items;
-}
 
 function GroupHead({ group }) {
   return (
@@ -113,26 +98,14 @@ function GroupHead({ group }) {
 }
 
 function Cell({ agent, mode, ran, onPick }) {
-  const items = cellItems(agent.scenarios.filter((s) => s.mode === mode));
+  const items = agent.scenarios.filter((s) => s.mode === mode);
   return (
     <div className={styles.matrixCell}>
       <span className={styles.matrixCellAgent}>{agent.title}</span>
       {items.length === 0 && <div className={styles.matrixEmpty}>No scenario yet</div>}
-      {items.map((item) => (item.type === "pair" ? (
-        <div key={item.key} className={styles.pair}>
-          <div className={styles.pairHead}>
-            <span className={styles.pairTitle}>{item.pair.title}</span>
-            <span className={styles.muted}>{item.pair.blurb}</span>
-          </div>
-          <div className={styles.pairCards}>
-            {item.members.map((s) => (
-              <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={onPick} />
-            ))}
-          </div>
-        </div>
-      ) : (
-        <ScenarioCard key={item.key} scenario={item.scenario} ran={ran.includes(item.key)} onPick={onPick} />
-      )))}
+      {items.map((s) => (
+        <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={onPick} />
+      ))}
     </div>
   );
 }

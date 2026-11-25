@@ -23,7 +23,7 @@ export const LANE_LABEL = { agent: "Agent", code: "Code", mongo: "MongoDB", huma
 
 const PHASE_OF_STEP = {
   initiate: PAYMENT, settle: PAYMENT, glpost: PAYMENT,
-  statement: DETECTION, match: DETECTION, overdue: DETECTION, window: DETECTION,
+  statement: DETECTION, match: DETECTION, window: DETECTION,
   investigate: INVESTIGATION, approve: DECISION, late: RESOLUTION, verify: RESOLUTION,
 };
 // Where a step's MongoDB writes sit among the detection and agent lines of the same phase.

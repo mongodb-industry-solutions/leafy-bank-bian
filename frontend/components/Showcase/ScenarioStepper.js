@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Body, Overline } from "@leafygreen-ui/typography";
 import { agentApi, coreApi, pipelineApi } from "@/lib/api/client";
-import { usePaymentWorkflow, usePipelineTrace, useWorkflowExceptions } from "@/lib/api/hooks";
+import { usePaymentWorkflow, usePipelineTrace } from "@/lib/api/hooks";
 import { CATEGORY, OVERDUE_SECONDS, actOf, scenarioByKey, stepsFor } from "./scenarios";
 import { PaymentCard } from "./StatusRail";
 import { BriefStrip } from "./ScenarioBrief";
@@ -25,11 +25,11 @@ import { BEAT_DWELL_MS, phaseOfStep, usePacedEvents, useRunLog } from "./runLog"
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
-// Endings each scenario is designed to reach. ESCALATED is a legitimate waypoint for R4/R5
+// Endings each scenario is designed to reach. ESCALATED is a legitimate waypoint for R4
 // (the correspondent has not answered yet); anywhere else it means the run went off script.
 const EXPECTED_OUTCOMES = {
-  R1: ["RESOLVED", "RECONCILED"], R1b: ["RESOLVED", "RECONCILED"], R2: ["RESOLVED", "RECONCILED"], TL: ["RESOLVED", "RECONCILED"],
-  R4: ["RESOLVED", "RECONCILED", "ESCALATED"], R5: ["ANSWERED", "ESCALATED"],
+  R1: ["RESOLVED", "RECONCILED"], TL: ["RESOLVED", "RECONCILED"],
+  R4: ["RESOLVED", "RECONCILED", "ESCALATED"],
 };
 // An automatic step fires this long after the log has finished showing the step before it,
 // so each beat is read before the next one starts.
@@ -71,13 +71,9 @@ async function runAction(kind, scenarioKey, paymentId) {
     return { patch: {}, note: "GL batch complete." };
   }
   if (kind === "statement" || kind === "statementLate") {
-    const { data, error } = await generateStatement(scenarioKey === "R5");
+    const { data, error } = await generateStatement(false);
     if (error) throw new Error(error);
     if (!data?.generated) {
-      // R5 needs its injected orphan line, which only a fresh statement carries.
-      if (scenarioKey === "R5") {
-        throw new Error("No statement generated: this wire is already on a statement. Start the scenario again.");
-      }
       return { patch: {}, note: "This wire is already on a statement." };
     }
     const orphans = data.orphanCount ? ` (${data.orphanCount} unknown)` : "";
@@ -126,7 +122,6 @@ export default function ScenarioStepper({ scenarioKey }) {
   const [note, setNote] = useState(null);
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(Date.now());
-  const [orphan, setOrphan] = useState(null);
   const [lastProposals, setLastProposals] = useState({});
 
   const step = steps[index];
@@ -145,19 +140,6 @@ export default function ScenarioStepper({ scenarioKey }) {
   const paymentId = ctx.paymentId || null;
   const { payment } = usePaymentWorkflow(paymentId, tick, 0);
   const { trace } = usePipelineTrace(paymentId, !!paymentId, 2000, tick);
-  const needsOrphan = scenarioKey === "R2" || scenarioKey === "R5";
-  const { items: openItems } = useWorkflowExceptions({ limit: 100 }, needsOrphan && ctx.statementId ? tick : -1);
-
-  // R2/R5: the ORPHANED line on THIS scenario's statement. Kept once seen, because a LINK
-  // resolves it and it drops out of the OPEN list.
-  useEffect(() => {
-    if (!needsOrphan || !ctx.statementId) return;
-    const hit = (openItems || [])
-      .map((row) => row.exception)
-      .find((e) => e?.category === CATEGORY.ORPHANED && e?.subjectRef?.paymentMessageId === ctx.statementId);
-    if (hit) setOrphan(hit);
-    else setOrphan((prev) => (prev ? { ...prev, status: prev.status === "OPEN" ? "RESOLVED" : prev.status } : prev));
-  }, [openItems, needsOrphan, ctx.statementId]);
 
   const ownException = useMemo(() => {
     const own = (payment?.exceptions || []).filter((e) => OWN_CATEGORIES.has(e.category));
@@ -165,10 +147,8 @@ export default function ScenarioStepper({ scenarioKey }) {
   }, [payment]);
 
   const candidateIds = useMemo(() => {
-    if (scenarioKey === "R5") return orphan ? [orphan.exceptionId] : [];
-    if (scenarioKey === "R2") return [orphan?.exceptionId, ownException?.exceptionId].filter(Boolean);
     return ownException ? [ownException.exceptionId] : [];
-  }, [scenarioKey, orphan, ownException]);
+  }, [ownException]);
 
   const agents = useAgentRecords(candidateIds, tick);
 
@@ -178,7 +158,6 @@ export default function ScenarioStepper({ scenarioKey }) {
     if (fresh.length) setLastProposals((prev) => ({ ...prev, ...Object.fromEntries(fresh.map(([id, a]) => [id, a.proposedAction])) }));
   }, [agents]);
 
-  // R2: follow whichever twin carries the proposal; otherwise the first candidate.
   const followedId =
     ctx.followedId ||
     candidateIds.find((id) => agents[id]?.proposedAction || lastProposals[id]) ||
@@ -187,14 +166,10 @@ export default function ScenarioStepper({ scenarioKey }) {
     null;
   const agent = followedId ? agents[followedId] : null;
 
-  const trackedExceptions = [ownException, needsOrphan ? orphan : null].filter(Boolean);
+  const trackedExceptions = [ownException].filter(Boolean);
   const followedException = trackedExceptions.find((e) => e.exceptionId === followedId) || null;
 
-  const reconciled =
-    payment?.lifecycle?.reconciliationStatus === "RECONCILED" ||
-    // Only R5 has no payment. Elsewhere the payment's own reconciliation must close:
-    // resolving one exception (e.g. dismissing an orphan twin) does not reconcile it.
-    (scenarioKey === "R5" && followedException && followedException.status !== "OPEN" && agent?.verification?.result === "RESOLVED");
+  const reconciled = payment?.lifecycle?.reconciliationStatus === "RECONCILED";
   const escalated =
     agent?.verification?.result === "ESCALATED" || (followedException?.awaitingCounterparty && followedException?.status === "OPEN");
   const awaitingReply = !!followedException?.awaitingCounterparty && followedException.status === "OPEN";
@@ -206,7 +181,7 @@ export default function ScenarioStepper({ scenarioKey }) {
   // The run ends when the agent has closed its exception. The payment flips to RECONCILED on the
   // next GL batch (scheduler, every 10 minutes); the demo does not wait for it. The result card
   // points to the Activity page in Payments, where that status lands on its own.
-  const resolved = scenarioKey !== "R5" && agent?.verification?.result === "RESOLVED" && trackedExceptions.every((e) => e.status !== "OPEN");
+  const resolved = agent?.verification?.result === "RESOLVED" && trackedExceptions.every((e) => e.status !== "OPEN");
   const outcome = reconciled ? "RECONCILED" : answered ? "ANSWERED" : escalated ? "ESCALATED" : resolved ? "RESOLVED" : null;
 
   const { steps: agentSteps, started: agentStarted } = useAgentSteps(followedId, !outcome);
@@ -384,7 +359,7 @@ export default function ScenarioStepper({ scenarioKey }) {
   // button would leave it hidden behind "Review the proposal".
   const proposalReady = step.gate === "proposal" && !!agent?.proposedAction && !ctx.decision;
   const canDecide = (step.gate === "decided" && !ctx.decision) || proposalReady || revisedProposalPending;
-  const sources = { payment, trace, ownException, orphan, agent, followedException, scenarioKey };
+  const sources = { payment, trace, ownException, agent, followedException, scenarioKey };
 
   // The decision opens only once the paced log has shown "Run paused for approval", i.e. after the
   // presenter has read the proposal and policy lines. `canDecide` itself stays live (it gates the

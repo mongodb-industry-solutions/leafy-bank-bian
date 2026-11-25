@@ -221,7 +221,7 @@ export function RaceHeader({ scenario, report, queued }) {
     <div className={styles.wsHero}>
       <div className={styles.wsHeroTop}>
         <div>
-          <span className={styles.wsEyebrow}>Write skew · {scenario.key}</span>
+          <span className={styles.wsEyebrow}>Write skew</span>
           <h2 className={styles.wsTitle}>{scenario.title}</h2>
           <p className={styles.wsStory}>{scenario.story}</p>
         </div>

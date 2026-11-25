@@ -3,7 +3,7 @@
 // Live, not snapshotted: a later step may have changed the doc since, which is why `fields`
 // names what THIS step wrote. Writers verified against the services' code (2026-10-03).
 //
-// sources = { payment, trace, ownException, orphan, agent, followedException, scenarioKey }
+// sources = { payment, trace, ownException, agent, followedException, scenarioKey }
 //   payment — GET /workflow/payments/{id}: the payments doc plus joined collections
 //   trace   — GET /pipeline/trace/{id}: the ledger's documents for the payment
 
@@ -61,8 +61,7 @@ const camt111 = ({ payment }) =>
   nonEmpty((payment?.messages || []).filter((m) => m.purpose === "INVESTIGATION_RESPONSE"));
 const correctedStatement = ({ payment }) =>
   nonEmpty((payment?.statements || []).filter((m) => m.statement?.correction));
-const exceptionsOpened = ({ ownException, orphan, scenarioKey }) =>
-  nonEmpty(scenarioKey === "R5" ? [orphan] : scenarioKey === "R2" ? [orphan, ownException] : [ownException]);
+const exceptionsOpened = ({ ownException }) => nonEmpty([ownException]);
 // The exception doc with the freshest agent{} (the stepper polls agent{} separately).
 const followed = ({ followedException, agent }) =>
   followedException ? nonEmpty({ ...followedException, agent: agent ?? followedException.agent }) : null;
@@ -141,20 +140,8 @@ const APPROVE_BY_SCENARIO = {
     W("settlementPositions", "update", "adjustmentPending", position),
     W("payments", "update", "clearing.settlementAdjustment", ({ payment }) => nonEmpty(paymentDoc(payment))),
   ],
-  R1b: [
-    W("payments", "update", "lifecycle.reconciliationStatus RECONCILED. No ledger entry, by design",
-      ({ payment }) => nonEmpty(paymentDoc(payment))),
-  ],
-  R2: [
-    W("canonicalJsonStorage", "update", "entries[].recon MANUAL_MATCHED on the altered line", statements),
-    W("settlementPositions", "update", "actualAmount, sourceMessageRef from the linked line", position),
-  ],
   R4: [
     W("canonicalJsonStorage", "insert", "camt.110 investigation request to the correspondent: purpose INVESTIGATION_REQUEST, caseId", camt110),
-  ],
-  R5: [
-    W("canonicalJsonStorage", "insert", "camt.110 investigation request to the correspondent about the unknown line (escalation.paymentMessageId on the exception)",
-      () => null),
   ],
 };
 // The simulated correspondent's answer to the escalation, shown on the final step.
@@ -170,10 +157,6 @@ const REPLY_BY_SCENARIO = {
     W("exceptions", "update", "status RESOLVED (RECHECK), escalation.correctedStatement", followed, RECHECK_WRITER),
     W("payments", "update", "lifecycle.reconciliationStatus RECONCILED, set by the tie-out",
       ({ payment }) => nonEmpty(paymentDoc(payment)), RECHECK_WRITER),
-  ],
-  R5: [
-    W("canonicalJsonStorage", "insert", "camt.111 investigation response: misposting confirmed", () => null, REPLY_WRITER),
-    W("exceptions", "update", "awaitingCounterparty false, escalation.reply, status DISMISSED", followed, REPLY_WRITER),
   ],
 };
 const APPROVE_COMMON = W("exceptions", "update",
@@ -191,7 +174,6 @@ const BY_STEP = {
   glpost: GL_POST,
   statement: STATEMENT,
   match: MATCH,
-  overdue: MISSING,
   window: MISSING,
   investigate: INVESTIGATE,
   late: LATE,

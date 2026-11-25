@@ -5,7 +5,6 @@
 export const CATEGORY = {
   DISCREPANCY: "RECONCILIATION_DISCREPANCY",
   MISSING: "RECONCILIATION_MISSING",
-  ORPHANED: "ORPHANED_SETTLEMENT",
 };
 
 export const SCENARIOS = [
@@ -63,99 +62,6 @@ export const SCENARIOS = [
     },
   },
   {
-    key: "R1b",
-    // Disabled: a SHAR charge is deducted from the amount forwarded, so our nostro is still
-    // debited in full and no statement gap exists. The short-line premise below is not real.
-    disabled: true,
-    mode: "approval",
-    recommended: false,
-    decision: {
-      cause: { label: "Fee deducted", code: "FEE" },
-      constraint: { label: "Charges are shared", code: "SHAR" },
-      action: { label: "Accept the gap", code: "ACCEPT_DISCREPANCY" },
-    },
-    title: "Fee deducted, shared charges",
-    story: "Same USD 25.00 fee, but the payment is SHAR: intermediary bank charges are borne by the beneficiary, so the deduction is expected and not a loss for the bank.",
-    talkingPoint: "Same USD 25.00 shortfall, different outcome: under DEBT it stays a real exception; under SHAR the charge bearer decides it is not an error.",
-    bank: "Barclays",
-    wire: {
-      beneficiary: "Northwind Traders Ltd",
-      bankName: "Barclays Bank PLC",
-      bic: "BARCGB22",
-      country: "GB",
-      iban: "GB82WEST12345698765432",
-      chargeBearer: "SHAR",
-      purpose: "Supplier payment",
-    },
-    amount: "3,275.00",
-    expected: "Reconciled by accepting the discrepancy",
-    policyLine: "Discrepancy · cause FEE · bearer SHAR → only ACCEPT_DISCREPANCY is allowed",
-    beats: {
-      initiate:
-        "We send USD 3,275.00 to Barclays with charge bearer SHAR: the beneficiary bears the " +
-        "beneficiary bank's fee and any intermediary charges, so it may legitimately receive slightly less.",
-      settle: "Barclays confirms settlement.",
-      glpost: "Our books say 3,275.00 left our nostro account.",
-      statement: "Barclays's statement shows 3,250.00: the same 25.00 fee as in the sender-pays scenario.",
-      match: "A 25.00 RECONCILIATION_DISCREPANCY opens, the same as in the sender-pays scenario.",
-      investigate:
-        "The agent reaches the same cause, FEE, but this time the bearer is SHAR. Intermediary " +
-        "charges are borne by the beneficiary, so the deduction is expected and there is no charge adjustment to make. Policy allows only " +
-        "ACCEPT_DISCREPANCY. Same symptom as the sender-pays case, different correct answer.",
-      approve: "Approving records the variance as \"SHAR charge deducted\", explained and matched. No charge adjustment is posted, by design.",
-      verify:
-        "The exception is closed and the payment is RECONCILED, with no charge adjustment. " +
-        "The charge terms, not the agent's judgement, decided the books.",
-    },
-  },
-  {
-    key: "R2",
-    disabled: true,
-    mode: "approval",
-    recommended: false,
-    decision: {
-      cause: { label: "Reference rewritten", code: "REFERENCE_MISMATCH" },
-      constraint: { label: "A matching line exists", code: "candidate found" },
-      action: { label: "Link the statement line", code: "LINK_STATEMENT_ENTRY" },
-    },
-    title: "Altered reference",
-    story: "The bank changes our payment reference on the way through. Our payment looks missing and the statement line looks unknown, though they are the same payment.",
-    talkingPoint: "Fuzzy matching is the agent's job, never automatic. One link closes both exceptions.",
-    bank: "Deutsche Bank",
-    wire: {
-      beneficiary: "Fabrikam Logistics GmbH",
-      bankName: "Deutsche Bank AG",
-      bic: "DEUTDEFF",
-      country: "DE",
-      iban: "DE89370400440532013000",
-      chargeBearer: "SHAR",
-      purpose: "Freight and handling",
-    },
-    amount: "6,120.00",
-    expected: "Reconciled by linking the statement line",
-    policyLine: "Missing ↔ orphaned · cause REFERENCE_MISMATCH → LINK_STATEMENT_ENTRY, with approval",
-    beats: {
-      initiate: "We send USD 6,120.00 to Fabrikam Logistics at Deutsche Bank.",
-      settle: "Deutsche Bank confirms settlement.",
-      glpost: "Our books say 6,120.00 left our nostro account.",
-      statement:
-        "The statement has a 6,120.00 line, but Deutsche Bank rewrote our reference into its " +
-        "own format. The money is there; the label no longer matches.",
-      match:
-        "Matching is exact by design, so the line matches nothing and opens an " +
-        "ORPHANED_SETTLEMENT exception: money on the statement we can't place.",
-      overdue:
-        "Our payment's own line hasn't been found either. Once the window passes, a MISSING " +
-        "exception opens. Two exceptions now describe one problem from both sides.",
-      investigate:
-        "The agent searches for candidates: same amount, same correspondent, the reference " +
-        "rearranged. It proposes linking the line to the payment. Fuzzy matching is a " +
-        "proposal for a human to approve, never an automatic match.",
-      approve: "Approving links the statement line to the payment, and one link closes both exceptions.",
-      verify: "Both the MISSING and the ORPHANED exceptions are closed, and the payment is RECONCILED.",
-    },
-  },
-  {
     key: "R4",
     mode: "refuses",
     recommended: true,
@@ -208,55 +114,6 @@ export const SCENARIOS = [
         "\"Corrected statement now\"). The settlement position takes 7,360.00 from that " +
         "statement, the recheck agrees, the exception closes and the payment is RECONCILED. " +
         "No write-off, no adjustment.",
-    },
-  },
-  {
-    key: "R5",
-    disabled: true,
-    mode: "refuses",
-    recommended: false,
-    decision: {
-      cause: { label: "Unknown line", code: "ORPHANED" },
-      constraint: { label: "No payment explains it", code: "no candidate" },
-      action: { label: "Escalate to the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
-    },
-    title: "Unknown statement line",
-    story: "Our wire matches the statement. The statement also lists one extra line that does not belong to any payment we made.",
-    talkingPoint: "Not every line on the statement belongs to us.",
-    bank: "Barclays",
-    wire: {
-      beneficiary: "Northwind Traders Ltd",
-      bankName: "Barclays Bank PLC",
-      bic: "BARCGB22",
-      country: "GB",
-      iban: "GB33BUKB20201555555555",
-      chargeBearer: "SHAR",
-      purpose: "Software licences",
-    },
-    amount: "5,630.00",
-    expected: "Orphan dismissed once the correspondent confirms a misposting",
-    policyLine: "Orphaned · no candidate → ESCALATE_TO_CORRESPONDENT or DISMISS",
-    beats: {
-      initiate: "We send a routine USD 5,630.00 wire to Barclays. This payment is clean.",
-      settle: "Barclays confirms settlement.",
-      glpost: "Our books say 5,630.00 left our nostro account.",
-      statement:
-        "The statement carries our 5,630.00 line, plus one extra line we never sent: a " +
-        "movement on our account with no payment behind it.",
-      match:
-        "Our wire matches and reconciles cleanly. The extra line matches nothing and opens " +
-        "an ORPHANED_SETTLEMENT exception.",
-      investigate:
-        "The agent searches our payments for anything that could explain the line, and finds " +
-        "no candidate. With nothing to link, policy allows only escalation or dismissal.",
-      approve:
-        "Approving sends a camt.110 investigation request to Barclays to explain the line. " +
-        "We don't book money we can't attribute.",
-      verify:
-        "Our own wire is already RECONCILED. The orphan stays open, awaiting Barclays. About " +
-        "20 seconds later (simulated) Barclays answers with a camt.111 that the line was a misposting " +
-        "(or use \"Correspondent replies now\") and the exception is dismissed. No money " +
-        "was booked.",
     },
   },
   {
@@ -325,14 +182,7 @@ export const GROUPS = [
   },
 ];
 
-// Scenarios shown side by side as one comparison, because the contrast is the point. A pair
-// renders only when every member is enabled (ScenarioPicker.cellItems).
-export const PAIRS = [];
-
-// Disabled scenarios stay defined but are hidden from the picker and cannot be opened.
-export const ENABLED_SCENARIOS = SCENARIOS.filter((s) => !s.disabled);
-
-export const scenarioByKey = (key) => ENABLED_SCENARIOS.find((s) => s.key === key) || null;
+export const scenarioByKey = (key) => SCENARIOS.find((s) => s.key === key) || null;
 
 // Seconds after settlement before the ledger calls a statement line overdue (MISSING).
 export const OVERDUE_SECONDS = 60;
@@ -414,20 +264,6 @@ const STEP = {
       "change stream on the exceptions collection wakes the Reconciliation Agent.",
     run: "batch",
     auto: "Reconciliation is comparing payment, ledger and statement",
-  },
-  overdue: {
-    key: "overdue",
-    label: "Overdue",
-    title: "The payment's own line is overdue",
-    summary:
-      "A settled payment expects its statement line within a set window. If none arrives, a MISSING exception opens.",
-    narration:
-      "Every settled payment expects its line on a statement within a set window. When the " +
-      "window passes with no matching line, the next batch raises a MISSING exception for " +
-      "the payment.",
-    run: "batch",
-    countdown: true,
-    button: "Check for the missing line",
   },
   window: {
     key: "window",
@@ -518,8 +354,7 @@ export function stepsFor(key) {
   if (key === "TL") {
     return [...head, STEP.window, STEP.investigateTL, STEP.late, STEP.verify];
   }
-  const middle = key === "R2" ? [STEP.statement, STEP.match, STEP.overdue] : [STEP.statement, STEP.match];
-  return [...head, ...middle, STEP.investigate, STEP.approve, STEP.verify];
+  return [...head, STEP.statement, STEP.match, STEP.investigate, STEP.approve, STEP.verify];
 }
 
 // The five acts the audience sees. Several steps fold into one act; the step machine in
@@ -534,7 +369,7 @@ export const ACTS = [
 
 const ACT_OF_STEP = {
   initiate: 1, settle: 1, glpost: 1,
-  statement: 2, match: 2, overdue: 2, window: 2,
+  statement: 2, match: 2, window: 2,
   investigate: 3, approve: 4, late: 5, verify: 5,
 };
 

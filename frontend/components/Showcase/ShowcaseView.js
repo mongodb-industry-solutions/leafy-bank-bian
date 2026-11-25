@@ -92,7 +92,7 @@ export default function ShowcaseView() {
               <Icon glyph="ChevronLeft" size={14} />All scenarios
             </button>
             <span className={styles.crumbSep} aria-hidden="true">/</span>
-            <span className={styles.crumbHere} aria-current="page">{current?.key} · {current?.title}</span>
+            <span className={styles.crumbHere} aria-current="page">{current?.title}</span>
           </nav>
         )}
         {scenarioKey && isCutoffKey && <CutoffStepper key={scenarioKey} scenarioKey={scenarioKey} />}
