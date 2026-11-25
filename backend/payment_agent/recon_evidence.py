@@ -3,8 +3,9 @@ profile, resolution precedents. Direct pymongo reads on the shared DB, like `pay
 
 Candidate scoring is deterministic and lives in `rank_candidates`, a pure function, so the
 agent can only ever pick from a list the code produced (policy.check_proposal enforces it).
-No Atlas Search here — fuzzy reference repair is Wei You's demo's lane (`_state.md`
-no-overlap rule); this is a key comparison over a handful of unmatched lines.
+The reference score always decides; a Voyage rerank of the line's narrative (`AddtlNtryInf`)
+against the payment's remittance and beneficiary only orders candidates that tie on it.
+No Atlas Search fuzzy reference repair here — that is Wei You's demo's lane (`_state.md`).
 """
 
 from __future__ import annotations
@@ -12,11 +13,14 @@ from __future__ import annotations
 import logging
 import re
 from datetime import timedelta
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import policy
 
 logger = logging.getLogger(__name__)
+
+# (query, documents) -> one relevance per document, or None when unavailable.
+Reranker = Callable[[str, list[str]], Optional[list[float]]]
 
 STATEMENT_PURPOSE = "ACCOUNT_STATEMENT"
 DEFAULT_CHARGE = 25.0  # camt053.CORRESPONDENT_CHARGE; used when the correspondent has no policy
@@ -45,15 +49,30 @@ def reference_score(reference: Optional[str], payment_id: Optional[str]) -> tupl
     return SCORE_AMOUNT_ONLY, "amount only"
 
 
-def rank_candidates(rows: list[dict]) -> list[dict]:
-    """Score each `{reference, paymentId, amount, expectedAmount, ...}` row; best first."""
+def rank_candidates(rows: list[dict], semantic: Optional[list[float]] = None) -> list[dict]:
+    """Score each `{reference, paymentId, amount, expectedAmount, ...}` row; best first.
+
+    `semantic` (one relevance per row) breaks ties on the reference score before the amount
+    delta does; it never lifts a weaker reference match over a stronger one.
+    """
     ranked = []
-    for r in rows:
+    for i, r in enumerate(rows):
         score, basis = reference_score(r.get("reference"), r.get("paymentId"))
         delta = round(float(r.get("amount") or 0) - float(r.get("expectedAmount") or 0), 2)
-        ranked.append({**r, "score": score, "basis": basis, "amountDelta": delta})
-    ranked.sort(key=lambda c: (-c["score"], abs(c["amountDelta"])))
+        ranked.append({**r, "score": score, "basis": basis, "amountDelta": delta,
+                       "semanticScore": semantic[i] if semantic else None})
+    ranked.sort(key=lambda c: (-c["score"], -(c["semanticScore"] or 0), abs(c["amountDelta"])))
     return ranked[:MAX_CANDIDATES]
+
+
+def _rerank_rows(rows: list[dict], query: Optional[str], doc_key: str,
+                 rerank: Optional[Reranker]) -> Optional[list[float]]:
+    if rerank is None or not query or not rows:
+        return None
+    docs = [r.get(doc_key) or "" for r in rows]
+    if not any(docs):
+        return None
+    return rerank(query, docs)
 
 
 def known_charges(db: Any, bic: Optional[str]) -> list[float]:
@@ -87,22 +106,33 @@ def _latest_position(db: Any, payment_id: str) -> Optional[dict]:
     return rows[0] if rows else None
 
 
-def find_candidates(db: Any, exc: dict) -> list[dict]:
+def payment_narrative(payment: dict) -> Optional[str]:
+    """What we sent: remittance text and beneficiary — the counterpart of a line's narrative."""
+    remittance = payment.get("remittance") or {}
+    parts = [remittance.get("unstructured") or remittance.get("reference")
+             or remittance.get("invoiceNo"), (payment.get("creditor") or {}).get("name")]
+    return " ".join(p for p in parts if p) or None
+
+
+def find_candidates(db: Any, exc: dict, rerank: Optional[Reranker] = None) -> list[dict]:
     """Ranked pairings for a MISSING payment (lines) or an ORPHANED line (payments)."""
     category = exc.get("category")
     if category == policy.CATEGORY_MISSING:
-        return rank_candidates(_lines_for_payment(db, exc["paymentId"]))
+        rows, query = _lines_for_payment(db, exc["paymentId"])
+        return rank_candidates(rows, _rerank_rows(rows, query, "narrative", rerank))
     if category == policy.CATEGORY_ORPHANED:
-        return rank_candidates(_payments_for_line(db, exc))
+        rows, query = _payments_for_line(db, exc)
+        return rank_candidates(rows, _rerank_rows(rows, query, "paymentNarrative", rerank))
     return []
 
 
-def _lines_for_payment(db: Any, payment_id: str) -> list[dict]:
+def _lines_for_payment(db: Any, payment_id: str) -> tuple[list[dict], Optional[str]]:
     position = _latest_position(db, payment_id)
     if position is None:
-        return []
+        return [], None
     payment = db["payments"].find_one({"paymentId": payment_id},
-                                      {"_id": 0, "correspondent": 1}) or {}
+                                      {"_id": 0, "correspondent": 1, "remittance": 1,
+                                       "creditor.name": 1}) or {}
     bic = (payment.get("correspondent") or {}).get("correspondentBic")
     expected = float(position.get("expectedAmount") or position.get("grossAmount") or 0)
     tolerance = _charge_for(db, bic) + 0.005
@@ -121,22 +151,24 @@ def _lines_for_payment(db: Any, payment_id: str) -> list[dict]:
                     "entries.amount": {"$gte": expected - tolerance, "$lte": expected + tolerance}}},
         {"$project": {"_id": 0, "paymentMessageId": 1, "lineNo": "$entries.lineNo",
                       "reference": "$entries.reference", "amount": "$entries.amount",
+                      "narrative": "$entries.additionalInfo",
                       "charges": "$entries.charges", "bookingDate": "$statement.window.to"}},
     ]
     rows = list(db["canonicalJsonStorage"].aggregate(pipeline))
-    return [{**r, "paymentId": payment_id, "expectedAmount": expected} for r in rows]
+    return ([{**r, "paymentId": payment_id, "expectedAmount": expected} for r in rows],
+            payment_narrative(payment))
 
 
-def _payments_for_line(db: Any, exc: dict) -> list[dict]:
+def _payments_for_line(db: Any, exc: dict) -> tuple[list[dict], Optional[str]]:
     subject = exc.get("subjectRef") or {}
     stmt = db["canonicalJsonStorage"].find_one(
         {"paymentMessageId": subject.get("paymentMessageId"), "purpose": STATEMENT_PURPOSE},
         {"_id": 0, "statement": 1, "entries": 1})
     if stmt is None:
-        return []
+        return [], None
     line = next((e for e in stmt.get("entries") or [] if e.get("lineNo") == subject.get("lineNo")), None)
     if line is None:
-        return []
+        return [], None
     amount = float(line.get("amount") or 0)
     tolerance = _charge_for(db, line.get("counterpartyBic")) + 0.005
     pipeline = [
@@ -145,16 +177,22 @@ def _payments_for_line(db: Any, exc: dict) -> list[dict]:
                     "expectedAmount": {"$gte": amount - tolerance, "$lte": amount + tolerance}}},
         {"$lookup": {"from": "payments", "localField": "paymentId", "foreignField": "paymentId",
                      "as": "payment",
-                     "pipeline": [{"$project": {"_id": 0, "lifecycle": 1}}]}},
+                     "pipeline": [{"$project": {"_id": 0, "lifecycle": 1, "remittance": 1,
+                                                "creditor.name": 1}}]}},
         {"$match": {"payment.lifecycle.currentState": {"$in": ["SETTLED", "POSTED"]},
                     "payment.lifecycle.reconciliationStatus": {"$ne": "RECONCILED"}}},
-        {"$project": {"_id": 0, "paymentId": 1, "expectedAmount": 1}},
+        {"$project": {"_id": 0, "paymentId": 1, "expectedAmount": 1,
+                      "remittance": {"$first": "$payment.remittance"},
+                      "creditor": {"$first": "$payment.creditor"}}},
         {"$limit": 50},
     ]
     rows = list(db["settlementPositions"].aggregate(pipeline))
-    return [{**r, "paymentMessageId": subject.get("paymentMessageId"),
-             "lineNo": subject.get("lineNo"), "reference": line.get("reference"),
-             "amount": amount} for r in rows]
+    return ([{"paymentId": r["paymentId"], "expectedAmount": r.get("expectedAmount"),
+              "paymentNarrative": payment_narrative(r),
+              "paymentMessageId": subject.get("paymentMessageId"),
+              "lineNo": subject.get("lineNo"), "reference": line.get("reference"),
+              "narrative": line.get("additionalInfo"), "amount": amount} for r in rows],
+            line.get("additionalInfo"))
 
 
 def _percentile(sorted_values: list[float], p: float) -> Optional[float]:

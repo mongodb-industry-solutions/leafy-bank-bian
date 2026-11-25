@@ -46,9 +46,11 @@ from langgraph.prebuilt import InjectedState, ToolNode
 from langgraph.types import interrupt
 from typing_extensions import Annotated
 
+import case_memory
 import clients
 import policy
 import recon_evidence
+import semantic
 # `payment_trace`, not `trace` — the stdlib owns that name, and this service directory leads
 # sys.path, so a module called `trace.py` here shadows it for the whole process.
 import payment_trace as trace_mod
@@ -88,15 +90,18 @@ Exception categories:
 Steps:
 1. `payment_trace_lookup` and `reconciliation_analysis` (skip both for an ORPHANED line — it \
 has no payment; the exception detail describes the line).
-2. `get_correspondent_profile` (charge policy, reference format, usual booking lag) and \
-`get_resolution_precedents` (how similar cases were resolved before).
+2. `get_correspondent_profile` (charge policy, reference format, usual booking lag).
 3. For MISSING or ORPHANED: `find_statement_candidates`. For a DISCREPANCY: \
 `check_discrepancy_explanations` (currency, amount fields, FX, charge bearer, reported and \
 levied charges).
-4. `record_investigation` with a cause: TIMING_LAG, REFERENCE_MISMATCH, AMOUNT_MISMATCH, FEE \
+4. `get_resolution_precedents` with `situation`: one or two sentences on what you have found \
+so far (amounts, gap, reference, charge bearer). It returns this correspondent's recent \
+closed cases and, by meaning, the most similar closed cases at any correspondent. Precedent \
+informs your cause; it never overrides the checks.
+5. `record_investigation` with a cause: TIMING_LAG, REFERENCE_MISMATCH, AMOUNT_MISMATCH, FEE \
 or ORPHANED. Cite specific records and amounts as evidence. The reply lists the actions \
 permitted for that cause.
-5. Act:
+6. Act:
    - TIMING_LAG: `recheck_reconciliation`; if still open, `schedule_recheck` within the \
 correspondent's usual lag. Do not escalate a timing lag until rechecks are exhausted.
    - Otherwise: `propose_action` with one permitted action. An operator approves it.
@@ -124,7 +129,8 @@ def _now() -> datetime:
 
 
 def _exception(db: Any, exception_id: str) -> dict:
-    return db["exceptions"].find_one({"exceptionId": exception_id}, {"_id": 0}) or {}
+    return db["exceptions"].find_one({"exceptionId": exception_id},
+                                     {"_id": 0, case_memory.FIELD: 0}) or {}
 
 
 def _is_statement_line(exc: dict) -> bool:
@@ -204,9 +210,12 @@ amounts, the delta (left - right) and the reason a leg is pending."""
     def find_statement_candidates(state: Annotated[dict, InjectedState]) -> str:
         """For a MISSING payment: unmatched statement lines that could be it. For an ORPHANED \
 line: unreconciled payments it could belong to. Scored deterministically by reference \
-(exact / re-keyed prefix / shared token) and amount. Use the returned index with LINK."""
+(exact / re-keyed prefix / shared token) and amount; ties are broken by `semanticScore`, \
+a Voyage rerank of the line's narrative against the payment's remittance and beneficiary. \
+Use the returned index with LINK."""
         exception_id, _ = _ids(state)
-        candidates = recon_evidence.find_candidates(db, _exception(db, exception_id))
+        candidates = recon_evidence.find_candidates(db, _exception(db, exception_id),
+                                                    rerank=semantic.rerank)
         set_agent_fields(db, exception_id, {"candidates": candidates})
         return json.dumps([{"index": i, **c} for i, c in enumerate(candidates)] or
                           "No candidates found.", default=str)
@@ -238,16 +247,18 @@ escalation threshold applies. The threshold decides escalation, never the cause.
         return json.dumps(recon_evidence.correspondent_profile(db, bic), default=str)
 
     @tool
-    def get_resolution_precedents(state: Annotated[dict, InjectedState]) -> str:
-        """The last resolved exceptions of this category with this correspondent, and the \
-action each was closed with."""
+    def get_resolution_precedents(state: Annotated[dict, InjectedState], situation: str = "") -> str:
+        """How past cases were closed. `sameCorrespondent`: the last closed exceptions of this \
+category with this correspondent. `similarCases`: the closed cases of this category most \
+like `situation` (your short description of the evidence), found by vector search and \
+reranked, at any correspondent; null when semantic search is unavailable."""
         exception_id, payment_id = _ids(state)
         exc = _exception(db, exception_id)
         bic = _correspondent_bic(db, exc, payment_id)
-        if not bic:
-            return "No correspondent to look up precedents for."
-        return json.dumps(recon_evidence.resolution_precedents(db, bic, exc.get("category")),
-                          default=str)
+        same = (recon_evidence.resolution_precedents(db, bic, exc.get("category")) if bic
+                else "No correspondent on this exception.")
+        similar = case_memory.similar_cases(db, exc, situation, correspondent_bic=bic)
+        return json.dumps({"sameCorrespondent": same, "similarCases": similar}, default=str)
 
     @tool
     def record_investigation(
@@ -288,6 +299,7 @@ short strings each citing a specific record and amount. Returns the permitted ac
             "recommendedResolution": None,
             "recordedAt": _now().isoformat(),
         })
+        _remember_case(db, exception_id)
         if not allowed:
             return (f"Recorded (cause={cause_up}). No action is permitted for a "
                     f"{exc.get('category')} with that cause — re-check the cause.")
@@ -385,6 +397,18 @@ def _correspondent_bic(db: Any, exc: dict, payment_id: str) -> Optional[str]:
         return line.get("counterpartyBic")
     payment = db["payments"].find_one({"paymentId": payment_id}, {"_id": 0, "correspondent": 1}) or {}
     return (payment.get("correspondent") or {}).get("correspondentBic")
+
+
+def _remember_case(db: Any, exception_id: str) -> None:
+    """Add this investigation to case memory. Best effort: a failure costs a future run a
+    precedent, never this run its result."""
+    try:
+        exc = _exception(db, exception_id)
+        case_memory.index_case(db, exc,
+                               correspondent_bic=_correspondent_bic(db, exc, exc.get("paymentId")),
+                               charge_bearer=_charge_bearer(db, exc))
+    except Exception:  # noqa: BLE001
+        logger.warning("case memory: indexing %s failed", exception_id, exc_info=True)
 
 
 def _refusal(db: Any, exception_id: str, action: str, params: dict) -> Optional[str]:

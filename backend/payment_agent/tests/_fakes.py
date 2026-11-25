@@ -82,6 +82,16 @@ class _Cursor(list):
         return _Cursor(self[:n])
 
 
+def _project(doc, proj):
+    """Honour exclusion projections (`{"caseMemory": 0}`); inclusion ones are ignored."""
+    doc = copy.deepcopy(doc)
+    excluded = [k for k, v in (proj or {}).items() if not v and k != "_id"]
+    if excluded and all(not v for k, v in proj.items() if k != "_id"):
+        for k in excluded:
+            doc.pop(k, None)
+    return doc
+
+
 class FakeColl:
     def __init__(self, docs=None, unique=None):
         self.docs = [copy.deepcopy(d) for d in (docs or [])]
@@ -89,10 +99,10 @@ class FakeColl:
         self.unique = list(unique or [])
 
     def find_one(self, q=None, proj=None, **_):
-        return next((copy.deepcopy(d) for d in self.docs if matches(d, q or {})), None)
+        return next((_project(d, proj) for d in self.docs if matches(d, q or {})), None)
 
     def find(self, q=None, proj=None):
-        return _Cursor(copy.deepcopy(d) for d in self.docs if matches(d, q or {}))
+        return _Cursor(_project(d, proj) for d in self.docs if matches(d, q or {}))
 
     def count_documents(self, q=None):
         return sum(1 for d in self.docs if matches(d, q or {}))

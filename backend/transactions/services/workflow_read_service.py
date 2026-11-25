@@ -20,6 +20,7 @@ from typing import Optional
 from contexts.payment_order_initiation.domain import lifecycle, lifecycle_history
 from contexts.payment_rail.domain import gpi, pacs008
 from database.connection import MongoDBConnection
+from process.exceptions import READ_PROJECTION as _EXCEPTION_PROJECTION
 
 # A payment needing attention is one that stopped somewhere it will never leave. The set is
 # taken from the state machine rather than restated, so a new terminal state cannot silently
@@ -246,7 +247,7 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
     # "no exceptions" rather than branching on undefined. Oldest first; the panel sorts.
     payment["exceptions"] = list(
         connection.get_collection(db_name, "exceptions")
-        .find({"paymentId": payment_id}, {"_id": 0})
+        .find({"paymentId": payment_id}, {"_id": 0, **_EXCEPTION_PROJECTION})
         .sort("updatedAt", 1)
     )
     # Stage 8's evidence: the camt.053 statement(s) carrying this payment's line. Not in
@@ -358,7 +359,7 @@ def _join_exceptions(exc_coll, payment_ids: list) -> dict:
     if not ids:
         return {}
     by_payment: dict = {}
-    for exc in exc_coll.find({"paymentId": {"$in": ids}}):
+    for exc in exc_coll.find({"paymentId": {"$in": ids}}, _EXCEPTION_PROJECTION):
         by_payment.setdefault(exc.get("paymentId"), []).append(exc)
     return {pid: _pick_exception(excs) for pid, excs in by_payment.items()}
 

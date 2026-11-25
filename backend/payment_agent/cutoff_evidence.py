@@ -196,6 +196,7 @@ def funds_position(db: Any, payment: dict, *, business_date: date) -> dict:
 
 
 def open_exceptions(db: Any, payment_id: str) -> dict:
-    rows = list(db["exceptions"].find({"paymentId": payment_id, "status": OPEN}))
+    rows = list(db["exceptions"].find({"paymentId": payment_id, "status": OPEN},
+                                      {"_id": 0, "category": 1}))
     return {"count": len(rows),
             "categories": sorted({r.get("category") for r in rows if r.get("category")})}

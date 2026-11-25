@@ -99,6 +99,10 @@ SOURCE_STAGE_RECONCILE = "8 reconcile"
 SERVICE_TRANSACTIONS = "transactions-service"
 SERVICE_LEDGER = "ledger-service"
 
+# `caseMemory{}` holds the Reconciliation Agent's 1024-float case embedding
+# (payment_agent/case_memory.py). Agent evidence only: keep it out of every API read.
+READ_PROJECTION = {"caseMemory": 0}
+
 # A payment's terminal state never reopens (B4); resolution is evidence alongside it.
 _RESOLVED_STATUSES = frozenset({STATUS_RESOLVED, STATUS_DISMISSED})
 

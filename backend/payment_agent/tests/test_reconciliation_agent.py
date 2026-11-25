@@ -350,7 +350,7 @@ _R2 = {"exceptionId": "EXC-R2", "paymentId": "PAY-2452e147", "category": policy.
 
 def test_missing_with_a_rekeyed_line_links_the_candidate(calls, monkeypatch):
     db = _db(_R2, {"paymentId": "PAY-2452e147", "chargeBearer": "SHAR"})
-    monkeypatch.setattr(ev, "find_candidates", lambda _db, _exc: ev.rank_candidates([{
+    monkeypatch.setattr(ev, "find_candidates", lambda _db, _exc, **_kw: ev.rank_candidates([{
         "paymentId": "PAY-2452e147", "paymentMessageId": "PM-2452e166", "lineNo": 1,
         "reference": "2452E147/LEAFYBK", "amount": 6120.0, "expectedAmount": 6120.0}]))
 

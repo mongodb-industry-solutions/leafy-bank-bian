@@ -80,6 +80,42 @@ def test_the_xml_carries_only_iso_elements():
     assert isinstance(stmt["Ntry"], list) and isinstance(stmt["Bal"], list)
 
 
+@pytest.mark.parametrize("payment,expected", [
+    ({"remittance": {"unstructured": "Invoice 4471"}, "creditor": {"name": "Acme Corp"}},
+     "INVOICE 4471 ACME CORP"),
+    ({"remittance": {"reference": "REF-1"}, "creditor": {}}, "REF-1"),
+    ({"remittance": {"invoiceNo": "INV-9"}}, "INV-9"),
+    ({"remittance": {}, "creditor": {"name": "  "}}, None),
+    ({}, None),
+])
+def test_the_narrative_is_remittance_plus_beneficiary_in_correspondent_style(payment, expected):
+    assert camt053.narrative_for(payment) == expected
+
+
+def test_the_narrative_is_cut_to_the_correspondents_length():
+    long = {"remittance": {"unstructured": "x" * 300}}
+    assert len(camt053.narrative_for(long)) == 140
+
+
+def test_the_narrative_renders_as_addtlntryinf_and_only_when_present():
+    position = {"paymentId": "PAY-1", "grossAmount": 100.0, "currency": "USD"}
+    now = datetime.now(timezone.utc)
+    with_text = camt053.to_ntry(camt053.entry_for(position, None, "INV 1 ACME"), booking_date=now)
+    without = camt053.to_ntry(camt053.entry_for(position, None), booking_date=now)
+    assert with_text["AddtlNtryInf"] == "INV 1 ACME"
+    assert list(with_text)[-1] == "AddtlNtryInf"  # last element of ISO ReportEntry
+    assert "AddtlNtryInf" not in without
+
+
+def test_an_orphan_line_carries_a_narrative_and_keeps_its_seeded_bic():
+    bics = ["AAAAUS33", "BBBBGB22", "CCCCDEFF"]
+    orphan = camt053.orphan_entry(random.Random(7), bics)
+    rng = random.Random(7)
+    rng.choice([1_250, 3_400, 7_800, 12_500, 18_750]); rng.randrange(16**8)
+    assert orphan["counterpartyBic"] == rng.choice(bics)
+    assert orphan["additionalInfo"]
+
+
 # --- the generator, over the real saga ---------------------------------------
 
 def test_each_lever_produces_its_line(service, db):
@@ -97,6 +133,13 @@ def test_each_lever_produces_its_line(service, db):
     assert all(e["recon"]["status"] == camt053.RECON_UNMATCHED for e in doc["entries"])
     assert doc["purpose"] == "ACCOUNT_STATEMENT" and doc["paymentId"] is None
     assert doc["statement"]["closingBalance"] == -(250 + 225 + 250 + 205)
+
+
+def test_a_rekeyed_line_still_names_the_beneficiary(service, db):
+    """The narrative survives REFERENCE_ALTERED — the text the agent's reranker reads."""
+    ref = _settled_wire(service, db, camt053.REFERENCE_ALTERED)
+    doc = generate_statement(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False, now=_later(1))
+    assert "ACME CORP" in _line(doc, ref)["additionalInfo"]
 
 
 def test_a_late_line_is_held_one_statement_and_booked_once(service, db):

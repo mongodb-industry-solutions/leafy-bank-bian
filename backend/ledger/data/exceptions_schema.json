@@ -148,6 +148,17 @@
             "lineNo": {"bsonType": "int"}
           }
         },
+        "caseMemory": {
+          "bsonType": ["object", "null"],
+          "description": "Reconciliation Agent case memory (backend/payment_agent/case_memory.py): a short case description and its Voyage embedding, searched with Atlas $vectorSearch (index exceptions_case_memory_vector). Written only by payment_agent, on record_investigation and by scripts/setup_case_memory.py. Kept out of agent{} so a backfilled precedent never looks worked. Every API read projects it out.",
+          "properties": {
+            "text": {"bsonType": "string"},
+            "embedding": {"bsonType": "array", "items": {"bsonType": "double"}},
+            "correspondentBic": {"bsonType": ["string", "null"]},
+            "model": {"bsonType": "string"},
+            "indexedAt": {"bsonType": "date"}
+          }
+        },
         "createdAt": {"bsonType": "date"},
         "updatedAt": {"bsonType": "date"},
         "sourceSystem": {

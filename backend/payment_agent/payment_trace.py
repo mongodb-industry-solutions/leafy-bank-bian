@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 #   {paymentId}-REV     — a reversal (stage 9)
 _LEDGER_EVENT_KEYS = lambda pid: [pid, f"{pid}-FEE", f"{pid}-SETTLEMENT", f"{pid}-REV"]
 
+# `caseMemory.embedding` is 1024 floats: never put it in the model's context.
+_EXCEPTION_OUT = {"_id": 0, "caseMemory": 0}
+
 
 def _find(collection, query, projection):
     if collection is None:
@@ -59,7 +62,7 @@ def _find_open_recon_exception(db, payment_id):
             {"paymentId": payment_id, "status": "OPEN",
              "category": {"$in": ["RECONCILIATION_DISCREPANCY", "RECONCILIATION_MISSING",
                                   "ORPHANED_SETTLEMENT"]}},
-            {"_id": 0},
+            _EXCEPTION_OUT,
         )
     except Exception:  # noqa: BLE001
         logger.warning("open recon exception read failed for %s — skipping", payment_id, exc_info=True)
@@ -107,7 +110,7 @@ def gather_trace(db: Any, payment_id: str, exception_id: str | None = None) -> d
             {"paymentId": payment_id}, no_id,
         ),
         "exception": (
-            db["exceptions"].find_one({"exceptionId": exception_id}, no_id)
+            db["exceptions"].find_one({"exceptionId": exception_id}, _EXCEPTION_OUT)
             if db is not None and exception_id
             else _find_open_recon_exception(db, payment_id)
         ),

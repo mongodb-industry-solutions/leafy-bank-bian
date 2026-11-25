@@ -69,6 +69,17 @@ _MAX_REF_LEN = 16
 
 ORPHAN_REF_PREFIX = "ORPH-"
 
+# ISO `AddtlNtryInf` is Max500Text; correspondents usually cut far shorter.
+_NARRATIVE_MAX = 140
+# What an orphan line says about itself. None of it names one of our payments.
+_ORPHAN_NARRATIVES = (
+    "RETURN OF FUNDS UNABLE TO APPLY",
+    "COVER PAYMENT NO UNDERLYING DETAILS",
+    "CORRESPONDENT ADJUSTMENT PRIOR PERIOD",
+    "TRADE SETTLEMENT FX SWAP LEG",
+    "INTERBANK FEE REBATE Q3",
+)
+
 # Balance type codes (ISO ExternalBalanceType1Code).
 _OPENING_BOOKED = "OPBD"
 _CLOSING_BOOKED = "CLBD"
@@ -101,11 +112,27 @@ def transposed_amount(amount: float) -> float:
     return amount
 
 
-def entry_for(position: dict, outcome: Optional[str]) -> dict:
+def narrative_for(payment: dict) -> Optional[str]:
+    """The free text a correspondent puts in `AddtlNtryInf` for our wire. Pure.
+
+    Correspondent style: what we sent as remittance plus the beneficiary, upper-cased and cut
+    short. It survives a re-keyed reference, which is what lets the Reconciliation Agent's
+    reranker tie a line back to a payment when the reference alone does not.
+    """
+    remittance = payment.get("remittance") or {}
+    parts = [remittance.get("unstructured") or remittance.get("reference")
+             or remittance.get("invoiceNo"),
+             (payment.get("creditor") or {}).get("name")]
+    text = " ".join(p.strip() for p in parts if p and p.strip())
+    return text.upper()[:_NARRATIVE_MAX] or None
+
+
+def entry_for(position: dict, outcome: Optional[str], narrative: Optional[str] = None) -> dict:
     """The statement line the correspondent books for one of our settlement positions. Pure.
 
     Returns our flat projection (`entries[]` on the stored doc); `to_ntry` renders it as ISO.
     LATE is not handled here — the caller decides which statement a LATE line lands on.
+    `narrative` (see `narrative_for`) becomes `additionalInfo` / ISO `AddtlNtryInf`.
     """
     outcome = outcome or CLEAN
     payment_id = position["paymentId"]
@@ -127,6 +154,7 @@ def entry_for(position: dict, outcome: Optional[str]) -> dict:
         "currency": position.get("currency") or position.get("expectedCurrency") or "USD",
         "creditDebit": _DEBIT,          # an outbound wire leaves the nostro
         "charges": charges,
+        "additionalInfo": narrative,
         # Simulator truth, kept for tests and the demo UI. Matching (A2) must never read these:
         # a real statement does not tell you which payment a line belongs to.
         "simulatedPaymentId": payment_id,
@@ -189,6 +217,8 @@ def orphan_entry(rng: random.Random, correspondent_bics: list[str]) -> dict:
         "creditDebit": _DEBIT,
         "charges": None,
         "counterpartyBic": rng.choice(correspondent_bics),
+        # Drawn after the BIC so seeded statements keep their existing orphans.
+        "additionalInfo": rng.choice(_ORPHAN_NARRATIVES),
         "simulatedPaymentId": None,
         "simulatedOutcome": "ORPHAN",
         "recon": _unmatched(),
@@ -223,6 +253,8 @@ def to_ntry(entry: dict, *, booking_date: datetime) -> dict:
         "AcctSvcrRef": entry["reference"],
         "NtryDtls": [{"TxDtls": [tx_details]}],
     }
+    if entry.get("additionalInfo"):
+        ntry["AddtlNtryInf"] = entry["additionalInfo"]  # last element of ISO ReportEntry
     if entry.get("reversal"):
         # ISO places RvslInd straight after CdtDbtInd; dict order is XML order.
         ntry = {k: ntry[k] for k in ("Amt", "CdtDbtInd")} | {"RvslInd": "true"} | {

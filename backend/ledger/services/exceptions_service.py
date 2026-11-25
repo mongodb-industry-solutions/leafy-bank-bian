@@ -52,6 +52,10 @@ SEVERITY_INFORMATIONAL = "INFORMATIONAL"
 SERVICE_TRANSACTIONS = "transactions-service"
 SERVICE_LEDGER = "ledger-service"
 
+# `caseMemory{}` holds the Reconciliation Agent's 1024-float case embedding
+# (payment_agent/case_memory.py). Agent evidence only: keep it out of every API read.
+READ_PROJECTION = {"caseMemory": 0}
+
 SOURCE_STAGE_VALIDATE = "3 validate"
 SOURCE_STAGE_SETTLE = "7 settle"
 SOURCE_STAGE_RECONCILE = "8 reconcile"

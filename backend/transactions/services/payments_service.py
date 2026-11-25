@@ -49,6 +49,7 @@ from process.exceptions import (
     ExceptionActionNotLegal,
     ExceptionConflict,
     ExceptionNotFound,
+    READ_PROJECTION as EXCEPTION_READ_PROJECTION,
     STATUS_DISMISSED,
     STATUS_OPEN,
     STATUS_RESOLVED,
@@ -575,7 +576,7 @@ class PaymentsService:
         self._mark_exception_resolved(
             exc, action, note, datetime.now(timezone.utc),
         )
-        return self.db["exceptions"].find_one({"exceptionId": exception_id})
+        return self.db["exceptions"].find_one({"exceptionId": exception_id}, EXCEPTION_READ_PROJECTION)
 
     def resume_payment(
         self, payment_id: str, *, customer_ref: str, authentication: Optional[dict]
@@ -1484,7 +1485,7 @@ class PaymentsService:
                 )
             ])
 
-        updated = self.db["exceptions"].find_one({"exceptionId": exception_id})
+        updated = self.db["exceptions"].find_one({"exceptionId": exception_id}, EXCEPTION_READ_PROJECTION)
         return updated
 
     def _post_adjustment(self, payment: dict, exc: dict, note: Optional[str], now: datetime) -> None:

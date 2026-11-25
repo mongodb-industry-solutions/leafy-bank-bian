@@ -35,10 +35,13 @@ from services.exceptions_service import (
     CATEGORY_ORPHANED_SETTLEMENT,
     CATEGORY_RECONCILIATION_DISCREPANCY,
     CATEGORY_RECONCILIATION_MISSING,
+    READ_PROJECTION,
     STATUS_DISMISSED,
     STATUS_OPEN,
 )
 from shared.refs import derive_ref
+
+_EXCEPTION_OUT = {"_id": 0, **READ_PROJECTION}
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +197,7 @@ def reply(connection: MongoDBConnection, db_name: str, exception_id: str) -> dic
                 "note": "Correspondent's camt.111 confirmed the line was a misposting."},
                 "updatedAt": now}})
         return {"reply": OUTCOME_MISPOSTING_CONFIRMED,
-                "exception": exc_coll.find_one({"exceptionId": exception_id}, {"_id": 0})}
+                "exception": exc_coll.find_one({"exceptionId": exception_id}, _EXCEPTION_OUT)}
 
     position = connection.get_collection(db_name, "settlementPositions").find_one(
         {"paymentId": exc["paymentId"]}, sort=[("createdAt", -1)])
@@ -211,7 +214,7 @@ def reply(connection: MongoDBConnection, db_name: str, exception_id: str) -> dic
     _claim_reply(messages, exc_coll, exc, response, record,
                  {"awaitingCorrectedStatement": True}, now)
     return {"reply": OUTCOME_AMOUNT_CONFIRMED,
-            "exception": exc_coll.find_one({"exceptionId": exception_id}, {"_id": 0})}
+            "exception": exc_coll.find_one({"exceptionId": exception_id}, _EXCEPTION_OUT)}
 
 
 def _reply_record(response: dict, outcome: str, now: datetime) -> dict:
@@ -260,7 +263,7 @@ def apply_corrected_statement(connection: MongoDBConnection, db_name: str,
         "awaitingCorrectedStatement": False,
         "escalation.correctedStatement": {"paymentMessageId": statement["paymentMessageId"],
                                           "bookedAmount": booked}}})
-    result["exception"] = exc_coll.find_one({"exceptionId": exception_id}, {"_id": 0})
+    result["exception"] = exc_coll.find_one({"exceptionId": exception_id}, _EXCEPTION_OUT)
     return result
 
 

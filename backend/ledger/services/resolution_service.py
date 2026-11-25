@@ -25,9 +25,12 @@ from services.exceptions_service import (
     CATEGORY_ORPHANED_SETTLEMENT,
     CATEGORY_RECONCILIATION_DISCREPANCY,
     CATEGORY_RECONCILIATION_MISSING,
+    READ_PROJECTION,
     STATUS_OPEN,
     STATUS_RESOLVED,
 )
+
+_EXCEPTION_OUT = {"_id": 0, **READ_PROJECTION}
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +96,7 @@ def recheck(connection: MongoDBConnection, db_name: str, exception_id: str, *,
         exc_coll.update_one({"_id": exc["_id"], "status": STATUS_OPEN},
                             {"$set": _resolution(ACTION_RECHECK, by, note, datetime.now(timezone.utc))})
     return {"outcome": outcome, "check": check.as_dict(),
-            "exception": exc_coll.find_one({"exceptionId": exception_id}, {"_id": 0})}
+            "exception": exc_coll.find_one({"exceptionId": exception_id}, _EXCEPTION_OUT)}
 
 
 def _find_line(messages, payment_message_id: str, line_no: int) -> tuple[dict, dict]:
@@ -195,4 +198,4 @@ def link(connection: MongoDBConnection, db_name: str, exception_id: str, *,
                 payment_id, exception_id)
     check, outcome = reconciliation_service.reconcile_payment(payment_id, connection, db_name)
     return {"outcome": outcome, "check": check.as_dict() if check else None,
-            "exception": exc_coll.find_one({"exceptionId": exception_id}, {"_id": 0})}
+            "exception": exc_coll.find_one({"exceptionId": exception_id}, _EXCEPTION_OUT)}
