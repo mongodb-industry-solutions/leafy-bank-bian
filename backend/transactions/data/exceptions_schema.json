@@ -143,7 +143,7 @@
           "properties": {
             "correspondentBic": {"bsonType": "string"},
             "chargeBearer": {"bsonType": "string", "enum": ["DEBT", "CRED", "SHAR", "SLEV"]},
-            "statementOutcome": {"bsonType": "string", "enum": ["FEE_DEDUCTED", "REFERENCE_ALTERED", "LATE", "AMOUNT_TRANSPOSED", "ORPHAN"]},
+            "statementOutcome": {"bsonType": "string", "enum": ["FEE_DEDUCTED", "CHARGE_CLAIMED", "REFERENCE_ALTERED", "LATE", "AMOUNT_TRANSPOSED", "ORPHAN"]},
             "paymentMessageId": {"bsonType": "string"},
             "lineNo": {"bsonType": "int"}
           }

@@ -115,7 +115,7 @@ const MATCH = [
   W("settlementPositions", "update", "actualAmount, actualBookedAt, sourceMessageRef: what the correspondent actually booked", position),
   W("reconciliationItems", "upsert", "The three-way check: legs[] (payment, ledger, statement) and overallResult",
     ({ trace }) => nonEmpty(trace?.reconciliationItem)),
-  W("payments", "update", "lifecycle.reconciliationStatus RECONCILED or DISCREPANT",
+  W("payments", "update", "lifecycle.reconciliationStatus RECONCILED or DISCREPANT (with clearing.discrepancyAmount and discrepancyReason)",
     ({ payment }) => nonEmpty(paymentDoc(payment))),
   W("exceptions", "insert", "One per break: category, status OPEN, detail, subjectRef", exceptionsOpened,
     "Its insert wakes the agent through a change stream"),
@@ -136,7 +136,7 @@ const INVESTIGATE = [
 // What Approve writes depends on the scenario's action.
 const APPROVE_BY_SCENARIO = {
   R1: [
-    W("ledgerEvents", "insert", "Adjustment {paymentId}-ADJ: Dr 5214 correspondent charges / Cr 1111 Nostro/Central Bank Cash, 25.00",
+    W("ledgerEvents", "insert", "Adjustment {paymentId}-ADJ: Dr 5214 correspondent charges / Cr 1111 Nostro/Central Bank Cash, 15.00",
       ledgerEvents(["ADJ"]), "Ledger service, change stream"),
     W("settlementPositions", "update", "adjustmentPending", position),
     W("payments", "update", "clearing.settlementAdjustment", ({ payment }) => nonEmpty(paymentDoc(payment))),

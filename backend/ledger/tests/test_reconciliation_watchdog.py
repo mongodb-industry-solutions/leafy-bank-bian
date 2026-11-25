@@ -274,17 +274,26 @@ def test_the_route_refuses_a_reconciled_payment_and_an_unknown_one():
 
 # --- plan A4 D2: reconciliation closes a POST_ADJUSTMENT itself ----------------
 
-def _adj_event(amount_minor=2500):
+def _adj_event(amount_minor=1500):
     return {"eventId": "EVT-ADJ", "idempotencyKey": "PAY-A-ADJ", "postingStatus": "POSTED",
             "debitLeg": {"glAccountCode": "5214", "amount": amount_minor, "currency": "USD"},
             "creditLeg": {"glAccountCode": "1111", "amount": amount_minor, "currency": "USD"}}
 
 
 def _fee_wire(c):
-    """A DEBT fee wire matched short (24,975 vs 25,000) and already DISCREPANT."""
-    _wire_fixture(c, 24975.0)
+    """A DEBT wire whose creditor agent claimed its 15.00 charge: the nostro line is 25,015
+    against 25,000 posted (an over-debit), and the payment is already DISCREPANT."""
+    _wire_fixture(c, 25015.0)
     match_statements(c, "db", now=_NOW)
     reconcile_settled_payments(c, "db", now=_NOW)
+
+
+def test_a_discrepancy_is_recorded_on_the_payment_itself():
+    c = FakeConnection()
+    _fee_wire(c)
+    clearing = c.get_collection("db", "payments").find_one({"paymentId": "PAY-A"})["clearing"]
+    assert clearing["discrepancyAmount"] == -15.0, "books − statement: an over-debit is negative"
+    assert clearing["discrepancyReason"]
 
 
 def test_an_approved_adjustment_awaiting_its_event_raises_no_fresh_discrepancy():

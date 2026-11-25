@@ -121,11 +121,16 @@ def check_proposal(*, category: str, cause: Optional[str], charge_bearer: Option
         return ("DISMISS is refused: this line has candidate payments "
                 f"({len(candidates)}). Record REFERENCE_MISMATCH and propose LINK, or ESCALATE.")
     if action == POST_ADJUSTMENT:
+        # Dr 5214 / Cr nostro books a charge the nostro paid on top of the wire, so the
+        # statement must show MORE leaving than we posted (discrepancy = books − statement < 0).
+        # A short statement line is not a charge we owe; it is refused here.
         proposed = params.get("amount")
-        if discrepancy_amount is None or proposed is None or \
-                round(float(proposed), 2) != round(float(discrepancy_amount), 2):
+        if discrepancy_amount is None or float(discrepancy_amount) >= 0:
+            return (f"POST_ADJUSTMENT books a charge debited on top of the wire; this "
+                    f"discrepancy ({discrepancy_amount}) is not an over-debit.")
+        if proposed is None or round(abs(float(proposed)), 2) != round(-float(discrepancy_amount), 2):
             return (f"The adjustment must equal the discrepancy exactly "
-                    f"({discrepancy_amount}); proposed {proposed}.")
+                    f"({abs(float(discrepancy_amount))}); proposed {proposed}.")
     if action == LINK:
         idx = params.get("candidateIndex")
         if not isinstance(idx, int) or not 0 <= idx < len(candidates or []):

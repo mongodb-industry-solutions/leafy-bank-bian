@@ -14,6 +14,7 @@ persisted on the payment, applied here. `None` means CLEAN.
 |---------------------|-------------------------------------------------------------------|
 | `CLEAN`             | full amount, reference = paymentId                                |
 | `FEE_DEDUCTED`      | amount − 25.00, `Chrgs/TtlChrgsAndTaxAmt` 25.00 (Doina's $25)     |
+| `CHARGE_CLAIMED`    | amount + 15.00, `Chrgs/Rcrd` 15.00 included, levied by the creditor agent |
 | `REFERENCE_ALTERED` | same amount, reference re-keyed by the correspondent              |
 | `LATE`              | omitted from the first statement, booked on the next one          |
 | `AMOUNT_TRANSPOSED` | two adjacent digits swapped (a keying error)                      |
@@ -52,16 +53,25 @@ NAMESPACE = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.08"
 
 CLEAN = "CLEAN"
 FEE_DEDUCTED = "FEE_DEDUCTED"
+# An OUR (DEBT) wire: the beneficiary's bank may not take its fee from the principal, so it
+# claims the fee from us and our nostro servicer debits it with the wire. The nostro moves
+# MORE than our books, the opposite of FEE_DEDUCTED.
+CHARGE_CLAIMED = "CHARGE_CLAIMED"
 REFERENCE_ALTERED = "REFERENCE_ALTERED"
 LATE = "LATE"
 AMOUNT_TRANSPOSED = "AMOUNT_TRANSPOSED"
 # Not a lever: marks the lines a correcting statement carries (`correction_entries`).
 CORRECTION = "CORRECTION"
-STATEMENT_OUTCOMES = (CLEAN, FEE_DEDUCTED, REFERENCE_ALTERED, LATE, AMOUNT_TRANSPOSED)
+STATEMENT_OUTCOMES = (CLEAN, FEE_DEDUCTED, CHARGE_CLAIMED, REFERENCE_ALTERED, LATE,
+                      AMOUNT_TRANSPOSED)
 
 # The intermediary's deducted charge — Doina's $25 story (Sep 17 L1264-1270). The single
 # source since A2 retired settle.py's copy (reconciliation plan Decision 1).
 CORRESPONDENT_CHARGE = 25.0
+# The creditor agent's OUR charge claimed back on a DEBT wire. Deliberately not 25.00 so it
+# cannot be confused with Leafy's own WIRE_FEE (enrichment_plan.WIRE_FEE), which the debtor
+# already paid. Mirrors BARCGB22's `chargePolicy.OUR` in the correspondentBanks seed.
+OUR_CHARGE = 15.0
 
 # The correspondent's own suffix when it re-keys a reference (REFERENCE_ALTERED).
 _CORRESPONDENT_REF_SUFFIX = "/LEAFYBK"
@@ -127,22 +137,29 @@ def narrative_for(payment: dict) -> Optional[str]:
     return text.upper()[:_NARRATIVE_MAX] or None
 
 
-def entry_for(position: dict, outcome: Optional[str], narrative: Optional[str] = None) -> dict:
+def entry_for(position: dict, outcome: Optional[str], narrative: Optional[str] = None,
+              charging_agent_bic: Optional[str] = None) -> dict:
     """The statement line the correspondent books for one of our settlement positions. Pure.
 
     Returns our flat projection (`entries[]` on the stored doc); `to_ntry` renders it as ISO.
     LATE is not handled here — the caller decides which statement a LATE line lands on.
     `narrative` (see `narrative_for`) becomes `additionalInfo` / ISO `AddtlNtryInf`.
+    `charging_agent_bic` names the bank that levied a CHARGE_CLAIMED charge.
     """
     outcome = outcome or CLEAN
     payment_id = position["paymentId"]
     amount = float(position.get("grossAmount") or position.get("expectedAmount") or 0.0)
     reference = payment_id
     charges = None
+    extra = {}
 
     if outcome == FEE_DEDUCTED:
         charges = min(CORRESPONDENT_CHARGE, amount)
         amount = round(amount - charges, 2)
+    elif outcome == CHARGE_CLAIMED:
+        charges = OUR_CHARGE
+        amount = round(amount + charges, 2)
+        extra = {"chargesIncluded": True, "chargingAgentBic": charging_agent_bic}
     elif outcome == REFERENCE_ALTERED:
         reference = altered_reference(payment_id)
     elif outcome == AMOUNT_TRANSPOSED:
@@ -154,6 +171,7 @@ def entry_for(position: dict, outcome: Optional[str], narrative: Optional[str] =
         "currency": position.get("currency") or position.get("expectedCurrency") or "USD",
         "creditDebit": _DEBIT,          # an outbound wire leaves the nostro
         "charges": charges,
+        **extra,
         "additionalInfo": narrative,
         # Simulator truth, kept for tests and the demo UI. Matching (A2) must never read these:
         # a real statement does not tell you which payment a line belongs to.
@@ -241,7 +259,14 @@ def to_ntry(entry: dict, *, booking_date: datetime) -> dict:
         "Amt": _amt(entry["amount"], entry["currency"]),
     }
     if entry.get("charges"):
-        tx_details["Chrgs"] = {"TtlChrgsAndTaxAmt": _amt(entry["charges"], entry["currency"])}
+        chrgs = {"TtlChrgsAndTaxAmt": _amt(entry["charges"], entry["currency"])}
+        if entry.get("chargesIncluded"):
+            # ISO ChargesRecord: the entry amount includes this charge, and Agt says who took it.
+            record = {"Amt": _amt(entry["charges"], entry["currency"]), "ChrgInclInd": "true"}
+            if entry.get("chargingAgentBic"):
+                record["Agt"] = {"FinInstnId": {"BICFI": entry["chargingAgentBic"]}}
+            chrgs["Rcrd"] = [record]
+        tx_details["Chrgs"] = chrgs
     if entry.get("counterpartyBic"):
         tx_details["RltdAgts"] = {"CdtrAgt": {"FinInstnId": {"BICFI": entry["counterpartyBic"]}}}
     ntry = {

@@ -6,7 +6,7 @@ Each wire goes through the real `initiate_payment` (the reachability lesson, def
 
 | # | Wire | Statement lever | What the engine raises |
 |---|---|---|---|
-| R1  | GB, DEBT | FEE_DEDUCTED      | leg 2 MISMATCH $25 → RECONCILIATION_DISCREPANCY |
+| R1  | GB, DEBT | CHARGE_CLAIMED    | leg 2 MISMATCH: nostro debited $15 more → RECONCILIATION_DISCREPANCY |
 | R1b | GB, SHAR | FEE_DEDUCTED      | same $25, but the beneficiary bears it |
 | R2  | DE       | REFERENCE_ALTERED | payment MISSING + the line ORPHANED (twins) |
 | R3  | CH       | LATE              | MISSING once the window lapses; the next cycle heals it |
@@ -53,7 +53,7 @@ _BANKS = {
 
 SCENARIOS = (
     # key, country, chargeBearer, statement lever, amount, beneficiary account, purpose
-    ("R1", "GB", "DEBT", camt053.FEE_DEDUCTED, 4_850.00, "GB29NWBK60161331926819", "Invoice settlement"),
+    ("R1", "GB", "DEBT", camt053.CHARGE_CLAIMED, 4_850.00, "GB29NWBK60161331926819", "Invoice settlement"),
     ("R1b", "GB", "SHAR", camt053.FEE_DEDUCTED, 3_275.00, "GB82WEST12345698765432", "Supplier payment"),
     ("R2", "DE", "SHAR", camt053.REFERENCE_ALTERED, 6_120.00, "DE89370400440532013000", "Freight and handling"),
     ("R3", "CH", "SHAR", camt053.LATE, 2_940.00, "CH9300762011623852957", "Consulting services"),

@@ -91,7 +91,8 @@ def _settled_wires(payments, account_code: str, *, skip_presenter_driven: bool =
             "direction": {"$ne": "INBOUND"},
         },
         {"paymentId": 1, "clearing.settledAt": 1, "simulatedStatementOutcome": 1,
-         "clientReference": 1, "remittance": 1, "creditor.name": 1},
+         "clientReference": 1, "remittance": 1, "creditor.name": 1,
+         "correspondent.correspondentBic": 1},
     )
     if not skip_presenter_driven:
         return list(wires)
@@ -155,8 +156,11 @@ def generate_statement(
             continue
         outcome = w.get("simulatedStatementOutcome")
         # LATE has done its job by arriving a statement late; the line itself is clean.
-        entries.append(camt053.entry_for(position, None if outcome == camt053.LATE else outcome,
-                                         camt053.narrative_for(w)))
+        # A CHARGE_CLAIMED charge is levied by the beneficiary's bank, which for these
+        # corridors is the country correspondent on the payment.
+        entries.append(camt053.entry_for(
+            position, None if outcome == camt053.LATE else outcome, camt053.narrative_for(w),
+            charging_agent_bic=(w.get("correspondent") or {}).get("correspondentBic")))
     if include_orphan:
         rng = rng or random.Random(f"{account_code}:{window_from.isoformat()}")
         entries.append(camt053.orphan_entry(rng, sorted(_CORRESPONDENT_BY_COUNTRY.values())))

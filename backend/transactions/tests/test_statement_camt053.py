@@ -118,6 +118,20 @@ def test_an_orphan_line_carries_a_narrative_and_keeps_its_seeded_bic():
 
 # --- the generator, over the real saga ---------------------------------------
 
+def test_a_claimed_charge_is_debited_on_top_and_names_the_charging_bank():
+    """DEBT: the creditor agent claims its charge, so the line is principal + charge and the
+    ISO ChargesRecord says it is included and who levied it."""
+    entry = camt053.entry_for({"paymentId": "PAY-1", "grossAmount": 4850.0, "currency": "USD"},
+                              camt053.CHARGE_CLAIMED, charging_agent_bic="BARCGB22")
+    assert entry["amount"] == 4865.0 and entry["charges"] == camt053.OUR_CHARGE == 15.0
+
+    ntry = camt053.to_ntry(entry, booking_date=datetime(2026, 11, 25, tzinfo=timezone.utc))
+    record = ntry["NtryDtls"][0]["TxDtls"][0]["Chrgs"]["Rcrd"][0]
+    assert record["ChrgInclInd"] == "true"
+    assert record["Agt"]["FinInstnId"]["BICFI"] == "BARCGB22"
+    assert "chargingAgentBic" not in ntry and "chargesIncluded" not in ntry
+
+
 def test_each_lever_produces_its_line(service, db):
     clean = _settled_wire(service, db)
     fee = _settled_wire(service, db, camt053.FEE_DEDUCTED)

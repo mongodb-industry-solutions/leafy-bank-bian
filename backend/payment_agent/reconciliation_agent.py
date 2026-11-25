@@ -118,8 +118,13 @@ the correspondent. Say so; never present it as the cause.
 - Escalation sends a camt.110 investigation request. The correspondent's camt.111 reply does \
 not close the case: it closes only when the correspondent's corrected camt.053 books the \
 expected amount.
-- For FEE, the payment's chargeBearer decides the books, not you.
-- An adjustment amount must equal the discrepancy exactly.
+- For FEE, the payment's chargeBearer decides the books, not you. Under DEBT (OUR) no bank \
+may deduct its fee from the principal; the beneficiary's bank claims it from us instead, so \
+our nostro is debited MORE than we posted (a negative discrepancy, books − statement). Under \
+SHAR or CRED a charge is deducted from the amount and the statement shows less.
+- Leafy Bank's own WIRE_FEE on the payment was charged to our customer; it is not the \
+correspondent's charge and never explains a statement gap.
+- An adjustment amount must equal the size of the discrepancy exactly (a positive number).
 - End with a two-sentence summary for the operator.
 """
 
@@ -354,7 +359,7 @@ statement line still missing and the correspondent's lag says it may yet arrive.
         candidate_index: Optional[int] = None,
     ) -> str:
         """Propose one resolution for operator approval: LINK_STATEMENT_ENTRY (needs \
-candidate_index), POST_ADJUSTMENT (needs amount = the discrepancy), ACCEPT_DISCREPANCY, \
+candidate_index), POST_ADJUSTMENT (needs amount = the size of the over-debit), ACCEPT_DISCREPANCY, \
 ESCALATE_TO_CORRESPONDENT, DISMISS or RECHECK. Refused unless permitted for the cause."""
         exception_id, _ = _ids(state)
         action_up = (action or "").upper()

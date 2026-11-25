@@ -14,13 +14,13 @@ export const SCENARIOS = [
     mode: "approval",
     recommended: true,
     decision: {
-      cause: { label: "Fee deducted", code: "FEE" },
+      cause: { label: "Charge claimed", code: "FEE" },
       constraint: { label: "Sender pays all charges", code: "DEBT" },
-      action: { label: "Post a $25 adjustment", code: "POST_ADJUSTMENT" },
+      action: { label: "Book the $15 charge", code: "POST_ADJUSTMENT" },
     },
-    title: "Fee deducted, sender pays",
-    story: "We send $4,850 through Barclays and agree that the sender pays all fees. Barclays still takes a $25 fee out of the payment, so its statement shows $25 less than our books.",
-    talkingPoint: "The agent proposes a $25 adjustment; code checks it matches the discrepancy exactly.",
+    title: "Charge claimed, sender pays",
+    story: "We send $4,850 to Barclays and agree that the sender pays all charges. Barclays can't take its fee from the payment, so it claims $15 from us, and our nostro is debited $15 more than our books show.",
+    talkingPoint: "The agent proposes booking the $15 charge; code checks it matches the over-debit exactly.",
     bank: "Barclays",
     wire: {
       beneficiary: "Northwind Traders Ltd",
@@ -33,33 +33,40 @@ export const SCENARIOS = [
     },
     amount: "4,850.00",
     expected: "Reconciled by adjustment",
-    policyLine: "Discrepancy · cause FEE · bearer DEBT → only POST_ADJUSTMENT is allowed",
+    policyLine: "Discrepancy · cause FEE · bearer DEBT · nostro over-debited → only POST_ADJUSTMENT is allowed",
     beats: {
       initiate:
-        "We send USD 4,850.00 to Northwind Traders at Barclays. The customer chose charge " +
-        "bearer DEBT: they pay every fee, so the beneficiary must receive the full amount.",
-      settle: "Barclays confirms settlement. So far, a perfectly normal wire.",
-      glpost: "Our books say 4,850.00 left our nostro account.",
+        "We send USD 4,850.00 to Northwind Traders at Barclays, through our USD correspondent " +
+        "JPMorgan Chase. The customer chose charge bearer DEBT: they pay every charge, so " +
+        "Northwind must receive the full amount. The customer has already paid Leafy's own " +
+        "25.00 wire fee; that is separate from any bank charge.",
+      settle: "Barclays credits Northwind the full 4,850.00. So far, a perfectly normal wire.",
+      glpost: "Our books say 4,850.00 left our nostro account at Chase.",
       statement:
-        "Barclays's statement shows only 4,825.00. They took a 25.00 fee out of the payment, " +
-        "which they shouldn't have, because our customer agreed to pay all charges.",
+        "Chase's statement for our nostro shows 4,865.00 for this wire: the 4,850.00 plus a " +
+        "15.00 charge that Barclays claimed. Under DEBT Barclays can't deduct its fee from " +
+        "the payment, so it bills us, and the statement names Barclays as the charging bank.",
       match:
-        "Books say 4,850.00; statement says 4,825.00. A 25.00 RECONCILIATION_DISCREPANCY " +
+        "Books say 4,850.00; the statement says 4,865.00. A 15.00 RECONCILIATION_DISCREPANCY " +
         "opens, and the agent is woken.",
       investigate:
-        "Watch the agent find that 25.00 is exactly Barclays's published wire fee, classify " +
-        "the cause as FEE, and see the bearer is DEBT. Under DEBT the fee is ours to absorb, " +
-        "so policy allows exactly one action: post a 25.00 adjustment.",
+        "Watch the agent find that 15.00 is the charge reported on the statement line and " +
+        "Barclays's published OUR charge, not Leafy's 25.00 wire fee. It classifies the " +
+        "cause as FEE and sees the bearer is DEBT. Under DEBT the charge is ours to bear, " +
+        "so policy allows exactly one action: book the 15.00 charge.",
       approve:
         "Approving posts a correcting journal: Dr 5214 correspondent charges / Cr 1111 " +
-        "nostro, 25.00. Code rejects any adjustment that doesn't equal the discrepancy exactly.",
+        "nostro, 15.00. Code rejects any amount that doesn't equal the over-debit exactly.",
       verify:
-        "The adjustment is in the general ledger, the books now agree with Barclays, and the " +
-        "payment is RECONCILED. No analyst wrote the entry.",
+        "The charge is in the general ledger, the books now agree with Chase's statement, " +
+        "and the payment is RECONCILED. No analyst wrote the entry.",
     },
   },
   {
     key: "R1b",
+    // Disabled: a SHAR charge is deducted from the amount forwarded, so our nostro is still
+    // debited in full and no statement gap exists. The short-line premise below is not real.
+    disabled: true,
     mode: "approval",
     recommended: false,
     decision: {
@@ -318,14 +325,9 @@ export const GROUPS = [
   },
 ];
 
-// Scenarios shown side by side as one comparison, because the contrast is the point.
-export const PAIRS = [
-  {
-    keys: ["R1", "R1b"],
-    title: "Same $25 gap, two answers",
-    blurb: "Who pays the charges decides the right fix.",
-  },
-];
+// Scenarios shown side by side as one comparison, because the contrast is the point. A pair
+// renders only when every member is enabled (ScenarioPicker.cellItems).
+export const PAIRS = [];
 
 // Disabled scenarios stay defined but are hidden from the picker and cannot be opened.
 export const ENABLED_SCENARIOS = SCENARIOS.filter((s) => !s.disabled);

@@ -80,21 +80,27 @@ def test_every_wire_line_is_matched_and_every_orphan_already_queued():
 
 def test_the_gb_correspondent_has_enough_fee_precedents_including_a_debt_one():
     _, exceptions = _history()
-    fees = [x for x in exceptions if x["historical"]["statementOutcome"] == camt053.FEE_DEDUCTED
+    fees = [x for x in exceptions
+            if x["historical"]["statementOutcome"] in (camt053.FEE_DEDUCTED, camt053.CHARGE_CLAIMED)
             and x["historical"]["correspondentBic"] == FEE_FLOOR_BIC]
     assert len(fees) >= FEE_FLOOR
     assert any(x["historical"]["chargeBearer"] == "DEBT" for x in fees)
 
 
 def test_every_precedent_resolution_follows_the_charge_bearer_rule():
-    """Decision 2: DEBT → POST_ADJUSTMENT, anything else → ACCEPT. History must not teach the
-    agent the opposite."""
+    """Decision 2: DEBT → the charge is claimed (over-debit) and booked; anything else → the
+    charge is deducted and accepted. History must not teach the agent the opposite."""
     _, exceptions = _history()
     for x in exceptions:
         assert x["status"] == "RESOLVED"
-        if x["historical"]["statementOutcome"] == camt053.FEE_DEDUCTED:
-            want = "POST_ADJUSTMENT" if x["historical"]["chargeBearer"] == "DEBT" else "ACCEPT_DISCREPANCY"
-            assert x["resolution"]["action"] == want
+        outcome, bearer = x["historical"]["statementOutcome"], x["historical"]["chargeBearer"]
+        if outcome == camt053.CHARGE_CLAIMED:
+            assert bearer == "DEBT"
+            assert x["resolution"]["action"] == "POST_ADJUSTMENT"
+            assert x["detail"]["discrepancyAmount"] == -camt053.OUR_CHARGE
+        if outcome == camt053.FEE_DEDUCTED:
+            assert bearer != "DEBT", "a DEBT wire's charge is never deducted from the principal"
+            assert x["resolution"]["action"] == "ACCEPT_DISCREPANCY"
 
 
 def test_a_rekeyed_line_closes_both_twins():

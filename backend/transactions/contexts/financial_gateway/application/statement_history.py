@@ -103,6 +103,10 @@ def plan_wires(start: datetime, days: int, rng: random.Random) -> list[dict]:
         if w["outcome"] == camt053.LATE and w["day"] == days - 1:
             w["outcome"] = camt053.CLEAN
     _enforce_fee_floor(wires)
+    # A charge under DEBT is claimed from us, never deducted from the principal.
+    for w in wires:
+        if w["outcome"] == camt053.FEE_DEDUCTED and w["chargeBearer"] == "DEBT":
+            w["outcome"] = camt053.CHARGE_CLAIMED
     for w in wires:
         w["amount"] = _amount(rng, w["outcome"])
     return wires
@@ -121,10 +125,12 @@ def _enforce_fee_floor(wires: list[dict]) -> None:
 
 def _resolution_for(outcome: str, charge_bearer: str) -> tuple[str, str]:
     """(category, action) for one non-clean line, matching what A3/A4 would have done."""
+    if outcome == camt053.CHARGE_CLAIMED:
+        # OUR wire: the creditor agent's claimed charge is ours to book.
+        return CATEGORY_RECONCILIATION_DISCREPANCY, ACTION_POST_ADJUSTMENT
     if outcome == camt053.FEE_DEDUCTED:
-        # Decision 2: chargeBearer decides the books.
-        return CATEGORY_RECONCILIATION_DISCREPANCY, (
-            ACTION_POST_ADJUSTMENT if charge_bearer == "DEBT" else ACTION_ACCEPT_DISCREPANCY)
+        # SHAR / CRED: the beneficiary bears the deducted charge.
+        return CATEGORY_RECONCILIATION_DISCREPANCY, ACTION_ACCEPT_DISCREPANCY
     if outcome == camt053.REFERENCE_ALTERED:
         return CATEGORY_RECONCILIATION_MISSING, ACTION_LINK_STATEMENT_ENTRY
     if outcome == camt053.LATE:
@@ -139,7 +145,7 @@ def _resolution_for(outcome: str, charge_bearer: str) -> tuple[str, str]:
 
 
 _NOTES = {
-    (camt053.FEE_DEDUCTED, ACTION_POST_ADJUSTMENT): "Correspondent deducted its charge on an OUR (DEBT) wire; booked to 5214.",
+    (camt053.CHARGE_CLAIMED, ACTION_POST_ADJUSTMENT): "Beneficiary bank claimed its OUR charge on a DEBT wire; nostro debited with the wire; booked to 5214.",
     (camt053.FEE_DEDUCTED, ACTION_ACCEPT_DISCREPANCY): "Correspondent charge on a shared/beneficiary-borne wire; accepted, no entry.",
     (camt053.REFERENCE_ALTERED, ACTION_LINK_STATEMENT_ENTRY): "Correspondent re-keyed the reference; same amount and value date — linked.",
     (camt053.LATE, ACTION_RECHECK): "Line booked one statement late; cleared on re-check.",
@@ -205,7 +211,7 @@ def build_history(*, now: datetime, days: int = 14, seed: int = 1039,
         for w in due:
             position = {"paymentId": w["paymentId"], "grossAmount": w["amount"], "currency": "USD"}
             outcome = None if w["outcome"] in (camt053.CLEAN, camt053.LATE) else w["outcome"]
-            entry = camt053.entry_for(position, outcome)
+            entry = camt053.entry_for(position, outcome, charging_agent_bic=w["bic"])
             entry["simulatedOutcome"] = w["outcome"]
             entry["counterpartyBic"] = w["bic"]
             entry["settledAt"] = w["settledAt"]    # lag evidence: bookingDate − settledAt

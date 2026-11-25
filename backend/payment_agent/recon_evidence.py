@@ -321,7 +321,8 @@ def discrepancy_checks(payment: dict, position: dict, entry: Optional[dict],
          "explainsGap": bool(fx_rate) or cur_instructed != cur_payment},
         {"check": "CHARGE_BEARER",
          "finding": (f"{bearer}: " + ("we bear all charges, so none may be deducted from the "
-                                      "amount" if bearer == "DEBT" else
+                                      "amount; a charge claimed from us shows as an over-debit"
+                                      if bearer == "DEBT" else
                                       "a deducted charge is possible, but only a reported or "
                                       "levied charge of exactly the gap would explain it")),
          "explainsGap": False},

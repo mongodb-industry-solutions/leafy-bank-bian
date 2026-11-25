@@ -369,11 +369,12 @@ def compute_reconciliation(
         # Sep 17 L1264-1270: the rail can settle short ($24,975) while the GL settlement
         # posting carries the full $25,000. Compare what actually settled, when recorded.
         actual_minors = _majors_to_minors(position.get("actualAmount"))
-        # Plan A4 D2 — an approved DEBT correction (Dr 5214 / Cr nostro) books the
-        # correspondent's charge, so the nostro moved by posted − adjustment, which is what
-        # the statement shows. Reconciliation closes the leg itself; the action never does.
+        # Plan A4 D2 — an approved DEBT correction (Dr 5214 / Cr nostro) books the charge the
+        # correspondent debited on top of the wire, so the nostro moved by posted + adjustment,
+        # which is what the statement shows. Reconciliation closes the leg itself; the action
+        # never does.
         if adjustment_event is not None:
-            posted_minors -= _signed_leg_amount(adjustment_event.get("creditLeg"))
+            posted_minors += _signed_leg_amount(adjustment_event.get("creditLeg"))
         if (settled and adjustment_event is None and position.get("adjustmentPending")
                 and actual_minors is not None and actual_minors != posted_minors):
             # Approved but not yet posted. Without this the sweep would read MISMATCH and
@@ -387,9 +388,8 @@ def compute_reconciliation(
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_MISMATCH,
                                   left_amount=posted_minors,
                                   right_amount=actual_minors,
-                                  detail=(f"Settlement position {position.get('actualAmount')} "
-                                          f"!= GL settlement posting {expected} — "
-                                          "rail settled short.")))
+                                  detail=(f"Statement booked {position.get('actualAmount')} "
+                                          f"against GL settlement posting {expected}.")))
         elif (settled and actual_minors is None
               and payment.get("direction") != "INBOUND"):
             # Reconciliation plan A2 — an outbound wire's actual amount comes only from the
@@ -401,13 +401,13 @@ def compute_reconciliation(
                                   detail="Awaiting the correspondent statement line for this settlement.",
                                   reason=REASON_AWAITING_STATEMENT))
         elif settled and adjustment_event is not None:
-            # Reached only when actual == posted − adjustment (the mismatch branch above
+            # Reached only when actual == posted + adjustment (the mismatch branch above
             # took every other case), so the correction ties the nostro out.
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_MATCH,
                                   left_amount=posted_minors,
                                   right_amount=actual_minors,
                                   detail=(f"Statement actual {position.get('actualAmount')} == settlement "
-                                          "posting net of the approved correspondent-charge adjustment.")))
+                                          "posting plus the approved correspondent-charge adjustment.")))
         elif expected_minors is None:
             legs.append(LegResult(LEG_RAIL_SETTLEMENT, LEG_PENDING,
                                   detail="settlementPositions.expectedAmount is missing."))
@@ -431,8 +431,9 @@ def compute_reconciliation(
     # outbound) with the actual settlement position. Applied only to a leg that passed the
     # position-vs-ledger checks above, so it can add a MISMATCH/PENDING but never hides one.
     # Mismatch = (a) the rail refused but the position says SETTLED, or (b) the rail-confirmed
-    # amount != the position's actual amount (gross of an approved correspondent-charge
-    # adjustment, which explains a legitimate gap between the two).
+    # amount != the position's actual amount (net of an approved correspondent-charge
+    # adjustment: the statement line carries the claimed charge on top of the principal the
+    # rail confirmed).
     if legs[-1].leg == LEG_RAIL_SETTLEMENT and legs[-1].result == LEG_MATCH:
         confirmation = _rail_confirmation(payment, connection, db_name, payment_amount_minors)
         adj_minors = _signed_leg_amount(adjustment_event.get("creditLeg")) if adjustment_event else 0
@@ -447,7 +448,7 @@ def compute_reconciliation(
                                      left_amount=confirmed_minors, right_amount=actual_minors,
                                      detail=f"The rail's confirmed outcome is {label} (not accepted) but the settlement position is SETTLED.")
             elif confirmed_minors is not None and actual_minors is not None \
-                    and confirmed_minors != actual_minors + adj_minors:
+                    and confirmed_minors != actual_minors - adj_minors:
                 legs[-1] = LegResult(LEG_RAIL_SETTLEMENT, LEG_MISMATCH,
                                      left_amount=confirmed_minors, right_amount=actual_minors,
                                      detail=f"Rail-confirmed amount ({label}) != the settlement position's actual amount.")
@@ -487,15 +488,15 @@ def compute_reconciliation(
                 # Doina: compare the settlement position against its settlement-leg journal
                 # entry (the second ledger event, stage 7). left = the position's actual
                 # amount (its expected amount while an outbound statement line is awaited —
-                # leg 2 owns that wait); right = the booked settlement debit, net of an
-                # approved correspondent-charge adjustment exactly as leg 2 reads it.
+                # leg 2 owns that wait); right = the booked settlement debit plus an approved
+                # correspondent-charge adjustment exactly as leg 2 reads it.
                 # The clearing-net-zero invariant stays a second, independent condition.
                 position_minors = _majors_to_minors(
                     position.get("actualAmount") if position.get("actualAmount") is not None
                     else position.get("expectedAmount", position.get("grossAmount")))
                 booked_minors = _signed_leg_amount(settlement_event.get("debitLeg"))
                 if adjustment_event is not None:
-                    booked_minors -= _signed_leg_amount(adjustment_event.get("creditLeg"))
+                    booked_minors += _signed_leg_amount(adjustment_event.get("creditLeg"))
                 net = _clearing_account_net(all_events, clearing_code)
                 amounts_equal = position_minors is not None and position_minors == booked_minors
                 if (adjustment_event is None and position.get("adjustmentPending")
@@ -652,16 +653,36 @@ def _stamp_reconciled(payments, payment_id: str, check: ReconciliationCheck, ri_
     )
 
 
+def _discrepancy_detail(mismatch: Optional[LegResult]) -> dict:
+    if mismatch is None:
+        return {"discrepancyAmount": None,
+                "discrepancyReason": "DISCREPANT (no single mismatched leg)",
+                "expectedAmount": None, "actualAmount": None,
+                "returnCode": None, "duplicateOf": None}
+    expected_min = int(mismatch.left_amount or 0)
+    actual_min = int(mismatch.right_amount or 0)
+    return {"discrepancyAmount": (expected_min - actual_min) / 100.0,
+            "discrepancyReason": mismatch.detail or f"Leg {mismatch.leg} MISMATCH",
+            "expectedAmount": expected_min / 100.0, "actualAmount": actual_min / 100.0,
+            "returnCode": None, "duplicateOf": None}
+
+
 def _stamp_discrepant(payments, payment_id: str, check: ReconciliationCheck, ri_coll, exc_coll) -> None:
     """Record a discrepancy without advancing state. The payment stays at SETTLED/POSTED and
     feeds stage 9's exception queue (doc 24 B3 site 4)."""
     item = _upsert_reconciliation_item(ri_coll, check)
+    mismatch = next((lg for lg in check.legs if lg.result == LEG_MISMATCH), None)
+    discrepancy = _discrepancy_detail(mismatch)
 
+    # The payment carries the discrepancy itself, not only its exception: a reader of the
+    # canonical record must not see DISCREPANT with no amount or reason.
     payments.update_one(
         {"paymentId": payment_id},
         {
             "$set": {
                 "lifecycle.reconciliationStatus": DISCREPANT,
+                "clearing.discrepancyAmount": discrepancy["discrepancyAmount"],
+                "clearing.discrepancyReason": discrepancy["discrepancyReason"],
                 "updatedAt": _now_utc(),
                 "refs.reconciliationItemId": item["reconciliationItemId"],
             },
@@ -670,30 +691,11 @@ def _stamp_discrepant(payments, payment_id: str, check: ReconciliationCheck, ri_
 
     # Stage 9 — queue the discrepancy. The mismatched leg's leftAmount/rightAmount (minor
     # units, the pipeline convention) become the exception detail in MAJOR units, so the
-    # Operations queue row shows the $25 short-pay exactly as the tie-out saw it. Idempotent
-    # on (paymentId, category, OPEN) — a DISCREPANT payment re-checked next batch does not
-    # double-insert (B3).
-    mismatch = next((lg for lg in check.legs if lg.result == LEG_MISMATCH), None)
-    if mismatch is not None:
-        expected_min = int(mismatch.left_amount or 0)
-        actual_min = int(mismatch.right_amount or 0)
-        detail = {
-            "discrepancyAmount": (expected_min - actual_min) / 100.0,
-            "discrepancyReason": mismatch.detail or f"Leg {mismatch.leg} MISMATCH",
-            "expectedAmount": expected_min / 100.0,
-            "actualAmount": actual_min / 100.0,
-            "returnCode": None,
-            "duplicateOf": None,
-        }
-    else:
-        detail = {
-            "discrepancyAmount": None,
-            "discrepancyReason": "DISCREPANT (no single mismatched leg)",
-            "expectedAmount": None,
-            "actualAmount": None,
-            "returnCode": None,
-            "duplicateOf": None,
-        }
+    # Operations queue row shows the gap exactly as the tie-out saw it. `discrepancyAmount` is
+    # books − statement: positive when the nostro moved less than we posted, negative when it
+    # moved more (a claimed charge). Idempotent on (paymentId, category, OPEN) — a DISCREPANT
+    # payment re-checked next batch does not double-insert (B3).
+    detail = discrepancy
     record_exception(
         exc_coll, payment_id, CATEGORY_RECONCILIATION_DISCREPANCY, detail,
         source={"stage": SOURCE_STAGE_RECONCILE, "service": SERVICE_LEDGER},

@@ -57,17 +57,23 @@ def test_charge_bearer_decides_the_books_for_a_fee():
 
 
 def _check(**over):
+    # R1: the creditor agent claimed 15.00 on a DEBT wire; books − statement = −15.00.
     kw = dict(category=policy.CATEGORY_DISCREPANCY, cause=policy.FEE, charge_bearer="DEBT",
-              action=policy.POST_ADJUSTMENT, params={"amount": 25.0}, candidates=[],
-              discrepancy_amount=25.0)
+              action=policy.POST_ADJUSTMENT, params={"amount": 15.0}, candidates=[],
+              discrepancy_amount=-15.0)
     kw.update(over)
     return policy.check_proposal(**kw)
 
 
 def test_adjustment_must_equal_the_discrepancy():
     assert _check() is None
-    assert "exactly" in _check(params={"amount": 24.0})
+    assert "exactly" in _check(params={"amount": 14.0})
     assert "exactly" in _check(params={})
+
+
+def test_adjustment_is_refused_for_a_short_line():
+    """Dr 5214 / Cr nostro books an over-debit; a short line is never a charge we owe."""
+    assert "over-debit" in _check(discrepancy_amount=15.0)
 
 
 def test_link_must_name_a_returned_candidate():
@@ -94,7 +100,7 @@ def test_a_fee_is_refused_unless_it_matches_a_levied_charge():
 
 
 def test_an_ungrounded_fee_is_refused_at_check_proposal_too():
-    assert _check(known_charges=[25.0]) is None
+    assert _check(known_charges=[15.0, 25.0]) is None
     refusal = _check(discrepancy_amount=54.0, known_charges=[25.0], params={"amount": 54.0})
     assert refusal and "AMOUNT_MISMATCH" in refusal
     assert "No evidence supports a fee" in _check(discrepancy_amount=54.0, known_charges=[25.0],
@@ -192,12 +198,22 @@ def _agent_doc(db, exc_id):
 
 # --- R1: DEBT fee → POST_ADJUSTMENT, approved, verified -----------------------------------
 
+# Barclays claimed its 15.00 OUR charge on a DEBT wire: Chase debited 4,865 for a 4,850 wire.
 _R1 = {"exceptionId": "EXC-R1", "paymentId": "PAY-R1", "category": policy.CATEGORY_DISCREPANCY,
-       "detail": {"discrepancyAmount": 25.0, "expectedAmount": 4850.0, "actualAmount": 4825.0}}
+       "detail": {"discrepancyAmount": -15.0, "expectedAmount": 4850.0, "actualAmount": 4865.0}}
+
+
+def _r1_db() -> FakeDB:
+    db = _db(_R1, {"paymentId": "PAY-R1", "chargeBearer": "DEBT",
+                   "correspondent": {"correspondentBic": "BARCGB22"}})
+    db["correspondentBanks"] = FakeColl([
+        {"recordType": "BIC_DIRECTORY", "identification": {"value": "BARCGB22"},
+         "chargePolicy": {"SHAR": 25.0, "OUR": 15.0, "currency": "USD"}}])
+    return db
 
 
 def test_fee_on_a_debt_wire_is_proposed_executed_and_verified(calls):
-    db = _db(_R1, {"paymentId": "PAY-R1", "chargeBearer": "DEBT"})
+    db = _r1_db()
 
     def resolve(exc_id, action, note=None):
         db["exceptions"].update_one({"exceptionId": exc_id}, {"$set": {"status": "RESOLVED"}})
@@ -207,8 +223,8 @@ def test_fee_on_a_debt_wire_is_proposed_executed_and_verified(calls):
 
     agent = _agent(db,
                    _call("record_investigation", cause="FEE", root_cause="correspondent charge",
-                         evidence=["line 4825.00 vs position 4850.00"], confidence="HIGH"),
-                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT wire", amount=25.0),
+                         evidence=["line 4865.00 vs position 4850.00"], confidence="HIGH"),
+                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT wire", amount=15.0),
                    AIMessage(content="Proposed the 5214 adjustment."))
     ra.investigate(agent, db, "EXC-R1", "PAY-R1")
 
@@ -229,7 +245,7 @@ def test_fee_on_a_debt_wire_is_proposed_executed_and_verified(calls):
 
 
 def test_the_agent_cannot_choose_accept_on_a_debt_wire(calls):
-    db = _db(_R1, {"paymentId": "PAY-R1", "chargeBearer": "DEBT"})
+    db = _r1_db()
     agent = _agent(db,
                    _call("record_investigation", cause="FEE", root_cause="x", evidence=[], confidence="HIGH"),
                    _call("propose_action", action="ACCEPT_DISCREPANCY", rationale="cheaper"),
@@ -240,10 +256,10 @@ def test_the_agent_cannot_choose_accept_on_a_debt_wire(calls):
 
 
 def test_reject_records_the_decision_and_executes_nothing(calls):
-    db = _db(_R1, {"paymentId": "PAY-R1", "chargeBearer": "DEBT"})
+    db = _r1_db()
     agent = _agent(db,
                    _call("record_investigation", cause="FEE", root_cause="x", evidence=[], confidence="HIGH"),
-                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT", amount=25.0),
+                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT", amount=15.0),
                    AIMessage(content="done"))
     ra.investigate(agent, db, "EXC-R1", "PAY-R1")
     ra.resume(agent, db, "EXC-R1", ra.REJECT, note="wait for the correspondent")
@@ -252,11 +268,11 @@ def test_reject_records_the_decision_and_executes_nothing(calls):
 
 
 def test_a_service_refusal_is_recorded_then_reinvestigated_once(calls):
-    db = _db(_R1, {"paymentId": "PAY-R1", "chargeBearer": "DEBT"})
+    db = _r1_db()
     calls.fake("resolve", clients.ServiceRefused(409, "another resolver acted"))
     agent = _agent(db,
                    _call("record_investigation", cause="FEE", root_cause="x", evidence=[], confidence="HIGH"),
-                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT", amount=25.0),
+                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT", amount=15.0),
                    AIMessage(content="proposed"),
                    AIMessage(content="nothing further"))  # the re-investigation turn
     ra.investigate(agent, db, "EXC-R1", "PAY-R1")
@@ -267,11 +283,11 @@ def test_a_service_refusal_is_recorded_then_reinvestigated_once(calls):
 
 
 def test_execute_rechecks_policy_if_the_exception_moved_while_paused(calls):
-    db = _db(_R1, {"paymentId": "PAY-R1", "chargeBearer": "DEBT"})
+    db = _r1_db()
     calls.fake("resolve", {"status": "RESOLVED"})
     agent = _agent(db,
                    _call("record_investigation", cause="FEE", root_cause="x", evidence=[], confidence="HIGH"),
-                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT", amount=25.0),
+                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT", amount=15.0),
                    AIMessage(content="proposed"), AIMessage(content="closed elsewhere"))
     ra.investigate(agent, db, "EXC-R1", "PAY-R1")
     db["exceptions"].update_one({"exceptionId": "EXC-R1"}, {"$set": {"status": "RESOLVED"}})
@@ -415,10 +431,10 @@ def test_rechecks_stop_at_the_cap(calls):
 
 
 def test_a_paused_proposal_is_not_reinvestigated(calls):
-    db = _db(_R1, {"paymentId": "PAY-R1", "chargeBearer": "DEBT"})
+    db = _r1_db()
     agent = _agent(db,
                    _call("record_investigation", cause="FEE", root_cause="x", evidence=[], confidence="HIGH"),
-                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT", amount=25.0),
+                   _call("propose_action", action="POST_ADJUSTMENT", rationale="DEBT", amount=15.0),
                    AIMessage(content="proposed"))
     ra.investigate(agent, db, "EXC-R1", "PAY-R1")
     before = _agent_doc(db, "EXC-R1")["proposedAction"]

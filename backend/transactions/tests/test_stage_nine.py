@@ -534,7 +534,7 @@ def test_resolve_retry_on_delayed_settles_and_auto_resolves(service, db):
     assert payment_after["lifecycle"]["currentState"] == lifecycle.SETTLED
 
 
-def _discrepant_wire(service, db, *, charge_bearer=None):
+def _discrepant_wire(service, db, *, charge_bearer=None, over_debit=True):
     """A settled external wire carrying the stage-8 RECONCILIATION_DISCREPANCY, stamped as
     `_stamp_discrepant` does (the ledger's sweep is not in this suite)."""
     from process.exceptions import record_exception
@@ -548,37 +548,52 @@ def _discrepant_wire(service, db, *, charge_bearer=None):
         extra["chargeBearer"] = charge_bearer
     db["payments"].update_one({"paymentId": pid}, {"$set": extra})
     payment = joined(db, db["payments"].find_one({"paymentId": pid}))
+    # DEBT: the creditor agent claims its charge, so the nostro is debited MORE (books −
+    # statement < 0). Otherwise the charge is deducted and the line is short.
+    detail = ({"discrepancyAmount": -15.0, "discrepancyReason": "charge claimed",
+               "expectedAmount": 25000.0, "actualAmount": 25015.0}
+              if charge_bearer == "DEBT" and over_debit else
+              {"discrepancyAmount": 25.0, "discrepancyReason": "rail settled short",
+               "expectedAmount": 25000.0, "actualAmount": 24975.0})
     record_exception(
         service._collections(), payment, CATEGORY_RECONCILIATION_DISCREPANCY,
-        detail={"discrepancyAmount": 25.0, "discrepancyReason": "rail settled short",
-                "expectedAmount": 25000.0, "actualAmount": 24975.0,
-                "returnCode": None, "duplicateOf": None},
+        detail={**detail, "returnCode": None, "duplicateOf": None},
         source={"stage": SOURCE_STAGE_RECONCILE, "service": SERVICE_LEDGER},
     )
     return payment, _exc(db)
 
 
 def test_post_adjustment_on_a_debt_wire_stamps_the_correction_for_the_ledger(service, db):
-    """Plan A4 — chargeBearer DEBT: the bank bears the correspondent's charge, so the
-    approved POST_ADJUSTMENT stamps the correction the ledger posts as Dr 5214 / Cr nostro.
-    It does NOT flip reconciliationStatus: reconciliation nets the -ADJ event and closes the
-    leg itself (D2), held PENDING meanwhile by the position's `adjustmentPending`."""
+    """Plan A4 — chargeBearer DEBT: the bank bears the charge the creditor agent claimed, so
+    the approved POST_ADJUSTMENT stamps the correction the ledger posts as Dr 5214 / Cr nostro
+    for the over-debit. It does NOT flip reconciliationStatus: reconciliation nets the -ADJ
+    event and closes the leg itself (D2), held PENDING meanwhile by `adjustmentPending`."""
     payment, exc = _discrepant_wire(service, db, charge_bearer="DEBT")
     db["settlementPositions"].insert_one({"paymentId": payment["paymentId"]})
 
     updated = service.resolve_exception(exc["exceptionId"], action=ACTION_POST_ADJUSTMENT,
-                                        note="Correspondent fee — bank absorbs.")
+                                        note="Correspondent charge claimed — bank absorbs.")
 
     assert updated["status"] == STATUS_RESOLVED
     assert updated["resolution"]["action"] == ACTION_POST_ADJUSTMENT
     after = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
     adj = after["clearing"]["settlementAdjustment"]
-    assert adj["amount"] == 25.0
+    assert adj["amount"] == 15.0
     assert adj["chargeBearer"] == "DEBT"
     assert adj["exceptionId"] == exc["exceptionId"]
     assert after["lifecycle"]["reconciliationStatus"] == "DISCREPANT"
     position = db["settlementPositions"].find_one({"paymentId": payment["paymentId"]})
     assert position["adjustmentPending"] is True
+
+
+def test_post_adjustment_refuses_a_short_line_on_a_debt_wire(service, db):
+    """A short statement line is not a charge we owe: nothing to book to 5214."""
+    payment, exc = _discrepant_wire(service, db, charge_bearer="DEBT", over_debit=False)
+    with pytest.raises(ExceptionActionNotLegal, match="over-debit"):
+        service.resolve_exception(exc["exceptionId"], action=ACTION_POST_ADJUSTMENT)
+    assert _exc(db)["status"] == STATUS_OPEN
+    after = joined(db, db["payments"].find_one({"paymentId": payment["paymentId"]}))
+    assert "settlementAdjustment" not in (after.get("clearing") or {})
 
 
 def test_a_second_post_adjustment_is_refused_and_stamps_nothing_twice(service, db):

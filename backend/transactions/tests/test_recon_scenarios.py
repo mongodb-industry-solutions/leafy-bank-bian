@@ -43,7 +43,11 @@ def test_the_statement_carries_each_lever_and_holds_the_late_line(service, db):
     by_pid = {e["simulatedPaymentId"]: e for e in stmt["entries"]}
     p = {k: v["paymentId"] for k, v in out["payments"].items()}
 
-    assert by_pid[p["R1"]]["charges"] == camt053.CORRESPONDENT_CHARGE
+    r1 = by_pid[p["R1"]]
+    assert r1["charges"] == camt053.OUR_CHARGE != camt053.CORRESPONDENT_CHARGE
+    assert r1["amount"] == out["payments"]["R1"]["amount"] + camt053.OUR_CHARGE, \
+        "DEBT: the claimed charge is debited on top of the wire, never deducted"
+    assert r1["chargesIncluded"] is True and r1["chargingAgentBic"] == "BARCGB22"
     assert by_pid[p["R1b"]]["charges"] == camt053.CORRESPONDENT_CHARGE
     assert by_pid[p["R2"]]["reference"] != p["R2"]
     assert p["R3"] not in by_pid, "LATE is held one statement"
@@ -83,7 +87,7 @@ def test_run_one_initiates_exactly_one_wire_with_its_lever(service, db):
     assert db["payments"].count_documents({}) == 1
     doc = joined(db, db["payments"].find_one({"paymentId": out["paymentId"]}))
     assert doc["chargeBearer"] == "DEBT"
-    assert doc["simulatedStatementOutcome"] == camt053.FEE_DEDUCTED
+    assert doc["simulatedStatementOutcome"] == camt053.CHARGE_CLAIMED
     assert doc["lifecycle"]["settlementStatus"] != "SETTLED", "no settle on initiate"
     assert out["bic"] == "BARCGB22" and out["includeOrphan"] is False
 

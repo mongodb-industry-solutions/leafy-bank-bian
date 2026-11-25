@@ -45,7 +45,7 @@ SettlementOutcomeLiteral = Literal["MATCHED", "UNMATCHED", "DELAYED", "EXCEPTION
 # books. A simulation control, authored here (not a spec enum); mirrors
 # `financial_gateway.domain.camt053.STATEMENT_OUTCOMES`.
 StatementOutcomeLiteral = Literal[
-    "CLEAN", "FEE_DEDUCTED", "REFERENCE_ALTERED", "LATE", "AMOUNT_TRANSPOSED",
+    "CLEAN", "FEE_DEDUCTED", "CHARGE_CLAIMED", "REFERENCE_ALTERED", "LATE", "AMOUNT_TRANSPOSED",
 ]
 
 # Stage 2 (BIAN PartyAuthentication, SD 38917). NOT from the `payments` spec — no

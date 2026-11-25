@@ -15,11 +15,11 @@ const MONGO_CUTOFF = ["Change streams", "TTL index", "Partial unique indexes", "
 
 export const BRIEFS = {
   R1: {
-    hard: "The statement is 25.00 short. Whether that is our loss depends on who agreed to pay the charges.",
-    decides: "Whether the gap is a fee, and what to do about it.",
-    guarantees: "Under sender-pays, code allows only a posting adjustment, and its amount must equal the gap exactly.",
+    hard: "Our nostro was debited 15.00 more than we booked. Barclays claimed its charge from us, and it is not Leafy's own 25.00 wire fee.",
+    decides: "Whether the extra debit is a charge, and who bears it.",
+    guarantees: "Under sender-pays, code allows only booking the charge, and only for exactly the over-debit.",
     mongo: [...MONGO_RECON, "Idempotent ledger write"],
-    autonomy: { level: 2, alone: "Reads the history, finds the cause, proposes the fix", needsYou: "Posting the adjustment" },
+    autonomy: { level: 2, alone: "Reads the history, finds the cause, proposes the fix", needsYou: "Booking the charge" },
   },
   R1b: {
     hard: "The same 25.00 gap as the sender-pays case, but the books must end up different.",

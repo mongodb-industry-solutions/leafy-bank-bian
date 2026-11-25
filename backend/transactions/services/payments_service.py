@@ -69,24 +69,23 @@ logger = logging.getLogger(__name__)
 
 
 def _settlement_adjustment_for(payment: dict, exc: dict) -> Optional[dict]:
-    """The correcting entry an accepted short-settlement needs, keyed off `chargeBearer`.
+    """The correcting entry an approved charge claim needs, keyed off `chargeBearer`.
 
-    Sep 17 L1264-1270: the rail settled short while the GL posted the full amount. Who
-    bears the correspondent's charge decides whether the bank books anything:
-      * DEBT — Leafy Bank's customer pays all charges, so the bank absorbs the deduction:
-        post it (Dr 5214 Correspondent Charges / Cr nostro).
+    `discrepancyAmount` is books − statement. A DEBT (OUR) wire's creditor agent may not
+    deduct its fee from the principal, so it claims the fee from us and our nostro is
+    debited MORE than we posted (a negative discrepancy). The bank absorbs that charge:
+    Dr 5214 Correspondent Charges / Cr nostro, for the over-debit.
       * CRED / SHAR / SLEV — the beneficiary bears (or shares under scheme rules) the
-        correspondent's charge; the short credit is theirs, no bank entry. The accept is
-        the record.
+        charge; no bank entry. The accept is the record.
     Returns None when no entry is due.
     """
     if payment.get("chargeBearer") != "DEBT":
         return None
-    amount = ((exc.get("detail") or {}).get("discrepancyAmount")) or 0
-    if amount <= 0:
+    gap = ((exc.get("detail") or {}).get("discrepancyAmount")) or 0
+    if gap >= 0:
         return None
     return {
-        "amount": amount,
+        "amount": round(-gap, 2),
         "currency": payment.get("currency", "USD"),
         "chargeBearer": "DEBT",
         "exceptionId": exc.get("exceptionId"),
@@ -1501,8 +1500,8 @@ class PaymentsService:
         adjustment = _settlement_adjustment_for(payment, exc)
         if adjustment is None:
             raise ExceptionActionNotLegal(
-                f"Exception {exc.get('exceptionId')} carries no positive discrepancyAmount — "
-                "there is no correspondent charge to book."
+                f"Exception {exc.get('exceptionId')} shows no over-debit on a DEBT wire — "
+                "there is no claimed correspondent charge to book."
             )
 
         def callback(session) -> None:
