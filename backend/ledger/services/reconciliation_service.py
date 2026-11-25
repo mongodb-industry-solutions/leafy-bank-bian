@@ -582,7 +582,7 @@ _ACTOR = "ledger-service"
 _ACTOR_TYPE = "SERVICE"
 _SOURCE_SYSTEM = "ledger-service"
 _ELIGIBLE_STATES = ("SETTLED", "POSTED")
-# clientReference prefix of the cut-off demo wires; mirrors transactions `statement.py`.
+# clientReference prefix of the cut-off demo wires: reconciled, but never raised as MISSING.
 CUTOFF_DEMO_REF_PREFIX = "CUTOFF-DEMO-"
 
 
@@ -758,12 +758,14 @@ OUTCOME_MISSING = "MISSING"
 
 
 def reconcile_payment(payment_id: str, connection: MongoDBConnection, db_name: str,
-                      now: Optional[datetime] = None) -> tuple[Optional[ReconciliationCheck], Optional[str]]:
+                      now: Optional[datetime] = None, *, raise_missing: bool = True,
+                      ) -> tuple[Optional[ReconciliationCheck], Optional[str]]:
     """Check one payment and stamp the result. Returns (check, outcome), where outcome is
     RECONCILED | DISCREPANT | PENDING | MISSING; (None, None) if the payment does not exist.
 
     Shared by the post-batch sweep and `POST /pipeline/reconcile/{paymentId}` (plan A3, the
-    spec's "re-run reconciliation" step). The caller decides eligibility.
+    spec's "re-run reconciliation" step). The caller decides eligibility, and whether an
+    overdue statement line may raise MISSING (`raise_missing`).
     """
     now = now or _now_utc()
     payments = connection.get_collection(db_name, "payments")
@@ -787,7 +789,7 @@ def reconcile_payment(payment_id: str, connection: MongoDBConnection, db_name: s
             payment_id, [lg.result for lg in check.legs],
         )
         return check, DISCREPANT
-    if _is_overdue(check, now):
+    if raise_missing and _is_overdue(check, now):
         _stamp_missing(check, ri_coll, exc_coll)
         logger.warning("reconciliation MISSING paymentId=%s — statement line overdue", payment_id)
         return check, OUTCOME_MISSING
@@ -819,10 +821,6 @@ def reconcile_settled_payments(connection: MongoDBConnection, db_name: str,
         },
         {"_id": 0, "paymentId": 1, "clientReference": 1},
     ))
-    # Cut-off demo wires have no statement story (the transactions simulator skips them), so
-    # sweeping them would raise MISSING for a line that is never coming.
-    eligible = [d for d in eligible
-                if not (d.get("clientReference") or "").startswith(CUTOFF_DEMO_REF_PREFIX)]
 
     counts = {RECONCILED: 0, DISCREPANT: 0, PENDING: 0, OUTCOME_MISSING: 0}
     for doc in eligible:
@@ -830,7 +828,11 @@ def reconcile_settled_payments(connection: MongoDBConnection, db_name: str,
         if not payment_id:
             continue
         try:
-            _, outcome = reconcile_payment(payment_id, connection, db_name, now=now)
+            # Cut-off demo wires are booked on the simulated statement so they reconcile, but
+            # the walkthrough must not surface a MISSING exception if that line runs late.
+            is_cutoff_demo = (doc.get("clientReference") or "").startswith(CUTOFF_DEMO_REF_PREFIX)
+            _, outcome = reconcile_payment(payment_id, connection, db_name, now=now,
+                                           raise_missing=not is_cutoff_demo)
         except Exception:  # noqa: BLE001 — one payment must not abort the sweep; it is retried next cycle
             logger.exception("reconciliation failed for %s; retried next cycle", payment_id)
             continue

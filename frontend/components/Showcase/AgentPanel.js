@@ -182,8 +182,11 @@ function flowOf(agent, timeline, awaitingYou) {
   const decided = !!agent?.approval;
   const proposed = !!agent?.proposedAction || decided;
   const verified = !!agent?.verification?.result;
-  const raw = [!!agent?.cause || recorded, proposed, decided, (agent?.actionsTaken || []).length > 0, verified];
-  const skipped = raw.map((_, i) => (i === 1 || i === 2) && verified && !proposed);
+  const executed = (agent?.actionsTaken || []).length > 0;
+  const raw = [!!agent?.cause || recorded, proposed, decided, executed, verified];
+  // No proposal but the agent already acted (or verified): it stayed within its own authority,
+  // e.g. the cut-off agent's reminder and escalation. Proposal and decision were skipped, not done.
+  const skipped = raw.map((_, i) => (i === 1 || i === 2) && (verified || executed) && !proposed);
   const done = raw.map((_, i) => !skipped[i] && raw.slice(i).some(Boolean));
   const started = timeline.length > 0 || !!agent;
   const active = started ? done.findIndex((d, i) => !d && !skipped[i]) : -1;
@@ -210,16 +213,23 @@ function Flow({ steps }) {
 
 // The finding, pinned above the timeline: cause and confidence as chips, the root cause, the
 // proposal, then evidence and what was done behind a click so it does not push the timeline off.
+// Chips hold codes like FEE or HIGH. The cut-off agent writes a full sentence into `cause`, which
+// rendered as a paragraph inside a pill, so anything longer than a code moves to the body text.
+const CHIP_MAX = 32;
+
 function Summary({ agent }) {
   if (!agent) return null;
-  const chips = [
+  const fields = [
     ["Cause", agent.cause || agent.diagnosis],
     ["Blocker", agent.blocker],
     ["Confidence", agent.confidence],
   ].filter(([, v]) => v && typeof v === "string");
-  const text = [agent.rootCause, agent.reasoning].find((v) => v && typeof v === "string");
+  const chips = fields.filter(([, v]) => v.length <= CHIP_MAX);
+  const longField = fields.find(([, v]) => v.length > CHIP_MAX)?.[1];
+  const text = [agent.rootCause, agent.reasoning, longField].find((v) => v && typeof v === "string");
   const evidence = Array.isArray(agent.evidence) ? agent.evidence : [];
-  const actions = agent.actionsTaken || [];
+  // The agent can record the same action twice (one per sweep); show each action once.
+  const actions = [...new Map((agent.actionsTaken || []).map((a) => [`${a.action}:${a.result}`, a])).values()];
   const proposal = agent.proposedAction?.action;
   if (!chips.length && !text && !evidence.length && !actions.length) return null;
   return (
@@ -247,7 +257,8 @@ function Summary({ agent }) {
           {actions.map((a, i) => (
             <li key={`${a.action}:${i}`} className={a.result === "REFUSED" ? styles.checkBad : styles.checkOk}>
               <Icon glyph={a.result === "REFUSED" ? "XWithCircle" : "CheckmarkWithCircle"} size={14} />
-              <span>{prettyAction(a.action)} <span className={styles.muted}>({a.result})</span></span>
+              {/* The tick already says done; only an unusual result earns a label. */}
+              <span>{prettyAction(a.action)}{a.result && a.result !== "DONE" && <span className={styles.muted}> ({String(a.result).toLowerCase()})</span>}</span>
             </li>
           ))}
         </ul>
@@ -288,12 +299,17 @@ export default function AgentPanel({ agent, steps, started, activity, activation
   const waitsOnYou = (activity?.kind === "human" && (!!children || !!needsDecision)) || pendingProposal;
   const flow = flowOf(agent, timeline, waitsOnYou);
   const flowComplete = flow.every((st) => st.state === "done" || st.state === "skip");
+  // Between sweeps the agent is not working, but it is not idle either: name the stage it waits
+  // to do, so the pill and the stepper below it say the same thing.
+  const nextStage = flow.find((st) => st.state === "now")?.label;
+  const pausedText = { Investigate: "Waiting to investigate", Executed: "Waiting to act", Verified: "Waiting to verify" }[nextStage];
   // "Agent done", not "Done": the payment can still be settling after the agent finishes.
   const state = agent?.error && !agent?.verification ? "Failed"
     : waitsOnYou ? "Waiting for you"
       : working ? "Thinking"
         : flowComplete || agent?.verification || agent?.outcome ? "Agent done"
-          : started || agent ? "Idle" : "Not started";
+          : pausedText && agent ? pausedText
+            : started || agent ? "Idle" : "Not started";
   const stateClass = { Thinking: styles.aiThinking, "Waiting for you": styles.aiWaiting, Failed: styles.aiFailed }[state] || "";
   const activatedAt = time(activation?.at || agent?.startedAt);
 

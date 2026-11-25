@@ -121,17 +121,16 @@ def test_a_reconciled_payment_creates_no_exception():
     assert _exceptions(c) == []
 
 
-def test_a_cutoff_demo_wire_is_left_out_of_the_sweep():
-    """Cut-off demo wires never get a statement line (the simulator skips them), so the sweep
-    must not count them: they would only ever raise RECONCILIATION_DISCREPANCY."""
+def test_a_cutoff_demo_wire_is_swept_like_any_other():
+    """Cut-off demo wires get a statement line like ambient wires, so the sweep reconciles
+    them; only the MISSING watchdog is suppressed (test_reconciliation_watchdog)."""
     c = FakeConnection()
     _seed_discrepant(c)
     c.get_collection("db", "payments").docs[0]["clientReference"] = "CUTOFF-DEMO-C3"
 
     result = reconcile_settled_payments(c, "db")
 
-    assert result["eligible"] == 0
-    assert _exceptions(c) == []
+    assert result["eligible"] == 1 and result["discrepant"] == 1
 
 
 # --- enum parity: the ledger's constants equal the authored stub (B3 mirror) --

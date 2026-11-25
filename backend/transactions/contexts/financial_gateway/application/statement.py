@@ -49,11 +49,9 @@ NOSTRO_USD = "1111"
 # their statement by hand, so the background simulator must leave them alone — otherwise any
 # instance sharing the DB (e.g. a deployed one with the sim on) books them mid-walkthrough.
 PRESENTER_DRIVEN_REF_PREFIX = "RECON-DEMO-"
-# Cut-off demo wires settle against a seeded account with no statement story. Booking them
-# would turn a cut-off walkthrough into a reconciliation exception, so the simulator skips
-# them too (the ledger's sweep skips the same prefix).
-CUTOFF_DEMO_REF_PREFIX = "CUTOFF-DEMO-"
-_SIMULATOR_SKIPPED_PREFIXES = (PRESENTER_DRIVEN_REF_PREFIX, CUTOFF_DEMO_REF_PREFIX)
+# Cut-off demo wires (`CUTOFF-DEMO-`) are booked like any ambient wire so they reach
+# RECONCILED; the ledger sweep only stops them raising RECONCILIATION_MISSING.
+_SIMULATOR_SKIPPED_PREFIXES = (PRESENTER_DRIVEN_REF_PREFIX,)
 
 
 def _as_datetime(value) -> Optional[datetime]:

@@ -244,9 +244,8 @@ def test_the_simulator_leaves_scenario_wires_for_the_presenter_to_book(service, 
     assert {e["simulatedPaymentId"] for e in manual["entries"]} == {scenario}
 
 
-def test_the_simulator_leaves_cutoff_demo_wires_unbooked(service, db):
-    """A C3 wire settles on the nostro but has no statement story; booking it would open a
-    reconciliation exception during a cut-off walkthrough."""
+def test_the_simulator_books_cutoff_demo_wires(service, db):
+    """A C3 wire settles on the nostro and must reach RECONCILED, so its line is booked."""
     ambient = _settled_wire(service, db)
     cutoff = _initiate_external(service, instructed_amount=300.0,
                                 client_reference="CUTOFF-DEMO-C3")["paymentId"]
@@ -255,8 +254,7 @@ def test_the_simulator_leaves_cutoff_demo_wires_unbooked(service, db):
     sim = generate_statement(db, account_code=SETTLEMENT_ACCOUNT, include_orphan=False,
                              now=_later(1), skip_presenter_driven=True)
 
-    assert {e["simulatedPaymentId"] for e in sim["entries"]} == {ambient}
-    assert cutoff not in {e["simulatedPaymentId"] for e in sim["entries"]}
+    assert {e["simulatedPaymentId"] for e in sim["entries"]} == {ambient, cutoff}
 
 
 # --- correcting statement (Doina 2026-11-10) ----------------------------------

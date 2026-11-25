@@ -101,6 +101,36 @@ def test_an_inbound_wire_is_never_raised_missing():
     assert _excs(c, CATEGORY_RECONCILIATION_MISSING) == []
 
 
+def _as_cutoff_demo(c):
+    c.get_collection("db", "payments").update_one(
+        {"paymentId": "PAY-A"}, {"$set": {"clientReference": "CUTOFF-DEMO-C3"}})
+
+
+def test_a_cutoff_demo_wire_past_its_window_is_pending_not_missing():
+    """The walkthrough must not surface an exception if the simulated line runs late."""
+    c = FakeConnection()
+    _missing_wire(c)
+    _as_cutoff_demo(c)
+
+    result = reconcile_settled_payments(c, "db", now=_LATE)
+
+    assert result["eligible"] == 1 and result["pending"] == 1 and result["missing"] == 0
+    assert _excs(c) == []
+
+
+def test_a_cutoff_demo_wire_reconciles_once_its_line_arrives():
+    c = FakeConnection()
+    line = _missing_wire(c)
+    _as_cutoff_demo(c)
+
+    _arrive(c, line)
+    match_statements(c, "db", now=_LATE)
+    result = reconcile_settled_payments(c, "db", now=_LATE)
+
+    assert result["reconciled"] == 1
+    assert _excs(c) == []
+
+
 def test_a_late_clean_line_reconciles_and_auto_resolves_the_missing():
     """D2 — the late line makes MISSING untrue; the sweep closes it with RECHECK."""
     c = FakeConnection()
