@@ -120,7 +120,7 @@ function StepCards({ cards, current, final, waiting }) {
           <Icon glyph="ChevronLeft" size={16} />
         </button>
         <Overline>
-          {isCurrent ? (final ? "Run" : "Next") : viewed < current ? "Done" : "Coming up"} · Step {viewed + 1} of {cards.length}
+          {isCurrent ? (final ? "Final step" : "Current step") : viewed < current ? "Done" : "Coming up"} · {viewed + 1} of {cards.length}
         </Overline>
         <button type="button" className={styles.stepArrow} aria-label="Next step" disabled={viewed === cards.length - 1} onClick={() => setViewed(viewed + 1)}>
           <Icon glyph="ChevronRight" size={16} />
@@ -150,9 +150,12 @@ function StepCards({ cards, current, final, waiting }) {
 const SLOW_AFTER_S = 20;
 const ACTIVITY_ICON = { agent: "Sparkle", code: "CurlyBraces", human: "Person", external: "Clock" };
 
-// One line saying what the run is doing or waiting on. The timer restarts when the state
-// changes; after SLOW_AFTER_S it reassures the audience the app is still working.
-function ActivityBanner({ activity }) {
+// The run's status line: always on screen, fixed height, with the control that moves the run on
+// at its right end, so the prompt and its action are never apart and nothing jumps between
+// states. Idle it says what the next click does; working it shows the status, a timer and a
+// progress line, and the button stays put as a disabled "Running…". The timer restarts when
+// the state changes; after SLOW_AFTER_S it reassures the audience the app is still working.
+function ActivityBanner({ activity, controller, children }) {
   const key = activity ? `${activity.kind}:${activity.text}` : null;
   const [since, setSince] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
@@ -165,18 +168,30 @@ function ActivityBanner({ activity }) {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [key]);
-  if (!activity) return null;
   const seconds = Math.max(0, Math.floor((now - since) / 1000));
-  const waitsOnYou = activity.kind === "human";
+  const waitsOnYou = activity?.kind === "human";
+  const busy = !!activity && !waitsOnYou;
+  // Placeholder in the button's spot while a step runs without its own button.
+  const holdSpot = !children && busy && !controller.final;
+  const lane = activity ? (activity.kind === "external" ? "code" : activity.kind) : "idle";
+  const idleText = controller.final ? controller.title || "Run complete"
+    : controller.label ? `Ready · ${controller.label}` : "Ready for the next step";
   return (
-    <div className={`${styles.activity} ${styles[`lane_${activity.kind === "external" ? "code" : activity.kind}`]}`} role="status" aria-live="polite">
-      <span className={styles.activityIcon} aria-hidden="true">
-        <Icon glyph={ACTIVITY_ICON[activity.kind]} size={14} />
+    <div className={`${styles.activity} ${styles[`lane_${lane}`] || ""} ${busy ? styles.activityBusy : ""}`}>
+      <span className={styles.activityStatus} role="status" aria-live="polite">
+        <span className={`${styles.activityIcon} ${activity ? "" : styles.activityIconIdle}`} aria-hidden="true">
+          <Icon glyph={activity ? ACTIVITY_ICON[activity.kind] : controller.final ? "Checkmark" : "ArrowRight"} size={14} />
+        </span>
+        <span className={styles.activityText}>{activity ? `${activity.text}${waitsOnYou ? "" : "…"}` : idleText}</span>
+        {busy && <span className={styles.activityTime}>{seconds}s</span>}
+        {busy && seconds >= SLOW_AFTER_S && (
+          <span className={styles.activityHint}>Still working. This can take up to a minute.</span>
+        )}
       </span>
-      <span className={styles.activityText}>{activity.text}{waitsOnYou ? "" : "…"}</span>
-      {!waitsOnYou && <span className={styles.activityTime}>{seconds}s</span>}
-      {!waitsOnYou && seconds >= SLOW_AFTER_S && (
-        <span className={styles.activityHint}>Still working. This can take up to a minute.</span>
+      {(children || holdSpot) && (
+        <span className={styles.activityActions}>
+          {children || <Button variant="primary" disabled>Running…</Button>}
+        </span>
       )}
     </div>
   );
@@ -186,6 +201,7 @@ export default function RunConsole({
   top, pipeline, stepCards, stepIndex, controller, events, pending, sources, evidence, aside, failure, result, activity, decision, filters = FILTERS, logFolded = false,
 }) {
   const [filter, setFilter] = useState("all");
+  const [logOpen, setLogOpen] = useState(!logFolded);
   const logRef = useRef(null);
   const following = useRef(true);
   const lastCount = useRef(0);
@@ -218,12 +234,13 @@ export default function RunConsole({
   useEffect(() => {
     lastCount.current = shown.length;
     scrollToLatest();
-  }, [filter]);
+  }, [filter, logOpen]);
 
-  const actions = (
+  const hasActions = controller.showButton || controller.awaitingReply || controller.awaitingStatement || controller.extra || controller.onSweep;
+  const actions = hasActions && (
       <div className={styles.runActions}>
         {controller.showButton && (
-          <Button variant="primary" size="large" disabled={controller.running || !!controller.waiting} onClick={controller.onNext}>
+          <Button variant="primary" disabled={controller.running || !!controller.waiting} onClick={controller.onNext}>
             {controller.running ? "Running…" : controller.label}
           </Button>
         )}
@@ -246,14 +263,18 @@ export default function RunConsole({
       </div>
   );
   const blocks = toBlocks(shown);
+  // One header: the title folds the log, the filters sit beside it. The box grows with its
+  // content up to a cap, so an empty log is one line, not a 520px blank.
   const logBox = (
       <div className={styles.runLogBox}>
       <div className={styles.runLogHead}>
-        <span className={styles.runLogTitle}>
-          <Overline>Run log</Overline>
+        <button type="button" className={styles.runLogToggle} aria-expanded={logOpen} onClick={() => setLogOpen(!logOpen)}>
+          <Icon glyph={logOpen ? "ChevronDown" : "ChevronRight"} size={14} />
+          <Overline as="span">Run log</Overline>
+          <span className={styles.muted}>{events.length} events</span>
           <span className={styles.liveDot} aria-hidden="true" />
-        </span>
-        <div className={styles.runFilters} role="group" aria-label="Filter the log">
+        </button>
+        {logOpen && <div className={styles.runFilters} role="group" aria-label="Filter the log">
           {filters.map(([value, text]) => (
             <button
               key={value}
@@ -269,10 +290,10 @@ export default function RunConsole({
               </span>
             </button>
           ))}
-        </div>
+        </div>}
       </div>
 
-      <div className={styles.runLog} ref={logRef} onScroll={onLogScroll} aria-live="polite">
+      {logOpen && <div className={styles.runLog} ref={logRef} onScroll={onLogScroll} aria-live="polite">
         {shown.length === 0 && (
           <Body className={styles.muted}>
             {events.length === 0 ? "Events appear here as the run progresses." : "No events in this filter yet."}
@@ -315,8 +336,8 @@ export default function RunConsole({
             {pending}
           </div>
         )}
-      </div>
-      {unseen > 0 && (
+      </div>}
+      {logOpen && unseen > 0 && (
         <button type="button" className={styles.jumpLatest} onClick={scrollToLatest}>
           <Icon glyph="ArrowDown" size={12} />
           Jump to latest ({unseen} new)
@@ -324,12 +345,13 @@ export default function RunConsole({
       )}
       </div>
   );
+  // Fixed order for every scenario: context, lifecycle, the step, what happens next (status and
+  // its control together), the scenario's evidence, its result, then the full log.
   return (
     <div className={aside ? styles.consoleGrid : undefined}>
     <section className={`${styles.scene} ${styles.toneStripe}`}>
       {top && <div className={styles.runTop}>{top}</div>}
       {pipeline}
-      {result}
 
       <div className={styles.runRow}>
         <div className={styles.runControl}>
@@ -337,17 +359,13 @@ export default function RunConsole({
         </div>
       </div>
 
+      <ActivityBanner activity={activity} controller={controller}>{actions || null}</ActivityBanner>
       {controller.error && <Body className={styles.error}>{controller.error}</Body>}
-      <ActivityBanner activity={activity} />
       {evidence}
+      {result}
       {failure}
 
-      {logFolded ? (
-        <details className={styles.foldBox}>
-          <summary><Overline as="span">Run log</Overline> <span className={styles.muted}>{events.length} events</span></summary>
-          {logBox}
-        </details>
-      ) : logBox}
+      {logBox}
 
       {/* Docked to the bottom of the viewport while the proposal waits, so it is never off screen. */}
       {decision && (
@@ -358,7 +376,6 @@ export default function RunConsole({
       )}
     </section>
     <div className={styles.rightCol}>
-      {actions}
       {aside}
     </div>
     </div>

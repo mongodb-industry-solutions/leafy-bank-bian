@@ -147,7 +147,9 @@ export function Outcome({ scenario, caseDoc, rejected, waiting }) {
   if (!result) return <Body className={styles.muted}>{waiting || "Verifying the result…"}</Body>;
   const expected = result === scenario.expectedOutcome;
   return (
-    <div className={styles.section}>
+    // Same card frame as the other result blocks, so the outcome does not float on the page.
+    <div className={`${styles.findingCard} ${styles.closeOut}`}>
+      <Overline>Outcome</Overline>
       <div className={styles.chipRow}>
         <Badge variant={expected ? "green" : "yellow"}>{OUTCOME_LABEL[result] || result}</Badge>
         {caseDoc.outcome.paymentStatus && <Badge variant="lightgray">{caseDoc.outcome.paymentStatus}</Badge>}
@@ -190,7 +192,7 @@ export function ClosingPanel({ closing }) {
       <ul className={styles.actionLog}>
         {stages.map((st) => (
           <li key={st.label} className={`${styles.checkRow} ${st.done ? styles.checkDone : ""}`}>
-            <Icon glyph={st.done ? "Checkmark" : "Ellipsis"} size={20} />
+            <Icon glyph={st.done ? "Checkmark" : "Ellipsis"} size={14} />
             <Body as="span">{st.label}</Body>
             {st.label === "Settled" && st.done && valueDate && (
               <Body as="span" className={styles.muted}>value date {valueDate}</Body>

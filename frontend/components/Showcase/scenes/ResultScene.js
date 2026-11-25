@@ -68,10 +68,8 @@ export default function ResultScene({ paymentId, scenario, trace, payment, outco
           </Link>
         )}
       </div>
-      <Body className={styles.resultText}>
-        {scenario.beats.verify}
-        {resolvedOnly && " The ledger marks the payment reconciled on its next batch."}
-      </Body>
+      {/* The story card above already narrates beats.verify; this bar carries only the outcome. */}
+      {resolvedOnly && <Body className={styles.resultText}>The ledger marks the payment reconciled on its next batch.</Body>}
       {unexpected && (
         <Body className={styles.error}>
           Ended differently than expected ({scenario.expected}). Check the exception and the payment before continuing.

@@ -82,7 +82,8 @@ export default function ScenarioInfo({ scenario, className = "" }) {
             <Overline>MongoDB features</Overline>
             <span className={styles.chipRow}>
               {brief.mongo.map((m) => (
-                <Badge key={m} variant="green">{m}</Badge>
+            // Light gray, not green: green badges on this page mean payment status.
+            <Badge key={m} variant="lightgray">{m}</Badge>
               ))}
             </span>
           </span>

@@ -158,7 +158,12 @@ function CallRow({ call, bank }) {
           )}
           <AccessRow label="Reads" items={reads} />
           <AccessRow label="Writes" items={writes} />
-          {call.result && <pre className={styles.aiPre}>{call.result}</pre>}
+          {call.result && (
+            <details className={styles.aiSummaryMore}>
+              <summary>Raw result</summary>
+              <pre className={styles.aiPre}>{call.result}</pre>
+            </details>
+          )}
         </div>
       </details>
     </li>
@@ -277,11 +282,17 @@ export default function AgentPanel({ agent, steps, started, activity, activation
   }, [rows.length, follow]);
 
   const working = activity?.kind === "agent";
-  const waitsOnYou = activity?.kind === "human" && (!!children || !!needsDecision);
+  // A proposal with no decision is waiting on the presenter even when the decision UI is docked
+  // elsewhere; otherwise the pill said "Idle" while the stepper sat on "Your call".
+  const pendingProposal = !!agent?.proposedAction && !agent?.approval && !working;
+  const waitsOnYou = (activity?.kind === "human" && (!!children || !!needsDecision)) || pendingProposal;
+  const flow = flowOf(agent, timeline, waitsOnYou);
+  const flowComplete = flow.every((st) => st.state === "done" || st.state === "skip");
+  // "Agent done", not "Done": the payment can still be settling after the agent finishes.
   const state = agent?.error && !agent?.verification ? "Failed"
     : waitsOnYou ? "Waiting for you"
       : working ? "Thinking"
-        : agent?.verification || agent?.outcome ? "Done"
+        : flowComplete || agent?.verification || agent?.outcome ? "Agent done"
           : started || agent ? "Idle" : "Not started";
   const stateClass = { Thinking: styles.aiThinking, "Waiting for you": styles.aiWaiting, Failed: styles.aiFailed }[state] || "";
   const activatedAt = time(activation?.at || agent?.startedAt);
@@ -300,7 +311,7 @@ export default function AgentPanel({ agent, steps, started, activity, activation
           {activation.text}{activatedAt ? ` · ${activatedAt}` : ""}
         </Body>
       )}
-      <Flow steps={flowOf(agent, timeline, waitsOnYou)} />
+      <Flow steps={flow} />
 
       {children}
 
