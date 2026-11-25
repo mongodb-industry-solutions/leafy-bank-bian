@@ -15,11 +15,11 @@ export const SCENARIOS = [
     decision: {
       cause: { label: "Charge claimed", code: "FEE" },
       constraint: { label: "Sender pays all charges", code: "DEBT" },
-      action: { label: "Book the $15 charge", code: "POST_ADJUSTMENT" },
+      action: { label: "Book and recover the $15", code: "POST_ADJUSTMENT" },
     },
     title: "Charge claimed, sender pays",
-    story: "We send $4,850 to Barclays and agree that the sender pays all charges. Barclays can't take its fee from the payment, so it claims $15 from us, and our nostro is debited $15 more than our books show.",
-    talkingPoint: "The agent proposes booking the $15 charge; code checks it matches the over-debit exactly.",
+    story: "We send $4,850 to Barclays and agree that the sender pays all charges. Barclays can't take its fee from the payment, so it claims $15 from us, and our nostro is debited $15 more than our books show. The customer chose sender pays, so we recover the $15 from them.",
+    talkingPoint: "The agent proposes booking the $15 claim and recovering it from the customer; code checks it matches the over-debit exactly.",
     bank: "Barclays",
     wire: {
       beneficiary: "Northwind Traders Ltd",
@@ -35,10 +35,12 @@ export const SCENARIOS = [
     policyLine: "Discrepancy · cause FEE · bearer DEBT · nostro over-debited → only POST_ADJUSTMENT is allowed",
     beats: {
       initiate:
-        "We send USD 4,850.00 to Northwind Traders at Barclays, through our USD correspondent " +
-        "JPMorgan Chase. The customer chose charge bearer DEBT: they pay every charge, so " +
-        "Northwind must receive the full amount. The customer has already paid Leafy's own " +
-        "25.00 wire fee; that is separate from any bank charge.",
+        "We send USD 4,850.00 to Northwind Traders. The route is Leafy, then JPMorgan Chase " +
+        "(our USD correspondent, which holds our nostro), then Barclays (Northwind's bank, the " +
+        "creditor agent). The customer chose charge bearer DEBT, and the outbound pacs.008 " +
+        "carries ChrgBr DEBT, so Northwind must receive the full amount and the customer pays " +
+        "every charge: Leafy's own 25.00 wire fee now, and any other bank's charge as it is " +
+        "claimed.",
       settle: "Barclays credits Northwind the full 4,850.00. So far, a perfectly normal wire.",
       glpost: "Our books say 4,850.00 left our nostro account at Chase.",
       statement:
@@ -51,14 +53,19 @@ export const SCENARIOS = [
       investigate:
         "Watch the agent find that 15.00 is the charge reported on the statement line and " +
         "Barclays's published OUR charge, not Leafy's 25.00 wire fee. It classifies the " +
-        "cause as FEE and sees the bearer is DEBT. Under DEBT the charge is ours to bear, " +
-        "so policy allows exactly one action: book the 15.00 charge.",
+        "cause as FEE and sees the bearer is DEBT. Under DEBT the customer pays every charge, " +
+        "so policy allows exactly one action: pay Barclays's claim and recover the 15.00 from " +
+        "the customer. Northwind keeps the full 4,850.00.",
       approve:
-        "Approving posts a correcting journal: Dr 5214 correspondent charges / Cr 1111 " +
-        "nostro, 15.00. Code rejects any amount that doesn't equal the over-debit exactly.",
+        "Approving debits the customer's account 15.00 in the same transaction and posts two " +
+        "journals: Dr 5214 correspondent charges / Cr 1111 nostro (the claim we paid), and " +
+        "Dr customer deposits / Cr 5214 (the recovery). Code rejects any amount that doesn't " +
+        "equal the over-debit exactly.",
       verify:
-        "The charge is in the general ledger, the books now agree with Chase's statement, " +
-        "and the payment is RECONCILED. No analyst wrote the entry.",
+        "The claim and its recovery are in the general ledger, the books agree with Chase's " +
+        "statement, the payment records the 15.00 discrepancy and its reason, and it is " +
+        "RECONCILED. The customer paid 4,850.00 + 25.00 + 15.00; Leafy keeps its 25.00 fee " +
+        "and 5214 nets to zero. No analyst wrote the entries.",
     },
   },
   {
@@ -71,8 +78,8 @@ export const SCENARIOS = [
       action: { label: "Escalate to the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
     },
     title: "Amount discrepancy",
-    story: "RBC booked 7,306.00 in our nostro against the 7,360.00 we sent. Currency, amounts, FX, charge bearer and reported charges leave the 54.00 gap unexplained.",
-    talkingPoint: "The agent doesn't guess a cause. It rules out the usual explanations, asks RBC, and closes only when RBC's statement books the right amount.",
+    story: "Chase booked 7,306.00 on our nostro against the 7,360.00 we sent to RBC. Currency, amounts, FX, charge bearer and reported charges leave the 54.00 gap unexplained.",
+    talkingPoint: "The agent doesn't guess a cause. It rules out the usual explanations, asks Chase, and closes only when Chase's statement books the right amount.",
     bank: "Royal Bank of Canada",
     wire: {
       beneficiary: "Adventure Works Supply Co",
@@ -84,32 +91,35 @@ export const SCENARIOS = [
       purpose: "Quarterly rent",
     },
     amount: "7,360.00",
-    expected: "Reconciled once RBC's corrected camt.053 books 7,360.00",
+    expected: "Reconciled once Chase's corrected camt.053 books 7,360.00",
     policyLine: "Discrepancy · unexplained after checks · FEE refused (no reported or levied charge of 54.00) · above the 25.00 internal escalation threshold → ESCALATE_TO_CORRESPONDENT",
     beats: {
-      initiate: "We send USD 7,360.00 to Adventure Works at Royal Bank of Canada.",
-      settle: "RBC confirms settlement.",
-      glpost: "Our books say 7,360.00 left our nostro account.",
+      initiate:
+        "We send USD 7,360.00 to Adventure Works at Royal Bank of Canada, through Chase, our " +
+        "USD correspondent and the bank that holds our nostro.",
+      settle: "Settlement is confirmed. So far, a normal wire.",
+      glpost: "Our books say 7,360.00 left our nostro account at Chase.",
       statement:
-        "RBC sends Leafy a camt.053 for Leafy's nostro account at RBC, showing a booked " +
-        "entry of 7,306.00.",
+        "Chase sends Leafy a camt.053 for our nostro, showing a booked entry of 7,306.00 " +
+        "for this wire, with no charges reported on the line.",
       match: "A 54.00 RECONCILIATION_DISCREPANCY opens.",
       investigate:
         "The agent checks currency (USD throughout), the amount fields (instructed, " +
         "payment amount and expected settlement all 7,360.00), FX (none on this wire), the charge bearer " +
-        "(SHAR) and reported charges (none on the entry). Nothing explains 54.00. A guard in " +
+        "(SHAR) and reported charges (none on the entry). Nothing explains 54.00, and a " +
+        "SHAR charge would come off what RBC credits, not off our nostro debit. A guard in " +
         "code accepts FEE only when the gap equals a reported or levied charge, so FEE is " +
         "refused. The agent records an unexplained AMOUNT_MISMATCH. The gap is above our " +
         "25.00 escalation threshold, an internal rule for when to ask the correspondent, not " +
-        "proof of the cause, so it proposes escalating to RBC.",
+        "proof of the cause, so it proposes escalating to Chase, the bank that booked the line.",
       approve:
-        "Approving sends RBC a camt.110 investigation request through SWIFT Case " +
+        "Approving sends Chase a camt.110 investigation request through SWIFT Case " +
         "Management. We don't write off or adjust money we can't explain.",
       verify:
-        "RBC replies with a camt.111, correlated to our request by case id, confirming " +
+        "Chase replies with a camt.111, correlated to our request by case id, confirming " +
         "7,360.00 (simulated after about 20 seconds, or use \"Correspondent replies now\"). " +
         "A reply is not a booking: the exception stays open, pending correction, and the " +
-        "settlement position still shows 7,306.00. RBC then sends a corrected camt.053 that " +
+        "settlement position still shows 7,306.00. Chase then sends a corrected camt.053 that " +
         "reverses the 7,306.00 entry and books 7,360.00 in our nostro (simulated, or use " +
         "\"Corrected statement now\"). The settlement position takes 7,360.00 from that " +
         "statement, the recheck agrees, the exception closes and the payment is RECONCILED. " +
@@ -126,7 +136,7 @@ export const SCENARIOS = [
       action: { label: "Re-check automatically", code: "RECHECK" },
     },
     title: "Delayed statement",
-    story: "Our wire settled as expected, but the bank's statement has not yet arrived, so we cannot confirm receipt. No discrepancy has been identified.",
+    story: "Our wire to UBS settled as expected, but Chase's statement for our nostro does not include it yet, so we cannot confirm the debit. No discrepancy has been identified.",
     talkingPoint: "RECHECK is the only action the agent may take on its own.",
     bank: "UBS",
     wire: {
@@ -142,18 +152,18 @@ export const SCENARIOS = [
     expected: "Reconciled once the statement arrives",
     policyLine: "Missing · cause TIMING → RECHECK runs autonomously; nothing else does",
     beats: {
-      initiate: "We send USD 2,485.00 to Tailspin Aviation at UBS.",
-      settle: "UBS confirms settlement.",
-      glpost: "Our books say 2,485.00 left our nostro account.",
+      initiate: "We send USD 2,485.00 to Tailspin Aviation at UBS, through Chase, our USD correspondent.",
+      settle: "Settlement is confirmed.",
+      glpost: "Our books say 2,485.00 left our nostro account at Chase.",
       window:
-        "UBS's statement is late, and that's all. Watch the countdown: when the window " +
-        "closes, a MISSING exception opens for a payment that is actually fine.",
+        "Chase hasn't booked our line yet, and that's all. Watch the countdown: when the " +
+        "window closes, a MISSING exception opens for a payment that is actually fine.",
       investigate:
         "The agent sees a clean, settled payment that is merely overdue. It classifies the " +
         "cause as TIMING, rechecks, and schedules its next check, all without asking anyone, " +
         "because it moves no money. It can recheck up to 3 times over 10 minutes.",
       late:
-        "UBS's statement arrives with our line on it. No one clicks anything; within a " +
+        "Chase's next statement arrives with our line on it. No one clicks anything; within a " +
         "minute the agent's sweep rechecks and finds the line.",
       verify:
         "The exception closes and the payment is RECONCILED. The agent handled a false " +

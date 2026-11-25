@@ -289,6 +289,36 @@ def test_an_approved_adjustment_posts_dr_5214_cr_nostro():
     assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"] == 2500
 
 
+def test_an_approved_debt_claim_is_recovered_from_the_debtor():
+    """DEBT: the customer bears the claim. Dr customer deposit / Cr 5214 offsets the -ADJ
+    event's Dr 5214, so the bank keeps no net charge expense."""
+    from shared.posting_rules import EVENT_PAYMENT_FEE
+    from workers.settlement_worker import build_recovery_event
+
+    class _CoA(_StubCoAWith5214):
+        _CONTROLS = {**_StubCoAWith5214._CONTROLS, "2111": "2110"}
+
+    debtor = {"accountId": "ACC-debtor", "gl": {"accountCode": "2111"}}
+    payment = {**_PAYMENT, "clearing": {
+        **_PAYMENT["clearing"],
+        "settlementAdjustment": {"amount": 15.0, "currency": "USD", "chargeBearer": "DEBT",
+                                 "exceptionId": "EXC-1", "recoveredFromAccountId": "ACC-debtor"},
+    }}
+    event = build_recovery_event(payment, debtor, _CoA())
+    assert event["eventType"] == EVENT_PAYMENT_FEE
+    assert event["idempotencyKey"] == "PAY-test0001-RCV"
+    assert event["debitLeg"]["glAccountCode"] == "2111"
+    assert event["creditLeg"]["glAccountCode"] == "5214"
+    assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"] == 1500
+
+
+def test_no_recovery_event_without_a_debtor_to_recover_from():
+    from workers.settlement_worker import build_recovery_event
+    payment = {**_PAYMENT, "clearing": {
+        **_PAYMENT["clearing"], "settlementAdjustment": {"amount": 15.0, "currency": "USD"}}}
+    assert build_recovery_event(payment, {"accountId": "A"}, _StubCoAWith5214()) is None
+
+
 def test_no_adjustment_event_without_an_approved_adjustment():
     from workers.settlement_worker import build_adjustment_event
     assert build_adjustment_event(_PAYMENT, _CLEARING_ACCOUNT, _StubCoAWith5214()) is None

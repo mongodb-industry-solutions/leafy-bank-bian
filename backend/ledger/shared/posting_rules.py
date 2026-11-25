@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 #          legs (Dr clearing / Cr customer deposit) so 1131 nets back to zero. The mirror-drift
 #          prevention rule requires the bump on every rule change; the conformance test
 #          asserts the stamp.
-MAPPING_VERSION = "1.3.0"
+# 1.4.0 — the charge-recovery rule: a DEBT wire's claimed correspondent charge is recovered
+#          from the debtor (Dr customer deposit / Cr 5214), so 5214 nets to zero.
+MAPPING_VERSION = "1.4.0"
 
 # eventType — subset of the spec's ledgerEvents.eventType enum exercised in Phase 1.
 # Values are verbatim from the spec enum (`SETTLEMENT`, `FEE`, `PAYMENT_PRINCIPAL`) — the
@@ -36,8 +38,8 @@ MAPPING_VERSION = "1.3.0"
 EVENT_PAYMENT_PRINCIPAL = "PAYMENT_PRINCIPAL"
 EVENT_PAYMENT_FEE = "FEE"
 EVENT_PAYMENT_SETTLEMENT = "SETTLEMENT"
-# Operator-approved correction for a short-settled wire whose charges the bank bears
-# (chargeBearer DEBT) — Sep 17 L1286: "financial corrections … under human approval".
+# Operator-approved correction for a DEBT wire's claimed correspondent charge — Sep 17
+# L1286: "financial corrections … under human approval".
 EVENT_SETTLEMENT_ADJUSTMENT = "SETTLEMENT_ADJUSTMENT"
 
 # Accounting sides.
@@ -56,8 +58,8 @@ BANK_GL_ACCOUNT_BY_EVENT_TYPE: dict[str, str] = {
     # `4211 Transaction Fee Income` is the leaf: level 4, normalBalance CREDIT, ACTIVE,
     # "Payment and transaction processing fees".
     EVENT_PAYMENT_FEE: "4211",
-    # `5214 Correspondent Charges` — the correspondent deducted its fee from a wire whose
-    # charges Leafy Bank bears (DEBT), so the bank absorbs it as an operating expense.
+    # `5214 Correspondent Charges` — a correspondent charge on a wire whose charges the
+    # sending side bears (DEBT). Booked when the claim is paid, then recovered from the debtor.
     EVENT_SETTLEMENT_ADJUSTMENT: "5214",
 }
 
@@ -298,6 +300,52 @@ def decompose_settlement_adjustment(
             amount_minor=amount_minor,
             currency=currency,
             account_id=clearing_account["accountId"],
+        ),
+    ]
+    assert_balanced(legs)
+    return legs
+
+
+def decompose_charge_recovery(
+    *,
+    amount: float | str | Decimal,
+    currency: str,
+    debtor_account: dict,
+    coa: ChartOfAccounts,
+) -> list[PostingLeg]:
+    """Recover a paid DEBT charge claim from the debtor: Dr customer deposit / Cr 5214.
+
+    The customer chose DEBT, so the charge is theirs. Crediting 5214 offsets the
+    settlement adjustment's debit, leaving the bank with no net charge expense. Returns
+    ``[]`` when the chart of accounts has no active 5214 leaf, like the adjustment.
+    """
+    amount_minor = to_minor_units(amount)
+    if amount_minor <= 0:
+        return []
+    expense_code = BANK_GL_ACCOUNT_BY_EVENT_TYPE[EVENT_SETTLEMENT_ADJUSTMENT]
+    try:
+        coa.require_active_posting_account(expense_code)
+    except (ValueError, KeyError):
+        logger.warning("charge recovery of %s %s not posted: no active %s posting leaf.",
+                       amount, currency, expense_code)
+        return []
+
+    legs = [
+        PostingLeg(
+            event_type=EVENT_PAYMENT_FEE,
+            side=SIDE_DEBIT,
+            gl_account_code=_principal_gl_account(debtor_account, coa),
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=debtor_account["accountId"],
+        ),
+        PostingLeg(
+            event_type=EVENT_PAYMENT_FEE,
+            side=SIDE_CREDIT,
+            gl_account_code=expense_code,
+            amount_minor=amount_minor,
+            currency=currency,
+            account_id=debtor_account["accountId"],
         ),
     ]
     assert_balanced(legs)

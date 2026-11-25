@@ -120,7 +120,8 @@ not close the case: it closes only when the correspondent's corrected camt.053 b
 expected amount.
 - For FEE, the payment's chargeBearer decides the books, not you. Under DEBT (OUR) no bank \
 may deduct its fee from the principal; the beneficiary's bank claims it from us instead, so \
-our nostro is debited MORE than we posted (a negative discrepancy, books − statement). Under \
+our nostro is debited MORE than we posted (a negative discrepancy, books − statement). The \
+adjustment books that claim and recovers it from our customer, who chose DEBT. Under \
 SHAR or CRED a charge is deducted from the amount and the statement shows less.
 - Leafy Bank's own WIRE_FEE on the payment was charged to our customer; it is not the \
 correspondent's charge and never explains a statement gap.

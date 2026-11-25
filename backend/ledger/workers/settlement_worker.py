@@ -39,10 +39,12 @@ from shared.change_stream import iter_with_idle_checkpoint
 from shared.coa_cache import ChartOfAccounts
 from shared.posting_rules import (
     MAPPING_VERSION,
+    EVENT_PAYMENT_FEE,
     EVENT_PAYMENT_SETTLEMENT,
     EVENT_SETTLEMENT_ADJUSTMENT,
     SIDE_CREDIT,
     SIDE_DEBIT,
+    decompose_charge_recovery,
     decompose_inbound_settlement,
     decompose_settlement,
     decompose_settlement_adjustment,
@@ -219,6 +221,40 @@ def build_adjustment_event(
     )
     if not legs:
         return None
+    return _correction_event(
+        payment, legs, coa, key_suffix="ADJ", event_type=EVENT_SETTLEMENT_ADJUSTMENT,
+        sub_ledger="CLEARING_AND_SETTLEMENT",
+        description=(f"Correspondent charge claim paid (chargeBearer DEBT) — approved on "
+                     f"{adj.get('exceptionId')}: {payment['paymentId']}"),
+        source_id=adj.get("exceptionId"))
+
+
+def build_recovery_event(payment: dict, debtor_account: dict, coa: ChartOfAccounts) -> dict | None:
+    """Pure: recover the paid charge claim from the debtor (Dr customer deposit / Cr 5214).
+
+    Rides on the same approved ``clearing.settlementAdjustment`` as the -ADJ event, so a
+    DEBT customer ends up bearing the claim and the bank's 5214 nets to zero. Idempotent on
+    ``{paymentId}-RCV``. The customer's balance was debited in the approval's transaction.
+    """
+    adj = (payment.get("clearing") or {}).get("settlementAdjustment")
+    if not adj or not adj.get("recoveredFromAccountId"):
+        return None
+    legs = decompose_charge_recovery(
+        amount=adj.get("amount", 0), currency=adj.get("currency", "USD"),
+        debtor_account=debtor_account, coa=coa)
+    if not legs:
+        return None
+    return _correction_event(
+        payment, legs, coa, key_suffix="RCV", event_type=EVENT_PAYMENT_FEE,
+        sub_ledger="CUSTOMER_DEPOSITS",
+        description=(f"Correspondent charge recovered from the debtor (chargeBearer DEBT) — "
+                     f"approved on {adj.get('exceptionId')}: {payment['paymentId']}"),
+        source_id=adj.get("exceptionId"))
+
+
+def _correction_event(payment: dict, legs: list, coa: ChartOfAccounts, *, key_suffix: str,
+                      event_type: str, sub_ledger: str, description: str,
+                      source_id) -> dict:
     debit_leg = next(l for l in legs if l.side == SIDE_DEBIT)
     credit_leg = next(l for l in legs if l.side == SIDE_CREDIT)
 
@@ -239,28 +275,25 @@ def build_adjustment_event(
     return {
         "_id": oid,
         "eventId": derive_ref(PREFIX_LEDGER_EVENT, oid),
-        "idempotencyKey": f"{payment_id}-ADJ",
+        "idempotencyKey": f"{payment_id}-{key_suffix}",
         "groupId": derive_ref(PREFIX_GROUP, oid),
         "occurredAt": occurred_at,
         "valueDate": occurred_at,
         "periodName": occurred_at.strftime("%B %Y"),
-        "description": (
-            f"Correspondent charge absorbed (chargeBearer DEBT) — approved on "
-            f"{adj.get('exceptionId')}: {payment_id}"
-        ),
+        "description": description,
         "meta": {
-            "subLedgerType": "CLEARING_AND_SETTLEMENT",
+            "subLedgerType": sub_ledger,
             "periodCode": occurred_at.strftime("%Y-%m"),
             "sourceSystem": _SOURCE_SYSTEM,
         },
-        "eventType": EVENT_SETTLEMENT_ADJUSTMENT,
+        "eventType": event_type,
         "debitLeg": _leg(debit_leg),
         "creditLeg": _leg(credit_leg),
         "sourceReference": {
             "sourceCollection": "exceptions",
-            "sourceId": adj.get("exceptionId") or payment_id,
+            "sourceId": source_id or payment_id,
             "sourceSystem": _SOURCE_SYSTEM,
-            "sourceType": EVENT_SETTLEMENT_ADJUSTMENT,
+            "sourceType": event_type,
         },
         "rail": payment.get("rail") or payment.get("paymentType"),
         "paymentType": payment.get("paymentType"),
@@ -343,6 +376,26 @@ def process_settlement(
             {"paymentId": payment_id, "adjustmentPending": True},
             {"$set": {"adjustmentPending": False}},
         )
+
+    _post_recovery(payment, txn, accounts, le_coll, coa)
+
+
+def _post_recovery(payment: dict, txn: dict, accounts, le_coll, coa: ChartOfAccounts) -> None:
+    """Post the approved charge recovery against the outbound wire's debtor (the payer)."""
+    adj = (payment.get("clearing") or {}).get("settlementAdjustment") or {}
+    debtor_id = adj.get("recoveredFromAccountId")
+    if not debtor_id or debtor_id != (txn.get("payer") or {}).get("accountId"):
+        return
+    debtor_account = accounts.find_one({"accountId": debtor_id})
+    event = build_recovery_event(payment, debtor_account, coa) if debtor_account else None
+    if event is None:
+        return
+    try:
+        le_coll.insert_one(event)
+        logger.info("charge recovery ledgerEvent %s created for paymentId=%s",
+                    event["eventId"], payment["paymentId"])
+    except DuplicateKeyError:
+        pass
 
 
 # A field path written only by the transactions service's gpi tracker (`payments.tracking`).

@@ -229,7 +229,7 @@ def test_a_reversal_txn_builds_a_balanced_event_with_swapped_legs_and_reversalOf
     assert event["debitLeg"]["amount"] == event["creditLeg"]["amount"]   # balanced
     # mappingVersion bumped (1.3.0)
     from shared.posting_rules import MAPPING_VERSION
-    assert event["mappingVersion"] == MAPPING_VERSION == "1.3.0"
+    assert event["mappingVersion"] == MAPPING_VERSION == "1.4.0"
     # eventType stays PAYMENT_PRINCIPAL (no invented enum value)
     assert event["eventType"] == "PAYMENT_PRINCIPAL"
     assert "reversal of TXN-original0001" in event["description"]

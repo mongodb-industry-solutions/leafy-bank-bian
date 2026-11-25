@@ -422,7 +422,7 @@ def test_the_mapping_version_was_bumped_for_the_fee_rule():
     Stage 9 bumped it (1.2.0 → 1.3.0) for the reversal rule (doc 24 B5).
     """
     from shared.posting_rules import MAPPING_VERSION
-    assert MAPPING_VERSION == "1.3.0"
+    assert MAPPING_VERSION == "1.4.0"
 
 
 # --- enum parity for the values the LEDGER writes onto payments ---------------

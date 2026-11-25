@@ -137,8 +137,12 @@ const APPROVE_BY_SCENARIO = {
   R1: [
     W("ledgerEvents", "insert", "Adjustment {paymentId}-ADJ: Dr 5214 correspondent charges / Cr 1111 Nostro/Central Bank Cash, 15.00",
       ledgerEvents(["ADJ"]), "Ledger service, change stream"),
+    W("ledgerEvents", "insert", "Recovery {paymentId}-RCV: Dr customer deposits / Cr 5214 correspondent charges, 15.00",
+      ledgerEvents(["RCV"]), "Ledger service, change stream"),
+    W("accounts", "update", "balance.current / available / ledger: the customer's account debited 15.00",
+      () => null, "Transactions service"),
     W("settlementPositions", "update", "adjustmentPending", position),
-    W("payments", "update", "clearing.settlementAdjustment", ({ payment }) => nonEmpty(paymentDoc(payment))),
+    W("payments", "update", "clearing.settlementAdjustment (with recoveredFromAccountId)", ({ payment }) => nonEmpty(paymentDoc(payment))),
   ],
   R4: [
     W("canonicalJsonStorage", "insert", "camt.110 investigation request to the correspondent: purpose INVESTIGATION_REQUEST, caseId", camt110),

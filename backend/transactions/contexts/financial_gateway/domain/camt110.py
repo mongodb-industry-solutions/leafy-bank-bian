@@ -88,7 +88,11 @@ def build(
         "BookdAmt": _amt(booked, currency),
         "AddtlInf": note or detail.get("discrepancyReason"),
     }
-    correspondent_bic = ((payment or {}).get("correspondent") or {}).get("correspondentBic")
+    # The responder is the bank that booked the line we dispute: our nostro's servicer, the
+    # first hop out (`instructedAgentBic`, CHASUS33 for USD). The country correspondent is the
+    # fallback for a wire with no such hop.
+    correspondent = (payment or {}).get("correspondent") or {}
+    correspondent_bic = correspondent.get("instructedAgentBic") or correspondent.get("correspondentBic")
     return {ROOT: {MESSAGE_ROOT: {
         "InvstgtnReq": {
             "MsgId": msg_id,

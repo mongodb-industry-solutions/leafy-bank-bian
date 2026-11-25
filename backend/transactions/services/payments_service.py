@@ -73,8 +73,9 @@ def _settlement_adjustment_for(payment: dict, exc: dict) -> Optional[dict]:
 
     `discrepancyAmount` is books − statement. A DEBT (OUR) wire's creditor agent may not
     deduct its fee from the principal, so it claims the fee from us and our nostro is
-    debited MORE than we posted (a negative discrepancy). The bank absorbs that charge:
-    Dr 5214 Correspondent Charges / Cr nostro, for the over-debit.
+    debited MORE than we posted (a negative discrepancy). The bank pays the claim
+    (Dr 5214 Correspondent Charges / Cr nostro) and, because the customer chose DEBT,
+    recovers it from the debtor's account (Dr customer deposit / Cr 5214).
       * CRED / SHAR / SLEV — the beneficiary bears (or shares under scheme rules) the
         charge; no bank entry. The accept is the record.
     Returns None when no entry is due.
@@ -89,6 +90,7 @@ def _settlement_adjustment_for(payment: dict, exc: dict) -> Optional[dict]:
         "currency": payment.get("currency", "USD"),
         "chargeBearer": "DEBT",
         "exceptionId": exc.get("exceptionId"),
+        "recoveredFromAccountId": (payment.get("debtor") or {}).get("accountId"),
     }
 
 
@@ -1333,13 +1335,15 @@ class PaymentsService:
 
         if category == CATEGORY_RECONCILIATION_DISCREPANCY:
             # Parent plan Decision 2, enforced here and not only in the UI or the agent:
-            # chargeBearer decides the books. DEBT → the bank absorbs the charge, so the only
-            # closing entry is POST_ADJUSTMENT; any other bearer → ACCEPT, no entry (A4 D3).
+            # chargeBearer decides the books. DEBT → the bank pays the claim and recovers it
+            # from the debtor, so the only closing entry is POST_ADJUSTMENT; any other
+            # bearer → ACCEPT, no entry (A4 D3).
             bearer = payment.get("chargeBearer")
             if action == ACTION_ACCEPT_DISCREPANCY and bearer == "DEBT":
                 raise ExceptionActionNotLegal(
-                    f"Payment {exc['paymentId']} has chargeBearer DEBT — the bank absorbs the "
-                    "correspondent's charge, so close it with POST_ADJUSTMENT, not ACCEPT."
+                    f"Payment {exc['paymentId']} has chargeBearer DEBT — the correspondent's "
+                    "charge is booked and recovered from the debtor, so close it with "
+                    "POST_ADJUSTMENT, not ACCEPT."
                 )
             if action == ACTION_POST_ADJUSTMENT and bearer != "DEBT":
                 raise ExceptionActionNotLegal(
@@ -1492,7 +1496,8 @@ class PaymentsService:
 
         One ACID txn: the conditional OPEN→RESOLVED claim first (B2 — a second resolver's
         claim matches 0 and aborts before anything is stamped), then the stamp the ledger's
-        settlement_worker turns into Dr 5214 / Cr nostro, idempotent on {paymentId}-ADJ.
+        settlement_worker turns into Dr 5214 / Cr nostro ({paymentId}-ADJ) and the recovery
+        Dr customer deposit / Cr 5214 ({paymentId}-RCV), plus the customer's balance debit.
         `reconciliationStatus` is NOT flipped: reconciliation nets the posted -ADJ event and
         closes the leg itself (D2). `adjustmentPending` on the position holds leg 2 PENDING
         until that event exists, so the sweep cannot re-raise the discrepancy meanwhile.
@@ -1530,6 +1535,19 @@ class PaymentsService:
                 {"$set": {"clearing.settlementAdjustment": adjustment, "updatedAt": now}},
                 session=session,
             )
+            # Recover the claim from the customer in the same transaction as the approval.
+            # Not guarded on available balance: a bank recovers charges it is owed even into
+            # an overdraft, and refusing here would leave the paid claim unrecoverable.
+            debtor_id = adjustment.get("recoveredFromAccountId")
+            if debtor_id:
+                recovery = adjustment["amount"]
+                self.accounts.update_one(
+                    {"accountId": debtor_id},
+                    {"$inc": {"balance.current": -recovery, "balance.available": -recovery,
+                              "balance.ledger": -recovery},
+                     "$set": {"balance.updatedAt": now, "updatedAt": now}},
+                    session=session,
+                )
 
         with self.db.client.start_session() as session:
             session.with_transaction(callback)

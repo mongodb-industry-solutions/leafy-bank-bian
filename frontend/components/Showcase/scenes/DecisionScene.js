@@ -11,7 +11,7 @@ import styles from "../Showcase.module.css";
 function effectOf(proposal, bank) {
   switch (proposal.action) {
     case "POST_ADJUSTMENT":
-      return `A correcting journal: Dr 5214 correspondent charges / Cr 1111 Nostro/Central Bank Cash, ${major(proposal.params?.amount)}.`;
+      return `The customer's account is debited ${major(proposal.params?.amount)}, and two journals post: Dr 5214 correspondent charges / Cr 1111 Nostro/Central Bank Cash (the claim we paid), and Dr customer deposits / Cr 5214 (the recovery).`;
     case "ACCEPT_DISCREPANCY":
       return "No charge adjustment. The 25.00 shortfall is recorded as variance (\"SHAR charge deducted\") and marked explained and matched. The exception closes and the payment reconciles.";
     case "LINK_STATEMENT_ENTRY":

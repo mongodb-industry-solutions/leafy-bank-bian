@@ -570,9 +570,11 @@ def test_post_adjustment_on_a_debt_wire_stamps_the_correction_for_the_ledger(ser
     event and closes the leg itself (D2), held PENDING meanwhile by `adjustmentPending`."""
     payment, exc = _discrepant_wire(service, db, charge_bearer="DEBT")
     db["settlementPositions"].insert_one({"paymentId": payment["paymentId"]})
+    debtor_id = payment["debtor"]["accountId"]
+    before = db["accounts"].find_one({"accountId": debtor_id})["balance"]
 
     updated = service.resolve_exception(exc["exceptionId"], action=ACTION_POST_ADJUSTMENT,
-                                        note="Correspondent charge claimed — bank absorbs.")
+                                        note="Correspondent charge claimed — recovered from the debtor.")
 
     assert updated["status"] == STATUS_RESOLVED
     assert updated["resolution"]["action"] == ACTION_POST_ADJUSTMENT
@@ -581,6 +583,11 @@ def test_post_adjustment_on_a_debt_wire_stamps_the_correction_for_the_ledger(ser
     assert adj["amount"] == 15.0
     assert adj["chargeBearer"] == "DEBT"
     assert adj["exceptionId"] == exc["exceptionId"]
+    assert adj["recoveredFromAccountId"] == debtor_id
+    # DEBT: the customer bears the claim, debited in the approval's transaction.
+    balance = db["accounts"].find_one({"accountId": debtor_id})["balance"]
+    for field in ("current", "available", "ledger"):
+        assert balance[field] == pytest.approx(before[field] - 15.0)
     assert after["lifecycle"]["reconciliationStatus"] == "DISCREPANT"
     position = db["settlementPositions"].find_one({"paymentId": payment["paymentId"]})
     assert position["adjustmentPending"] is True

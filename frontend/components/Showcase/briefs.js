@@ -17,12 +17,12 @@ export const BRIEFS = {
   R1: {
     hard: "Our nostro was debited 15.00 more than we booked. Barclays claimed its charge from us, and it is not Leafy's own 25.00 wire fee.",
     decides: "Whether the extra debit is a charge, and who bears it.",
-    guarantees: "Under sender-pays, code allows only booking the charge, and only for exactly the over-debit.",
+    guarantees: "Under sender-pays, code allows only booking the claim and recovering it from the customer, and only for exactly the over-debit.",
     mongo: [...MONGO_RECON, "Idempotent ledger write"],
-    autonomy: { level: 2, alone: "Reads the history, finds the cause, proposes the fix", needsYou: "Booking the charge" },
+    autonomy: { level: 2, alone: "Reads the history, finds the cause, proposes the fix", needsYou: "Booking and recovering the charge" },
   },
   R4: {
-    hard: "RBC's statement books 7,306.00 against our 7,360.00, and nothing on the payment or the entry explains the 54.00.",
+    hard: "Chase's statement books 7,306.00 against our 7,360.00, and nothing on the payment or the entry explains the 54.00.",
     decides: "Whether any check explains the gap, or whether to ask the correspondent.",
     guarantees: "Code refuses a fee explanation unless the gap equals a reported or levied charge, and only a corrected statement closes the case.",
     mongo: MONGO_RECON,
@@ -82,7 +82,7 @@ const MOMENTS = {
 const MOMENT_OVERRIDES = {
   R1: {
     approve: [
-      moment("Idempotent write", "The adjustment's key is {paymentId}-ADJ, so a retry cannot post it twice."),
+      moment("Idempotent write", "The claim and the recovery are keyed {paymentId}-ADJ and {paymentId}-RCV, so a retry cannot post either twice."),
       moment("LangGraph checkpoint", "The paused run is saved in MongoDB and resumes on approval."),
     ],
     verify: [moment("Change stream into the GL", "The adjustment flows through the ledger and the payment turns RECONCILED.")],

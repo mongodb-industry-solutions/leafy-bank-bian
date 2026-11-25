@@ -1723,7 +1723,8 @@ const ACTION_LABELS = {
 const LEDGER_ACTIONS = { RECHECK: "recheck", LINK_STATEMENT_ENTRY: "link" };
 
 // Mirrors the backend's chargeBearer gate (parent plan Decision 2): DEBT means the bank
-// absorbs the correspondent's charge and books it; any other bearer accepts with no entry.
+// books the correspondent's charge and recovers it from the debtor; any other bearer
+// accepts with no entry.
 // The backend refuses the wrong one either way — this only hides a button that would 422.
 function actionsFor(exception, payment) {
   const actions = EXCEPTION_ACTIONS[exception.category] || [];
@@ -1790,8 +1791,9 @@ const EXCEPTION_EXPLANATION = {
   RECONCILIATION_DISCREPANCY:
     "The three-way reconciliation — payment to rail, rail to settlement, settlement to GL — " +
     "found a mismatch, e.g. the rail settled short of the GL posting. Who bears the charges " +
-    "decides the fix: if Leafy Bank does (DEBT), book the charge (Dr 5214 Correspondent " +
-    "Charges / Cr nostro) and reconciliation closes once it posts; otherwise the beneficiary " +
+    "decides the fix: if the customer chose DEBT, book the claimed charge (Dr 5214 " +
+    "Correspondent Charges / Cr nostro) and recover it from the customer (Dr customer " +
+    "deposits / Cr 5214); reconciliation closes once it posts. Otherwise the beneficiary " +
     "bore it, so accept the discrepancy with no entry.",
   RECONCILIATION_MISSING:
     "The payment settled, but the correspondent bank's statement has not shown it within " +
