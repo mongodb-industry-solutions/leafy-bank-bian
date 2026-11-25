@@ -119,12 +119,6 @@
   gap: 40px;
 }
 
-.agentSectionTitle {
-  margin: 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #dbe2e0;
-}
-
 /* Scenario matrix: a behaviour label, then one equal-width slot per agent. */
 .matrix {
   --label-col: 240px;
@@ -133,7 +127,6 @@
   gap: 24px;
 }
 
-.matrixHeadRow,
 .matrixRow {
   display: grid;
   grid-template-columns: var(--label-col) repeat(2, minmax(0, 1fr));
@@ -146,7 +139,7 @@
   border-top: 1px solid #e8edeb;
 }
 
-.matrixHeadRow + .matrixRow { border-top: 0; padding-top: 0; }
+.matrixRow:first-child { border-top: 0; padding-top: 0; }
 
 .matrixCell {
   display: flex;
@@ -156,9 +149,6 @@
 }
 
 .matrixCell > .cardWrap { flex: 1; }
-
-/* The agent's name inside a cell is only needed once the header row is gone (narrow screens). */
-.matrixCellAgent { display: none; }
 
 .matrixEmpty {
   flex: 1;
@@ -238,20 +228,9 @@
   margin: 0;
 }
 
-/* Narrow screens: no header row; each behaviour stacks its agents' cells, each naming its agent. */
+/* Narrow screens: each behaviour stacks its cells; the card pills still name the agent. */
 @media (max-width: 1100px) {
-  .matrixHeadRow { display: none; }
-
   .matrixRow { grid-template-columns: minmax(0, 1fr); }
-
-  .matrixCellAgent {
-    display: block;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #5c6c75;
-  }
 }
 
 @media (max-width: 700px) {
@@ -317,8 +296,29 @@
   outline-offset: 2px;
 }
 
+/* Which agent (or none) owns the scenario. Colour is per agent, not per mode, so it never
+   competes with the mode accent on the card's left edge. */
+.agentPill {
+  position: absolute; /* on the title's line, just left of the absolutely-placed info button */
+  top: 16px;
+  right: 44px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  border: 1px solid #c1c7c6;
+  background: #f9fbfa;
+  color: #3d4f58;
+}
+
+.agentPill_recon { border-color: #c0e8d6; background: #e3fcf7; color: #00684a; }
+.agentPill_cutoff { border-color: #ffdcb0; background: #fef7e3; color: #944f01; }
+.agentPill_none { border-color: #dcd6ff; background: #f5f3ff; color: #5a3ec8; }
+
 .cardTitle {
-  padding-right: 32px; /* clear the info button */
+  padding-right: 180px; /* clear the agent pill and the info button */
   font-size: 15px;
   line-height: 20px;
   font-weight: 600;

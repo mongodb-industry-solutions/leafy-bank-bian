@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Icon from "@leafygreen-ui/icon";
-import { H2, H3, Body } from "@leafygreen-ui/typography";
+import { H3, Body } from "@leafygreen-ui/typography";
 import ScenarioInfo from "./ScenarioBrief";
 import { SCENARIOS, GROUPS, stepsFor } from "./scenarios";
 import { CUTOFF_SCENARIOS } from "./cutoffScenarios";
@@ -52,7 +52,7 @@ function DecisionFlow({ decision }) {
   );
 }
 
-function ScenarioCard({ scenario, ran, onPick }) {
+function ScenarioCard({ scenario, ran, onPick, agent }) {
   const meta = scenario.startEt
     ? `${scenario.cardAmount || `USD ${scenario.amount}`} · ${scenario.startEt} ET`
     : scenario.bank
@@ -61,6 +61,7 @@ function ScenarioCard({ scenario, ran, onPick }) {
   return (
     <div className={`${styles.cardWrap} ${styles[`mode_${scenario.mode}`]}`}>
       <button type="button" className={styles.scenarioCard} onClick={() => onPick(scenario.key)}>
+        <span className={`${styles.agentPill} ${styles[`agentPill_${agent.id}`]}`}>{agent.title}</span>
         <span className={styles.cardTitle}>{scenario.title}</span>
         <span className={styles.cardStory}>{scenario.story}</span>
         <DecisionFlow decision={scenario.decision} />
@@ -77,7 +78,9 @@ function ScenarioCard({ scenario, ran, onPick }) {
 }
 
 // One matrix: rows are what the agent does, columns are the agents. Every cell is one slot, so
-// all cards share one width.
+// all cards share one width. Each card names its own agent in a pill (no column headers), so
+// the no-agent concurrency row is not read as belonging to the first column's agent.
+const NO_AGENT = { id: "none", title: "No agent · MongoDB" };
 const AGENTS = [
   { id: "recon", title: "Reconciliation agent", scenarios: SCENARIOS },
   { id: "cutoff", title: "Cut-off agent", scenarios: CUTOFF_SCENARIOS },
@@ -101,10 +104,9 @@ function Cell({ agent, mode, ran, onPick }) {
   const items = agent.scenarios.filter((s) => s.mode === mode);
   return (
     <div className={styles.matrixCell}>
-      <span className={styles.matrixCellAgent}>{agent.title}</span>
-      {items.length === 0 && <div className={styles.matrixEmpty}>No scenario yet</div>}
+      {items.length === 0 && <div className={styles.matrixEmpty}>No {agent.title.toLowerCase()} scenario yet</div>}
       {items.map((s) => (
-        <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={onPick} />
+        <ScenarioCard key={s.key} scenario={s} agent={agent} ran={ran.includes(s.key)} onPick={onPick} />
       ))}
     </div>
   );
@@ -113,12 +115,6 @@ function Cell({ agent, mode, ran, onPick }) {
 function ScenarioMatrix({ ran, onPick }) {
   return (
     <div className={styles.matrix}>
-      <div className={styles.matrixHeadRow}>
-        <span />
-        {AGENTS.map((a) => (
-          <H2 key={a.id} className={styles.agentSectionTitle}>{a.title}</H2>
-        ))}
-      </div>
       {GROUPS.map((group) => (
         <div key={group.mode} className={`${styles.matrixRow} ${styles[`mode_${group.mode}`]}`}>
           <GroupHead group={group} />
@@ -131,7 +127,7 @@ function ScenarioMatrix({ ran, onPick }) {
         <GroupHead group={CONCURRENCY_GROUP} />
         <div className={styles.matrixCell}>
           {CONCURRENCY_SCENARIOS.map((s) => (
-            <ScenarioCard key={s.key} scenario={s} ran={ran.includes(s.key)} onPick={onPick} />
+            <ScenarioCard key={s.key} scenario={s} agent={NO_AGENT} ran={ran.includes(s.key)} onPick={onPick} />
           ))}
         </div>
       </div>

@@ -15,9 +15,9 @@ const FEATURES = [
     badge: { variant: "green", text: "Live lifecycle" },
   },
   {
-    icon: "Bulb", title: "Agentic", href: "/showcase",
-    body: "Watch an agent investigate reconciliation breaks and cutoff risk, then decide.",
-    badge: { variant: "blue", text: "AI-assisted" },
+    icon: "Bulb", title: "Scenarios", href: "/showcase",
+    body: "Walk through reconciliation breaks, cutoff risk and concurrent wires, with agents or the database deciding.",
+    badge: { variant: "blue", text: "Agents + MongoDB" },
   },
   {
     icon: "Charts", title: "GL Pipeline Monitor", href: "/gl-pipeline-monitor",
