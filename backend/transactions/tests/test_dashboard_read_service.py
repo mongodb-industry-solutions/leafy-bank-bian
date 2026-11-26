@@ -177,3 +177,28 @@ def test_cached_dashboard_computes_once_within_the_ttl(monkeypatch):
     svc.get_dashboard_cached(None, "db", window="7d")  # another window computes separately
     assert len(calls) == 2
     svc._cache.clear()
+
+
+def test_every_payments_aggregate_excludes_the_smart_routing_wires(monkeypatch):
+    """`payments` is shared with the smart-routing demo; its wires must not reach any widget.
+    `settlementPositions` is a different collection and keeps its plain window."""
+    monkeypatch.setattr(svc.workflow_read_service, "list_exceptions", lambda *a, **k: {"items": []})
+    monkeypatch.setattr(svc.workflow_read_service, "list_payments", lambda *a, **k: {"items": []})
+    payment_matches, settlement_matches = [], []
+
+    def payments(pipeline):
+        payment_matches.append(pipeline[0]["$match"])
+        return []
+
+    def settlement(pipeline):
+        settlement_matches.append(pipeline[0]["$match"])
+        return []
+
+    svc.get_dashboard(_Conn(_Coll(payments), _Coll(lambda p: []), _Coll(settlement)),
+                      "db", window="24h", now=NOW)
+
+    own = svc.workflow_read_service.OWN_PAYMENTS
+    assert len(payment_matches) == 6  # 2 histograms, rails, volume, dwell, reconciliation
+    for match in payment_matches:
+        assert match["sourceSystem"] == own["sourceSystem"]
+    assert settlement_matches and all("sourceSystem" not in m for m in settlement_matches)

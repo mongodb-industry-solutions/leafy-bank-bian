@@ -84,6 +84,14 @@ _LIST_PROJECTION = {
 }
 
 
+# `payments` is shared with the agentic smart-routing demo, whose wire payments are
+# migrated into this database tagged with their own `sourceSystem`. They have none of this
+# demo's lifecycle (no stages, events or exceptions), so every UI read excludes them. `$ne`
+# also matches a missing `sourceSystem`, so no payment of ours is ever dropped by it.
+FOREIGN_SOURCE_SYSTEM = "fsi-agentic-smart-routing"
+OWN_PAYMENTS = {"sourceSystem": {"$ne": FOREIGN_SOURCE_SYSTEM}}
+
+
 def _payments(connection: MongoDBConnection, db_name: str):
     return connection.get_collection(db_name, "payments")
 
@@ -113,7 +121,7 @@ def _build_filter(
     source of truth: `status` is its mirror (lifecycle.py's contract) and is the top-level
     field an index can serve.
     """
-    query: dict = {}
+    query: dict = dict(OWN_PAYMENTS)
     if status:
         query["status"] = status
     if customer_id:
@@ -203,7 +211,8 @@ def get_payment(connection: MongoDBConnection, db_name: str, payment_id: str) ->
     `_id` is excluded rather than stringified — the paymentId is the identifier the UI uses,
     and echoing a raw ObjectId into a response is the 2026-06-11 defect.
     """
-    payment = _payments(connection, db_name).find_one({"paymentId": payment_id}, {"_id": 0})
+    payment = _payments(connection, db_name).find_one(
+        {"paymentId": payment_id, **OWN_PAYMENTS}, {"_id": 0})
     if payment is None:
         return None
     # `lifecycle.events[]` and `checks[]` live in `paymentEvents`; join them back so the
@@ -289,7 +298,7 @@ def get_tracking(connection: MongoDBConnection, db_name: str, uetr: str) -> Opti
     flt = ({"paymentId": {"$in": tracked}} if tracked
            else {"uetr": {"$in": [bare, f"UETR-{bare}", raw, f"UETR-{raw}"]}})
     candidates = list(payments.find(
-        flt, {"_id": 0, "paymentId": 1, "tracking": 1, "createdAt": 1}))
+        {**flt, **OWN_PAYMENTS}, {"_id": 0, "paymentId": 1, "tracking": 1, "createdAt": 1}))
     if not candidates:
         return None
     payment = min(candidates, key=_creation_order)
@@ -522,17 +531,17 @@ def resolve_ref(connection: MongoDBConnection, db_name: str, ref: str) -> Option
     upper = (ref or "").upper()
 
     if upper.startswith("PAY-"):
-        payment = coll.find_one({"paymentId": ref}, {"paymentId": 1, "_id": 0})
+        payment = coll.find_one({"paymentId": ref, **OWN_PAYMENTS}, {"paymentId": 1, "_id": 0})
         return {"paymentId": payment["paymentId"], "matchedBy": "paymentId", "ref": ref} if payment else None
 
     if upper.startswith("TXN-"):
-        payment = coll.find_one({"txnId": ref}, {"paymentId": 1, "_id": 0})
+        payment = coll.find_one({"txnId": ref, **OWN_PAYMENTS}, {"paymentId": 1, "_id": 0})
         return {"paymentId": payment["paymentId"], "matchedBy": "txnId", "ref": ref} if payment else None
 
     if upper.startswith("ACC-"):
         # Newest first — an account has many payments; the most recent is the way in.
         payment = coll.find_one(
-            {"$or": [{"debtor.accountId": ref}, {"creditor.accountId": ref}]},
+            {"$or": [{"debtor.accountId": ref}, {"creditor.accountId": ref}], **OWN_PAYMENTS},
             {"paymentId": 1, "_id": 0},
             sort=[("createdAt", -1)],
         )

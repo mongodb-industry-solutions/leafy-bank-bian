@@ -771,3 +771,64 @@ def test_tracking_with_a_shared_uetr_returns_the_earliest_created_payment():
     for doc in store.docs:
         doc["createdAt"] = NOW
     assert svc.get_tracking(connection, "db", _UETR)["paymentId"] == "PAY-A"
+
+
+# --- shared `payments`: the smart-routing demo's wires -------------------------
+#
+# The agentic smart-routing demo's wire payments live in the same collection, tagged with
+# their own `sourceSystem`. They have none of this demo's lifecycle, so no UI read may show
+# them. The fixture gives the foreign wire a BSON-date `createdAt` (the real ones store a
+# string) so the date range cannot be what excludes it — only the `sourceSystem` filter.
+
+def _foreign(pid="PAY-SR-1", **kw):
+    doc = _payment(pid, **kw)
+    doc.update({"sourceSystem": svc.FOREIGN_SOURCE_SYSTEM, "txnId": f"TXN-{pid}",
+                "debtor": {"accountId": "ACC-DEMO-01"}})
+    return doc
+
+
+@pytest.fixture
+def shared_conn():
+    own = _payment("PAY-1", status=lifecycle.SETTLED, amount=25000.0)
+    own["sourceSystem"] = "leafy-bank-payments-service"
+    return FakeConnection(FakePayments([
+        own,
+        _payment("PAY-2", status=lifecycle.REJECTED, amount=500.0, days_ago=1),  # no tag
+        _foreign(amount=99999.0),
+    ]))
+
+
+def test_list_and_total_exclude_the_smart_routing_wires(shared_conn):
+    out = svc.list_payments(shared_conn, "db")
+    assert [p["paymentId"] for p in out["items"]] == ["PAY-1", "PAY-2"]
+    assert out["total"] == 2
+
+
+def test_filters_cannot_bring_the_smart_routing_wires_back(shared_conn):
+    out = svc.list_payments(shared_conn, "db", status=lifecycle.SETTLED, rail="WIRE")
+    assert [p["paymentId"] for p in out["items"]] == ["PAY-1"]
+
+
+def test_stats_exclude_the_smart_routing_wires(shared_conn):
+    out = svc.get_stats(shared_conn, "db", date_from=NOW - timedelta(days=30))
+    assert out["total"] == 2
+    assert out["totalValue"] == 25500.0
+
+
+def test_deep_dive_and_command_search_do_not_resolve_a_smart_routing_wire(shared_conn):
+    assert svc.get_payment(shared_conn, "db", "PAY-SR-1") is None
+    assert svc.resolve_ref(shared_conn, "db", "PAY-SR-1") is None
+    assert svc.resolve_ref(shared_conn, "db", "TXN-PAY-SR-1") is None
+    assert svc.resolve_ref(shared_conn, "db", "ACC-DEMO-01") is None
+
+
+def test_untagged_and_own_tagged_payments_are_still_ours(shared_conn):
+    assert svc.get_payment(shared_conn, "db", "PAY-1")["paymentId"] == "PAY-1"
+    assert svc.get_payment(shared_conn, "db", "PAY-2")["paymentId"] == "PAY-2"
+
+
+def test_gpi_tracker_does_not_resolve_a_smart_routing_wire_by_uetr():
+    foreign = _foreign()
+    foreign["uetr"] = _UETR
+    conn = FakeConnection(FakePayments([foreign]))
+    assert svc.get_tracking(conn, "db", _UETR) is None

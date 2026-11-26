@@ -107,7 +107,8 @@ def _kpis(by_status: dict[str, int]) -> dict:
 
 def _status_histogram(coll, start: datetime, end: datetime) -> dict[str, int]:
     pipeline = [
-        {"$match": {"createdAt": {"$gte": start, "$lt": end}}},
+        {"$match": {"createdAt": {"$gte": start, "$lt": end},
+                    **workflow_read_service.OWN_PAYMENTS}},
         {"$group": {"_id": "$status", "n": {"$sum": 1}}},
     ]
     return {r["_id"]: int(r["n"]) for r in coll.aggregate(pipeline) if r["_id"]}
@@ -277,10 +278,13 @@ def get_dashboard(
     previous = _kpis(_status_histogram(payments, prev_start, start))
 
     in_window = {"createdAt": {"$gte": start, "$lt": end}}
+    # The smart-routing wires store `createdAt` as a string, so the date range already skips
+    # them; the explicit exclusion keeps that true if they ever switch to a BSON date.
+    payments_window = {**in_window, **workflow_read_service.OWN_PAYMENTS}
     rails = sorted({k for r in payments.aggregate([
-        {"$match": in_window}, {"$group": {"_id": "$rail", "n": {"$sum": 1}}},
+        {"$match": payments_window}, {"$group": {"_id": "$rail", "n": {"$sum": 1}}},
     ]) if (k := r["_id"])})
-    volume_rows = _bucketed(payments, in_window, "createdAt", "$rail", unit)
+    volume_rows = _bucketed(payments, payments_window, "createdAt", "$rail", unit)
     by_type = [
         {"type": rail, "count": sum(int(r["n"]) for r in volume_rows if r["_id"].get("k") == rail)}
         for rail in rails
@@ -313,8 +317,8 @@ def get_dashboard(
         "types": by_type,
         "exceptionTrend": fill_series(starts, trend_rows, ["count"]),
         "exceptionReasons": reasons,
-        "processingTimes": processing_times(_dwell_rows(payments, in_window)),
-        "reconciliation": _reconciliation(payments, in_window),
+        "processingTimes": processing_times(_dwell_rows(payments, payments_window)),
+        "reconciliation": _reconciliation(payments, payments_window),
         "settlement": _settlement(connection, db_name, in_window),
         "agentImpact": agent,
         "attention": workflow_read_service.list_exceptions(connection, db_name, limit=5, status="OPEN")["items"],
