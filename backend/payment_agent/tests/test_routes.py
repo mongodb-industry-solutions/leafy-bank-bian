@@ -62,23 +62,36 @@ def test_steps_before_the_agent_is_built_is_503(monkeypatch):
     assert TestClient(main.app).get("/reconciliation/EXC-1/steps").status_code == 503
 
 
-# --- wake: new evidence brings a scheduled recheck forward ---------------------------------
+# --- wake: new evidence runs the scheduled recheck now -------------------------------------
 
-def test_wake_pulls_only_pending_rechecks_forward(client, monkeypatch):
-    calls = []
+def _wake_db():
+    from tests._fakes import FakeColl, FakeDB
+    db = FakeDB()
+    db["exceptions"] = FakeColl([
+        {"exceptionId": "EXC-due", "paymentId": "PAY-1", "status": "OPEN",
+         "agent": {"nextCheckAt": "later"}},
+        {"exceptionId": "EXC-none", "paymentId": "PAY-1", "status": "OPEN",
+         "agent": {"nextCheckAt": None}},
+    ])
+    return db
 
-    class _Coll:
-        def update_many(self, query, update):
-            calls.append((query, update))
-            return type("R", (), {"modified_count": 1})()
 
-    monkeypatch.setattr(main, "_DB", {"exceptions": _Coll()})
+def test_wake_runs_only_pending_rechecks_and_resolves(client, monkeypatch):
+    ran = []
+    monkeypatch.setattr(main, "_DB", _wake_db())
+    monkeypatch.setattr(main, "run_recheck", lambda db, eid: ran.append(eid) or ("ok", True))
     r = client.post("/reconciliation/wake", json={"paymentId": "PAY-1"})
-    assert r.json() == {"paymentId": "PAY-1", "woken": 1}
-    query, update = calls[0]
-    assert query["paymentId"] == "PAY-1" and query["status"] == "OPEN"
-    assert query["agent.nextCheckAt"] == {"$ne": None}
-    assert "agent.nextCheckAt" in update["$set"]
+    assert r.json() == {"paymentId": "PAY-1", "woken": 1, "resolved": 1}
+    assert ran == ["EXC-due"]
+
+
+def test_wake_hands_a_still_open_case_to_the_next_sweep(client, monkeypatch):
+    db = _wake_db()
+    monkeypatch.setattr(main, "_DB", db)
+    monkeypatch.setattr(main, "run_recheck", lambda db, eid: ("still missing", False))
+    assert client.post("/reconciliation/wake", json={"paymentId": "PAY-1"}).json()["resolved"] == 0
+    doc = db["exceptions"].find_one({"exceptionId": "EXC-due"})
+    assert doc["agent"]["nextCheckAt"] != "later"  # due now
 
 
 # --- Cutoff Agent routes (cutoff plan C3) --------------------------------------------------

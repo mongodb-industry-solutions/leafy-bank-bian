@@ -316,27 +316,7 @@ short strings each citing a specific record and amount. Returns the permitted ac
         """Re-match statements and re-run this payment's tie-out. Resolves the exception only \
 if the engine now says RECONCILED. You may call this without approval."""
         exception_id, _ = _ids(state)
-        refusal = _refusal(db, exception_id, policy.RECHECK, {})
-        if refusal:
-            return refusal
-        agent_doc = _exception(db, exception_id).get("agent") or {}
-        count = int(agent_doc.get("recheckCount") or 0)
-        if count >= policy.MAX_RECHECKS:
-            return (f"Rechecks exhausted ({count}). Propose ESCALATE_TO_CORRESPONDENT.")
-        try:
-            out = clients.recheck(exception_id, note="Reconciliation Agent re-check")
-        except clients.ServiceRefused as e:
-            set_agent_fields(db, exception_id, {}, push={
-                "actionsTaken": _action_record(policy.RECHECK, VERIFIED_REFUSED, e.detail)})
-            return f"Recheck refused: {e.detail}"
-        status = (out.get("exception") or {}).get("status")
-        set_agent_fields(db, exception_id, {"recheckCount": count + 1}, push={
-            "actionsTaken": _action_record(policy.RECHECK, out.get("outcome") or "UNKNOWN")})
-        if status != "OPEN":
-            set_agent_fields(db, exception_id, {"nextCheckAt": None, "verification": {
-                "result": VERIFIED_RESOLVED, "at": _now().isoformat()}})
-            return f"Recheck reconciled the payment (outcome {out.get('outcome')}). Case closed."
-        return f"Still {out.get('outcome')} after recheck {count + 1}/{policy.MAX_RECHECKS}."
+        return run_recheck(db, exception_id)[0]
 
     @tool
     def schedule_recheck(state: Annotated[dict, InjectedState], minutes: int) -> str:
@@ -644,6 +624,33 @@ def is_awaiting_approval(agent: Any, exception_id: str) -> bool:
 # this long after the failure, up to MAX_ERROR_ATTEMPTS times; the manual trigger always works.
 ERROR_RETRY_AFTER_SECONDS = 60
 MAX_ERROR_ATTEMPTS = 5
+
+
+def run_recheck(db: Any, exception_id: str) -> tuple[str, bool]:
+    """One RECHECK (re-match statements, re-run the tie-out), within policy and the cap.
+    Returns (message for the model, resolved). Shared by the agent's tool and the wake path,
+    which runs a recheck the agent already scheduled without another LLM round."""
+    refusal = _refusal(db, exception_id, policy.RECHECK, {})
+    if refusal:
+        return refusal, False
+    agent_doc = _exception(db, exception_id).get("agent") or {}
+    count = int(agent_doc.get("recheckCount") or 0)
+    if count >= policy.MAX_RECHECKS:
+        return f"Rechecks exhausted ({count}). Propose ESCALATE_TO_CORRESPONDENT.", False
+    try:
+        out = clients.recheck(exception_id, note="Reconciliation Agent re-check")
+    except clients.ServiceRefused as e:
+        set_agent_fields(db, exception_id, {}, push={
+            "actionsTaken": _action_record(policy.RECHECK, VERIFIED_REFUSED, e.detail)})
+        return f"Recheck refused: {e.detail}", False
+    status = (out.get("exception") or {}).get("status")
+    set_agent_fields(db, exception_id, {"recheckCount": count + 1}, push={
+        "actionsTaken": _action_record(policy.RECHECK, out.get("outcome") or "UNKNOWN")})
+    if status != "OPEN":
+        set_agent_fields(db, exception_id, {"nextCheckAt": None, "verification": {
+            "result": VERIFIED_RESOLVED, "at": _now().isoformat()}})
+        return f"Recheck reconciled the payment (outcome {out.get('outcome')}). Case closed.", True
+    return f"Still {out.get('outcome')} after recheck {count + 1}/{policy.MAX_RECHECKS}.", False
 
 
 def investigate(agent: Any, db: Any, exception_id: str, payment_id: str) -> Optional[dict]:
