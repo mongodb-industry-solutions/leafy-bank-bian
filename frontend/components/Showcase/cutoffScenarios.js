@@ -70,7 +70,7 @@ export const CUTOFF_SCENARIOS = [
     title: "Short of funds",
     story:
       "A domestic wire for USD 9,500 is held because the account has only USD 6,300 available, USD 3,200 short. The incoming credit that would cover it isn't due until after Fedwire closes. " +
-      "The agent informs the customer, then asks the operator to hold the wire for the next value date.",
+      "The agent informs the customer, then hands off to an operator: Leafy Bank policy requires human approval before a wire is rolled to the next value date.",
     bank: "Bank of America",
     wire: {
       beneficiary: "Lakeside Components LLC",

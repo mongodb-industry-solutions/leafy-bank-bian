@@ -18,7 +18,7 @@ export const SCENARIOS = [
       action: { label: "Book and recover the $15", code: "POST_ADJUSTMENT" },
     },
     title: "Charge claimed, sender pays",
-    story: "We send $4,850 to Barclays and agree that the sender pays all charges. Barclays can't take its fee from the payment, so it claims $15 from us, and our nostro is debited $15 more than our books show. The customer chose sender pays, so we recover the $15 from them.",
+    story: "We send $4,850 to Barclays and agree that the sender pays all charges (OUR), so Northwind must receive the full $4,850 and Barclays can't take its fee from the payment. We can't deduct the fee at the start either: Barclays sets and levies it after processing, the amount depends on factors we can't see in advance, no agreed charge exists with Barclays for this route, and Leafy Bank policy is to claim actuals after the fact. Barclays claims $15 from us, and our nostro is debited $15 more than our books show. The customer chose sender pays, so once the actual charge is claimed we pass it on to them.",
     talkingPoint: "The agent proposes booking the $15 claim and recovering it from the customer; code checks it matches the over-debit exactly.",
     bank: "Barclays",
     wire: {
@@ -46,7 +46,10 @@ export const SCENARIOS = [
       statement:
         "Chase's statement for our nostro shows 4,865.00 for this wire: the 4,850.00 plus a " +
         "15.00 charge that Barclays claimed. Under DEBT Barclays can't deduct its fee from " +
-        "the payment, so it bills us, and the statement names Barclays as the charging bank.",
+        "the payment, so it bills us, and the statement names Barclays as the charging bank. " +
+        "We couldn't have deducted it up front: Barclays sets the fee after it processes the " +
+        "payment, we have no agreed charge with Barclays for this route, and our policy is to " +
+        "claim actuals after the fact.",
       match:
         "Books say 4,850.00; the statement says 4,865.00. A 15.00 RECONCILIATION_DISCREPANCY " +
         "opens, and the agent is woken.",
