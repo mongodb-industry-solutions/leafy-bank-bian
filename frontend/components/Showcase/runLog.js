@@ -78,7 +78,7 @@ export function policyLines(agent, scenario, gapMajor) {
       lines.push({ text: `Linked only to a returned candidate: ${target.reference}${target.score != null ? ` (score ${target.score})` : ""}`, ok: true });
     }
   } else if (agent.nextCheckAt || agent.recheckCount) {
-    lines.push({ text: `${action.code} moves no money, so it ran without asking anyone`, ok: true });
+    lines.push({ text: `${action.code} doesn't move funds, so it didn't need approval`, ok: true });
   }
   return lines;
 }
@@ -184,7 +184,7 @@ export function deriveRunEvents({ scenario, scenarioKey, steps, index, step, ctx
     out.push({
       key: `recheck:${agent.recheckCount ?? 0}`, phase: INVESTIGATION, lane: "agent", ord: 410, tone: "good",
       title: `Acted without approval: RECHECK ${agent.recheckCount ?? 0} of 3 scheduled`,
-      detail: "Re-checking moves no money and changes no books.",
+      detail: "Re-checking doesn't move funds and changes no books.",
     });
   }
 

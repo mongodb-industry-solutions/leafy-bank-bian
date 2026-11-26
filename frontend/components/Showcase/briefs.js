@@ -26,14 +26,14 @@ export const BRIEFS = {
     decides: "Whether any check explains the gap, or whether to ask the correspondent.",
     guarantees: "Code refuses a fee explanation unless the gap equals a reported or levied charge, and only a corrected statement closes the case.",
     mongo: MONGO_RECON,
-    autonomy: { level: 2, alone: "Declines to guess and proposes asking the correspondent", needsYou: "Sending the query" },
+    autonomy: { level: 2, alone: "Documents what it found and proposes escalating to the correspondent", needsYou: "Sending the query" },
   },
   TL: {
     hard: "Nothing is wrong yet. The wire is fine and the correspondent's statement has not arrived.",
     decides: "When to look again.",
-    guarantees: "Re-checking moves no money and changes no books, so it is the only action allowed without approval.",
+    guarantees: "Actions that don't move funds don't need approval. Nothing is booked or adjusted; the item stays open as in-transit until the line arrives.",
     mongo: ["Change streams", "Scheduled re-checks", "Embedded agent record"],
-    autonomy: { level: 3, alone: "Re-runs reconciliation on a schedule", needsYou: "Nothing, unless the line never arrives" },
+    autonomy: { level: 3, alone: "Re-runs reconciliation on a schedule", needsYou: "Nothing, unless the line misses the next statement or an aging limit. Then it is a real break and escalates" },
   },
   C1: {
     hard: "Time is the constraint. A second signature is missing, the approver is out, and the Fedwire cut-off is closing.",
@@ -45,7 +45,7 @@ export const BRIEFS = {
   C3: {
     hard: "The account is short of funds and no incoming credit will cover it before the cut-off.",
     decides: "Whether the wire can make today's cut-off at all.",
-    guarantees: "Moving the wire to another day needs approval. Telling the customer does not.",
+    guarantees: "Holding moves no funds, but it delays the customer's payment, and policy requires an operator to approve anything that changes when a payment goes out. Telling the customer needs no approval.",
     mongo: MONGO_CUTOFF,
     autonomy: { level: 2, alone: "Tells the customer about the shortfall, records its assessment", needsYou: "Holding the wire for the next value date" },
   },

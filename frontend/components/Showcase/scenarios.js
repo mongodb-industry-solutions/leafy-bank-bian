@@ -78,7 +78,7 @@ export const SCENARIOS = [
       action: { label: "Escalate to the correspondent", code: "ESCALATE_TO_CORRESPONDENT" },
     },
     title: "Amount discrepancy",
-    story: "Chase booked 7,306.00 on our nostro against the 7,360.00 we sent to RBC. Currency, amounts, FX, charge bearer and reported charges leave the 54.00 gap unexplained.",
+    story: "Chase booked 7,306.00 on our nostro against the 7,360.00 we sent to RBC. Currency, amounts, FX, charge bearer and reported charges leave the 54.00 gap unexplained. STP flows don't re-key amounts, so a digit swap like this needs a manual touch, most likely a repair queue or manual posting at Chase.",
     talkingPoint: "The agent doesn't guess a cause. It rules out the usual explanations, asks Chase, and closes only when Chase's statement books the right amount.",
     bank: "Royal Bank of Canada",
     wire: {
@@ -101,7 +101,9 @@ export const SCENARIOS = [
       glpost: "Our books say 7,360.00 left our nostro account at Chase.",
       statement:
         "Chase sends Leafy a camt.053 for our nostro, showing a booked entry of 7,306.00 " +
-        "for this wire, with no charges reported on the line.",
+        "for this wire, with no charges reported on the line. STP flows don't re-key amounts, so a " +
+        "transposition like this needs a manual touch: the wire most likely sat in Chase's repair " +
+        "queue or was posted by hand.",
       match: "A 54.00 RECONCILIATION_DISCREPANCY opens.",
       investigate:
         "The agent checks currency (USD throughout), the amount fields (instructed, " +
@@ -161,7 +163,10 @@ export const SCENARIOS = [
       investigate:
         "The agent sees a clean, settled payment that is merely overdue. It classifies the " +
         "cause as TIMING, rechecks, and schedules its next check, all without asking anyone, " +
-        "because it moves no money. It can recheck up to 3 times over 10 minutes.",
+        "because actions that don't move funds don't need approval. It can recheck up to 3 times over " +
+        "10 minutes; in production the limit is the next end-of-day statement or an aging limit. If the " +
+        "debit never appears, it becomes a real break and the agent escalates. Meanwhile nothing is booked " +
+        "or adjusted: the item stays on the open items list as an in-transit reconciling item.",
       late:
         "Chase's next statement arrives with our line on it. No one clicks anything; within a " +
         "minute the agent's sweep rechecks and finds the line.",
@@ -182,13 +187,13 @@ export const GROUPS = [
   },
   {
     mode: "refuses",
-    title: "Declines to force it",
-    blurb: "When no safe fix exists, the agent says so and hands the case on.",
+    title: "Escalates when no safe fix exists",
+    blurb: "When no safe fix exists, the agent documents what it found and escalates to a human.",
   },
   {
     mode: "autonomous",
     title: "Resolves on its own",
-    blurb: "Actions that move no funds do not require approval.",
+    blurb: "Actions that don't move funds don't need approval.",
   },
 ];
 

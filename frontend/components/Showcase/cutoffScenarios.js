@@ -104,7 +104,8 @@ export const CUTOFF_SCENARIOS = [
         "At 16:45 ET, the agent sees that the expected credit lands after Fedwire's 18:45 ET close, too late to send today, and informs the customer about the " +
         "USD 3,200 shortfall on the USD 9,500 wire (USD 6,300 available).",
       decide:
-        "The agent asks to hold the wire for the next value date. Moving a wire to another day needs your approval.",
+        "The agent asks to hold the wire for the next value date. The hold moves no funds, but it delays the " +
+        "customer's payment, and policy requires an operator to approve anything that changes when a payment goes out.",
       final:
         "The wire is held for the next value date. Fast-forward moves the demo to the next business day, when the " +
         "wire can be released and settled once funded.",
