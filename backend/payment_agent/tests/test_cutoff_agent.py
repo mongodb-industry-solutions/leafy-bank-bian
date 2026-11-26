@@ -336,6 +336,43 @@ def test_c3_notifies_then_holds_for_next_value_date(routes):
     assert db["payments"].find_one({"paymentId": PID})["status"] == cr.PENDING_FUNDS
 
 
+def test_c3_a_run_that_stops_after_the_assessment_is_nudged_once_to_propose(routes):
+    db = _funds_world()
+    routes.install(db)
+    case_id = _open_case(db, et(16, 45))
+    agent = _agent(db,
+                   _call("notify_customer_funds"),
+                   _assess("FUNDS", "RESOLVE_BLOCKER"),
+                   _done("Stopped without proposing."),
+                   _call("propose_resolution", action="HOLD_NEXT_VALUE_DATE", rationale="x"),
+                   _done())
+    agent_doc = ca.investigate(agent, db, case_id, PID)
+
+    nudges = [m.content for m in ca.thread_messages(agent, case_id)
+              if getattr(m, "type", None) == "human" and "HOLD_NEXT_VALUE_DATE" in m.content]
+    assert len(nudges) == 1
+    assert agent_doc["proposedAction"]["action"] == rules.HOLD_NEXT_VALUE_DATE
+    assert agent_doc["finishedAt"] >= agent_doc["startedAt"]
+    assert ca.is_awaiting_approval(agent, case_id)
+
+
+def test_c3_the_nudge_is_spent_after_one_try(routes):
+    db = _funds_world()
+    routes.install(db)
+    case_id = _open_case(db, et(16, 45))
+    agent = _agent(db,
+                   _call("notify_customer_funds"),
+                   _assess("FUNDS", "RESOLVE_BLOCKER"),
+                   _done(), _done())
+    agent_doc = ca.investigate(agent, db, case_id, PID)
+    assert agent_doc["proposedAction"] is None and agent_doc["finishedAt"]
+    assert not ca.is_awaiting_approval(agent, case_id)
+
+
+def test_tool_times_are_quoted_in_et():
+    assert ca._et_default(et(17, 30)) == "2026-10-06 17:30 ET"
+    assert ca._et_default(et(17, 30).replace(tzinfo=None)) == "2026-10-06 17:30 ET"  # naive = UTC
+
 # --- C4: on track → assessment only ----------------------------------------------------------
 
 def test_c4_on_track_records_an_assessment_and_nothing_else(routes):

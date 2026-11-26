@@ -111,8 +111,18 @@ EXPEDITE or DEFER_NEXT_BUSINESS_DAY. A human approves it.
 Rules:
 - The code decides what is permitted; a refusal explains why. Do not argue with it.
 - An ON_TRACK payment gets an assessment with recommendation NONE and nothing else.
+- Quote times in ET (e.g. 17:30 ET), as the tools return them. Never convert to UTC.
 - End with a two-sentence summary for the operator.
 """
+
+
+def _et_default(value: Any) -> str:
+    """JSON fallback for tool output. Datetimes go out in ET, the zone the cut-offs and the
+    demo's business clock are shown in; UTC strings led the model to quote 22:30 for 17:30 ET."""
+    if isinstance(value, datetime):
+        at = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return at.astimezone(cw.ET).strftime("%Y-%m-%d %H:%M ET")
+    return str(value)
 
 
 def _now() -> datetime:
@@ -274,7 +284,7 @@ current business time."""
             "debtorAccountId": (p.get("debtor") or {}).get("accountId"),
             "stateEnteredAt": (p.get("lifecycle") or {}).get("stateEnteredAt"),
             "cutoff": p.get("cutoff"), "clockRunId": snap["runId"], "businessNow": snap["at"],
-        }, default=str)
+        }, default=_et_default)
 
     @tool
     def get_cutoff_window(state: Annotated[dict, InjectedState]) -> str:
@@ -290,7 +300,7 @@ autonomous and gated actions permitted right now."""
             "risk": _risk_view(snap["risk"]),
             "autonomousPermitted": sorted(rules.allowed_auto(**_auto_kwargs(snap, case))),
             "gatedPermitted": _permitted_gated(db, case_id, payment_id),
-        }, default=str)
+        }, default=_et_default)
 
     @tool
     def get_stage_timing(state: Annotated[dict, InjectedState]) -> str:
@@ -298,7 +308,7 @@ autonomous and gated actions permitted right now."""
 adjusted for the time of day. These are static estimates, not measured history."""
         _, payment_id = _ids(state)
         return json.dumps(_snapshot(db, payment_id)["timing"] or "No timing: not in a hold.",
-                          default=str)
+                          default=_et_default)
 
     @tool
     def get_approval_status(state: Annotated[dict, InjectedState]) -> str:
@@ -308,7 +318,7 @@ primary and backup approvers with on-shift status and workload."""
         snap = _snapshot(db, payment_id)
         if snap["at"] is None:
             return "The demo clock run is gone."
-        return json.dumps(ev.approval_status(db, payment_id=payment_id, at=snap["at"]), default=str)
+        return json.dumps(ev.approval_status(db, payment_id=payment_id, at=snap["at"]), default=_et_default)
 
     @tool
     def get_screening_queue(state: Annotated[dict, InjectedState]) -> str:
@@ -319,7 +329,7 @@ shift, its priority and the run's highest priority."""
         if snap["at"] is None:
             return "The demo clock run is gone."
         out = ev.screening_status(db, payment_id=payment_id, at=snap["at"])
-        return json.dumps(out or "Not in the screening queue.", default=str)
+        return json.dumps(out or "Not in the screening queue.", default=_et_default)
 
     @tool
     def get_funds_position(state: Annotated[dict, InjectedState]) -> str:
@@ -330,13 +340,13 @@ expected credits with their expected time today."""
         if snap["at"] is None or not snap["payment"]:
             return "No payment or demo clock run."
         day = cutoff_clock.business_date(cutoff_clock.run(db, snap["runId"]), snap["at"])
-        return json.dumps(ev.funds_position(db, snap["payment"], business_date=day), default=str)
+        return json.dumps(ev.funds_position(db, snap["payment"], business_date=day), default=_et_default)
 
     @tool
     def get_open_exceptions(state: Annotated[dict, InjectedState]) -> str:
         """OPEN exceptions on this payment (count and categories). Any one blocks EXPEDITE."""
         _, payment_id = _ids(state)
-        return json.dumps(ev.open_exceptions(db, payment_id), default=str)
+        return json.dumps(ev.open_exceptions(db, payment_id), default=_et_default)
 
     @tool
     def send_approval_reminder(state: Annotated[dict, InjectedState]) -> str:
@@ -559,6 +569,7 @@ class CutoffState(TypedDict, total=False):
     verification: Optional[str]
     execute_error: Optional[str]
     reinvestigated: bool
+    nudged: bool
 
 
 def build_cutoff_agent(model: Any, db: Any, checkpointer: Any):
@@ -579,7 +590,20 @@ def build_cutoff_agent(model: Any, db: Any, checkpointer: Any):
         if getattr(state["messages"][-1], "tool_calls", None):
             return "tools"
         agent_doc = cases.get(db, state["case_id"]).get("agent") or {}
-        return "approval" if agent_doc.get("proposedAction") else END
+        if agent_doc.get("proposedAction"):
+            return "approval"
+        # The model sometimes stops after record_assessment although the policy permits a
+        # gated action; the run then ends with no proposal and the case never reaches a human.
+        if (not state.get("nudged") and agent_doc.get("assessedAt")
+                and _permitted_gated(db, state["case_id"], state["payment_id"])):
+            return "nudge"
+        return END
+
+    def nudge(state: CutoffState) -> dict:
+        permitted = _permitted_gated(db, state["case_id"], state["payment_id"])
+        return {"nudged": True, "messages": [HumanMessage(
+            f"The policy permits {permitted} now and nothing has been proposed. Call "
+            "`propose_resolution` with the permitted action that fits your assessment.")]}
 
     def approval(state: CutoffState) -> dict:
         case_id = state["case_id"]
@@ -683,9 +707,11 @@ def build_cutoff_agent(model: Any, db: Any, checkpointer: Any):
     builder.add_node("execute", execute)
     builder.add_node("verify", verify)
     builder.add_node("reinvestigate", reinvestigate)
+    builder.add_node("nudge", nudge)
     builder.add_edge(START, "investigate")
     builder.add_conditional_edges("investigate", after_investigate,
-                                  {"tools": "tools", "approval": "approval", END: END})
+                                  {"tools": "tools", "approval": "approval", "nudge": "nudge", END: END})
+    builder.add_edge("nudge", "investigate")
     builder.add_edge("tools", "investigate")
     builder.add_conditional_edges("approval", after_approval, {"execute": "execute", END: END})
     builder.add_edge("execute", "verify")
@@ -719,14 +745,14 @@ def investigate(agent: Any, db: Any, case_id: str, payment_id: str) -> Optional[
         snap = _snapshot(db, payment_id)
         cases.record_risk(db, case_id, snap["risk"])
         cases.set_agent_fields(db, case_id, {"startedAt": _now().isoformat(),
-                                             "proposedAction": None})
+                                             "finishedAt": None, "proposedAction": None})
         risk = snap["risk"] or {}
         user_msg = (f"{payment_id} is {snap['status']} (case {case_id}). Computed: phase "
                     f"{risk.get('phase')}, risk {risk.get('riskLevel')}, blocker "
                     f"{risk.get('blockerType')}, {risk.get('minutesToExternal')} min to the "
                     "external cut-off. Investigate and act.")
         agent.invoke({"messages": [HumanMessage(user_msg)], "case_id": case_id,
-                      "payment_id": payment_id, "reinvestigated": False, "decision": None,
+                      "payment_id": payment_id, "reinvestigated": False, "nudged": False, "decision": None,
                       "verification": None, "execute_error": None},
                      config=_config(case_id))
     except Exception as e:  # noqa: BLE001 — never propagate to the worker.
@@ -736,7 +762,9 @@ def investigate(agent: Any, db: Any, case_id: str, payment_id: str) -> Optional[
         cases.set_agent_fields(db, case_id, {"error": {
             "message": f"{type(e).__name__}: {e}"[:300], "at": _now(), "attempts": attempts}})
         return None
-    cases.set_agent_fields(db, case_id, {"error": None})
+    # finishedAt >= startedAt tells the page the run is over, so a run that ended without a
+    # proposal is not shown as "thinking" forever.
+    cases.set_agent_fields(db, case_id, {"error": None, "finishedAt": _now().isoformat()})
     return cases.get(db, case_id).get("agent")
 
 

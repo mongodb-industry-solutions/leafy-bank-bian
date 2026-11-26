@@ -127,13 +127,18 @@ def _retry_due(error: Optional[dict], real_now: datetime) -> bool:
     return isinstance(at, datetime) and at <= real_now - timedelta(seconds=ERROR_RETRY_AFTER_SECONDS)
 
 
-def _needs_run(case: dict, key: str, real_now: datetime) -> bool:
+def _needs_run(case: dict, key: str, real_now: datetime, source: str = cases.SOURCE_SWEEP) -> bool:
     """`trigger.ranKey` is the key the agent last actually ran on, so a run that was blocked
-    (claim, lease, paused for approval) leaves the change pending for the next sweep."""
+    (claim, lease, paused for approval) leaves the change pending for the next sweep.
+
+    Run now (MANUAL) also re-runs a finished run that left no proposal: the key is unchanged,
+    so without this the presenter has no way to get the agent to try again."""
     agent = case.get("agent") or {}
     error = agent.get("error")
     if error:
         return _retry_due(error, real_now)
+    if source == cases.SOURCE_MANUAL and agent.get("finishedAt") and not agent.get("proposedAction"):
+        return True
     return (case.get("trigger") or {}).get("ranKey") != key
 
 
@@ -161,7 +166,7 @@ def _evaluate(agent: Any, db: Any, payment: dict, source: str, real_now: datetim
                              value_date=value_date, business_at=snap["at"], source=source)
     case_id = case.get("caseId")
     key = cases.trigger_key(snap["status"], snap["risk"])
-    if not case_id or not _needs_run(case, key, real_now):
+    if not case_id or not _needs_run(case, key, real_now, source):
         return False
     cases.set_fields(db, case_id, {"trigger.key": key, "trigger.source": source,
                                    "trigger.at": snap["at"]})

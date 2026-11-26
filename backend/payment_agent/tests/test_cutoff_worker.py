@@ -76,6 +76,16 @@ def test_sweep_opens_a_case_and_runs_the_agent_once(runs):
     assert len(runs) == 1
 
 
+def test_run_now_reruns_a_finished_run_that_left_no_proposal(runs):
+    db = _held()
+    cwk.sweep_once(object(), db)
+    case_id = _case(db)["caseId"]
+    cases.set_agent_fields(db, case_id, {"finishedAt": "later", "proposedAction": None})
+    assert cwk.sweep_once(object(), db)["investigated"] == 0  # periodic sweep: same key
+    assert cwk.sweep_once(object(), db, source=cases.SOURCE_MANUAL)["investigated"] == 1
+    cases.set_agent_fields(db, case_id, {"finishedAt": "later", "proposedAction": {"action": "X"}})
+    assert cwk.sweep_once(object(), db, source=cases.SOURCE_MANUAL)["investigated"] == 0
+
 def test_untagged_or_decided_payments_are_not_candidates(runs):
     db = _world("PENDING_APPROVAL", "DOMESTIC", et(17, 5), tagged=False)
     assert cwk.sweep_once(object(), db)["evaluated"] == 0

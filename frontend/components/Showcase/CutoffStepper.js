@@ -91,11 +91,22 @@ function logSlot(kind, stepsSeen) {
   }[kind];
 }
 
-function gateWaiting(gate, { agent, caseDoc, ctx }) {
+// The run is over (finishedAt is cleared at each start) and nothing waits for a human.
+function runEndedWithoutProposal(agent, caseDoc) {
+  return !!agent?.finishedAt && !!agent?.assessedAt && !agent?.proposedAction &&
+    agent.finishedAt >= (agent.startedAt || "") && caseDoc?.status !== "AWAITING_APPROVAL";
+}
+
+const NO_PROPOSAL = "The agent finished without proposing an action. Use Run now to ask it again.";
+
+function gateWaiting(gate, { agent, caseDoc, sweeping }) {
   if (!gate) return null;
   if (!caseDoc) return "Waiting for the agent to open a case…";
   if (gate === "assessed") return agent?.assessedAt || agent?.error ? null : "Agent assessing…";
-  if (gate === "proposal") return agent?.proposedAction ? null : "Agent assessing…";
+  if (gate === "proposal") {
+    if (agent?.proposedAction) return null;
+    return !sweeping && runEndedWithoutProposal(agent, caseDoc) ? NO_PROPOSAL : "Agent assessing…";
+  }
   return null;
 }
 
@@ -165,7 +176,7 @@ export default function CutoffStepper({ scenarioKey }) {
   const displayMs = frozenMs.current ?? businessMs;
   const waiting = step.final
     ? revisedProposal ? "The agent revised its proposal. Approve or reject it" : done ? null : "Waiting for the outcome…"
-    : gateWaiting(step.gate, { agent, caseDoc, ctx });
+    : gateWaiting(step.gate, { agent, caseDoc, sweeping });
 
   async function runAction(kind) {
     if (kind === "start") {
@@ -271,8 +282,9 @@ export default function CutoffStepper({ scenarioKey }) {
   const canDecide = ((step.decide || proposalReady) && !ctx.decision) || revisedProposal;
 
   const gate = step.gate;
+  const stalled = gate === "proposal" && !sweeping && runEndedWithoutProposal(agent, caseDoc);
   const agentBusy =
-    !!caseDoc && !done && !agent?.error && !revisedProposal &&
+    !!caseDoc && !done && !agent?.error && !revisedProposal && !stalled &&
     ((gate === "assessed" && !agent?.assessedAt) || (gate === "proposal" && !agent?.proposedAction) ||
       (step.final && !closingProps));
   const activity = deriveActivity({
