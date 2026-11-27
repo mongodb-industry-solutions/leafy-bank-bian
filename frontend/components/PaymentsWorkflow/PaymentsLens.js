@@ -37,10 +37,11 @@ const CORRIDORS = [
   { value: "INTERNATIONAL", label: "International" },
 ];
 
+// Every status pillFamily() colours, so any status a row can show is filterable.
 const STATUSES = [
-  "DRAFT", "INITIATED", "VALIDATED", "ENRICHED", "FINAL_VALIDATED", "ROUTED",
+  "DRAFT", "INITIATED", "RECEIVED", "ACCEPTED", "VALIDATED", "ENRICHED", "FINAL_VALIDATED", "ROUTED",
   "MANUAL_FRAUD_REVIEW", "AUTHORISED", "APPROVED", "SUBMITTED", "IN_PROGRESS", "POSTED", "SETTLED",
-  "RECONCILED", "REJECTED", "FAILED", "RETURNED", "CANCELLED", "REVERSED", "REFUNDED",
+  "PENDING", "PROCESSING", "COMPLETED", "RECONCILED", "UNRECONCILED", "DISCREPANT", "UTA", "REJECTED", "FAILED", "RETURNED", "CANCELLED", "REVERSED", "REFUNDED",
 ];
 
 function Filters({ value, onChange }) {
@@ -361,17 +362,8 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                 key={p.paymentId}
                 className={`${styles.row} ${active ? styles.rowActive : ""}`}
                 onClick={open}
-                // Keyboard parity: the row is the control, so it must be reachable and
-                // activatable without a pointer.
-                tabIndex={0}
-                role="button"
-                aria-pressed={active}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    open();
-                  }
-                }}
+                // Mouse convenience only. The keyboard/AT control is the button in the
+                // Payment ID cell, so the row keeps its native table semantics.
               >
                 <td>
                   <div className={styles.beneficiary} title={beneficiary.name}>
@@ -394,7 +386,23 @@ function PaymentsTable({ items, selectedPaymentId, onSelect }) {
                     <div className={styles.beneficiarySub}>{beneficiary.sub}</div>
                   )}
                 </td>
-                <td className={styles.mono}>{p.paymentId}</td>
+                <td className={styles.mono}>
+                  {isStatementLine ? (
+                    p.paymentId
+                  ) : (
+                    <button
+                      type="button"
+                      className={styles.rowLink}
+                      aria-current={active ? "true" : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        open();
+                      }}
+                    >
+                      {p.paymentId}
+                    </button>
+                  )}
+                </td>
                 <td className={styles.cellMuted}>{fmtWhen(p.createdAt)}</td>
                 <td className={`${styles.numeric} ${styles.cellAmount}`}>
                   {fmtAmount(p.amount, p.currency)}
@@ -441,6 +449,7 @@ export default function PaymentsLens({
   onRefresh,
   selectedPaymentId,
   onSelect,
+  onNewPayment,
 }) {
   const [filters, setFilters] = useState({
     status: "", rail: "", direction: "", corridor: "", customerId: "", from: "", to: "", skip: 0,
@@ -503,6 +512,14 @@ export default function PaymentsLens({
             </span>
           </div>
           <div className={styles.panelHeadRight}>
+            <Button
+              size="small"
+              variant="baseGreen"
+              leftGlyph={<Icon glyph="Plus" />}
+              onClick={onNewPayment}
+            >
+              New payment
+            </Button>
             <InboundTrigger onRefresh={onRefresh} onJump={onSelect} />
             <Button
               size="small"
@@ -543,14 +560,18 @@ export default function PaymentsLens({
           </div>
         )}
 
-        {!error && loading && <div className={styles.emptyState}>Loading payments…</div>}
+        {!error && loading && items.length === 0 && (
+          <div className={styles.emptyState} role="status">Loading payments…</div>
+        )}
 
         {!error && !loading && items.length === 0 && (
           <div className={styles.emptyState}>No payments match these filters.</div>
         )}
 
-        {!error && !loading && items.length > 0 && (
-          <>
+        {/* Keep the previous page on screen (dimmed) while the next one loads, so paging
+            and filtering don't collapse the panel and jump the layout. */}
+        {!error && items.length > 0 && (
+          <div className={loading ? styles.reloading : undefined} aria-busy={loading}>
             <PaymentsTable
               items={items}
               selectedPaymentId={selectedPaymentId}
@@ -575,7 +596,7 @@ export default function PaymentsLens({
                 </Button>
               </div>
             </div>
-          </>
+          </div>
         )}
       </div>
 

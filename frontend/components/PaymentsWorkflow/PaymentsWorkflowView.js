@@ -2,8 +2,8 @@
 
 // Client shell for the Payments Workflow route (Payments Analyst persona).
 //
-// One surface: the payment history list, with its lifecycle deep-dive on selection. A
-// persistent "New payment" button (bottom centre, like Leafy Bank's Send Money) opens the
+// One surface: the payment history list, with its lifecycle deep-dive on selection. The
+// list header's "New payment" button (the page's one primary action) opens the
 // initiation wizard in a modal over the list. When the wizard's "View lifecycle" action
 // fires, the modal closes and the new payment is selected in the list.
 //
@@ -49,17 +49,9 @@ export default function PaymentsWorkflowView() {
           onRefresh={refresh}
           selectedPaymentId={selectedPaymentId}
           onSelect={setSelectedPaymentId}
+          onNewPayment={() => setWizardOpen(true)}
         />
       </div>
-
-      {/* Hidden while a payment's lifecycle is open; the list view is where you start one. */}
-      {!selectedPaymentId && (
-        <div className={styles.newPaymentBar}>
-          <Button variant="baseGreen" leftGlyph={<Icon glyph="Plus" />} onClick={() => setWizardOpen(true)}>
-            New payment
-          </Button>
-        </div>
-      )}
 
       {wizardOpen && (
         <div

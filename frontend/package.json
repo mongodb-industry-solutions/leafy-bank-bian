@@ -23,6 +23,7 @@
     "@leafygreen-ui/palette": "^5.0.1",
     "@leafygreen-ui/segmented-control": "^11.1.0",
     "@leafygreen-ui/select": "^17.1.0",
+    "@leafygreen-ui/split-button": "^6.3.1",
     "@leafygreen-ui/stepper": "^5.0.13",
     "@leafygreen-ui/tabs": "^14.2.5",
     "@leafygreen-ui/text-input": "^16.2.3",

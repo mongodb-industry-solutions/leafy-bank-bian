@@ -23,7 +23,7 @@ import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
 import TextInput from "@leafygreen-ui/text-input";
 import { Select, Option } from "@leafygreen-ui/select";
-import Stepper, { Step } from "@leafygreen-ui/stepper";
+import { SplitButton, MenuItem } from "@leafygreen-ui/split-button";
 import { Body, H2 } from "@leafygreen-ui/typography";
 import Tooltip from "@leafygreen-ui/tooltip";
 
@@ -369,6 +369,15 @@ const AUTOFILL_SCENARIOS = [
 ];
 
 
+// Autopopulate's type picker. Values match the `group` field on AUTOFILL_SCENARIOS.
+// [value, menu label, menu description, short label shown on the button]
+const AUTOFILL_GROUPS = [
+  ["ALL", "Any payment type", "Cycle through every scenario", "Any"],
+  ["International", "International wire", "SWIFT via our USD correspondent", "International"],
+  ["Domestic", "US wire", "Fedwire or CHIPS", "US wire"],
+  ["Internal", "Internal transfer", "Book transfer on our own ledger", "Internal"],
+];
+
 const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
 const digits = (n) =>
   Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join("");
@@ -473,6 +482,26 @@ function autofill(form, scenario, { accountsByCustomer, allAccounts }) {
   };
 }
 
+// Compact progress: one dot per step. The step names stay available to screen readers and
+// on hover, but no longer take a full-width band of the dialog.
+function StepDots({ current }) {
+  return (
+    <div
+      className={styles.stepDots}
+      role="img"
+      aria-label={`Step ${current + 1} of ${STEPS.length}: ${STEPS[current]}`}
+    >
+      {STEPS.map((label, i) => (
+        <span
+          key={label}
+          title={label}
+          className={`${styles.stepDot} ${i === current ? styles.stepDotCurrent : ""} ${i < current ? styles.stepDotDone : ""}`}
+        />
+      ))}
+    </div>
+  );
+}
+
 function SectionCard({ n, title, subtitle, children, className }) {
   return (
     <div className={`${styles.sectionCard} ${className || ""}`}>
@@ -503,6 +532,8 @@ export default function InitiateWizard({ onInitiated }) {
   // Autopopulate walks AUTOFILL_SCENARIOS in order; the index survives "Clear form" so the
   // presenter keeps their place in the cycle.
   const [scenarioIdx, setScenarioIdx] = useState(0);
+  // Which AUTOFILL_SCENARIOS group Autopopulate draws from; "ALL" cycles every scenario.
+  const [autofillGroup, setAutofillGroup] = useState("ALL");
   const [appliedScenario, setAppliedScenario] = useState(null);
   const { customers, accountsByCustomer, allAccounts, loading } = useBankAssistedParties();
 
@@ -521,6 +552,7 @@ export default function InitiateWizard({ onInitiated }) {
   const customerAccounts = accountsByCustomer.get(form.customerId) || [];
   const debtor = customerAccounts.find((a) => a.accountId === form.debtorAccountId) || null;
   const selectedType = PAYMENT_TYPES.find((t) => t.rail === form.rail);
+  const autofillGroupShort = AUTOFILL_GROUPS.find(([v]) => v === autofillGroup)[3];
 
   const recipientLabel = isWire(form)
     ? form.beneficiaryName || "—"
@@ -538,11 +570,24 @@ export default function InitiateWizard({ onInitiated }) {
     setStep(1);
   }
 
-  function autopopulate() {
-    const scenario = AUTOFILL_SCENARIOS[scenarioIdx];
+  // `group` lets the menu fill immediately with the type just picked, before the
+  // `autofillGroup` state update has landed.
+  function autopopulate(group = autofillGroup) {
+    // Walk forward from the cursor to the next scenario in the chosen group, so the cycle
+    // order is preserved whether the presenter picks "Any" or one payment type.
+    const n = AUTOFILL_SCENARIOS.length;
+    let idx = scenarioIdx;
+    for (let i = 0; i < n; i++) {
+      const candidate = (scenarioIdx + i) % n;
+      if (group === "ALL" || AUTOFILL_SCENARIOS[candidate].group === group) {
+        idx = candidate;
+        break;
+      }
+    }
+    const scenario = AUTOFILL_SCENARIOS[idx];
     setForm((f) => autofill(f, scenario, { accountsByCustomer, allAccounts }));
     setAppliedScenario(scenario);
-    setScenarioIdx((i) => (i + 1) % AUTOFILL_SCENARIOS.length);
+    setScenarioIdx((idx + 1) % n);
     setShowErrors(false);
     setSubmitError(null);
   }
@@ -591,9 +636,7 @@ export default function InitiateWizard({ onInitiated }) {
       <div className={styles.panel}>
         <div className={styles.panelBody}>
           <div className={styles.stepperBar}>
-            <Stepper currentStep={2} maxDisplayedSteps={3}>
-              {STEPS.map((l) => <Step key={l}>{l}</Step>)}
-            </Stepper>
+            <StepDots current={2} />
           </div>
           <div className={styles.confirmBox}>
             <Icon
@@ -667,11 +710,9 @@ export default function InitiateWizard({ onInitiated }) {
                 Confirm the details before submitting for processing.
               </Body>
             </div>
-          </div>
-          <div className={styles.stepperBar}>
-            <Stepper currentStep={1} maxDisplayedSteps={3}>
-              {STEPS.map((l) => <Step key={l}>{l}</Step>)}
-            </Stepper>
+            <div className={styles.headerStepper}>
+              <StepDots current={1} />
+            </div>
           </div>
 
           {isWire(form) && (
@@ -732,45 +773,63 @@ export default function InitiateWizard({ onInitiated }) {
               Enter payment details and submit for processing.
             </Body>
           </div>
+          <div className={styles.headerStepper}>
+            <StepDots current={0} />
+          </div>
           <div className={styles.headerActions}>
             <Button onClick={reset}>Clear form</Button>
-            <Button
-              onClick={autopopulate}
-              disabled={loading || !allAccounts.length}
-              leftGlyph={<Icon glyph="Refresh" />}
-            >
-              <span className={styles.autofillLabel}>
-                Autopopulate
-                {/* A span, not a button: a button may not nest in a button. Hover-only, so a
-                    click on it still autopopulates like the rest of the button. */}
-                <Tooltip
-                  trigger={
-                    <span className={styles.autofillInfo} aria-label="What was populated">
-                      <Icon glyph="InfoWithCircle" size={14} />
+            <div className={styles.autofillLabel}>
+              {/* Main click fills the next scenario of the chosen type; the chevron menu
+                  switches type and fills one straight away. */}
+              <SplitButton
+                label={`Autopopulate · ${autofillGroupShort}`}
+                leftGlyph={<Icon glyph="Refresh" />}
+                onClick={() => autopopulate()}
+                disabled={loading || !allAccounts.length}
+                triggerAriaLabel="Choose payment type to autopopulate"
+                align="bottom"
+                justify="end"
+                menuItems={AUTOFILL_GROUPS.map(([v, l, d]) => (
+                  <MenuItem
+                    key={v}
+                    active={autofillGroup === v}
+                    description={d}
+                    onClick={() => {
+                      setAutofillGroup(v);
+                      autopopulate(v);
+                    }}
+                  >
+                    {l}
+                  </MenuItem>
+                ))}
+              />
+              <Tooltip
+                trigger={
+                  <span className={styles.autofillInfo} tabIndex={0} aria-label="What was populated">
+                    <Icon glyph="InfoWithCircle" size={16} />
+                  </span>
+                }
+              >
+                {appliedScenario ? (
+                  <div className={styles.autofillTip}>
+                    <strong>{appliedScenario.title}</strong>
+                    <span>
+                      {fmtAmount(appliedScenario.amount, form.currency)} · {appliedScenario.story}
                     </span>
-                  }
-                >
-                  {appliedScenario ? (
-                    <div className={styles.autofillTip}>
-                      <strong>{appliedScenario.title}</strong>
-                      <span>
-                        {fmtAmount(appliedScenario.amount, form.currency)} · {appliedScenario.story}
-                      </span>
-                      <span>
-                        <b>How it travels:</b> {appliedScenario.path}
-                      </span>
-                      <span className={styles.autofillTipNote}>
-                        Scenario {AUTOFILL_SCENARIOS.indexOf(appliedScenario) + 1} of{" "}
-                        {AUTOFILL_SCENARIOS.length}. The paying customer and account are picked
-                        at random; click again for the next scenario.
-                      </span>
-                    </div>
-                  ) : (
-                    `Fills the form with a ready-made demo payment. Each click moves to the next of ${AUTOFILL_SCENARIOS.length} scenarios: international wires, US wires and internal transfers.`
-                  )}
-                </Tooltip>
-              </span>
-            </Button>
+                    <span>
+                      <b>How it travels:</b> {appliedScenario.path}
+                    </span>
+                    <span className={styles.autofillTipNote}>
+                      Scenario {AUTOFILL_SCENARIOS.indexOf(appliedScenario) + 1} of{" "}
+                      {AUTOFILL_SCENARIOS.length}. The paying customer and account are picked
+                      at random; click again for the next scenario.
+                    </span>
+                  </div>
+                ) : (
+                  `Fills the form with a ready-made demo payment. Use the arrow to pick the payment type; each click moves to the next scenario of that type (${AUTOFILL_SCENARIOS.length} in total).`
+                )}
+              </Tooltip>
+            </div>
             <Button
               variant="primary"
               onClick={toReview}
@@ -782,16 +841,13 @@ export default function InitiateWizard({ onInitiated }) {
           </div>
         </div>
 
-        <div className={styles.stepperBar}>
-          <Stepper currentStep={0} maxDisplayedSteps={3}>
-            {STEPS.map((l) => <Step key={l}>{l}</Step>)}
-          </Stepper>
-        </div>
-
         {loading && <div className={styles.emptyState}>Loading customers and accounts…</div>}
 
         {!loading && (
           <div className={styles.createGrid}>
+            {/* Demo Controls hidden for now (not needed in the current demo). The form still
+                sends the defaults — MATCHED / CLEAN — so wires take the happy path. Restore by
+                uncommenting this block.
             {isWire(form) && (
               <SectionCard
                 n={0}
@@ -811,10 +867,10 @@ export default function InitiateWizard({ onInitiated }) {
                 {showDemoControls && (
                   <div className={styles.twoCol}>
                     <div className={styles.fieldStack}>
-                      {/* Stage 9 — settlement-outcome selector, re-enabled for the exceptions
+                      Stage 9 — settlement-outcome selector, re-enabled for the exceptions
                           demo (doc 24 §3 step 8). Was commented out 2026-09-22 (stage 7's enum ask
                           was schema, not driver); stage 9 needs the non-happy paths reachable to
-                          populate the exception queue. Backend plumbing stayed in place. */}
+                          populate the exception queue. Backend plumbing stayed in place.
                       <Select
                         label="Simulated settlement outcome"
                         description="Stage 7 demo control — picks the simulated external settlement response."
@@ -859,6 +915,7 @@ export default function InitiateWizard({ onInitiated }) {
                 )}
               </SectionCard>
             )}
+            */}
 
             <SectionCard n={1} title="Select Payment Type" className={styles.fullSpan}>
               <div style={{ maxWidth: 420 }}>
