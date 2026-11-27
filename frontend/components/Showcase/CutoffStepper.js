@@ -22,6 +22,7 @@ import { useAgentSteps } from "./AgentThinking";
 import { INVESTIGATION, PAYMENT, RESOLUTION, usePacedEvents, useRunLog } from "./runLog";
 import { deriveCutoffEvents } from "./cutoffRunLog";
 import { ClockStrip, ClosingPanel, Outcome, Proposal, OUTCOME_LABEL, RISK_VARIANT } from "./scenes/CutoffScene";
+import { hasSavedRun, useSavedState } from "./savedRun";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
@@ -126,8 +127,9 @@ const TRIGGER_LABEL = { STREAM: "a payments change stream", SWEEP: "the periodic
 export default function CutoffStepper({ scenarioKey }) {
   const scenario = cutoffByKey(scenarioKey);
   const steps = useMemo(() => cutoffStepsFor(scenarioKey), [scenarioKey]);
-  const [index, setIndex] = useState(0);
-  const [ctx, setCtx] = useState({});
+  const [restored] = useState(() => hasSavedRun(scenarioKey));
+  const [index, setIndex] = useSavedState(scenarioKey, "index", 0);
+  const [ctx, setCtx] = useSavedState(scenarioKey, "ctx", {});
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const [tick, setTick] = useState(0);
@@ -162,7 +164,7 @@ export default function CutoffStepper({ scenarioKey }) {
   );
 
   // Lines appear one at a time, so the presenter can read where the wire is and where it stops.
-  const { events, backlog } = usePacedEvents(allEvents);
+  const { events, backlog } = usePacedEvents(allEvents, undefined, { catchUp: restored });
 
   // A failed approved action sends the agent back once; its new proposal needs its own decision.
   const revisedProposal =

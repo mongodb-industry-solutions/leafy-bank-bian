@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Icon from "@leafygreen-ui/icon";
 import { H3, Body } from "@leafygreen-ui/typography";
 import ScenarioInfo from "./ScenarioBrief";
+import { hasSavedRun } from "./savedRun";
 import { SCENARIOS, GROUPS, stepsFor } from "./scenarios";
 import { CUTOFF_SCENARIOS } from "./cutoffScenarios";
 import { CONCURRENCY_GROUP, CONCURRENCY_SCENARIOS } from "./concurrencyScenarios";
@@ -19,7 +20,9 @@ const RAN_KEY = "showcase.ran";
 
 function useRanScenarios() {
   const [ran, setRan] = useState([]);
+  const [saved, setSaved] = useState([]);
   useEffect(() => {
+    setSaved([...SCENARIOS, ...CUTOFF_SCENARIOS, ...CONCURRENCY_SCENARIOS].map((s) => s.key).filter(hasSavedRun));
     try {
       setRan(JSON.parse(sessionStorage.getItem(RAN_KEY) || "[]"));
     } catch {
@@ -31,7 +34,7 @@ function useRanScenarios() {
     setRan(next);
     sessionStorage.setItem(RAN_KEY, JSON.stringify(next));
   };
-  return [ran, markRan];
+  return [ran, markRan, saved];
 }
 
 function DecisionFlow({ decision }) {
@@ -52,7 +55,7 @@ function DecisionFlow({ decision }) {
   );
 }
 
-function ScenarioCard({ scenario, ran, onPick, agent }) {
+function ScenarioCard({ scenario, ran, resumable, onPick, agent }) {
   const meta = scenario.startEt
     ? `${scenario.cardAmount || `USD ${scenario.amount}`} · ${scenario.startEt} ET`
     : scenario.bank
@@ -68,7 +71,7 @@ function ScenarioCard({ scenario, ran, onPick, agent }) {
         <span className={styles.cardFooter}>
           <span className={styles.cardMeta}>{meta}</span>
           <span className={styles.cardBadges}>
-            {ran && <span className={styles.ranMark}>Run</span>}
+            {resumable ? <span className={styles.ranMark}>Resume</span> : ran && <span className={styles.ranMark}>Run</span>}
           </span>
         </span>
       </button>
@@ -100,26 +103,26 @@ function GroupHead({ group }) {
   );
 }
 
-function Cell({ agent, mode, ran, onPick }) {
+function Cell({ agent, mode, ran, saved, onPick }) {
   const items = agent.scenarios.filter((s) => s.mode === mode);
   return (
     <div className={styles.matrixCell}>
       {items.length === 0 && <div className={styles.matrixEmpty}>No {agent.title.toLowerCase()} scenario yet</div>}
       {items.map((s) => (
-        <ScenarioCard key={s.key} scenario={s} agent={agent} ran={ran.includes(s.key)} onPick={onPick} />
+        <ScenarioCard key={s.key} scenario={s} agent={agent} ran={ran.includes(s.key)} resumable={saved.includes(s.key)} onPick={onPick} />
       ))}
     </div>
   );
 }
 
-function ScenarioMatrix({ ran, onPick }) {
+function ScenarioMatrix({ ran, saved, onPick }) {
   return (
     <div className={styles.matrix}>
       {GROUPS.map((group) => (
         <div key={group.mode} className={`${styles.matrixRow} ${styles[`mode_${group.mode}`]}`}>
           <GroupHead group={group} />
           {AGENTS.map((a) => (
-            <Cell key={a.id} agent={a} mode={group.mode} ran={ran} onPick={onPick} />
+            <Cell key={a.id} agent={a} mode={group.mode} ran={ran} saved={saved} onPick={onPick} />
           ))}
         </div>
       ))}
@@ -127,7 +130,7 @@ function ScenarioMatrix({ ran, onPick }) {
         <GroupHead group={CONCURRENCY_GROUP} />
         <div className={styles.matrixCell}>
           {CONCURRENCY_SCENARIOS.map((s) => (
-            <ScenarioCard key={s.key} scenario={s} agent={NO_AGENT} ran={ran.includes(s.key)} onPick={onPick} />
+            <ScenarioCard key={s.key} scenario={s} agent={NO_AGENT} ran={ran.includes(s.key)} resumable={saved.includes(s.key)} onPick={onPick} />
           ))}
         </div>
       </div>
@@ -136,7 +139,7 @@ function ScenarioMatrix({ ran, onPick }) {
 }
 
 export default function ScenarioPicker({ onPick }) {
-  const [ran, markRan] = useRanScenarios();
+  const [ran, markRan, saved] = useRanScenarios();
   const pick = (key) => {
     markRan(key);
     onPick(key);
@@ -144,7 +147,7 @@ export default function ScenarioPicker({ onPick }) {
 
   return (
     <div id="showcase-scenarios" className={styles.picker}>
-      <ScenarioMatrix ran={ran} onPick={pick} />
+      <ScenarioMatrix ran={ran} saved={saved} onPick={pick} />
     </div>
   );
 }

@@ -277,8 +277,13 @@ export function useRunLog(sources, derive = deriveRunEvents) {
  * Each released line keeps its last snapshot, so one whose key later disappears from the derived
  * events (a risk reading replaced by a newer one) stays as history rather than vanishing.
  */
-export function usePacedEvents(events, gapMs = 1100) {
+// A restored run would otherwise replay its whole log at narration pace. With `catchUp`, every
+// event that arrives in the first CATCH_UP_MS after mount is shown at once.
+const CATCH_UP_MS = 5000;
+
+export function usePacedEvents(events, gapMs = 1100, { catchUp = false } = {}) {
   const [shown, setShown] = useState([]);
+  const [mountedAt] = useState(() => Date.now());
   const shownKeys = new Set(shown.map((s) => s.key));
   const next = events.find((e) => !shownKeys.has(e.key));
   const lastKey = shown.length ? shown[shown.length - 1].key : undefined;
@@ -286,7 +291,9 @@ export function usePacedEvents(events, gapMs = 1100) {
 
   useEffect(() => {
     if (!next) return undefined;
-    const id = setTimeout(() => setShown((prev) => [...prev, { key: next.key, event: next }]), shown.length ? lastDwell ?? gapMs : 0);
+    const catchingUp = catchUp && Date.now() - mountedAt < CATCH_UP_MS;
+    const delay = catchingUp || !shown.length ? 0 : lastDwell ?? gapMs;
+    const id = setTimeout(() => setShown((prev) => [...prev, { key: next.key, event: next }]), delay);
     return () => clearTimeout(id);
   }, [next?.key, shown.length]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -22,6 +22,7 @@ import ResultScene from "./scenes/ResultScene";
 import AgentFailure from "./scenes/AgentFailure";
 import { gapOf, railLegOf } from "./scenes/format";
 import { BEAT_DWELL_MS, phaseOfStep, usePacedEvents, useRunLog } from "./runLog";
+import { hasSavedRun, useSavedState } from "./savedRun";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
@@ -115,8 +116,9 @@ function useAgentRecords(ids, tick) {
 export default function ScenarioStepper({ scenarioKey }) {
   const scenario = scenarioByKey(scenarioKey);
   const steps = useMemo(() => stepsFor(scenarioKey), [scenarioKey]);
-  const [index, setIndex] = useState(0);
-  const [ctx, setCtx] = useState({});
+  const [restored] = useState(() => hasSavedRun(scenarioKey));
+  const [index, setIndex] = useSavedState(scenarioKey, "index", 0);
+  const [ctx, setCtx] = useSavedState(scenarioKey, "ctx", {});
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
@@ -201,7 +203,7 @@ export default function ScenarioStepper({ scenarioKey }) {
     exceptions: trackedExceptions, gapMajor: liveGap == null ? null : liveGap / 100,
   });
   // Lines appear one at a time, as in the cut-off walkthrough, so the presenter can read each.
-  const { events, backlog } = usePacedEvents(allEvents, LOG_GAP_MS);
+  const { events, backlog } = usePacedEvents(allEvents, LOG_GAP_MS, { catchUp: restored });
 
   // The lifecycle strip follows what the log has shown, not the live payment, which is seconds
   // ahead: it ticks to stage N when the "Stage N" line is read, is held once the exception line

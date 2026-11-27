@@ -5,6 +5,7 @@
 // (reconciliation) and CutoffStepper (cut-off).
 
 import { useEffect, useState } from "react";
+import Button from "@leafygreen-ui/button";
 import { useRouter, useSearchParams } from "next/navigation";
 import Banner from "@leafygreen-ui/banner";
 import Icon from "@leafygreen-ui/icon";
@@ -18,6 +19,7 @@ import { cutoffByKey } from "./cutoffScenarios";
 import CutoffStepper from "./CutoffStepper";
 import { concurrencyByKey } from "./concurrencyScenarios";
 import ConcurrencyStepper from "./ConcurrencyStepper";
+import { clearSavedRun } from "./savedRun";
 import styles from "./Showcase.module.css";
 
 const AGENT_COPY = {
@@ -65,6 +67,13 @@ export default function ShowcaseView() {
     ? cutoffByKey(scenarioKey) || concurrencyByKey(scenarioKey) || scenarioByKey(scenarioKey)
     : null;
   const health = useAgentHealth();
+  // Bumped by Start over: remounts the stepper after its saved run is cleared.
+  const [runNonce, setRunNonce] = useState(0);
+  const startOver = () => {
+    clearSavedRun(scenarioKey);
+    setRunNonce((n) => n + 1);
+  };
+  const stepperKey = `${scenarioKey}:${runNonce}`;
   const states = Object.values(health);
   const checking = states.some((s) => s == null);
   const allLive = states.every((s) => s === true);
@@ -93,11 +102,14 @@ export default function ShowcaseView() {
             </button>
             <span className={styles.crumbSep} aria-hidden="true">/</span>
             <span className={styles.crumbHere} aria-current="page">{current?.title}</span>
+            <Button size="xsmall" className={styles.crumbAction} leftGlyph={<Icon glyph="Refresh" />} onClick={startOver}>
+              Start over
+            </Button>
           </nav>
         )}
-        {scenarioKey && isCutoffKey && <CutoffStepper key={scenarioKey} scenarioKey={scenarioKey} />}
-        {scenarioKey && isConcurrencyKey && <ConcurrencyStepper key={scenarioKey} scenarioKey={scenarioKey} />}
-        {scenarioKey && !isCutoffKey && !isConcurrencyKey && <ScenarioStepper key={scenarioKey} scenarioKey={scenarioKey} />}
+        {scenarioKey && isCutoffKey && <CutoffStepper key={stepperKey} scenarioKey={scenarioKey} />}
+        {scenarioKey && isConcurrencyKey && <ConcurrencyStepper key={stepperKey} scenarioKey={scenarioKey} />}
+        {scenarioKey && !isCutoffKey && !isConcurrencyKey && <ScenarioStepper key={stepperKey} scenarioKey={scenarioKey} />}
         {!scenarioKey && <ScenarioPicker onPick={setScenarioKey} />}
         </div>
       </div>

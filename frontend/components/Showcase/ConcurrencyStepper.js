@@ -12,6 +12,7 @@ import { CONCURRENCY_STEPS, concurrencyByKey } from "./concurrencyScenarios";
 import { bookStatement, getPayment, runLedgerBatch, runRace, settleDue } from "./concurrencyActions";
 import { CONCURRENCY_FILTERS, deriveConcurrencyEvents } from "./concurrencyRunLog";
 import { usePacedEvents } from "./runLog";
+import { clearSavedRun, hasSavedRun, useSavedState } from "./savedRun";
 import { deriveActivity } from "./activity";
 import PaymentPipeline from "./PaymentPipeline";
 import RunConsole from "./RunConsole";
@@ -64,10 +65,11 @@ function usePayments(ids, tick) {
 
 function ConcurrencyRun({ scenarioKey, onRestart }) {
   const scenario = concurrencyByKey(scenarioKey);
-  const [index, setIndex] = useState(0);
-  const [queued, setQueued] = useState(false);
-  const [live, setLive] = useState(null);
-  const [statement, setStatement] = useState(null);
+  const [restored] = useState(() => hasSavedRun(scenarioKey));
+  const [index, setIndex] = useSavedState(scenarioKey, "index", 0);
+  const [queued, setQueued] = useSavedState(scenarioKey, "queued", false);
+  const [live, setLive] = useSavedState(scenarioKey, "live", null);
+  const [statement, setStatement] = useSavedState(scenarioKey, "statement", null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const [tick, setTick] = useState(0);
@@ -87,7 +89,7 @@ function ConcurrencyRun({ scenarioKey, onRestart }) {
     () => deriveConcurrencyEvents({ queued, live, payments, statement }),
     [queued, live, payments, statement]
   );
-  const { events, backlog } = usePacedEvents(allEvents);
+  const { events, backlog } = usePacedEvents(allEvents, undefined, { catchUp: restored });
 
   async function call(fn) {
     const { data, error: err } = await fn();
@@ -204,7 +206,12 @@ function ConcurrencyRun({ scenarioKey, onRestart }) {
 }
 
 export default function ConcurrencyStepper({ scenarioKey }) {
-  // Remounting resets every piece of state, including the paced log.
+  // Remounting resets every piece of state, including the paced log; clearing the saved run first
+  // stops the remount from restoring it.
   const [run, setRun] = useState(0);
-  return <ConcurrencyRun key={run} scenarioKey={scenarioKey} onRestart={() => setRun((n) => n + 1)} />;
+  const restart = () => {
+    clearSavedRun(scenarioKey);
+    setRun((n) => n + 1);
+  };
+  return <ConcurrencyRun key={run} scenarioKey={scenarioKey} onRestart={restart} />;
 }

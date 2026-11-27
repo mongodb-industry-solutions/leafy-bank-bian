@@ -2399,6 +2399,11 @@ summary.runTitle {
 }
 
 /* Breadcrumb above a running scenario: navigation, kept apart from the step controls. */
+/* Start over sits at the far end of the breadcrumb, away from the step controls. */
+.crumbAction {
+  margin-left: auto;
+}
+
 .crumbs {
   display: flex;
   align-items: center;
