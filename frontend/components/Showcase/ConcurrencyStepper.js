@@ -6,9 +6,8 @@
 // two are debited at stage 5, then settled, journaled and reconciled like any other wire.
 // There is no agent: the database makes the decision.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Button from "@leafygreen-ui/button";
-import { Overline } from "@leafygreen-ui/typography";
 import { CONCURRENCY_STEPS, concurrencyByKey } from "./concurrencyScenarios";
 import { bookStatement, getPayment, runLedgerBatch, runRace, settleDue } from "./concurrencyActions";
 import { CONCURRENCY_FILTERS, deriveConcurrencyEvents } from "./concurrencyRunLog";
@@ -16,10 +15,27 @@ import { usePacedEvents } from "./runLog";
 import { deriveActivity } from "./activity";
 import PaymentPipeline from "./PaymentPipeline";
 import RunConsole from "./RunConsole";
-import { BalanceGauge, DesignPanel, PaymentOps, RaceHeader, SkewContrast, Verdict } from "./scenes/ConcurrencyScene";
+import { BriefStrip } from "./ScenarioBrief";
+import { BalanceGauge, DesignPanel, PaymentOps, RaceCard, SkewContrast, Verdict } from "./scenes/ConcurrencyScene";
 import styles from "./Showcase.module.css";
 
 const TICK_MS = 3000;
+const AUTO_DELAY_MS = 2000;
+
+// What the database must show before an auto step may start. The log's pace is not enough:
+// settlement and posting land asynchronously, and booking a statement before any wire is
+// SETTLED fails with "No statement generated".
+const isSettled = (p) => ["SETTLED", "COMPLETED"].includes(p?.status);
+const isPosted = (p) => p?.lifecycle?.postingStatus === "POSTED";
+const READY = {
+  glpost: (wins) => wins.every(isSettled),
+  statement: (wins) => wins.every((p) => isSettled(p) && isPosted(p)),
+};
+
+const WAITING_TEXT = {
+  glpost: "Waiting for both wires to settle",
+  statement: "Waiting for both wires to post to the ledger",
+};
 
 const RUNNING_TEXT = {
   race: "Sending three wires through the saga",
@@ -79,6 +95,23 @@ function ConcurrencyRun({ scenarioKey, onRestart }) {
     return data;
   }
 
+  const winningPayments = winners.map((a) => payments[a.paymentId]);
+  const ready = !READY[step.key] || (winningPayments.length > 0 && READY[step.key](winningPayments));
+
+  // Same rule as the reconciliation walkthrough: an `auto` step starts once the paced log has caught
+  // up, so it never runs while the previous one is still being narrated. Each tries once; a failure
+  // leaves the button for a manual retry instead of looping.
+  const runRef = useRef(null);
+  const autoTried = useRef(new Set());
+  useEffect(() => {
+    if (!step.auto || running || !ready || backlog > 0 || autoTried.current.has(step.key)) return undefined;
+    const id = setTimeout(() => {
+      autoTried.current.add(step.key);
+      runRef.current();
+    }, AUTO_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [step.key, step.auto, running, ready, backlog]);
+
   async function runStep() {
     setRunning(true);
     setError(null);
@@ -101,8 +134,13 @@ function ConcurrencyRun({ scenarioKey, onRestart }) {
     }
   }
 
+  runRef.current = runStep;
+
   const tone = reconciled ? "resolved" : live && !live.summary.invariantHeld ? "alert" : live ? "waiting" : "neutral";
-  const activity = deriveActivity({ running: running ? RUNNING_TEXT[step.key] : null });
+  const activity = deriveActivity({
+    running: running ? RUNNING_TEXT[step.key] : null,
+    systemWait: !running && step.auto && !ready ? WAITING_TEXT[step.key] : null,
+  });
   const lead = winners[0] ? payments[winners[0].paymentId] : null;
   const status = lead?.lifecycle?.currentState || (queued ? "VALIDATED" : null);
 
@@ -132,25 +170,29 @@ function ConcurrencyRun({ scenarioKey, onRestart }) {
             summary: s.summary,
             beat: s.beat,
           }))}
-          top={<RaceHeader scenario={scenario} report={live} queued={queued} />}
-          pipeline={(
-            // Secondary here: the race happens at stages 3 and 5; the full lifecycle is one click away.
-            <details className={styles.foldBox}>
-              <summary><Overline as="span">Payment lifecycle</Overline> <span className={styles.muted}>race at stages 3 and 5</span></summary>
-              <PaymentPipeline payment={lead} status={status} paymentId={winners[0]?.paymentId} mode="reconciliation" reconciled={reconciled} />
-            </details>
+          top={(
+            <>
+              <BriefStrip scenario={scenario} />
+              <RaceCard scenario={scenario} report={live} queued={queued} />
+            </>
           )}
+          pipeline={<PaymentPipeline payment={lead} status={status} paymentId={winners[0]?.paymentId} mode="reconciliation" reconciled={reconciled} />}
           controller={controller}
           filters={CONCURRENCY_FILTERS}
           events={events}
           pending={backlog > 0 ? "Next event coming…" : null}
           activity={activity}
-          logFolded
           evidence={(
             <div className={styles.section}>
               <BalanceGauge report={live} />
-              {live && <PaymentOps report={live} payments={payments} />}
               <SkewContrast report={live} />
+              {live && (
+                // Engineer detail: the result above tells the story; this shows every command.
+                <details className={styles.w1Detail}>
+                  <summary>See what each wire ran on MongoDB</summary>
+                  <PaymentOps report={live} payments={payments} />
+                </details>
+              )}
             </div>
           )}
           aside={<DesignPanel live={live} stepKey={step.key} />}

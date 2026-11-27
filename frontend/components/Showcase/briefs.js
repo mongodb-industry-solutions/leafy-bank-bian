@@ -54,7 +54,7 @@ export const BRIEFS = {
 BRIEFS.W1 = {
   hard: "Three payments read the same balance at the same instant, so each one sees enough funds.",
   decides: "Nothing. There is no agent in this scenario; the database enforces the rule.",
-  guarantees: "The debit is guarded on the account document itself, so exactly two of the three $80 payments succeed.",
+  guarantees: "The debit is guarded on the account document itself, so exactly two of the three payments ($80, $110, $90) succeed.",
   mongo: ["ACID transactions", "Atomic single-document update", "Conditional write guard", "Change streams"],
   autonomy: { level: 3, alone: "Admits or rejects each payment atomically", needsYou: "Nothing" },
 };

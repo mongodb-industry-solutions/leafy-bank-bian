@@ -32,7 +32,11 @@ def test_three_racing_wires_leave_two_reserved_and_one_refused():
     assert summary["winners"] == 2
     assert summary["refused"] == 1
     assert summary["errors"] == 0
-    assert summary["finalAvailable"] == pytest.approx(40.0)
+    # The refused wire depends on the race: 80 + 110, 80 + 90 or 110 + 90 got through.
+    refused = next(a for a in report["attempts"] if a["outcome"] == "REFUSED_INSUFFICIENT_FUNDS")
+    winners_total = sum(a["amount"] for a in report["attempts"] if a["outcome"] == "RESERVED")
+    assert summary["finalAvailable"] == pytest.approx(200.0 - winners_total)
+    assert summary["finalAvailable"] < refused["amount"]
     assert summary["finalHold"] == pytest.approx(0.0)
     assert summary["invariantHeld"] is True
     assert all(a["observedAvailable"] == pytest.approx(200.0) for a in report["attempts"])
@@ -42,4 +46,4 @@ def test_three_racing_wires_leave_two_reserved_and_one_refused():
     for a in report["attempts"]:
         guarded = [op for op in a["ops"] if op["command"] == "findAndModify" and op["collection"] == "accounts"
                    and "balance.available" in op["filter"]]
-        assert guarded and guarded[-1]["filter"]["balance.available"] == {"$gte": 80.0}
+        assert guarded and guarded[-1]["filter"]["balance.available"] == {"$gte": a["amount"]}

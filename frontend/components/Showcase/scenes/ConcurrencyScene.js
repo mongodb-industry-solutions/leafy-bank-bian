@@ -7,8 +7,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Badge from "@leafygreen-ui/badge";
 import Icon from "@leafygreen-ui/icon";
-import { Body, InlineCode, Overline } from "@leafygreen-ui/typography";
-import { usd } from "../concurrencyRunLog";
+import { Body, H3, InlineCode, Overline } from "@leafygreen-ui/typography";
+import { reservedAt, usd } from "../concurrencyRunLog";
 import { groupsOf, stepCount } from "../concurrencyOps";
 import styles from "../Showcase.module.css";
 
@@ -30,6 +30,8 @@ function useStepReveal(report, total) {
 }
 
 const STEP_ICON = { ok: "Checkmark", wait: "Refresh", refuse: "XWithCircle", info: "MagnifyingGlass" };
+// Op tones mapped onto the page-wide tone scale.
+const STEP_TONE = { ok: "resolved", wait: "waiting", refuse: "neutral", info: "info" };
 const OUTCOME_BADGE = {
   RESERVED: ["green", "Reserved"],
   REFUSED_INSUFFICIENT_FUNDS: ["lightgray", "Refused"],
@@ -38,7 +40,7 @@ const OUTCOME_BADGE = {
 
 function StepRow({ step }) {
   return (
-    <li className={`${styles.opsStep} ${styles[`ops_${step.tone}`]}`}>
+    <li className={`${styles.opsStep} ${styles[`tone_${STEP_TONE[step.tone]}`]}`}>
       <div className={styles.opsRow}>
         <span className={styles.opsDot} aria-hidden="true"><Icon glyph={STEP_ICON[step.tone]} size={12} /></span>
         <Body as="span" className={styles.opsStepTitle}>{step.title}</Body>
@@ -53,16 +55,16 @@ function StepRow({ step }) {
   );
 }
 
-function PaymentOpsCard({ attempt, amount, shown, payment }) {
-  const groups = groupsOf(attempt, amount);
-  const total = stepCount(attempt, amount);
+function PaymentOpsCard({ attempt, shown, payment }) {
+  const groups = groupsOf(attempt, attempt.amount);
+  const total = stepCount(attempt, attempt.amount);
   const [variant, label] = OUTCOME_BADGE[attempt.outcome] || OUTCOME_BADGE.ERROR;
   // The read is step 1; every group step after it counts toward the shared reveal.
   let budget = shown - 1;
   return (
     <div className={styles.opsCard}>
       <div className={styles.opsHead}>
-        <Body as="span" className={styles.opsTitle}>Wire {attempt.worker}</Body>
+        <Body as="span" className={styles.opsTitle}>Wire {attempt.worker} · {usd(attempt.amount)}</Body>
         {shown >= total && <Badge variant={variant}>{label}</Badge>}
         {shown >= total && attempt.writeConflicts > 0 && <Badge variant="yellow">{attempt.writeConflicts} retries</Badge>}
       </div>
@@ -99,12 +101,12 @@ function PaymentOpsCard({ attempt, amount, shown, payment }) {
 
 /** What each concurrent wire ran against MongoDB, step by step. */
 export function PaymentOps({ report, payments }) {
-  const total = Math.max(...report.attempts.map((a) => stepCount(a, report.params.amount)));
+  const total = Math.max(...report.attempts.map((a) => stepCount(a, a.amount)));
   const shown = useStepReveal(report, total);
   return (
     <div className={styles.opsGrid}>
       {report.attempts.map((a) => (
-        <PaymentOpsCard key={a.worker} attempt={a} amount={report.params.amount} shown={shown} payment={payments[a.paymentId]} />
+        <PaymentOpsCard key={a.worker} attempt={a} shown={shown} payment={payments[a.paymentId]} />
       ))}
     </div>
   );
@@ -118,40 +120,25 @@ const FALLBACK_GUARD = {
 const pretty = (value) => JSON.stringify(value, null, 2);
 const stripStamps = (update) => (update?.$inc ? { $inc: update.$inc } : update);
 
-// Light JSON/code colouring (keys, strings, numbers, operators), as in the lending demo, so code
-// wraps inside narrow panels instead of scrolling sideways.
-const TOKEN = /("(?:[^"\\]|\\.)*"(?=\s*:))|("(?:[^"\\]|\\.)*")|(\$[a-zA-Z]+)|(-?\b\d+(?:\.\d+)?\b)|(#.*$)/gm;
-function Tokens({ text }) {
-  const out = [];
-  let last = 0;
-  for (const m of text.matchAll(TOKEN)) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    const cls = m[1] ? styles.tkKey : m[2] ? (m[2].startsWith('"$') ? styles.tkOp : styles.tkStr) : m[3] ? styles.tkOp : m[4] ? styles.tkNum : styles.tkComment;
-    out.push(<span key={m.index} className={cls}>{m[0]}</span>);
-    last = m.index + m[0].length;
-  }
-  out.push(text.slice(last));
-  return out;
-}
-
 function CodeBlock({ label, children }) {
   return (
-    <div className={styles.wsCode}>
-      {label && <span className={styles.wsLabel}>{label}</span>}
-      <pre><Tokens text={children} /></pre>
+    <div className={styles.w1Code}>
+      {label && <span className={styles.w1CodeLabel}>{label}</span>}
+      <pre className={styles.opsPre}>{children}</pre>
     </div>
   );
 }
 
 function Step({ title, chip, active, done, children }) {
+  const state = active ? styles.w1StepActive : done ? "" : styles.w1StepIdle;
   return (
-    <li className={`${styles.wsTlItem} ${active ? styles.wsTlActive : done ? "" : styles.wsTlIdle}`} aria-current={active ? "step" : undefined}>
-      <span className={styles.wsTlDot} aria-hidden="true" />
-      <div className={styles.wsTlHead}>
-        <span className={styles.wsTlTitle}>{title}</span>
-        <span className={styles.wsPill}>{chip}</span>
+    <li className={`${styles.w1Step} ${state}`} aria-current={active ? "step" : undefined}>
+      <span className={styles.w1StepDot} aria-hidden="true" />
+      <div className={styles.w1StepHead}>
+        <span className={styles.w1StepTitle}>{title}</span>
+        <Badge variant="lightgray">{chip}</Badge>
       </div>
-      <div className={styles.wsTlBody}>{children}</div>
+      <Body as="div" className={styles.w1StepBody}>{children}</Body>
     </li>
   );
 }
@@ -166,13 +153,20 @@ export function DesignPanel({ live, stepKey }) {
   const raceActive = stepKey === "race";
   const at = (n) => ({ active: n === focus || (raceActive && n <= 4 && n >= 2), done: n < focus });
   return (
-    <div className={styles.wsPanel}>
-      <div className={styles.wsPanelHead}>
-        <Icon glyph="Database" size={14} />
-        <span>How it is built on MongoDB</span>
-        {live && <Badge variant="green">Live</Badge>}
+    <aside className={styles.aiPanel} aria-label="MongoDB design">
+      <header className={styles.aiHead}>
+        <span className={`${styles.aiTitle} ${styles.w1PanelTitle}`}><Icon glyph="Database" size={16} />MongoDB design</span>
+        <Badge variant={live ? "green" : "lightgray"}>{live ? "Live" : "No agent"}</Badge>
+      </header>
+      <div className={styles.aiTouched} aria-label="MongoDB collections this scenario writes">
+        <Icon glyph="Database" size={12} />
+        <span className={styles.mongoChips}>
+          <span className={`${styles.mongoChip} ${styles.mongoWrite}`}>accounts</span>
+          <span className={`${styles.mongoChip} ${styles.mongoWrite}`}>payments</span>
+          <span className={`${styles.mongoChip} ${styles.mongoWrite}`}>transactions</span>
+        </span>
       </div>
-      <ol className={styles.wsTl}>
+      <ol className={styles.w1Steps}>
         <Step title="Balance lives on one document" chip="Model" {...at(1)}>
           The invariant and the money it protects sit in <b>one</b> <InlineCode>accounts</InlineCode> document, so every wire writes the same document and MongoDB sees them collide.
           <CodeBlock label="accounts">{`{
@@ -195,139 +189,148 @@ update: ${pretty(stripStamps(guard.update))}`}</CodeBlock>
           Settlement emits a change event; the ledger journals it and reconciliation matches it. Only committed wires appear.
         </Step>
       </ol>
-    </div>
+    </aside>
   );
 }
 
 const OPENING = 200;
-const AMOUNT = 80;
-const WIRES = 3;
+// Wire n sends AMOUNTS[n - 1]; mirrors the backend. Any two fit in the opening balance, all three do not.
+const AMOUNTS = [80, 110, 90];
+const WIRES = AMOUNTS.length;
+const DEMAND = AMOUNTS.reduce((t, n) => t + n, 0);
 
-function Kpi({ label, value, hint, tone = "neutral" }) {
+function Fact({ glyph, children, mono }) {
   return (
-    <div className={`${styles.wsKpi} ${styles[`wsTone_${tone}`]}`}>
-      <span className={styles.wsLabel}>{label}</span>
-      <span className={styles.wsKpiValue}>{value}</span>
-      {hint && <span className={styles.wsKpiHint}>{hint}</span>}
+    <div className={styles.payFact}>
+      <Icon glyph={glyph} size={14} className={styles.payFactIcon} />
+      <Body as="span" className={mono ? styles.mono : undefined}>{children}</Body>
     </div>
   );
 }
 
-/** Title, story and the four numbers that matter, as KPI tiles. */
-export function RaceHeader({ scenario, report, queued }) {
+/** The race at a glance, in the same card the other walkthroughs use for the payment. */
+export function RaceCard({ scenario, report, queued }) {
   const s = report?.summary;
   const state = s ? (s.invariantHeld ? ["green", "Invariant held"] : ["red", "Invariant broken"]) : queued ? ["blue", "3 wires queued"] : ["lightgray", "Not queued yet"];
   return (
-    <div className={styles.wsHero}>
-      <div className={styles.wsHeroTop}>
-        <div>
-          <span className={styles.wsEyebrow}>Write skew</span>
-          <h2 className={styles.wsTitle}>{scenario.title}</h2>
-          <p className={styles.wsStory}>{scenario.story}</p>
-        </div>
-        <div className={styles.wsHeroSide}>
-          <Badge variant={state[0]}>{state[1]}</Badge>
-          <span className={styles.wsInvariant}><Icon glyph="Lock" size={12} />{scenario.invariant}</span>
-        </div>
-      </div>
-      <div className={styles.wsKpis}>
-        <Kpi label="Opening balance" value={usd(OPENING)} hint="ACC-acc10004" />
-        <Kpi label="Demand" value={usd(WIRES * AMOUNT)} hint={`${WIRES} wires × ${usd(AMOUNT)}`} tone="warn" />
-        <Kpi label="Wires reserved" value={s ? `${s.winners} / ${WIRES}` : `– / ${WIRES}`} hint={s ? `${s.totalWriteConflicts} write conflicts retried` : "after the race"} tone="info" />
-        <Kpi label="Available" value={usd(s ? s.finalAvailable : OPENING)} hint={s ? "never below zero" : "before the race"} tone={s ? (s.invariantHeld ? "good" : "bad") : "neutral"} />
-      </div>
+    <div className={`${styles.railCard} ${styles.toneBorder} ${styles.payCard}`}>
+      <H3 as="p" className={styles.paneTitle}>USD {AMOUNTS.join(" + ")} vs {usd(OPENING)}</H3>
+      <Fact glyph="Building">Account <span className={styles.mono}>ACC-acc10004</span> · opening {usd(OPENING)}</Fact>
+      <Fact glyph="Lock" mono>{scenario.invariant}</Fact>
+      <Fact glyph="Coin">
+        {s
+          ? <>{s.winners} / {WIRES} reserved · {usd(s.finalAvailable)} left <span className={styles.muted}>· {s.totalWriteConflicts} conflicts retried</span></>
+          : <span className={styles.muted}>Demand {usd(DEMAND)}, before the race</span>}
+      </Fact>
+      <div className={styles.chipRow}><Badge variant={state[0]}>{state[1]}</Badge></div>
     </div>
   );
 }
 
+const joinNames = (wires) => wires.map((a) => `Wire ${a.worker}`).join(" and ");
+
+/** The result line under the bar, once the race has decided. */
+function raceOutcome(report) {
+  const paid = report.attempts.filter((a) => a.outcome === "RESERVED");
+  const refused = report.attempts.filter((a) => a.outcome !== "RESERVED");
+  const refusedText = refused.length ? ` · ${joinNames(refused)} refused` : "";
+  return {
+    tone: report.summary.invariantHeld ? "resolved" : "alert",
+    text: `${joinNames(paid)} paid${refusedText} · ${usd(report.summary.finalAvailable)} left`,
+  };
+}
+
 /**
- * The USD 200 balance as a bar, one segment per wire. Before the race the third wire spills past
- * zero (the demand every read saw); after it, winners fill the bar and the refused wire stays out.
+ * What the wires ask for against what the account holds, one segment per wire sized by amount.
+ * Before the race the wires sit in order and the last spills into the overdraft zone; after it,
+ * the winners fill the bar in the order they reserved and the refused wire is pushed past the line.
  */
 export function BalanceGauge({ report }) {
-  const attempts = report?.attempts || Array.from({ length: WIRES }, (_, i) => ({ worker: i + 1, outcome: null }));
-  const scale = WIRES * AMOUNT;
-  const pct = (v) => `${(v / scale) * 100}%`;
+  const queued = AMOUNTS.map((amount, i) => ({ worker: i + 1, amount, outcome: null }));
+  const attempts = report ? [...report.attempts].sort((a, b) => reservedAt(a) - reservedAt(b) || a.worker - b.worker) : queued;
+  const pct = (v) => `${(v / DEMAND) * 100}%`;
+  const outcome = report && raceOutcome(report);
+  let offset = 0;
   return (
-    <div className={styles.wsCard}>
-      <div className={styles.wsCardHead}>
-        <span className={styles.wsLabel}>Balance under contention</span>
-        <span className={styles.wsLegend}>
-          <i className={styles.segPending} />queued <i className={styles.segOk} />reserved <i className={styles.segRefused} />refused
+    <div className={styles.railCard}>
+      <div className={styles.w1CardHead}>
+        <Overline>Requested vs available</Overline>
+        <span className={styles.w1Legend}>
+          <i className={styles.segPending} />waiting <i className={styles.segOk} />paid <i className={styles.segRefused} />refused
         </span>
       </div>
-      <div className={styles.wsBar}>
-        <div className={styles.wsOverdraft} style={{ left: pct(OPENING) }} />
-        {attempts.map((a, i) => {
+      <Body as="p" className={styles.w1Question}>
+        Three wires ask for {usd(DEMAND)}. The account has {usd(OPENING)}. Who gets paid?
+      </Body>
+      <div className={styles.w1Bar}>
+        {/* Drawn over the segments, so the part of a wire past the balance reads as overdraft. */}
+        <div className={styles.w1Overdraft} style={{ "--at": pct(OPENING) }} />
+        {attempts.map((a) => {
           const tone = !a.outcome ? styles.segPending : a.outcome === "RESERVED" ? styles.segOk : styles.segRefused;
+          const left = offset;
+          offset += a.amount;
           return (
-            <div key={a.worker} className={`${styles.wsSeg} ${tone}`} style={{ left: pct(i * AMOUNT), width: pct(AMOUNT) }}>
-              Wire {a.worker} · {usd(AMOUNT)}
+            <div key={a.worker} className={`${styles.w1Seg} ${tone}`} style={{ "--at": pct(left), "--size": pct(a.amount) }}>
+              Wire {a.worker} · {usd(a.amount)}
             </div>
           );
         })}
       </div>
-      <div className={styles.wsScale}>
-        <span>USD 0 spent</span>
-        <span style={{ left: pct(OPENING) }} className={styles.wsScaleZero}>USD 200 · balance exhausted</span>
-        <span>USD 240</span>
+      <div className={styles.w1Scale}>
+        <span>USD 0</span>
+        <span className={styles.w1ScaleZero} style={{ "--at": pct(OPENING) }}>{usd(OPENING)} available</span>
+        <span className={styles.w1ScaleOver}>overdraft · must never happen</span>
       </div>
+      {outcome && (
+        <div className={`${styles.w1Row} ${styles[`tone_${outcome.tone}`]}`}>
+          <Icon glyph={outcome.tone === "resolved" ? "Checkmark" : "XWithCircle"} size={12} className={styles.w1RowIcon} />
+          <span>{outcome.text}</span>
+        </div>
+      )}
     </div>
   );
 }
 
-function RaceRow({ label, verdict, tone }) {
+function ContrastHalf({ tone, title, headline, why, code }) {
   return (
-    <li className={`${styles.wsRow} ${styles[`wsTone_${tone}`]}`}>
-      <Icon glyph={tone === "good" ? "Checkmark" : tone === "bad" ? "XWithCircle" : tone === "warn" ? "Warning" : "Clock"} size={12} />
-      <span className={styles.wsRowLabel}>{label}</span>
-      <span className={styles.wsRowVerdict}>{verdict}</span>
-    </li>
+    <div className={`${styles.w1Half} ${styles[`tone_${tone}`]}`}>
+      <Overline>{title}</Overline>
+      <H3 as="p" className={styles.w1Headline}>{headline}</H3>
+      <Body as="p" className={styles.w1Why}>{why}</Body>
+      <details className={styles.opsCode}>
+        <summary>Show code</summary>
+        <pre className={styles.opsPre}>{code}</pre>
+      </details>
+    </div>
   );
 }
 
 /**
- * Why the naive design fails and the guarded one does not. The left card is illustrative (the
- * anomaly, never run); the right card is filled from the live race report.
+ * Why the race came out right: the same three wires without a guard (illustrative, never run)
+ * against the live result with it. Shown only after the race, so it explains rather than spoils.
  */
 export function SkewContrast({ report }) {
-  const live = (a) => {
-    if (a.outcome === "RESERVED") return [`${a.writeConflicts ? `retried ×${a.writeConflicts} → ` : ""}matched, −${AMOUNT}`, "good"];
-    if (a.outcome === "ERROR") return ["error", "bad"];
-    return [`${a.writeConflicts ? `retried ×${a.writeConflicts} → ` : ""}no match, refused`, "warn"];
-  };
+  if (!report) return null;
   return (
-    <div className={styles.wsCompare}>
-      <div className={`${styles.wsCard} ${styles.wsAccent} ${styles.wsTone_bad}`}>
-        <div className={styles.wsCardHead}>
-          <span className={styles.wsCardTitle}>Read, then write</span>
-          <span className={styles.wsPill}>Illustration · not run</span>
-        </div>
-        <CodeBlock>{`acct = accounts.find_one({...})          # every wire sees 200
-if acct["available"] >= 80:              # all three pass
-    accounts.update_one({...}, {"$set": {...}})`}</CodeBlock>
-        <ul className={styles.wsRows}>
-          {[1, 2, 3].map((w) => <RaceRow key={w} label={`Wire ${w}`} verdict="read 200 → passes → writes" tone="bad" />)}
-        </ul>
-        <div className={styles.wsOutcome}>Available ends at {usd(OPENING - WIRES * AMOUNT)}</div>
-      </div>
-      <div className={`${styles.wsCard} ${styles.wsAccent} ${styles.wsTone_good}`}>
-        <div className={styles.wsCardHead}>
-          <span className={styles.wsCardTitle}>Check inside the write</span>
-          {report ? <Badge variant="green">Live</Badge> : <span className={styles.wsPill}>MongoDB</span>}
-        </div>
-        <CodeBlock>{`accounts.find_one_and_update(
-  {"balance.available": {"$gte": 80}},
-  {"$inc": {"balance.available": -80, "balance.hold": 80}})`}</CodeBlock>
-        <ul className={styles.wsRows}>
-          {report
-            ? report.attempts.map((a) => { const [v, t] = live(a); return <RaceRow key={a.worker} label={`Wire ${a.worker}`} verdict={v} tone={t} />; })
-            : [1, 2, 3].map((w) => <RaceRow key={w} label={`Wire ${w}`} verdict="waiting for the race" tone="neutral" />)}
-        </ul>
-        <div className={styles.wsOutcome}>
-          {report ? `Available ends at ${usd(report.summary.finalAvailable)}` : `Expected: 2 paid, 1 refused, ${usd(OPENING - 2 * AMOUNT)} left`}
-        </div>
-      </div>
+    <div className={`${styles.railCard} ${styles.w1Compare}`}>
+      <ContrastHalf
+        tone="alert"
+        title="Without a guard"
+        headline={`${usd(OPENING - DEMAND)} · overdrawn`}
+        why={`Each wire checks the balance it read earlier. All three see ${usd(OPENING)}, so all three pay.`}
+        code={`acct = accounts.find_one({...})          # every wire sees 200
+if acct["available"] >= amount:          # 80, 110, 90: all pass
+    accounts.update_one({...}, {"$set": {...}})`}
+      />
+      <ContrastHalf
+        tone={report.summary.invariantHeld ? "resolved" : "alert"}
+        title="With MongoDB's guard · live"
+        headline={`${usd(report.summary.finalAvailable)} left · protected`}
+        why="The check runs inside the update. Once the money is gone, the last wire finds no match and is refused."
+        code={`accounts.find_one_and_update(
+  {"balance.available": {"$gte": amount}},
+  {"$inc": {"balance.available": -amount, "balance.hold": amount}})`}
+      />
     </div>
   );
 }

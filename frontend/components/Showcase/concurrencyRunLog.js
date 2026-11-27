@@ -15,34 +15,34 @@ const BEAT_DWELL_MS = 2600;
 export const usd = (n) => `${n < 0 ? "-" : ""}USD ${Math.abs(n).toFixed(0)}`;
 
 /** When this attempt's guarded reserve matched, so winners read in the order they won. */
-const reservedAt = (a) => a.ops.find((o) => o.command === "findAndModify" && o.collection === "accounts" && o.result === "MATCHED")?.atMs ?? Infinity;
+export const reservedAt = (a) => a.ops.find((o) => o.command === "findAndModify" && o.collection === "accounts" && o.result === "MATCHED")?.atMs ?? Infinity;
 
 /** One line per attempt in the order the guard decided, with the running balance the winners left. */
 function attemptEvents(report) {
-  const { openingBalance, amount } = report.params;
+  const { openingBalance } = report.params;
   let available = openingBalance;
   const decided = [...report.attempts].sort((a, b) => reservedAt(a) - reservedAt(b) || a.worker - b.worker);
   return decided.map((a) => {
     const retries = a.writeConflicts > 0 ? `, retried after ${a.writeConflicts} write conflict${a.writeConflicts === 1 ? "" : "s"}` : "";
     if (a.outcome === "RESERVED") {
       const before = available;
-      available -= amount;
+      available -= a.amount;
       return {
         key: `g:${a.worker}`, phase: RACE, lane: "mongo", dwell: ATTEMPT_DWELL_MS,
-        title: `Wire ${a.worker} reserved ${usd(amount)}`,
+        title: `Wire ${a.worker} reserved ${usd(a.amount)}`,
         detail: `available ${usd(before)} to ${usd(available)}${retries}`,
       };
     }
     return {
       key: `g:${a.worker}`, phase: RACE, lane: "mongo", dwell: ATTEMPT_DWELL_MS, tone: a.outcome === "ERROR" ? "alert" : undefined,
       title: `Wire ${a.worker} ${a.outcome === "ERROR" ? "failed" : "refused: not enough available"}`,
-      detail: a.error || `available ${usd(available)} < ${usd(amount)}${retries}`,
+      detail: a.error || `available ${usd(available)} < ${usd(a.amount)}${retries}`,
     };
   });
 }
 
 function raceEvents(report) {
-  const { workers, amount, openingBalance } = report.params;
+  const { workers, openingBalance } = report.params;
   const s = report.summary;
   const out = [
     {
@@ -68,7 +68,7 @@ function raceEvents(report) {
     key: "g:result", phase: RACE, lane: "code", card: true, tone: s.invariantHeld ? "good" : "alert", tag: "Live on MongoDB",
     title: `${s.invariantHeld ? "Invariant held" : "Invariant broken"}: available ${usd(s.finalAvailable)}, hold ${usd(s.finalHold)}`,
     items: [
-      `${s.winners} reserved and debited ${usd(amount)} each, ${s.refused} refused${s.errors ? `, ${s.errors} errors` : ""}`,
+      `${s.winners} reserved and debited (${report.attempts.filter((a) => a.outcome === "RESERVED").map((a) => usd(a.amount)).join(" + ")}), ${s.refused} refused${s.errors ? `, ${s.errors} errors` : ""}`,
       `${Math.round(s.elapsedMs / 1000)} s through the full saga`,
     ],
   });
@@ -107,7 +107,7 @@ export function deriveConcurrencyEvents({ queued, live, payments, statement }) {
     out.push(
       {
         key: "p:queue", phase: PAYMENTS, lane: "code", dwell: BEAT_DWELL_MS,
-        title: "Three USD 80 wires leave the same account",
+        title: "Wires of USD 80, 110 and 90 leave the same account",
         detail: "Stage 3, Validate & Enrich: each must reserve funds on the debtor account before it can be routed.",
       },
       {

@@ -1,11 +1,12 @@
-"""Write-skew showcase (W1): three real $80 wires race for one $200 account.
+"""Write-skew showcase (W1): three real wires ($80, $110, $90) race for one $200 account.
 
 Each wire goes through the real `PaymentsService.initiate_payment` (the same saga a customer's
 wire takes), so the winners are debited at stage 5 and go on to settle and reconcile like any
 other wire. A rendezvous just before stage 3's reserve (`before_reserve`) releases the three
 into the guarded update together; without it the saga's earlier stages would stagger them and
-they might never collide. The guard is the conditional `$inc` on the account document, so
-exactly two reserve and the third is refused for insufficient funds.
+they might never collide. The guard is the conditional `$inc` on the account document. Any two
+amounts fit in $200 and all three do not, so exactly two reserve and the third is refused for
+insufficient funds. Which wire loses, and what is left ($0, $10 or $30), depends on the race.
 
 ## One persistent account
 
@@ -53,8 +54,8 @@ SOURCE_SYSTEM = "concurrency-demo-seed"
 ACCOUNT_ID = "ACC-acc10004"
 CUSTOMER_ID = "CUST-abc10001"  # ABC Manufacturing Inc., a verified COMMERCIAL customer
 OPENING = 200.0
-AMOUNT = 80.0
-WORKERS = 3
+AMOUNTS = (80.0, 110.0, 90.0)  # wire n sends AMOUNTS[n - 1]
+WORKERS = len(AMOUNTS)
 BARRIER_TIMEOUT_SECONDS = 20
 WRITE_CONFLICT = 112
 
@@ -243,7 +244,7 @@ def run(base_service: PaymentsService, connection, db_name: str) -> dict:
         "runId": run_id,
         "accountId": ACCOUNT_ID,
         "invariant": "balance.available >= 0",
-        "params": {"openingBalance": OPENING, "amount": AMOUNT, "workers": WORKERS},
+        "params": {"openingBalance": OPENING, "amounts": list(AMOUNTS), "workers": WORKERS},
         "guard": {
             "filter": funds_reservation.guarded_filter("<accountId>", "<amount>"),
             "update": {"$inc": {"balance.available": "-<amount>", "balance.hold": "<amount>"}},
@@ -268,7 +269,8 @@ def _attempt(service: PaymentsService, db, counter: _CommandRecorder, worker: in
     country, account_no, purpose = _CREDITORS[(worker - 1) % len(_CREDITORS)]
     bank = _BANKS[country]
     reference = f"INV-{random.randint(0, 999999):06d}"
-    attempt = {"worker": worker, "paymentId": None, "status": None, "observedAvailable": None,
+    amount = AMOUNTS[worker - 1]
+    attempt = {"worker": worker, "amount": amount, "paymentId": None, "status": None, "observedAvailable": None,
                "outcome": ERROR, "writeConflicts": 0, "readAtMs": None, "writeAtMs": None,
                "doneAtMs": None, "error": None}
 
@@ -293,7 +295,7 @@ def _attempt(service: PaymentsService, db, counter: _CommandRecorder, worker: in
                             "address": bank["address"],
                             "clearingSystemCode": bank["clearingSystemCode"],
                             "clearingSystemMemberId": bank["clearingSystemMemberId"]},
-            instructed_amount=AMOUNT,
+            instructed_amount=amount,
             instructed_currency="USD",
             payment_type="CREDIT_TRANSFER",
             payment_rail="WIRE",

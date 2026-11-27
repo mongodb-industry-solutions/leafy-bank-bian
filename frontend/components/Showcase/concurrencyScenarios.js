@@ -12,12 +12,13 @@ export const CONCURRENCY_SCENARIOS = [
     },
     title: "Balance never goes negative",
     story:
-      "Three $80 payments hit a $200 account at the same instant. Every payment reads $200, so every one looks affordable. A guard in the update's filter on the account document lets exactly two through.",
+      "Payments of $80, $110 and $90 hit a $200 account at the same instant. Every payment reads $200, so every one looks affordable. Any two fit, all three do not: a guard in the update's filter on the account document lets exactly two through.",
     invariant: "balance.available >= 0",
-    cardAmount: "3 × USD 80 vs USD 200",
+    cardAmount: "USD 80 + 110 + 90 vs USD 200",
   },
 ];
 
+// Steps marked `auto` run on their own once reached (after the race, the presenter just watches).
 // The walkthrough's step list. The race is three real wires through the payment saga; the steps
 // after it settle and reconcile the two that got through, the way the reconciliation scenarios do.
 export const CONCURRENCY_STEPS = [
@@ -26,8 +27,8 @@ export const CONCURRENCY_STEPS = [
     title: "Queue three wires",
     button: "Queue three wires",
     summary:
-      "Three USD 80 wires leave one customer account at the same moment. At stage 3 each must reserve funds on that account before it can be routed, so they all contend for one balance.",
-    beat: "The account holds USD 200, which covers two wires. Exactly two should get through.",
+      "Wires of USD 80, 110 and 90 leave one customer account at the same moment. At stage 3 each must reserve funds on that account before it can be routed, so they all contend for one balance.",
+    beat: "Exactly two should get through. Which one loses depends on the race.",
   },
   {
     key: "race",
@@ -41,6 +42,7 @@ export const CONCURRENCY_STEPS = [
     key: "settle",
     title: "The correspondent settles",
     button: "Settle the wires",
+    auto: true,
     summary:
       "The correspondent bank confirms it has settled the funds (stage 7). Each winning wire flips to SETTLED, and a change stream tells the ledger.",
     beat: "Two wires settle. The refused wire never left the bank, so there is nothing to settle.",
@@ -49,6 +51,7 @@ export const CONCURRENCY_STEPS = [
     key: "glpost",
     title: "The books are written",
     button: "Post to the ledger",
+    auto: true,
     summary:
       "The general-ledger batch journals each settled wire into balanced double-entry postings. As far as our own books go, the wires are done.",
     beat: "Two journals post, each debiting the customer and crediting our nostro account.",
@@ -57,6 +60,7 @@ export const CONCURRENCY_STEPS = [
     key: "statement",
     title: "The correspondent's statement arrives",
     button: "Receive the statement",
+    auto: true,
     summary:
       "The correspondent sends its own record of every movement on our nostro account (camt.053). Reconciliation checks our books against it.",
     beat: "A clean statement: both lines carry the right amount.",
@@ -65,6 +69,7 @@ export const CONCURRENCY_STEPS = [
     key: "match",
     title: "Reconciliation compares the two",
     button: "Reconcile",
+    auto: true,
     summary:
       "The next batch matches each statement line to a payment and runs a three-way comparison of payment, ledger and statement. When all three agree, the payment is RECONCILED.",
     beat: "Both wires match to the cent and reconcile with no exception.",
@@ -74,7 +79,7 @@ export const CONCURRENCY_STEPS = [
     title: "Verify the result",
     final: true,
     summary: "Check the balance and what became of every wire.",
-    beat: "Two wires reserved, debited, settled and reconciled. One refused. Available ends at USD 40 and never went negative.",
+    beat: "Two wires reserved, debited, settled and reconciled. One refused. Available never went negative.",
   },
 ];
 
